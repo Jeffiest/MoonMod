@@ -19,6 +19,12 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"player.damage", "player", "damage", "simulation", "game.write", "Apply bounded health damage to the active player character through native game state."},
     {"player.status_add", "player", "status_add", "simulation", "game.write", "Apply a registered status effect to a player."},
     {"player.status_remove", "player", "status_remove", "simulation", "game.write", "Remove a mod-owned or supported status effect."},
+    {"player.thirst_get", "player", "thirst_get", "any", "game.read", "Read the active character's water gauge, capacity, and native thirst drain rate in Chronicle."},
+    {"player.thirst_set", "player", "thirst_set", "simulation", "game.write", "Set or restore the active or named character's water gauge with native cap clamping in Chronicle."},
+    {"player.ridepod_get", "player", "ridepod_get", "any", "game.read", "Read the ridepod's energy, core capacity, defence, voice state, and fitted parts in Chronicle Two."},
+    {"player.ridepod_set", "player", "ridepod_set", "simulation", "game.write", "Adjust the ridepod's energy, capacity, shield kits, voice state, or fitted parts in Chronicle Two."},
+    {"player.transform_get", "player", "transform_get", "any", "game.read", "Read Monica's monster badge levels, experience, unlock state, and active form in Chronicle Two."},
+    {"player.transform_set", "player", "transform_set", "simulation", "game.write", "Adjust a monster badge's level, experience, or unlock state in Chronicle Two."},
     {"party.list", "party", "list", "any", "game.read", "Read party members and their stable handles."},
     {"party.active", "party", "active", "any", "game.read", "Read the active party member."},
     {"party.set_active", "party", "set_active", "simulation", "game.write", "Change the active party member when the game allows it."},
@@ -56,6 +62,10 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"dungeons.floor_rules_set", "dungeons", "floor_rules_set", "simulation", "game.write", "Override active or per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
     {"dungeons.loot_get", "dungeons", "loot_get", "any", "game.read", "Read active floor treasure chest contents and monster drop tables."},
     {"dungeons.loot_override", "dungeons", "loot_override", "simulation", "game.write", "Override floor treasure chest contents or monster drop tables."},
+    {"dungeons.back_floor_get", "dungeons", "back_floor_get", "any", "game.read", "Read Chronicle back-floor state, the active floor gate key, and whether the key is held."},
+    {"dungeons.back_floor_enter", "dungeons", "back_floor_enter", "simulation", "game.write", "Queue Chronicle's native back-floor transition without consuming the gate key."},
+    {"dungeons.spheda_get", "dungeons", "spheda_get", "any", "game.read", "Read the active Chronicle Two Spheda challenge, pin, ball, par, and gauge state."},
+    {"dungeons.spheda_spawn", "dungeons", "spheda_spawn", "simulation", "game.write", "Reset and activate the active Chronicle Two Spheda course's pin and ball placement."},
     {"georama.get", "georama", "get", "any", "game.read", "Read settlement reconstruction state and placed pieces."},
     {"georama.element_set", "georama", "element_set", "simulation", "game.write", "Toggle a defined optional visual element on a native Georama plot."},
     {"georama.request_set", "georama", "request_set", "simulation", "game.write", "Set a saved native Georama request's completion state."},
@@ -65,6 +75,9 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"georama.place", "georama", "place", "simulation", "game.write", "Place a registered georama piece through native placement rules."},
     {"georama.remove", "georama", "remove", "simulation", "game.write", "Remove a placed georama piece through native rules."},
     {"georama.river_set", "georama", "river_set", "simulation", "game.write", "Set or clear one cell in a saved town's native river grid."},
+    {"georama.atla_list", "georama", "atla_list", "any", "game.read", "Inspect Atla spheres on the active Chronicle dungeon floor."},
+    {"georama.atla_collect", "georama", "atla_collect", "simulation", "game.write", "Collect an Atla sphere and release its Georama part or chip through Chronicle's native save path."},
+    {"georama.satisfaction_get", "georama", "satisfaction_get", "any", "game.read", "Read saved Georama request completion and per-plot reconstruction state for Chronicle towns."},
     {"skills.list", "skills", "list", "any", "game.read", "List mod-owned skill trees and progression nodes."},
     {"skills.get", "skills", "get", "any", "game.read", "Read mod-owned skill ranks, prerequisites, and unlock state."},
     {"skills.register", "skills", "register", "content", "content.register", "Register a namespaced mod-owned skill tree and progression nodes."},
@@ -112,6 +125,12 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"weapons.build_up_register", "weapons", "build_up_register", "content", "content.register", "Register a custom build-up evolution path from a source weapon to a target weapon."},
     {"weapons.synthesize", "weapons", "synthesize", "simulation", "game.write", "Status-break a qualifying owned weapon into a SynthSphere attachment in Chronicle."},
     {"weapons.spectrumize", "weapons", "spectrumize", "simulation", "game.write", "Spectrumize an owned weapon or item into a synthesized attachment in Chronicle Two."},
+    {"photos.ideas_list", "photos", "ideas_list", "any", "game.read", "List learnt photo ideas, carried photos, and photographed subject ids in Chronicle Two."},
+    {"photos.idea_unlock", "photos", "idea_unlock", "simulation", "game.write", "Learn a Chronicle Two photo idea through the native invention save data."},
+    {"photos.scoops_list", "photos", "scoops_list", "any", "game.read", "List Chronicle Two scoops with known, obtained, photographed, and learnt state."},
+    {"inventions.list", "inventions", "list", "any", "game.read", "List native and mod-registered Chronicle Two invention recipes."},
+    {"inventions.register", "inventions", "register", "content", "content.register", "Register a namespaced three-idea Chronicle Two invention recipe and its materials."},
+    {"inventions.craft", "inventions", "craft", "simulation", "game.write", "Craft an unlocked native or mod-registered invention through native inventory and material rules."},
     {"characters.list", "characters", "list", "any", "game.read", "List character definitions and visible instances."},
     {"characters.get", "characters", "get", "any", "game.read", "Read character stats, state, and stable handle."},
     {"characters.register", "characters", "register", "content", "content.register", "Register a data-defined character or enemy."},
@@ -184,6 +203,10 @@ constexpr EventSpec kEventCatalog[] = {
     {"game.scene.entered", "scene", "both", "A scene finished initialization."},
     {"game.world.location_changed", "world", "both", "A world location changed; published at scene initialization when detectable and polled within scenes."},
     {"game.item_used", "items", "both", "A mod API item-use call completed."},
+    {"game.player.thirst_changed", "player", "chronicle", "The active character's Chronicle water gauge changed, drained empty, or was restored."},
+    {"game.photo.taken", "photos", "chronicle-two", "Max took a photo; reports its subject, map, and scoop or idea recognition state."},
+    {"game.invention.created", "inventions", "chronicle-two", "A Chronicle Two invention was discovered in the menu or crafted through the API."},
+    {"game.spheda.completed", "dungeons", "chronicle-two", "A Chronicle Two Spheda challenge was recorded as cleared."},
     {"game.item_given", "items", "both", "An item or weapon was added through a MoonFactory grant API."},
     {"game.item_picked_up", "items", "both", "A native dungeon pickup was added to the player's inventory."},
     {"game.item_removed", "items", "both", "An item was removed through the MoonFactory inventory API."},
@@ -256,17 +279,47 @@ namespace {
 
 std::string UnsupportedReason(std::string_view game_id, const ApiOperationSpec &operation) {
     const std::string game = game_id == "chronicle-two" ? "Chronicle Two" : "Chronicle";
+    if (operation.domain == "photos") {
+        return "Chronicle has no photography, idea, or scoop system; this domain is bound only in Chronicle Two.";
+    }
+    if (operation.domain == "inventions") {
+        return "Chronicle has no photo-invention system; this domain is bound only in Chronicle Two.";
+    }
+    if (operation.domain == "player") {
+        if (game_id == "chronicle") {
+            if (operation.operation == "ridepod_get" || operation.operation == "ridepod_set") {
+                return "Chronicle has no ridepod; this operation is bound only in Chronicle Two.";
+            }
+            if (operation.operation == "transform_get" || operation.operation == "transform_set") {
+                return "Chronicle has no monster-badge transformation system; this operation is bound only in Chronicle Two.";
+            }
+        } else if (operation.operation == "thirst_get" || operation.operation == "thirst_set") {
+            return "Chronicle Two has no per-character water gauge; its thirst ailment is exposed through player.status_add/remove.";
+        }
+    }
     if (operation.domain == "locations") {
         return game + " does not yet load mod-authored maps or their transition metadata.";
     }
     if (operation.domain == "dungeons") {
         if (game_id == "chronicle-two") {
+            if (operation.operation == "back_floor_get" || operation.operation == "back_floor_enter") {
+                return "Chronicle Two has no Dark Cloud back-floor state; back-floor entry is bound only in Chronicle.";
+            }
             return "Chronicle Two can append floors to existing dungeons, but does not yet register complete new dungeon graphs.";
+        }
+        if (operation.operation == "spheda_get" || operation.operation == "spheda_spawn") {
+            return "Chronicle has no Spheda minigame; Spheda operations are bound only in Chronicle Two.";
         }
         return "Chronicle can append procedural floors to native dungeons 0-4, but does not yet register standalone maps, custom geometry, or authored room assets.";
     }
     if (operation.domain == "georama") {
         if (game_id == "chronicle-two") {
+            if (operation.path == "georama.atla_list" || operation.path == "georama.atla_collect") {
+                return "Chronicle Two has no Atla spheres; Atla collection is bound only in Chronicle.";
+            }
+            if (operation.path == "georama.satisfaction_get") {
+                return "Chronicle Two Georama progression is exposed through its native request, condition, and river APIs; the Chronicle satisfaction view is not bound.";
+            }
             if (operation.path == "georama.element_set") {
                 return "Chronicle Two's Georama pieces do not use Chronicle's per-plot optional-element table.";
             }

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at_utc": "2026-10-17T12:33:29.614Z",
+  "generated_at_utc": "2026-10-17T16:24:58.873Z",
   "status": "passed",
   "python_tests": {
     "status": "passed",
@@ -73,8 +73,8 @@
       "native_tests": {
         "status": "passed",
         "exit_code": 0,
-        "executed": 78,
-        "passed": 78,
+        "executed": 82,
+        "passed": 82,
         "failed": 0,
         "cases": [
           {
@@ -111,6 +111,22 @@
           },
           {
             "name": "MoonModWeaponsApi.PublishesNativeUpgradeForQuestObjectivesOnNextPump",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleSignature.ReadsSetsThirstAndReportsDrainRate",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleSignature.ListsAndCollectsAtlaAndDerivesSatisfaction",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleSignature.ReadsBackFloorAndQueuesTransitionWithoutConsumingKey",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleSignature.PublishesThirstChangesFromApiAndNativeTicks",
             "status": "passed"
           },
           {
@@ -400,8 +416,8 @@
         "frames": 120,
         "phase": "startup",
         "capture_validated": false,
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-b62ed66d76024bec8fc27a5eea3e1be0\\startup.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-b62ed66d76024bec8fc27a5eea3e1be0\\run.log",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-bff3b657dd5a45a4bbada0674705c3d5\\startup.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-bff3b657dd5a45a4bbada0674705c3d5\\run.log",
         "note": "A successful startup and screenshot file are checked; screenshot pixels and in-game scene content are not validated by this smoke."
       },
       "manager_ui_smoke": {
@@ -440,34 +456,37 @@
         "note": "Retail-data map registration, entry, loading, and return proof."
       },
       "retail_gameplay_smoke": {
-        "status": "not_requested",
-        "checkpoint": null,
-        "data_root": null,
-        "exit_code": null,
+        "status": "passed",
+        "checkpoint": "Norune Village entry before the first simulation frame and verified the mod-owned data-only tonic plus a registered and granted mod weapon plus a native quest weapon reward",
+        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicle\\data",
+        "exit_code": 0,
         "timed_out": false,
-        "frames": null,
+        "frames": 1,
         "input_script": null,
         "capture_validated": false,
-        "screenshot": null,
-        "log": null
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\run.log",
+        "note": "The executable accepts the retail data and scripted gameplay checkpoint and writes a screenshot; visual scene content is reviewed separately."
       },
       "retail_item_smoke": {
-        "status": "not_requested",
+        "status": "passed",
         "mod_id": "moonfactory.retail-item-probe",
-        "verification_marker": null,
-        "item_capacity_marker": null,
-        "weapon_verification_marker": null,
-        "item_given_quest_marker": null,
-        "weapon_quest_reward_marker": null,
-        "item_removed_quest_marker": null,
+        "verification_marker": "MOONFACTORY_RETAIL_ITEM_OK|moonfactory.retail-item-probe:retail-starlight-tonic|",
+        "item_capacity_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ITEM_CAPACITY_OK|12|142",
+        "weapon_verification_marker": "MOONFACTORY_RETAIL_WEAPON_OK|moonfactory.retail-item-probe:retail-starlight-blade|",
+        "item_given_quest_marker": "MOONFACTORY_RETAIL_ITEM_GIVEN_QUEST_OK|moonfactory.retail-item-probe:retail-item-grants|2",
+        "weapon_quest_reward_marker": "MOONFACTORY_RETAIL_WEAPON_QUEST_REWARD_OK|moonfactory.retail-item-probe:retail-quest-blade|1",
+        "item_removed_quest_marker": "MOONFACTORY_RETAIL_ITEM_REMOVED_QUEST_OK|moonfactory.retail-item-probe:retail-item-removals|1",
         "native_item_pickup_marker": null,
         "enemy_spawned_event_marker": null,
         "enemy_defeat_event_marker": null,
         "enemy_defeat_quest_marker": null,
         "enemy_defeat_queued_marker": null,
         "error_lines": [],
-        "screenshot": null,
-        "log": null
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\run.log",
+        "content_registry_marker": "MOONFACTORY_RETAIL_CONTENT_OK|",
+        "note": "The enabled Lua package registers and reads back 12 data-only consumables, proving allocation can use a safe native row beyond the 11 legacy reserved rows. It then uses a data-only healing item, checks deferred game.item_given and game.item_removed delivery advances filtered quests, grants a data-only weapon directly, and verifies a completed quest pays a second weapon through the native inventory API. The smoke requires success markers and a screenshot file; it does not visually inspect the capture."
       },
       "retail_georama_smoke": {
         "status": "not_applicable",
@@ -537,19 +556,19 @@
       "headless_determinism": {
         "status": "passed",
         "run_count": 2,
-        "marker_count": 175,
+        "marker_count": 194,
         "normalized_reports": [
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-fb00bd5341eb4c1782103acb496da7ac-a\\normalized-report.txt",
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-fb00bd5341eb4c1782103acb496da7ac-b\\normalized-report.txt"
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-278fd099dc414570a543421f1168022d-a\\normalized-report.txt",
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-278fd099dc414570a543421f1168022d-b\\normalized-report.txt"
         ],
         "error": null,
         "note": "Each synthetic headless probe is repeated from two clean roots; stable API and feature markers must match."
       },
       "api_catalog": {
         "report": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\smoke-preflight-fixture\\preflight.log",
-        "operation_count": 161,
-        "supported_count": 152,
-        "unsupported_count": 9,
+        "operation_count": 180,
+        "supported_count": 159,
+        "unsupported_count": 21,
         "domains": [
           {
             "domain": "animations",
@@ -607,9 +626,9 @@
           },
           {
             "domain": "dungeons",
-            "operation_count": 8,
-            "supported_count": 8,
-            "unsupported_count": 0
+            "operation_count": 12,
+            "supported_count": 10,
+            "unsupported_count": 2
           },
           {
             "domain": "economy",
@@ -631,8 +650,8 @@
           },
           {
             "domain": "georama",
-            "operation_count": 9,
-            "supported_count": 6,
+            "operation_count": 12,
+            "supported_count": 9,
             "unsupported_count": 3
           },
           {
@@ -646,6 +665,12 @@
             "operation_count": 8,
             "supported_count": 8,
             "unsupported_count": 0
+          },
+          {
+            "domain": "inventions",
+            "operation_count": 3,
+            "supported_count": 0,
+            "unsupported_count": 3
           },
           {
             "domain": "items",
@@ -678,6 +703,12 @@
             "unsupported_count": 1
           },
           {
+            "domain": "photos",
+            "operation_count": 3,
+            "supported_count": 0,
+            "unsupported_count": 3
+          },
+          {
             "domain": "physics",
             "operation_count": 3,
             "supported_count": 3,
@@ -685,9 +716,9 @@
           },
           {
             "domain": "player",
-            "operation_count": 6,
-            "supported_count": 6,
-            "unsupported_count": 0
+            "operation_count": 12,
+            "supported_count": 8,
+            "unsupported_count": 4
           },
           {
             "domain": "quests",
@@ -810,6 +841,42 @@
             "domain": "player",
             "status": "supported",
             "reason": ""
+          },
+          {
+            "path": "player.thirst_get",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.thirst_set",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.ridepod_get",
+            "domain": "player",
+            "status": "unsupported",
+            "reason": "Chronicle has no ridepod; this operation is bound only in Chronicle Two."
+          },
+          {
+            "path": "player.ridepod_set",
+            "domain": "player",
+            "status": "unsupported",
+            "reason": "Chronicle has no ridepod; this operation is bound only in Chronicle Two."
+          },
+          {
+            "path": "player.transform_get",
+            "domain": "player",
+            "status": "unsupported",
+            "reason": "Chronicle has no monster-badge transformation system; this operation is bound only in Chronicle Two."
+          },
+          {
+            "path": "player.transform_set",
+            "domain": "player",
+            "status": "unsupported",
+            "reason": "Chronicle has no monster-badge transformation system; this operation is bound only in Chronicle Two."
           },
           {
             "path": "party.list",
@@ -1034,6 +1101,30 @@
             "reason": ""
           },
           {
+            "path": "dungeons.back_floor_get",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.back_floor_enter",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.spheda_get",
+            "domain": "dungeons",
+            "status": "unsupported",
+            "reason": "Chronicle has no Spheda minigame; Spheda operations are bound only in Chronicle Two."
+          },
+          {
+            "path": "dungeons.spheda_spawn",
+            "domain": "dungeons",
+            "status": "unsupported",
+            "reason": "Chronicle has no Spheda minigame; Spheda operations are bound only in Chronicle Two."
+          },
+          {
             "path": "georama.get",
             "domain": "georama",
             "status": "supported",
@@ -1086,6 +1177,24 @@
             "domain": "georama",
             "status": "unsupported",
             "reason": "Chronicle does not expose separate saved analysis-condition or river-grid state; its Georama APIs operate on native plot elements, requests, and placed pieces."
+          },
+          {
+            "path": "georama.atla_list",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.atla_collect",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.satisfaction_get",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
           },
           {
             "path": "skills.list",
@@ -1368,6 +1477,42 @@
             "domain": "weapons",
             "status": "unsupported",
             "reason": "Chronicle uses weapons.synthesize to status-break level 5+ weapons into SynthSphere attachments."
+          },
+          {
+            "path": "photos.ideas_list",
+            "domain": "photos",
+            "status": "unsupported",
+            "reason": "Chronicle has no photography, idea, or scoop system; this domain is bound only in Chronicle Two."
+          },
+          {
+            "path": "photos.idea_unlock",
+            "domain": "photos",
+            "status": "unsupported",
+            "reason": "Chronicle has no photography, idea, or scoop system; this domain is bound only in Chronicle Two."
+          },
+          {
+            "path": "photos.scoops_list",
+            "domain": "photos",
+            "status": "unsupported",
+            "reason": "Chronicle has no photography, idea, or scoop system; this domain is bound only in Chronicle Two."
+          },
+          {
+            "path": "inventions.list",
+            "domain": "inventions",
+            "status": "unsupported",
+            "reason": "Chronicle has no photo-invention system; this domain is bound only in Chronicle Two."
+          },
+          {
+            "path": "inventions.register",
+            "domain": "inventions",
+            "status": "unsupported",
+            "reason": "Chronicle has no photo-invention system; this domain is bound only in Chronicle Two."
+          },
+          {
+            "path": "inventions.craft",
+            "domain": "inventions",
+            "status": "unsupported",
+            "reason": "Chronicle has no photo-invention system; this domain is bound only in Chronicle Two."
           },
           {
             "path": "characters.list",
@@ -1730,8 +1875,8 @@
       "native_tests": {
         "status": "passed",
         "exit_code": 0,
-        "executed": 80,
-        "passed": 80,
+        "executed": 86,
+        "passed": 86,
         "failed": 0,
         "cases": [
           {
@@ -1760,6 +1905,30 @@
           },
           {
             "name": "MoonModWeaponRegistration.AddsNamedWeaponWithNativeAssetsAndOverriddenStats",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleTwoSignature.UnlocksPhotoIdeasAndListsScoops",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleTwoSignature.RegistersCraftsAndListsModInvention",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleTwoSignature.ReadsAndAdjustsRidepodStateAndParts",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleTwoSignature.ReadsAndAdjustsMonsterBadges",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleTwoSignature.ReadsAndSpawnsActiveSphedaState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModChronicleTwoSignature.PublishesPhotoInventionAndSphedaEvents",
             "status": "passed"
           },
           {
@@ -2065,8 +2234,8 @@
         "frames": 120,
         "phase": "startup",
         "capture_validated": false,
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-c6d5e5e950ab4c9a81a473e0bdf7d8ee\\startup.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-c6d5e5e950ab4c9a81a473e0bdf7d8ee\\run.log",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-4cc6050a79144b3cad5a32d4df17b838\\startup.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-4cc6050a79144b3cad5a32d4df17b838\\run.log",
         "note": "A successful startup and screenshot file are checked; screenshot pixels and in-game scene content are not validated by this smoke."
       },
       "manager_ui_smoke": {
@@ -2105,34 +2274,37 @@
         "note": "Retail-data map registration, entry, loading, and return proof."
       },
       "retail_gameplay_smoke": {
-        "status": "not_requested",
-        "checkpoint": null,
-        "data_root": null,
-        "exit_code": null,
+        "status": "passed",
+        "checkpoint": "Underground Channel floor 1 item use, mod annex entry, and live data-only enemy spawn and completed a character-filtered quest from native enemy-spawn and enemy-defeat events and verified the mod-owned data-only tonic plus a registered and granted mod weapon plus a native quest weapon reward and entered the mod-owned connected floor, spawned a data-only enemy, and adjusted the live dungeon camera through Lua",
+        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicletwo\\data",
+        "exit_code": 0,
         "timed_out": false,
-        "frames": null,
-        "input_script": null,
+        "frames": 2400,
+        "input_script": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\MoonFactory\\tools\\fixtures\\retail-item-smoke\\enter-annex.input",
         "capture_validated": false,
-        "screenshot": null,
-        "log": null
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\run.log",
+        "note": "The executable accepts the retail data and scripted gameplay checkpoint and writes a screenshot; visual scene content is reviewed separately."
       },
       "retail_item_smoke": {
-        "status": "not_requested",
+        "status": "passed",
         "mod_id": "moonfactory.retail-item-probe",
-        "verification_marker": null,
+        "verification_marker": "MOONFACTORY_RETAIL_ITEM_OK|moonfactory.retail-item-probe:retail-starlight-tonic|",
         "item_capacity_marker": null,
-        "weapon_verification_marker": null,
-        "item_given_quest_marker": null,
-        "weapon_quest_reward_marker": null,
-        "item_removed_quest_marker": null,
-        "native_item_pickup_marker": null,
-        "enemy_spawned_event_marker": null,
-        "enemy_defeat_event_marker": null,
-        "enemy_defeat_quest_marker": null,
-        "enemy_defeat_queued_marker": null,
+        "weapon_verification_marker": "MOONFACTORY_RETAIL_WEAPON_OK|moonfactory.retail-item-probe:retail-starlight-blade|",
+        "item_given_quest_marker": "MOONFACTORY_RETAIL_ITEM_GIVEN_QUEST_OK|moonfactory.retail-item-probe:retail-item-grants|2",
+        "weapon_quest_reward_marker": "MOONFACTORY_RETAIL_WEAPON_QUEST_REWARD_OK|moonfactory.retail-item-probe:retail-quest-blade|1",
+        "item_removed_quest_marker": "MOONFACTORY_RETAIL_ITEM_REMOVED_QUEST_OK|moonfactory.retail-item-probe:retail-item-removals|1",
+        "native_item_pickup_marker": "MOONFACTORY_RETAIL_NATIVE_ITEM_PICKUP_OK|chronicle-two:item:274|1",
+        "enemy_spawned_event_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_SPAWNED_EVENT|moonfactory.retail-item-probe:retail-annex-sentinel|chronicle-two:monster:0:1|1024|0|1|moonfactory.retail-item-probe|125",
+        "enemy_defeat_event_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_EVENT|moonfactory.retail-item-probe:retail-annex-sentinel|chronicle-two:monster:0:1|combat|1024",
+        "enemy_defeat_quest_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEST_OK|moonfactory.retail-item-probe:annex-sentinel-hunt|chronicle-two:monster:0:1",
+        "enemy_defeat_queued_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEUED|chronicle-two:monster:0:1",
         "error_lines": [],
-        "screenshot": null,
-        "log": null
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\run.log",
+        "content_registry_marker": null,
+        "note": "The enabled Lua package verifies a built-in dungeon pickup emits game.item_picked_up and completes a matching quest, then registers a data-only healing item, uses one of two native inventory copies, removes the other, and verifies deferred game.item_given and game.item_removed delivery advances filtered quests. It grants a data-only weapon directly and verifies a completed quest pays a second weapon through the native inventory API, enters a connected annex, and completes a filtered quest from a native enemy-defeat event. Pickup, weapon, dungeon, camera, quest markers, and a screenshot file are required. The capture is not visually inspected."
       },
       "retail_georama_smoke": {
         "status": "not_applicable",
@@ -2145,15 +2317,17 @@
         "note": "Uses a disposable save and test-only built stock to verify a Lua-registered data-only Georama variant is materialized by the retail map loader, placed and removed through native edit routines, and read back from the town layout. Visual persistence after process reload and compatibility with player saves remain unverified."
       },
       "retail_dungeon_smoke": {
-        "status": "not_applicable",
+        "status": "passed",
         "dungeon_id": "moonfactory.retail-item-probe:retail-moon-vault",
-        "floor_id": null,
-        "native_floor_id": null,
-        "context": null,
-        "verification_marker": null,
-        "camera_verification_marker": null,
-        "screenshot": null,
-        "log": null
+        "floor_id": "moonfactory.retail-item-probe:retail-moon-vault.annex",
+        "native_floor_id": 9,
+        "context": "dungeon",
+        "verification_marker": "MOONFACTORY_RETAIL_DUNGEON_OK|moonfactory.retail-item-probe:retail-moon-vault.annex|",
+        "camera_verification_marker": "MOONFACTORY_RETAIL_CAMERA_OK|",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\run.log",
+        "note": "The enabled Lua package enters its connected annex through world.transition, spawns a data-only enemy, resolves it with entities.get, verifies the active native dungeon floor, and adjusts the live follow camera through render.camera_set. The annex reuses native room geometry and enemy assets.",
+        "entity_handle": "chronicle-two:monster:0:1"
       },
       "retail_character_smoke": {
         "status": "not_applicable",
@@ -2197,19 +2371,19 @@
       "headless_determinism": {
         "status": "passed",
         "run_count": 2,
-        "marker_count": 432,
+        "marker_count": 470,
         "normalized_reports": [
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-1625e476a01d40ceb5ca1b0aa9f77645-a\\normalized-report.txt",
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-1625e476a01d40ceb5ca1b0aa9f77645-b\\normalized-report.txt"
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-239707bec22c4f41b193c5ad5c30da33-a\\normalized-report.txt",
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-239707bec22c4f41b193c5ad5c30da33-b\\normalized-report.txt"
         ],
         "error": null,
         "note": "Each synthetic headless probe is repeated from two clean roots; stable API and feature markers must match."
       },
       "api_catalog": {
         "report": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\smoke-fixture\\save\\moonmod-api-report.json",
-        "operation_count": 161,
-        "supported_count": 154,
-        "unsupported_count": 7,
+        "operation_count": 180,
+        "supported_count": 166,
+        "unsupported_count": 14,
         "domains": [
           {
             "domain": "animations",
@@ -2267,9 +2441,9 @@
           },
           {
             "domain": "dungeons",
-            "operation_count": 8,
-            "supported_count": 8,
-            "unsupported_count": 0
+            "operation_count": 12,
+            "supported_count": 10,
+            "unsupported_count": 2
           },
           {
             "domain": "economy",
@@ -2291,9 +2465,9 @@
           },
           {
             "domain": "georama",
-            "operation_count": 9,
+            "operation_count": 12,
             "supported_count": 8,
-            "unsupported_count": 1
+            "unsupported_count": 4
           },
           {
             "domain": "info",
@@ -2305,6 +2479,12 @@
             "domain": "input",
             "operation_count": 8,
             "supported_count": 8,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "inventions",
+            "operation_count": 3,
+            "supported_count": 3,
             "unsupported_count": 0
           },
           {
@@ -2338,6 +2518,12 @@
             "unsupported_count": 0
           },
           {
+            "domain": "photos",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
             "domain": "physics",
             "operation_count": 3,
             "supported_count": 3,
@@ -2345,9 +2531,9 @@
           },
           {
             "domain": "player",
-            "operation_count": 6,
-            "supported_count": 6,
-            "unsupported_count": 0
+            "operation_count": 12,
+            "supported_count": 10,
+            "unsupported_count": 2
           },
           {
             "domain": "quests",
@@ -2467,6 +2653,42 @@
           },
           {
             "path": "player.status_remove",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.thirst_get",
+            "domain": "player",
+            "status": "unsupported",
+            "reason": "Chronicle Two has no per-character water gauge"
+          },
+          {
+            "path": "player.thirst_set",
+            "domain": "player",
+            "status": "unsupported",
+            "reason": "Chronicle Two has no per-character water gauge"
+          },
+          {
+            "path": "player.ridepod_get",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.ridepod_set",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.transform_get",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.transform_set",
             "domain": "player",
             "status": "supported",
             "reason": ""
@@ -2694,6 +2916,30 @@
             "reason": ""
           },
           {
+            "path": "dungeons.back_floor_get",
+            "domain": "dungeons",
+            "status": "unsupported",
+            "reason": "Chronicle Two has no Dark Cloud back-floor state"
+          },
+          {
+            "path": "dungeons.back_floor_enter",
+            "domain": "dungeons",
+            "status": "unsupported",
+            "reason": "Chronicle Two has no Dark Cloud back-floor state"
+          },
+          {
+            "path": "dungeons.spheda_get",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.spheda_spawn",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
             "path": "georama.get",
             "domain": "georama",
             "status": "supported",
@@ -2746,6 +2992,24 @@
             "domain": "georama",
             "status": "supported",
             "reason": ""
+          },
+          {
+            "path": "georama.atla_list",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle Two has no Atla spheres"
+          },
+          {
+            "path": "georama.atla_collect",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle Two has no Atla spheres"
+          },
+          {
+            "path": "georama.satisfaction_get",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle Two Georama progression is exposed through its native request, condition, and river APIs"
           },
           {
             "path": "skills.list",
@@ -3026,6 +3290,42 @@
           {
             "path": "weapons.spectrumize",
             "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "photos.ideas_list",
+            "domain": "photos",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "photos.idea_unlock",
+            "domain": "photos",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "photos.scoops_list",
+            "domain": "photos",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "inventions.list",
+            "domain": "inventions",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "inventions.register",
+            "domain": "inventions",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "inventions.craft",
+            "domain": "inventions",
             "status": "supported",
             "reason": ""
           },

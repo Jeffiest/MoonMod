@@ -20,6 +20,8 @@ local item_given_weapon_reward_id = "moonfactory.retail-item-probe:retail-quest-
 local item_removed_quest_id = "moonfactory.retail-item-probe:retail-item-removals"
 local native_pickup_quest_id = "moonfactory.retail-item-probe:native-item-pickup"
 local native_pickup_quest_started = false
+local native_pickup_seen = false
+local transition_pending = false
 local function require_result(label, value, err)
   if value == nil then
     local detail = type(err) == "table" and (err.message or err.code) or err
@@ -70,6 +72,7 @@ game.events.subscribe("game.item_picked_up", function(event)
   local progress = require_result("quests.get native pickup progress", game.quests.get({id = native_pickup_quest_id}))
   assert(progress.status == "completed" and progress.objectives[1].progress == 1,
          "the native pickup should complete its filtered event quest")
+  native_pickup_seen = true
   moonmod.log("info", "MOONFACTORY_RETAIL_NATIVE_ITEM_PICKUP_OK|" .. event.id .. "|" .. event.count)
 end)
 
@@ -314,14 +317,19 @@ game.events.subscribe("game.scene.entered", function(scene)
   moonmod.log("info", "MOONFACTORY_RETAIL_ITEM_OK|" .. item.id .. "|" .. use.hp_after)
   item_completed = true
 
+  transition_pending = true
+end)
+
+game.events.subscribe("game.tick", function(tick)
+  if not transition_pending or transition_queued or not native_pickup_seen then return end
   local transition, transition_error = game.world.transition({id = added_floor.id})
   if transition == nil then
     local detail = type(transition_error) == "table" and
                    (transition_error.message or transition_error.code) or transition_error
-    error("world.transition failed before the dungeon's first simulation frame: " .. tostring(detail))
+    error("world.transition failed after the native pickup: " .. tostring(detail))
   end
   assert(transition.queued and transition.native_floor_id == added_floor.native_floor_id,
-         "the registered annex should queue a native transition before the first simulation frame")
+         "the registered annex should queue a native transition after the native pickup is observed")
   transition_queued = true
   moonmod.log("info", "MOONFACTORY_RETAIL_DUNGEON_TRANSITION_QUEUED|" .. added_floor.id .. "|" ..
               transition.native_floor_id)
