@@ -574,4 +574,3 @@ moonmod.on("ui.action",function(action)
   end
 end)
 moonmod.on("game.dungeon.generating",function() update_floor_bonuses() end)
-
