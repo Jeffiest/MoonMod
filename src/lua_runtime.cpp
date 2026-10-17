@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 44654)
-Total output lines: 3393
-
 #include "lua_runtime.hpp"
 #include "moonmod/manager_ui.hpp"
 #include "moonmod/native_resource_overrides.hpp"
@@ -1227,7 +1224,958 @@ struct LuaMod::Impl {
             !request.contains("title") || !request["title"].is_string() ||
             !request.contains("objectives") || !request["objectives"].is_array() ||
             request["objectives"].empty() || request["objectives"].size() > 64) {
-   …14654 tokens truncated…commands.unregister") return UnregisterCommand(arguments);
+            return {ApiCallStatus::InvalidArgument, nullptr,
+                    "expected {id, title, description = optional string, objectives = 1-64 entries}"};
+        }
+        const std::string title = request["title"].get<std::string>();
+        std::string description;
+        if (request.contains("description")) {
+            if (!request["description"].is_string()) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "description must be a string"};
+            }
+            description = request["description"].get<std::string>();
+        }
+        if (title.empty() || title.size() > 128 || description.size() > 2048) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "quest title or description exceeds its text limit"};
+        }
+        std::string local_id;
+        std::string error;
+        if (!ParseQuestId(request["id"].get_ref<const std::string &>(), local_id, error)) {
+            return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
+        }
+        Json objectives = Json::array();
+        Json rewards = Json::array();
+        if (request.contains("rewards")) {
+            if (!request["rewards"].is_array() || request["rewards"].size() > 8) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "rewards must be an array with at most 8 entries"};
+            }
+            if (!request["rewards"].empty() && !HasPermission(manifest, "game.write")) {
+                return {ApiCallStatus::PermissionDenied, nullptr,
+                        "manifest permission is required for quest rewards: game.write"};
+            }
+            for (const Json &reward : request["rewards"]) {
+                if (!reward.is_object() || !reward.contains("kind") || !reward["kind"].is_string()) {
+                    return {ApiCallStatus::InvalidArgument, nullptr,
+                            "each reward must have a supported kind"};
+                }
+                if (reward["kind"] == "currency") {
+                    if (!HasOnlyFields(reward, {"kind", "amount"}) || !reward.contains("amount") ||
+                        !reward["amount"].is_number_integer()) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "currency rewards must be {kind = 'currency', amount = integer from 1 to 32767}"};
+                    }
+                    std::int64_t amount = 0;
+                    try {
+                        amount = reward["amount"].get<std::int64_t>();
+                    } catch (const std::exception &) {
+                        return {ApiCallStatus::InvalidArgument, nullptr, "quest reward amount is outside the integer range"};
+                    }
+                    if (amount < 1 || amount > 32767) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "quest currency reward amount must be in the range [1, 32767]"};
+                    }
+                    rewards.push_back({{"kind", "currency"}, {"amount", amount}});
+                } else if (reward["kind"] == "item") {
+                    if (!HasOnlyFields(reward, {"kind", "id", "count"}) || !reward.contains("id") ||
+                        !reward["id"].is_string() || reward["id"].get_ref<const std::string &>().empty() ||
+                        reward["id"].get_ref<const std::string &>().size() > 128 ||
+                        reward["id"].get_ref<const std::string &>().find('\0') != std::string::npos) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "item rewards must have a stable item id of 1-128 bytes"};
+                    }
+                    std::int64_t count = 1;
+                    if (reward.contains("count")) {
+                        if (!reward["count"].is_number_integer()) {
+                            return {ApiCallStatus::InvalidArgument, nullptr, "item reward count must be an integer from 1 to 999"};
+                        }
+                        try {
+                            count = reward["count"].get<std::int64_t>();
+                        } catch (const std::exception &) {
+                            return {ApiCallStatus::InvalidArgument, nullptr, "item reward count is outside the integer range"};
+                        }
+                    }
+                    if (count < 1 || count > 999) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "item reward count must be in the range [1, 999]"};
+                    }
+                    rewards.push_back({{"kind", "item"}, {"id", reward["id"]}, {"count", count}});
+                } else if (reward["kind"] == "weapon") {
+                    if (!HasOnlyFields(reward, {"kind", "id"}) || !reward.contains("id") ||
+                        !reward["id"].is_string() || reward["id"].get_ref<const std::string &>().empty() ||
+                        reward["id"].get_ref<const std::string &>().size() > 128 ||
+                        reward["id"].get_ref<const std::string &>().find('\0') != std::string::npos) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "weapon rewards must have a stable weapon id of 1-128 bytes"};
+                    }
+                    rewards.push_back({{"kind", "weapon"}, {"id", reward["id"]}});
+                } else {
+                    return {ApiCallStatus::InvalidArgument, nullptr,
+                            "quest reward kind must be 'currency', 'item', or 'weapon'"};
+                }
+            }
+        }
+        Json progress = Json::object();
+        std::set<std::string, std::less<>> objective_ids;
+        for (const Json &objective : request["objectives"]) {
+            if (!objective.is_object() || !HasOnlyFields(objective, {"id", "title", "target", "event", "match"}) ||
+                !objective.contains("id") || !objective["id"].is_string() ||
+                !objective.contains("title") || !objective["title"].is_string() ||
+                !objective.contains("target") || !objective["target"].is_number_integer()) {
+                return {ApiCallStatus::InvalidArgument, nullptr,
+                        "each objective requires id, title, and positive integer target, with optional event and match fields"};
+            }
+            const std::string objective_id = objective["id"].get<std::string>();
+            const std::string objective_title = objective["title"].get<std::string>();
+            if (objective_id.empty() || objective_id.size() > 64 || objective_title.empty() ||
+                objective_title.size() > 128 || !objective_ids.insert(objective_id).second) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "objective ids and titles must be unique and bounded"};
+            }
+            std::int64_t target = 0;
+            try {
+                target = objective["target"].get<std::int64_t>();
+            } catch (const std::exception &) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "objective target is outside the integer range"};
+            }
+            if (target <= 0 || target > 1000000000) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "objective target must be in the range [1, 1000000000]"};
+            }
+            Json stored_objective = {{"id", objective_id}, {"title", objective_title}, {"target", target}};
+            if (objective.contains("event")) {
+                if (!objective["event"].is_string()) {
+                    return {ApiCallStatus::InvalidArgument, nullptr, "objective event must be a game event name"};
+                }
+                const std::string event_name = objective["event"].get<std::string>();
+                if (!ValidEventName(event_name) || !std::string_view(event_name).starts_with("game.")) {
+                    return {ApiCallStatus::InvalidArgument, nullptr,
+                            "objective event must use the game.* namespace and a valid event name"};
+                }
+                stored_objective["event"] = event_name;
+                if (objective.contains("match")) {
+                    const Json &match = objective["match"];
+                    if (!match.is_object() || match.size() > 16) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "objective match must be an object with at most 16 scalar fields"};
+                    }
+                    for (auto field = match.begin(); field != match.end(); ++field) {
+                        if (field.key().empty() || field.key().size() > 64 ||
+                            !(field->is_string() || field->is_boolean() || field->is_number_integer())) {
+                            return {ApiCallStatus::InvalidArgument, nullptr,
+                                    "objective match fields must have bounded names and string, boolean, or integer values"};
+                        }
+                        if (field->is_string() && field->get_ref<const std::string &>().size() > 256) {
+                            return {ApiCallStatus::InvalidArgument, nullptr,
+                                    "objective match strings are limited to 256 bytes"};
+                        }
+                    }
+                    stored_objective["match"] = match;
+                }
+            } else if (objective.contains("match")) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "objective match requires an event field"};
+            }
+            objectives.push_back(std::move(stored_objective));
+            progress[objective_id] = 0;
+        }
+        Json definition = {{"title", title}, {"description", description}, {"objectives", objectives}};
+        if (request.contains("rewards")) definition["rewards"] = rewards;
+        Json replacement = storage;
+        if (!replacement.contains(std::string(kQuestStorageKey))) {
+            replacement[std::string(kQuestStorageKey)] = Json::object();
+        }
+        Json &quests = replacement[std::string(kQuestStorageKey)];
+        if (!quests.is_object()) {
+            return {ApiCallStatus::Failed, nullptr, "stored quest data is invalid"};
+        }
+        const auto prior = quests.find(local_id);
+        if (prior != quests.end()) {
+            if (prior->is_object() && prior->value("definition", Json()) == definition) {
+                return {ApiCallStatus::Ok,
+                        {{"id", manifest.id + ":" + local_id}, {"status", "registered"}, {"idempotent", true}}, {}};
+            }
+            return {ApiCallStatus::Failed, nullptr, "quest id is already registered with a different definition"};
+        }
+        if (quests.size() >= 128) return {ApiCallStatus::InvalidArgument, nullptr, "mod quest limit reached"};
+        quests[local_id] = {{"definition", definition}, {"status", "registered"}, {"progress", progress}};
+        const ApiCallResult committed = CommitQuestStorage(std::move(replacement));
+        if (committed.status != ApiCallStatus::Ok) return committed;
+        return {ApiCallStatus::Ok,
+                {{"id", manifest.id + ":" + local_id}, {"status", "registered"}, {"idempotent", false}}, {}};
+    }
+
+    ApiCallResult StartQuest(const Json &arguments) {
+        if (!arguments.is_array() || arguments.size() != 1 || !arguments[0].is_object() ||
+            arguments[0].size() != 1 || !arguments[0].contains("id") || !arguments[0]["id"].is_string()) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "expected {id = quest_id}"};
+        }
+        std::string local_id;
+        std::string error;
+        if (!ParseQuestId(arguments[0]["id"].get_ref<const std::string &>(), local_id, error)) {
+            return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
+        }
+        Json replacement = storage;
+        auto quests = replacement.find(std::string(kQuestStorageKey));
+        if (quests == replacement.end() || !quests->is_object()) {
+            return {ApiCallStatus::Failed, nullptr, "quest is not registered"};
+        }
+        auto quest = quests->find(local_id);
+        if (quest == quests->end() || !quest->is_object()) return {ApiCallStatus::Failed, nullptr, "quest is not registered"};
+        const std::string status = quest->value("status", "");
+        if (status == "completed") return {ApiCallStatus::Failed, nullptr, "completed quest cannot be started again"};
+        if (status == "active") {
+            return {ApiCallStatus::Ok, {{"id", manifest.id + ":" + local_id}, {"status", "active"}, {"idempotent", true}}, {}};
+        }
+        quest->at("status") = "active";
+        const ApiCallResult committed = CommitQuestStorage(std::move(replacement));
+        if (committed.status != ApiCallStatus::Ok) return committed;
+        const Json event = {{"id", manifest.id + ":" + local_id}, {"status", "active"}};
+        Emit("quests.started", event);
+        return {ApiCallStatus::Ok,
+                {{"id", manifest.id + ":" + local_id}, {"status", "active"}, {"idempotent", false}}, {}};
+    }
+
+    ApiCallResult AdvanceQuest(const Json &arguments) {
+        if (!arguments.is_array() || arguments.size() != 1 || !arguments[0].is_object() ||
+            !HasOnlyFields(arguments[0], {"id", "objective", "amount"}) ||
+            !arguments[0].contains("id") || !arguments[0]["id"].is_string() ||
+            !arguments[0].contains("objective") || !arguments[0]["objective"].is_string() ||
+            (arguments[0].contains("amount") && !arguments[0]["amount"].is_number_integer())) {
+            return {ApiCallStatus::InvalidArgument, nullptr,
+                    "expected {id = quest_id, objective = objective_id, amount = optional positive integer}"};
+        }
+        std::string local_id;
+        std::string error;
+        if (!ParseQuestId(arguments[0]["id"].get_ref<const std::string &>(), local_id, error)) {
+            return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
+        }
+        const std::string objective_id = arguments[0]["objective"].get<std::string>();
+        if (objective_id.empty() || objective_id.size() > 64) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "objective id must contain 1-64 bytes"};
+        }
+        std::int64_t amount = 1;
+        if (arguments[0].contains("amount")) {
+            try {
+                amount = arguments[0]["amount"].get<std::int64_t>();
+            } catch (const std::exception &) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "amount is outside the integer range"};
+            }
+        }
+        if (amount <= 0 || amount > 1000000000) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "amount must be in the range [1, 1000000000]"};
+        }
+        return AdvanceQuestProgress(local_id, objective_id, amount);
+    }
+
+    ApiCallResult AdvanceQuestProgress(const std::string &local_id, const std::string &objective_id,
+                                       std::int64_t amount) {
+        Json replacement = storage;
+        auto quests = replacement.find(std::string(kQuestStorageKey));
+        if (quests == replacement.end() || !quests->is_object()) return {ApiCallStatus::Failed, nullptr, "quest is not registered"};
+        auto quest = quests->find(local_id);
+        if (quest == quests->end() || !quest->is_object()) return {ApiCallStatus::Failed, nullptr, "quest is not registered"};
+        if (quest->value("status", "") != "active") return {ApiCallStatus::Failed, nullptr, "quest is not active"};
+        const Json &definitions = quest->at("definition").at("objectives");
+        const auto definition = std::ranges::find_if(definitions, [&objective_id](const Json &entry) {
+            return entry.value("id", "") == objective_id;
+        });
+        if (definition == definitions.end()) return {ApiCallStatus::Failed, nullptr, "objective is not registered"};
+        Json &progress = quest->at("progress");
+        const std::int64_t target = definition->at("target").get<std::int64_t>();
+        const std::int64_t previous = progress.value(objective_id, std::int64_t{0});
+        const std::int64_t current = previous >= target ? target : previous + std::min(amount, target - previous);
+        if (current == previous) {
+            return {ApiCallStatus::Ok,
+                    {{"id", manifest.id + ":" + local_id}, {"objective", objective_id},
+                     {"progress", current}, {"target", target}, {"advanced", 0}, {"status", "active"}}, {}};
+        }
+        progress[objective_id] = current;
+        bool complete = true;
+        for (const Json &entry : definitions) {
+            if (progress.value(entry.at("id").get<std::string>(), std::int64_t{0}) < entry.at("target").get<std::int64_t>()) {
+                complete = false;
+                break;
+            }
+        }
+        if (complete) quest->at("status") = "completed";
+        Json reward_definitions = Json::array();
+        if (complete) {
+            const auto configured_rewards = quest->at("definition").find("rewards");
+            if (configured_rewards != quest->at("definition").end() && configured_rewards->is_array()) {
+                reward_definitions = *configured_rewards;
+            }
+        }
+        const ApiCallResult committed = CommitQuestStorage(std::move(replacement));
+        if (committed.status != ApiCallStatus::Ok) return committed;
+        const std::string status = complete ? "completed" : "active";
+        const Json event = {{"id", manifest.id + ":" + local_id}, {"objective", objective_id},
+                            {"progress", current}, {"target", target}, {"status", status}};
+        Emit("quests.objective_advanced", event);
+        if (complete) {
+            Json completed_event = {{"id", manifest.id + ":" + local_id}};
+            if (!reward_definitions.empty()) {
+                Json reward_results = Json::array();
+                for (const Json &reward : reward_definitions) {
+                    const std::string kind = reward.value("kind", "");
+                    const std::int64_t requested = kind == "currency"
+                                                       ? reward.value("amount", std::int64_t{0})
+                                                       : kind == "item" ? reward.value("count", std::int64_t{1}) : 1;
+                    const std::string operation = kind == "currency" ? "economy.add"
+                                                  : kind == "item" ? "items.give" : "weapons.give";
+                    const Json arguments = kind == "currency"
+                                               ? Json::array({Json{{"amount", requested}}})
+                                               : kind == "item"
+                                                     ? Json::array({Json{{"id", reward.value("id", std::string())},
+                                                                         {"count", requested}}})
+                                                     : Json::array({Json{{"id", reward.value("id", std::string())}}});
+                    const ApiCallResult granted = InvokeApi(operation, arguments);
+                    if (granted.status == ApiCallStatus::Ok) {
+                        std::int64_t added = requested;
+                        if (granted.value.is_object()) {
+                            const auto added_value = granted.value.find("added");
+                            if (added_value != granted.value.end()) {
+                                if (added_value->is_boolean()) added = added_value->get<bool>() ? 1 : 0;
+                                else if (added_value->is_number_integer()) {
+                                    try {
+                                        added = added_value->get<std::int64_t>();
+                                    } catch (const std::exception &) {
+                                        added = 0;
+                                    }
+                                } else {
+                                    added = 0;
+                                }
+                            }
+                        }
+                        const std::string status = added >= requested ? "granted" : added > 0 ? "partial" : "failed";
+                        Json result = {{"kind", kind}, {"status", status}, {"requested", requested},
+                                       {"result", granted.value}};
+                        if (kind == "item" || kind == "weapon") result["id"] = reward.value("id", std::string());
+                        reward_results.push_back(std::move(result));
+                        if (status != "granted") {
+                            Log("error", "quest " + kind + " reward was " + status + " for '" +
+                                             manifest.id + ":" + local_id + "'");
+                        }
+                    } else {
+                        Json result = {{"kind", kind}, {"status", "failed"},
+                                       {"requested", requested}, {"message", granted.message}};
+                        if (kind == "item" || kind == "weapon") result["id"] = reward.value("id", std::string());
+                        reward_results.push_back(std::move(result));
+                        Log("error", "quest " + kind + " reward failed for '" + manifest.id + ":" + local_id +
+                                         "': " + granted.message);
+                    }
+                }
+                completed_event["rewards"] = std::move(reward_results);
+            }
+            Emit("quests.completed", completed_event);
+        }
+        return {ApiCallStatus::Ok,
+                {{"id", manifest.id + ":" + local_id}, {"objective", objective_id},
+                 {"progress", current}, {"target", target}, {"advanced", current - previous},
+                 {"status", status}}, {}};
+    }
+
+    bool QuestObjectiveMatchesEvent(const Json &objective, std::string_view event_name, const Json &payload) const {
+        if (!objective.is_object()) return false;
+        const auto event = objective.find("event");
+        if (event == objective.end() || !event->is_string() || event->get_ref<const std::string &>() != event_name) {
+            return false;
+        }
+        const auto match = objective.find("match");
+        if (match == objective.end()) return true;
+        if (!match->is_object() || !payload.is_object()) return false;
+        for (auto field = match->begin(); field != match->end(); ++field) {
+            const auto value = payload.find(field.key());
+            if (value == payload.end() || *value != *field) return false;
+        }
+        return true;
+    }
+
+    void AdvanceQuestsFromEvent(std::string_view event_name, const Json &payload) {
+        const auto quests = storage.find(std::string(kQuestStorageKey));
+        if (quests == storage.end() || !quests->is_object()) return;
+        std::vector<std::pair<std::string, std::string>> matches;
+        for (auto quest = quests->begin(); quest != quests->end(); ++quest) {
+            if (!quest->is_object() || quest->value("status", "") != "active") continue;
+            const auto definition = quest->find("definition");
+            if (definition == quest->end() || !definition->is_object()) continue;
+            const auto objectives = definition->find("objectives");
+            if (objectives == definition->end() || !objectives->is_array()) continue;
+            for (const Json &objective : *objectives) {
+                if (!QuestObjectiveMatchesEvent(objective, event_name, payload)) continue;
+                const auto id = objective.find("id");
+                if (id != objective.end() && id->is_string()) {
+                    matches.emplace_back(quest.key(), id->get<std::string>());
+                }
+            }
+        }
+        for (const auto &[quest_id, objective_id] : matches) {
+            const ApiCallResult advanced = AdvanceQuestProgress(quest_id, objective_id, 1);
+            if (advanced.status != ApiCallStatus::Ok && advanced.message != "quest is not active") {
+                Log("error", "event-driven quest progress failed for '" + quest_id + "." + objective_id + "': " +
+                                 advanced.message);
+            }
+        }
+    }
+
+    bool ParseSkillTreeId(std::string_view raw, std::string &local_id, std::string &error) const {
+        if (!ParseQuestId(raw, local_id, error)) return false;
+        if (local_id.size() > 32) {
+            error = "skill tree id is limited to 32 ASCII letters, digits, '.', '_' or '-'";
+            return false;
+        }
+        return true;
+    }
+
+    bool ParseSkillId(std::string_view raw, std::string &local_id, std::string &error) const {
+        if (!ParseQuestId(raw, local_id, error)) return false;
+        if (local_id.size() > 64 || local_id.find('.') == std::string::npos) {
+            error = "skill id must use the form tree_id.skill_id and fit within 64 bytes";
+            return false;
+        }
+        return true;
+    }
+
+    ApiCallResult CommitSkillStorage(Json replacement) {
+        try {
+            if (replacement.dump().size() > kStorageSizeLimit) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "mod skill data exceeds the 128 KiB save limit"};
+            }
+        } catch (const std::exception &) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "skill data is not valid JSON"};
+        }
+        Json previous = std::move(storage);
+        const bool was_dirty = storage_dirty;
+        storage = std::move(replacement);
+        storage_dirty = true;
+        std::string error;
+        if (!FlushStorage(error)) {
+            storage = std::move(previous);
+            storage_dirty = was_dirty;
+            return {ApiCallStatus::Failed, nullptr, std::move(error)};
+        }
+        return {ApiCallStatus::Ok, nullptr, {}};
+    }
+
+    ApiCallResult RegisterSkillTree(const Json &arguments) {
+        if (!arguments.is_array() || arguments.size() != 1 || !arguments[0].is_object()) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "expected a skill tree definition object"};
+        }
+        const Json &request = arguments[0];
+        if (!HasOnlyFields(request, {"id", "title", "description", "skills"}) ||
+            !request.contains("id") || !request["id"].is_string() ||
+            !request.contains("title") || !request["title"].is_string() ||
+            !request.contains("skills") || !request["skills"].is_array() ||
+            request["skills"].empty() || request["skills"].size() > 128) {
+            return {ApiCallStatus::InvalidArgument, nullptr,
+                    "expected {id, title, description = optional string, skills = 1-128 nodes}"};
+        }
+        std::string tree_id;
+        std::string error;
+        if (!ParseSkillTreeId(request["id"].get_ref<const std::string &>(), tree_id, error)) {
+            return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
+        }
+        const std::string title = request["title"].get<std::string>();
+        std::string description;
+        if (request.contains("description")) {
+            if (!request["description"].is_string()) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "skill tree description must be a string"};
+            }
+            description = request["description"].get<std::string>();
+        }
+        if (title.empty() || title.size() > 128 || description.size() > 2048) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "skill tree title or description exceeds its text limit"};
+        }
+
+        Json skills = Json::array();
+        std::set<std::string, std::less<>> skill_ids;
+        std::map<std::string, Json, std::less<>> skill_definitions;
+        for (const Json &skill : request["skills"]) {
+            if (!skill.is_object() || !HasOnlyFields(skill, {"id", "title", "description", "max_rank", "prerequisites", "effects"}) ||
+                !skill.contains("id") || !skill["id"].is_string() ||
+                !skill.contains("title") || !skill["title"].is_string() ||
+                !skill.contains("max_rank") || !skill["max_rank"].is_number_integer() ||
+                (skill.contains("description") && !skill["description"].is_string()) ||
+                (skill.contains("prerequisites") && !skill["prerequisites"].is_array()) ||
+                (skill.contains("effects") && (!skill["effects"].is_object() ||
+                 !HasOnlyFields(skill["effects"], {"enemy_damage_per_rank"})))) {
+                return {ApiCallStatus::InvalidArgument, nullptr,
+                        "each skill requires id, title, max_rank, and optional description, prerequisites, or supported effects"};
+            }
+            std::string node_id;
+            if (!ParseQuestId(skill["id"].get_ref<const std::string &>(), node_id, error) || node_id.size() > 24) {
+                return {ApiCallStatus::InvalidArgument, nullptr,
+                        error.empty() ? "skill node ids are limited to 24 bytes" : std::move(error)};
+            }
+            const std::string node_title = skill["title"].get<std::string>();
+            const std::string node_description = skill.value("description", std::string{});
+            if (node_title.empty() || node_title.size() > 128 || node_description.size() > 1024 ||
+                !skill_ids.insert(node_id).second) {
+                return {ApiCallStatus::InvalidArgument, nullptr,
+                        "skill ids must be unique; titles and descriptions must fit their text limits"};
+            }
+            std::int64_t max_rank = 0;
+            try {
+                max_rank = skill["max_rank"].get<std::int64_t>();
+            } catch (const std::exception &) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "skill max_rank is outside the integer range"};
+            }
+            if (max_rank < 1 || max_rank > 99) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "skill max_rank must be in the range [1, 99]"};
+            }
+            Json prerequisites = Json::array();
+            const Json requested_prerequisites = skill.value("prerequisites", Json::array());
+            if (requested_prerequisites.size() > 32) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "a skill may have at most 32 prerequisites"};
+            }
+            std::set<std::string, std::less<>> prerequisite_ids;
+            for (const Json &prerequisite : requested_prerequisites) {
+                if (!prerequisite.is_object() || !HasOnlyFields(prerequisite, {"id", "rank"}) ||
+                    !prerequisite.contains("id") || !prerequisite["id"].is_string() ||
+                    !prerequisite.contains("rank") || !prerequisite["rank"].is_number_integer()) {
+                    return {ApiCallStatus::InvalidArgument, nullptr,
+                            "each prerequisite requires a local skill id and integer rank"};
+                }
+                std::string prerequisite_id;
+                if (!ParseQuestId(prerequisite["id"].get_ref<const std::string &>(), prerequisite_id, error) ||
+                    prerequisite_id.size() > 24 || prerequisite_id == node_id ||
+                    !prerequisite_ids.insert(prerequisite_id).second) {
+                    return {ApiCallStatus::InvalidArgument, nullptr,
+                            error.empty() ? "prerequisite ids must be unique local skill ids" : std::move(error)};
+                }
+                std::int64_t required_rank = 0;
+                try {
+                    required_rank = prerequisite["rank"].get<std::int64_t>();
+                } catch (const std::exception &) {
+                    return {ApiCallStatus::InvalidArgument, nullptr, "prerequisite rank is outside the integer range"};
+                }
+                if (required_rank < 1 || required_rank > 99) {
+                    return {ApiCallStatus::InvalidArgument, nullptr, "prerequisite rank must be in the range [1, 99]"};
+                }
+                prerequisites.push_back({{"id", prerequisite_id}, {"rank", required_rank}});
+            }
+            Json normalized = {{"id", node_id}, {"title", node_title}, {"description", node_description},
+                               {"max_rank", max_rank}, {"prerequisites", std::move(prerequisites)}};
+            if (skill.contains("effects")) {
+                const Json &effects = skill["effects"];
+                if (effects.contains("enemy_damage_per_rank")) {
+                    if (!effects["enemy_damage_per_rank"].is_number()) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "effects.enemy_damage_per_rank must be a finite number in [0, 1]"};
+                    }
+                    double per_rank = 0.0;
+                    try {
+                        per_rank = effects["enemy_damage_per_rank"].get<double>();
+                    } catch (const std::exception &) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "effects.enemy_damage_per_rank is outside the numeric range"};
+                    }
+                    if (!std::isfinite(per_rank) || per_rank < 0.0 || per_rank > 1.0) {
+                        return {ApiCallStatus::InvalidArgument, nullptr,
+                                "effects.enemy_damage_per_rank must be a finite number in [0, 1]"};
+                    }
+                }
+                normalized["effects"] = effects;
+            }
+            skill_definitions.emplace(node_id, normalized);
+            skills.push_back(std::move(normalized));
+        }
+
+        for (const Json &skill : skills) {
+            for (const Json &prerequisite : skill["prerequisites"]) {
+                const auto found = skill_definitions.find(prerequisite["id"].get_ref<const std::string &>());
+                if (found == skill_definitions.end() || prerequisite["rank"] > found->second["max_rank"]) {
+                    return {ApiCallStatus::InvalidArgument, nullptr,
+                            "prerequisites must name a skill in this tree and not exceed its max rank"};
+                }
+            }
+        }
+        std::set<std::string, std::less<>> visited;
+        std::set<std::string, std::less<>> active;
+        std::function<bool(const std::string &)> has_cycle = [&](const std::string &node_id) {
+            if (active.contains(node_id)) return true;
+            if (visited.contains(node_id)) return false;
+            active.insert(node_id);
+            for (const Json &prerequisite : skill_definitions.at(node_id)["prerequisites"]) {
+                if (has_cycle(prerequisite["id"].get<std::string>())) return true;
+            }
+            active.erase(node_id);
+            visited.insert(node_id);
+            return false;
+        };
+        for (const std::string &node_id : skill_ids) {
+            if (has_cycle(node_id)) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "skill prerequisites cannot contain a cycle"};
+            }
+        }
+
+        const Json definition = {{"title", title}, {"description", description}, {"skills", std::move(skills)}};
+        Json replacement = storage;
+        if (!replacement.contains(std::string(kSkillStorageKey))) replacement[std::string(kSkillStorageKey)] = Json::object();
+        Json &trees = replacement[std::string(kSkillStorageKey)];
+        if (!trees.is_object()) return {ApiCallStatus::Failed, nullptr, "stored skill data is invalid"};
+        const auto prior = trees.find(tree_id);
+        if (prior != trees.end()) {
+            if (prior->is_object() && prior->value("definition", Json()) == definition) {
+                Json node_ids = Json::array();
+                for (const Json &skill : definition["skills"]) {
+                    node_ids.push_back(manifest.id + ":" + tree_id + "." + skill["id"].get<std::string>());
+                }
+                return {ApiCallStatus::Ok,
+                        {{"id", manifest.id + ":" + tree_id}, {"skills", std::move(node_ids)},
+                         {"status", "registered"}, {"idempotent", true}}, {}};
+            }
+            const Json old = prior->value("definition", Json::object());
+            const Json old_nodes = old.value("skills", Json::array());
+            const Json &new_nodes = definition.at("skills");
+            bool compatible = old_nodes.is_array() && old_nodes.size() == new_nodes.size();
+            for (std::size_t i = 0; compatible && i < old_nodes.size(); ++i) {
+                compatible = old_nodes[i].value("id", "") == new_nodes[i].value("id", "") &&
+                             old_nodes[i].value("max_rank", 0) == new_nodes[i].value("max_rank", 0) &&
+                             old_nodes[i].value("prerequisites", Json::array()) == new_nodes[i].value("prerequisites", Json::array());
+            }
+            if (!compatible) return {ApiCallStatus::Failed, nullptr, "skill tree update changes its rank or prerequisite structure"};
+            (*prior)["definition"] = definition;
+            const ApiCallResult committed = CommitSkillStorage(std::move(replacement));
+            if (committed.status != ApiCallStatus::Ok) return committed;
+            return {ApiCallStatus::Ok, {{"id", manifest.id + ":" + tree_id}, {"status", "updated"}}, {}};
+        }
+        if (trees.size() >= 32) return {ApiCallStatus::InvalidArgument, nullptr, "mod skill tree limit reached"};
+        Json ranks = Json::object();
+        Json node_ids = Json::array();
+        for (const Json &skill : definition["skills"]) {
+            ranks[skill["id"].get<std::string>()] = 0;
+            node_ids.push_back(manifest.id + ":" + tree_id + "." + skill["id"].get<std::string>());
+        }
+        trees[tree_id] = {{"definition", definition}, {"ranks", std::move(ranks)}};
+        const ApiCallResult committed = CommitSkillStorage(std::move(replacement));
+        if (committed.status != ApiCallStatus::Ok) return committed;
+        return {ApiCallStatus::Ok,
+                {{"id", manifest.id + ":" + tree_id}, {"skills", std::move(node_ids)},
+                 {"status", "registered"}, {"idempotent", false}}, {}};
+    }
+
+    ApiCallResult GetSkills(const Json &arguments) const {
+        if (!arguments.is_array() || arguments.size() > 1 ||
+            (!arguments.empty() && (!arguments[0].is_object() || arguments[0].size() != 1 ||
+                                    !arguments[0].contains("id") || !arguments[0]["id"].is_string()))) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "expected no arguments or {id = skill_id}"};
+        }
+        const auto tree_store = storage.find(std::string(kSkillStorageKey));
+        if (tree_store == storage.end()) {
+            if (!arguments.empty()) return {ApiCallStatus::Failed, nullptr, "skill is not registered"};
+            return {ApiCallStatus::Ok, {{"skills", Json::array()}}, {}};
+        }
+        if (!tree_store->is_object()) return {ApiCallStatus::Failed, nullptr, "stored skill data is invalid"};
+        try {
+        auto build_view = [&](const std::string &tree_id, const std::string &node_id, const Json &node,
+                              const Json &definition, const Json &ranks) -> Json {
+            const auto rank_field = ranks.find(node_id);
+            if (rank_field == ranks.end() || !rank_field->is_number_integer()) {
+                throw std::runtime_error("skill rank is invalid");
+            }
+            const std::int64_t current_rank = rank_field->get<std::int64_t>();
+            bool prerequisites_met = true;
+            Json prerequisites = Json::array();
+            for (const Json &requirement : node.at("prerequisites")) {
+                const std::string required_id = requirement.at("id").get<std::string>();
+                const std::int64_t required_rank = requirement.at("rank").get<std::int64_t>();
+                const auto actual = ranks.find(required_id);
+                const std::int64_t actual_rank = actual != ranks.end() && actual->is_number_integer()
+                                                     ? actual->get<std::int64_t>() : 0;
+                const bool met = actual_rank >= required_rank;
+                prerequisites_met = prerequisites_met && met;
+                prerequisites.push_back({{"id", manifest.id + ":" + tree_id + "." + required_id},
+                                          {"required_rank", required_rank}, {"rank", actual_rank},
+                                          {"met", met}});
+            }
+            const std::int64_t max_rank = node.at("max_rank").get<std::int64_t>();
+            return {{"id", manifest.id + ":" + tree_id + "." + node_id},
+                    {"tree_id", manifest.id + ":" + tree_id}, {"tree_title", definition.at("title")},
+                    {"id_local", node_id}, {"title", node.at("title")},
+                    {"description", node.value("description", "")}, {"rank", current_rank},
+                    {"effects", node.value("effects", Json::object())},
+                    {"max_rank", max_rank}, {"unlocked", current_rank > 0},
+                    {"prerequisites_met", prerequisites_met},
+                    {"available", current_rank < max_rank && prerequisites_met},
+                    {"prerequisites", std::move(prerequisites)}};
+        };
+        if (!arguments.empty()) {
+            std::string skill_id;
+            std::string error;
+            if (!ParseSkillId(arguments[0]["id"].get_ref<const std::string &>(), skill_id, error)) {
+                return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
+            }
+            for (auto tree = tree_store->begin(); tree != tree_store->end(); ++tree) {
+                const std::string prefix = tree.key() + ".";
+                if (!skill_id.starts_with(prefix)) continue;
+                const std::string node_id = skill_id.substr(prefix.size());
+                if (!tree.value().is_object() || !tree.value().contains("definition") || !tree.value().contains("ranks")) {
+                    return {ApiCallStatus::Failed, nullptr, "stored skill tree is invalid"};
+                }
+                const Json &definition = tree.value().at("definition");
+                const Json &ranks = tree.value().at("ranks");
+                const auto node = std::ranges::find(definition.at("skills"), node_id,
+                                                    [](const Json &skill) -> const std::string & {
+                                                        return skill.at("id").get_ref<const std::string &>();
+                                                    });
+                if (node == definition.at("skills").end()) continue;
+                try {
+                    return {ApiCallStatus::Ok, build_view(tree.key(), node_id, *node, definition, ranks), {}};
+                } catch (const std::exception &) {
+                    return {ApiCallStatus::Failed, nullptr, "stored skill record is invalid"};
+                }
+            }
+            return {ApiCallStatus::Failed, nullptr, "skill is not registered"};
+        }
+        Json result = Json::array();
+        for (auto tree = tree_store->begin(); tree != tree_store->end(); ++tree) {
+            if (!tree.value().is_object() || !tree.value().contains("definition") || !tree.value().contains("ranks")) {
+                return {ApiCallStatus::Failed, nullptr, "stored skill tree is invalid"};
+            }
+            const Json &definition = tree.value().at("definition");
+            const Json &ranks = tree.value().at("ranks");
+            for (const Json &node : definition.at("skills")) {
+                try {
+                    result.push_back(build_view(tree.key(), node.at("id").get<std::string>(), node, definition, ranks));
+                } catch (const std::exception &) {
+                    return {ApiCallStatus::Failed, nullptr, "stored skill record is invalid"};
+                }
+            }
+        }
+        return {ApiCallStatus::Ok, {{"skills", std::move(result)}}, {}};
+        } catch (const std::exception &) {
+            return {ApiCallStatus::Failed, nullptr, "stored skill data is invalid"};
+        }
+    }
+
+    ApiCallResult SetSkillRank(const Json &arguments, bool increment) {
+        const bool fields_valid = arguments.is_array() && arguments.size() == 1 && arguments[0].is_object() &&
+                                  (increment ? HasOnlyFields(arguments[0], {"id"})
+                                             : HasOnlyFields(arguments[0], {"id", "rank"}));
+        if (!arguments.is_array() || arguments.size() != 1 || !arguments[0].is_object() ||
+            !fields_valid ||
+            !arguments[0].contains("id") || !arguments[0]["id"].is_string() ||
+            (!increment && (!arguments[0].contains("rank") || !arguments[0]["rank"].is_number_integer()))) {
+            return {ApiCallStatus::InvalidArgument, nullptr,
+                    increment ? "expected {id = skill_id}" : "expected {id = skill_id, rank = integer}"};
+        }
+        std::string skill_id;
+        std::string error;
+        if (!ParseSkillId(arguments[0]["id"].get_ref<const std::string &>(), skill_id, error)) {
+            return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
+        }
+        try {
+        auto tree_store = storage.find(std::string(kSkillStorageKey));
+        if (tree_store == storage.end() || !tree_store->is_object()) {
+            return {ApiCallStatus::Failed, nullptr, "skill is not registered"};
+        }
+        std::string selected_tree;
+        std::string selected_node;
+        for (auto tree = tree_store->begin(); tree != tree_store->end(); ++tree) {
+            const std::string prefix = tree.key() + ".";
+            if (!skill_id.starts_with(prefix)) continue;
+            const std::string node_id = skill_id.substr(prefix.size());
+            if (!tree.value().is_object() || !tree.value().contains("definition") || !tree.value().contains("ranks")) {
+                return {ApiCallStatus::Failed, nullptr, "stored skill tree is invalid"};
+            }
+            const Json &nodes = tree.value().at("definition").at("skills");
+            if (std::ranges::any_of(nodes, [&](const Json &node) { return node.value("id", "") == node_id; })) {
+                selected_tree = tree.key();
+                selected_node = node_id;
+                break;
+            }
+        }
+        if (selected_tree.empty()) return {ApiCallStatus::Failed, nullptr, "skill is not registered"};
+        Json replacement = storage;
+        Json &tree = replacement[std::string(kSkillStorageKey)][selected_tree];
+        Json &ranks = tree["ranks"];
+        const Json &definition = tree.at("definition");
+        const auto node = std::ranges::find(definition.at("skills"), selected_node,
+                                            [](const Json &skill) -> const std::string & {
+                                                return skill.at("id").get_ref<const std::string &>();
+                                            });
+        if (node == definition.at("skills").end()) return {ApiCallStatus::Failed, nullptr, "skill is not registered"};
+        const std::int64_t old_rank = ranks.value(selected_node, std::int64_t{0});
+        std::int64_t requested_rank = 0;
+        if (increment) {
+            if (old_rank >= node->at("max_rank").get<std::int64_t>()) {
+                return {ApiCallStatus::Failed, nullptr, "skill is already at maximum rank"};
+            }
+            requested_rank = old_rank + 1;
+        } else {
+            try {
+                requested_rank = arguments[0]["rank"].get<std::int64_t>();
+            } catch (const std::exception &) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "skill rank is outside the integer range"};
+            }
+            if (requested_rank < 0 || requested_rank > node->at("max_rank").get<std::int64_t>()) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "skill rank is outside the registered range"};
+            }
+        }
+        if (requested_rank == old_rank) {
+            return {ApiCallStatus::Ok,
+                    {{"id", manifest.id + ":" + skill_id}, {"rank", old_rank}, {"changed", false},
+                     {"idempotent", true}}, {}};
+        }
+        if (requested_rank > 0) {
+            for (const Json &prerequisite : node->at("prerequisites")) {
+                const std::string required_id = prerequisite.at("id").get<std::string>();
+                const std::int64_t required_rank = prerequisite.at("rank").get<std::int64_t>();
+                if (ranks.value(required_id, std::int64_t{0}) < required_rank) {
+                    return {ApiCallStatus::Failed, nullptr,
+                            "skill prerequisite is not met: " + required_id + " rank " + std::to_string(required_rank)};
+                }
+            }
+        }
+        ranks[selected_node] = requested_rank;
+        const ApiCallResult committed = CommitSkillStorage(std::move(replacement));
+        if (committed.status != ApiCallStatus::Ok) return committed;
+        const std::string qualified_id = manifest.id + ":" + skill_id;
+        Emit("skills.rank_changed", {{"id", qualified_id}, {"previous_rank", old_rank},
+                                     {"rank", requested_rank}});
+        if (old_rank == 0 && requested_rank > 0) Emit("skills.unlocked", {{"id", qualified_id}, {"rank", requested_rank}});
+        return {ApiCallStatus::Ok,
+                {{"id", qualified_id}, {"rank", requested_rank}, {"changed", true}, {"idempotent", false}}, {}};
+        } catch (const std::exception &) {
+            return {ApiCallStatus::Failed, nullptr, "stored skill data is invalid"};
+        }
+    }
+
+    ApiCallResult DebugProfile(const Json &arguments) const {
+        if (!arguments.is_array() || !arguments.empty()) {
+            return {ApiCallStatus::InvalidArgument, nullptr, "debug.profile expects no arguments"};
+        }
+
+        std::size_t subscription_count = 0;
+        for (const auto &[event_name, subscriptions] : callbacks) {
+            (void)event_name;
+            subscription_count += subscriptions.size();
+        }
+        std::size_t translation_count = 0;
+        for (const auto &[localization_id, entry] : localizations) {
+            (void)localization_id;
+            translation_count += entry.translations.size();
+        }
+
+        return {ApiCallStatus::Ok,
+                {{"lua_memory", {{"used_bytes", memory.used}, {"limit_bytes", memory.limit}}},
+                 {"events", {{"event_names", callbacks.size()}, {"subscriptions", subscription_count}}},
+                 {"localization", {{"keys", localizations.size()}, {"translations", translation_count},
+                                   {"bytes", localization_bytes}}},
+                 {"resources", {{"handles", resources.size()}, {"bytes", resource_bytes},
+                                {"handle_limit", kResourceHandleLimit}, {"byte_limit", kResourceTotalSizeLimit}}},
+                 {"storage", {{"keys", storage.size()}, {"bytes", storage.dump().size()},
+                              {"limit_bytes", kStorageSizeLimit}, {"dirty", storage_dirty}}}},
+                {}};
+    }
+
+
+    ApiCallResult InvokeApi(std::string_view path, const Json &arguments) {
+        const ApiOperationSpec *operation = FindApiOperation(path);
+        if (operation == nullptr) {
+            return {ApiCallStatus::Unsupported, nullptr, "unknown API operation"};
+        }
+        if (!operation->permission.empty() && !HasPermission(manifest, operation->permission)) {
+            return {ApiCallStatus::PermissionDenied, nullptr,
+                    "manifest permission is required: " + std::string(operation->permission)};
+        }
+        std::string reason;
+        if (!Capability(path, reason)) {
+            return {ApiCallStatus::Unsupported, nullptr, reason};
+        }
+        if (path == "info.get") {
+            return {ApiCallStatus::Ok,
+                    {{"id", config.game_id}, {"name", config.game_name}, {"api_major", config.framework_api},
+                     {"mod_id", manifest.id}},
+                    {}};
+        }
+        if (path == "events.list") {
+            if (!arguments.is_array() || !arguments.empty()) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "events.list does not accept arguments"};
+            }
+            Json events = Json::array();
+            for (const EventSpec &event : EventCatalog()) {
+                if (event.games != "both" && event.games != config.game_id) continue;
+                events.push_back({{"name", event.name}, {"domain", event.domain}, {"summary", event.summary}});
+            }
+            return {ApiCallStatus::Ok, {{"game", config.game_id}, {"events", std::move(events)}}, {}};
+        }
+        if (path == "scripts.list_hooks") {
+            if (!arguments.is_array() || !arguments.empty()) {
+                return {ApiCallStatus::InvalidArgument, nullptr, "scripts.list_hooks does not accept arguments"};
+            }
+            Json hooks = Json::array({
+                {{"id", "native.event.run"},
+                 {"kind", "event_program"},
+                 {"summary", "Runs before a native event program starts in the active scene."},
+                 {"context", {"program_no"}},
+                 {"original_call", "game.scripts.call({id = hook.id})"}},
+                {{"id", "native.dialogue.show"},
+                 {"kind", "dialogue"},
+                 {"summary", "Runs before a native dialogue or message window opens."},
+                 {"context", {"message_id", "speaker"}},
+                 {"original_call", "game.scripts.call({id = hook.id})"}},
+                {{"id", "native.combat.before_hit"},
+                 {"kind", "combat_hit"},
+                 {"summary", "Runs before a native combat hit applies damage."},
+                 {"context", {"attacker", "target", "damage"}},
+                 {"original_call", "game.scripts.call({id = hook.id})"}},
+                {{"id", "native.loot.roll"},
+                 {"kind", "loot_roll"},
+                 {"summary", "Runs before a native monster drop or treasure chest loot roll completes."},
+                 {"context", {"source", "item_no"}},
+                 {"original_call", "game.scripts.call({id = hook.id})"}},
+                {{"id", "native.transition.before_enter"},
+                 {"kind", "scene_transition"},
+                 {"summary", "Runs before a native map, town, or dungeon floor transition begins."},
+                 {"context", {"target", "floor_id"}},
+                 {"original_call", "game.scripts.call({id = hook.id})"}},
+            });
+            return {ApiCallStatus::Ok, {{"game", config.game_id}, {"hooks", std::move(hooks)}}, {}};
+        }
+        if (path == "scripts.call") {
+            if (!arguments.is_array() || arguments.size() != 1 || !arguments[0].is_object() ||
+                !HasOnlyFields(arguments[0], {"id"}) || !arguments[0].contains("id") ||
+                !arguments[0]["id"].is_string()) {
+                return {ApiCallStatus::InvalidArgument, nullptr,
+                        "scripts.call requires {id = the active native hook id}"};
+            }
+            const std::string &hook_id = arguments[0]["id"].get_ref<const std::string &>();
+            if (hook_id != "native.event.run" && hook_id != "native.dialogue.show" &&
+                hook_id != "native.combat.before_hit" && hook_id != "native.loot.roll" &&
+                hook_id != "native.transition.before_enter") {
+                return {ApiCallStatus::InvalidArgument, nullptr, "scripts.call does not recognize this native hook id"};
+            }
+            if (!config.script_hook_original_call_handler) {
+                return {ApiCallStatus::Unsupported, nullptr, "native script call-through is unavailable"};
+            }
+            return config.script_hook_original_call_handler(manifest.id, hook_id);
+        }
+        if (path == "localization.register") return RegisterLocalization(arguments);
+        if (path == "localization.get") return GetLocalization(arguments);
+        if (path == "resources.load") return LoadResource(arguments);
+        if (path == "resources.resolve") return ResolveResource(arguments);
+        if (path == "resources.release") return ReleaseResource(arguments);
+        if (path == "resources.override") {
+            return RegisterNativeResourceOverride(manifest.id, manifest.package_root, arguments);
+        }
+        if (path == "resources.unoverride") {
+            if (config.api_resource_override_removal_guard) {
+                const std::string reason = config.api_resource_override_removal_guard(manifest.id, arguments);
+                if (!reason.empty()) return {ApiCallStatus::Failed, nullptr, reason};
+            }
+            return RemoveNativeResourceOverride(manifest.id, arguments);
+        }
+        if (path == "ui.register") return RegisterUiAction(arguments);
+        if (path == "ui.remove") return RemoveUiAction(arguments);
+        if (path == "ui.open_skills") {
+            if (!arguments.is_array() || !arguments.empty()) return {ApiCallStatus::InvalidArgument,nullptr,"open_skills takes no arguments"};
+            OpenManager();
+            const auto mods=SharedRuntime().Mods();
+            for (std::size_t i=0;i<mods.size();++i) if (mods[i].id==manifest.id) ManagerState().selected_mod=static_cast<int>(i);
+            ManagerState().detail_tab=3; ManagerState().settings_focus=true;
+            return {ApiCallStatus::Ok,{{"opened",true}}, {}};
+        }
+        if (path == "ui.notify") return NotifyUi(arguments);
+        if (path == "commands.execute") return ExecuteCommand(arguments);
+        if (path == "commands.unregister") return UnregisterCommand(arguments);
         if (path == "scripts.list_functions") return ListScriptFunctions(arguments);
         if (path == "scripts.call_function") return CallScriptFunction(arguments);
         if (path == "scripts.unregister_function") return UnregisterScriptFunction(arguments);
@@ -2442,4 +3390,3 @@ ApiCallResult LuaMod::CallApi(std::string_view path, const Json &arguments) {
 }
 
 } // namespace moonmod
-
