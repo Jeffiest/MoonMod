@@ -62,7 +62,12 @@ Chronicle's location registration has native adapter coverage and a retail-data 
 
 ## 4. Modern mod rewrites (ported from legacy windows branch)
 
-- **`moonmod.dungeon-plus`**: Per-floor NG+ difficulty tiers (Tiers 1-5) using `game.dungeons.set_layout` for procedural chamber scaling, dynamic monster resilience scaling via `game.combat.register_formula`, clear bonuses awarding native gems and slayer attachments, and export of `current_tier` callable by other mods.
-- **`moonmod.ascension`**: Modern RPG progression layer featuring character XP, leveling up to level 40, Paragon ranks, max HP scaling, custom skill trees (`might` and `vitality`) via `game.skills.register`, dynamic combat damage formulas, and kill XP rewards via `game.enemy_defeated`.
+- **`moonmod.dungeon-plus`**: Chronicle source integration includes per-floor tiers/layouts, resilience and clear rewards, Dungeon Feats quests and bestiary, floor bounties, five floor mutators, native movement speed variation, and the static legacy shop-price rebalance. Daily shop rotations, hit procs, and bytecode AI edits remain unsupported.
+- **`moonmod.ascension`**: Chronicle source integration includes XP/level/Paragon progression, eighteen nodes across Might/Vitality/Focus, manager skill training, floor modifiers, and weapon mastery. Champion spawning, critical-hit effects, and other hit-triggered weapon effects remain unsupported.
 - **Exit gate replacement (not done)**: a walk-through exit room with a stair to the next floor and a stair back to town. The Chronicle patch has an unfinished version, switched off; the earlier seamless mode is also off because it forced the next floor.
 
+
+
+### Local Ascension/Dungeon+ code audit (2026-10-17)
+
+See MOD_AUDIT_AND_GUIDE.md for the current source feature inventory, manager access, unsupported legacy hooks, and unresolved per-native-slot persistence limitation. The audited packages are Ascension 1.3.0 and Dungeon+ 1.2.0. No gameplay or headless verification was performed for this integration.
