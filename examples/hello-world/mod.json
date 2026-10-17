@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "example.hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "author": "MoonFactory Example",
+  "description": "Shows the common lifecycle, setting, and storage APIs.",
+  "framework_api": 1,
+  "games": ["chronicle", "chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["storage.read", "storage.write"],
+  "settings": [
+    {"id": "greeting", "name": "Show greeting", "type": "boolean", "default": true}
+  ]
+}

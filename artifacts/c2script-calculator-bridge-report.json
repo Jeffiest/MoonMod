@@ -1,0 +1,250 @@
+{
+  "assets": {
+    "add": [
+      {
+        "asset_id": "file:mods/calculator/calc.chr",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "like": "model:uki"
+        },
+        "sha256": "9a95cd085b89ef86685f492febe686ce95a1f6957d73cfc8e854fa1018130443",
+        "size_bytes": 2302,
+        "source": "model/calc.gltf",
+        "source_exists": true,
+        "source_kind": "file"
+      },
+      {
+        "asset_id": "file:mods/calculator/calc_ui.img",
+        "file_count": 4,
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "like": "texture:logo_d00"
+        },
+        "size_bytes": 8500,
+        "source": "ui",
+        "source_exists": true,
+        "source_kind": "directory",
+        "tree_sha256": "8fda84fd7a8be245c3dea2300386a2de529c73a4be40adb3bbb709c0d787a812"
+      },
+      {
+        "asset_id": "sound:SE_MOD_CALC_CLEAR",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "bank": "SP_042"
+        },
+        "sha256": "abd9df6e737a3b1cd27739e2e9906243db59720b9e2ce45a1b3a54df13e753ea",
+        "size_bytes": 7244,
+        "source": "sounds/clear.wav",
+        "source_exists": true,
+        "source_kind": "file"
+      },
+      {
+        "asset_id": "sound:SE_MOD_CALC_CLOSE",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "bank": "SP_042"
+        },
+        "sha256": "8cf0f28173b7c4f7d8020d8f08dfa8c3159f54b5607777375e2672db1e70d0eb",
+        "size_bytes": 5324,
+        "source": "sounds/close.wav",
+        "source_exists": true,
+        "source_kind": "file"
+      },
+      {
+        "asset_id": "sound:SE_MOD_CALC_EQUALS",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "bank": "SP_042"
+        },
+        "sha256": "0626d97ff8ed874e0aeb514f0b57ebe82e429cd4051f2d34fce9c73a83499669",
+        "size_bytes": 12044,
+        "source": "sounds/equals.wav",
+        "source_exists": true,
+        "source_kind": "file"
+      },
+      {
+        "asset_id": "sound:SE_MOD_CALC_ERROR",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "bank": "SP_042"
+        },
+        "sha256": "45dfcfe6138b23cf5827ffdaa7309b553283bf98ed68b1bf7bd0c07a0768c478",
+        "size_bytes": 14444,
+        "source": "sounds/error.wav",
+        "source_exists": true,
+        "source_kind": "file"
+      },
+      {
+        "asset_id": "sound:SE_MOD_CALC_KEY",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "bank": "SP_042"
+        },
+        "sha256": "89cd20b7beeeeed67db9f75825f3acc9124fc1fa71f264fe297eee701345e2b5",
+        "size_bytes": 1964,
+        "source": "sounds/key.wav",
+        "source_exists": true,
+        "source_kind": "file"
+      },
+      {
+        "asset_id": "sound:SE_MOD_CALC_OPEN",
+        "operation": "add",
+        "runtime_status": "build_only",
+        "settings": {
+          "bank": "SP_042"
+        },
+        "sha256": "c287f3d67d0abb133980abf62b84bcbd8ab499a77480bebce2ca859ca1cf4cfa",
+        "size_bytes": 5324,
+        "source": "sounds/open.wav",
+        "source_exists": true,
+        "source_kind": "file"
+      }
+    ],
+    "replace": []
+  },
+  "capabilities": {
+    "chronicle_two_pc_runtime": "not_loaded",
+    "notes": [
+      "Script overrides, native wrappers, whole-file replacements, added assets, and allocated symbols affect a rebuilt script image only.",
+      "Moon Factory's current PC adapter must independently prove a matching native runtime loader before any component is reported runtime-supported."
+    ],
+    "script_image_build": "not_run"
+  },
+  "components": [
+    {
+      "every_frame_hooks": 0,
+      "kind": "script_patch_or_shared_source",
+      "original_calls": 0,
+      "overrides": [
+        {
+          "line": 445,
+          "native_wrapper": false
+        }
+      ],
+      "path": "calculator.c",
+      "runtime_status": "build_only",
+      "sha256": "7ccf3b2d5482679b4e3f90540cde64cb062fea53f0e539b1dd5d4f318604c3ce",
+      "size_bytes": 13925,
+      "symbols": {
+        "counter": [],
+        "flag": [],
+        "monster_var": [],
+        "program": [
+          "CALC_START"
+        ]
+      },
+      "targets": [
+        "map s17"
+      ]
+    }
+  ],
+  "errors": [],
+  "format_version": 1,
+  "report_kind": "moon-factory.chronicle-two-script-compatibility",
+  "script_additions": [],
+  "script_symbols": {
+    "allocation_destination": "ChronicleTwo-Script mods/numbers.json (build-time only)",
+    "allocation_file": "C:\\Users\\armor\\AppData\\Local\\Temp\\moonfactory-chronicle-two-script-20261015\\docs\\examples\\numbers.json",
+    "persisted_allocations": {
+      "note": "Numbers build gave mods' NEW_FLAG, NEW_COUNTER, NEW_PROGRAM and NEW_MONSTER_VAR names, kept so a name keeps its number and saves stay valid. Delete a line to free its number.",
+      "program": {
+        "calculator/CALC_START": 9000,
+        "new-character/NEWCHR_START": 9001,
+        "spinning-cult/GILL_TEST": 9002
+      }
+    },
+    "requested": {
+      "counter": [],
+      "flag": [],
+      "monster_var": [],
+      "program": [
+        "CALC_START"
+      ]
+    },
+    "target_fingerprints": {
+      "calculator.c": {
+        "talk_to_monica_spheda_trial": {
+          "exact": "125e5b10fc90ad5e",
+          "loose": "e04587317e79583e"
+        }
+      },
+      "note": "The fingerprints of the functions this mod's patches override, so that build finds a function the decompiler has renamed since. dc2tk writes it."
+    }
+  },
+  "source": {
+    "definition_set": "definitions/pal",
+    "definition_set_sha256": null,
+    "dependencies": {
+      "after": [],
+      "requires": []
+    },
+    "disc_fingerprint": null,
+    "manifest": {
+      "add": {
+        "file:mods/calculator/calc.chr": {
+          "file": "model/calc.gltf",
+          "like": "model:uki"
+        },
+        "file:mods/calculator/calc_ui.img": {
+          "file": "ui",
+          "like": "texture:logo_d00"
+        },
+        "sound:SE_MOD_CALC_CLEAR": {
+          "bank": "SP_042",
+          "file": "sounds/clear.wav"
+        },
+        "sound:SE_MOD_CALC_CLOSE": {
+          "bank": "SP_042",
+          "file": "sounds/close.wav"
+        },
+        "sound:SE_MOD_CALC_EQUALS": {
+          "bank": "SP_042",
+          "file": "sounds/equals.wav"
+        },
+        "sound:SE_MOD_CALC_ERROR": {
+          "bank": "SP_042",
+          "file": "sounds/error.wav"
+        },
+        "sound:SE_MOD_CALC_KEY": {
+          "bank": "SP_042",
+          "file": "sounds/key.wav"
+        },
+        "sound:SE_MOD_CALC_OPEN": {
+          "bank": "SP_042",
+          "file": "sounds/open.wav"
+        }
+      },
+      "start_at": "s17:CALC_START",
+      "title": "Calculator",
+      "version": "2.0.0"
+    },
+    "manifest_sha256": "eea1a7499f35233a1633542d626965c7fcc79ae36aaa00165cbf3324bc8ad8c4",
+    "mod_name": "calculator",
+    "mod_root": "C:\\Users\\armor\\AppData\\Local\\Temp\\moonfactory-chronicle-two-script-20261015\\docs\\examples\\calculator",
+    "project_root": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\MoonFactory",
+    "repository": "https://github.com/fakegenie/ChronicleTwo-Script",
+    "start_at": "s17:CALC_START",
+    "tool_revision": null
+  },
+  "target": {
+    "game_id": "chronicle-two",
+    "lua_api_major": 1,
+    "package_schema_version": 1
+  },
+  "validation": {
+    "dc2tk_mod_check": {
+      "status": "not_requested"
+    },
+    "static_inventory": "passed"
+  },
+  "warnings": [
+    "C2-Script build components are preserved as build-only; this report does not make them load in the PC runtime"
+  ]
+}

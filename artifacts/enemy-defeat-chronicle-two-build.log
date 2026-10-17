@@ -1,0 +1,81 @@
+kazarov: building C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification (12 jobs; log: C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\build.log)
+[0/2] Re-checking globbed directories...
+[0/310] C:\WINDOWS\system32\cmd.exe /C "cd /D C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\tools\kazarov && "C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/deps/llvm/llvm-mingw-20260922-ucrt-x86_64/bin/clang.exe CC_x86_64-pc-windows-gnullvm=C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/deps/llvm/llvm-mingw-20260922-ucrt-x86_64/bin/clang.exe CXX_x86_64-pc-windows-gnullvm=C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/deps/llvm/llvm-mingw-20260922-ucrt-x86_64/bin/clang++.exe AR_x86_64-pc-windows-gnullvm=C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/deps/llvm/llvm-mingw-20260922-ucrt-x86_64/bin/llvm-ar.exe CORROSION_BUILD_DIR=C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/build/moonmod-api-verification/tools/dc2data CARGO_BUILD_RUSTC=C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/deps/rust/1.99.0-gnullvm/bin/rustc.exe C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/deps/rust/1.99.0-gnullvm/bin/cargo.exe rustc --lib --target=x86_64-pc-windows-gnullvm --package kazarov_core --crate-type=staticlib --crate-type=rlib --manifest-path C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/tools/kazarov/Cargo.toml --target-dir C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/build/moonmod-api-verification/cargo/kazarov_1035f -- -Cdefault-linker-libraries=yes"
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.50s
+[3/310] Listing port/src's PORT_OVERRIDE definitions
+[5/310] Checking that every PORT_OVERRIDE definition replaces one of ps2/src's
+[6/14] Copying byproducts `libkazarov_core.a` to C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/build/moonmod-api-verification/tools/dc2data
+[7/12] Removing overridden definitions from ps2/src/runscript_opcodes.cpp
+[8/12] Building CXX object port/CMakeFiles/ct_ps2.dir/build/moonmod-api-verification/ps2_src/runscript_opcodes.cpp.obj
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1081:9: warning: variable 'color_flag' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+ 1081 |     if (argc == 3) {
+      |         ^~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1088:9: note: uninitialized use occurs here
+ 1088 |     if (color_flag == 1) {
+      |         ^~~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1081:5: note: remove the 'if' if its condition is always true
+ 1081 |     if (argc == 3) {
+      |     ^~~~~~~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1057:29: note: initialize the variable 'color_flag' to silence this warning
+ 1057 |     int           color_flag;
+      |                             ^
+      |                              = 0
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1475:9: warning: variable 'value' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+ 1475 |     if (argc > 0) {
+      |         ^~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1479:9: note: uninitialized use occurs here
+ 1479 |     if (value != -99999.9 && argc > 0) {
+      |         ^~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1475:5: note: remove the 'if' if its condition is always true
+ 1475 |     if (argc > 0) {
+      |     ^~~~~~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1467:27: note: initialize the variable 'value' to silence this warning
+ 1467 |     float            value;
+      |                           ^
+      |                            = 0.0
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1525:9: warning: variable 'value' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+ 1525 |     if (argc > 0) {
+      |         ^~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1529:9: note: uninitialized use occurs here
+ 1529 |     if (value != -99999.9 && argc > 0) {
+      |         ^~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1525:5: note: remove the 'if' if its condition is always true
+ 1525 |     if (argc > 0) {
+      |     ^~~~~~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1517:27: note: initialize the variable 'value' to silence this warning
+ 1517 |     float            value;
+      |                           ^
+      |                            = 0.0
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1978:13: warning: variable 'object' is used uninitialized whenever 'if' condition is false [-Wsometimes-uninitialized]
+ 1978 |         if (chara != NULL) {
+      |             ^~~~~~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1985:9: note: uninitialized use occurs here
+ 1985 |     if (object == NULL) {
+      |         ^~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1978:9: note: remove the 'if' if its condition is always true
+ 1978 |         if (chara != NULL) {
+      |         ^~~~~~~~~~~~~~~~~~
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/ps2/src/runscript_opcodes.cpp:1960:25: note: initialize the variable 'object' to silence this warning
+ 1960 |     mgCFrame     *object;
+      |                         ^
+      |                          = nullptr
+4 warnings generated.
+[9/12] Building CXX object port/CMakeFiles/ct_port.dir/src/moonmod/chronicle_two_adapter.cpp.obj
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/src/moonmod/chronicle_two_adapter.cpp:5210:41: warning: destination for this 'memcpy' call is a pointer to class containing a dynamic class 'CEditCollision'; vtable pointer will be overwritten [-Wdynamic-class-memaccess]
+ 5210 |     if (original_count > 0) std::memcpy(table, manager.parts_info, static_cast<std::size_t>(original_count) * sizeof(CEditPartsInfo));
+      |                             ~~~~~~~~~~~ ^
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/src/moonmod/chronicle_two_adapter.cpp:5210:41: note: explicitly cast the pointer to silence this warning
+ 5210 |     if (original_count > 0) std::memcpy(table, manager.parts_info, static_cast<std::size_t>(original_count) * sizeof(CEditPartsInfo));
+      |                                         ^
+      |                                         (void*)
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/src/moonmod/chronicle_two_adapter.cpp:5225:21: warning: destination for this 'memcpy' call is a pointer to class containing a dynamic class 'CEditCollision'; vtable pointer will be overwritten [-Wdynamic-class-memaccess]
+ 5225 |         std::memcpy(&copy, entry.source, sizeof(CEditPartsInfo));
+      |         ~~~~~~~~~~~ ^
+C:/Users/armor/Documents/Codex/2026-10-14/i-want-to-build-an-all/ChronicleTwo/port/src/moonmod/chronicle_two_adapter.cpp:5225:21: note: explicitly cast the pointer to silence this warning
+ 5225 |         std::memcpy(&copy, entry.source, sizeof(CEditPartsInfo));
+      |                     ^
+      |                     (void*)
+2 warnings generated.
+[10/12] Linking CXX executable darkchronicle.exe
+[11/12] Linking CXX executable darkchronicle_tests.exe
+kazarov: build finished in 9.3s (exit 0)

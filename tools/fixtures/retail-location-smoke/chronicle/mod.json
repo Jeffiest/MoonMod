@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.retail-location-probe",
+  "name": "MoonFactory Chronicle Retail Location Probe",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Retail-data proof that Chronicle can register, load, and return from a namespaced map identity.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write", "debug.inspect"]
+}

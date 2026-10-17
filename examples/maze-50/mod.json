@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.maze-50",
+  "name": "Maze 50",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Test mod: every dungeon floor built while it is enabled is a 50-room maze of small rooms on the enlarged floor grid.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write"]
+}

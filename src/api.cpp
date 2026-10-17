@@ -1,0 +1,385 @@
+#include "moonmod/api.hpp"
+
+#include <array>
+#include <ranges>
+
+namespace moonmod {
+namespace {
+
+// Names remain stable within API major 1. A port advertises only operations it has
+// actually bound to game state; every other catalog entry is queryable as unsupported.
+constexpr ApiOperationSpec kApiCatalog[] = {
+    {"info.get", "info", "get", "any", "", "Read game, build, platform, and MoonFactory API identity."},
+    {"events.list", "events", "list", "any", "", "List stable runtime and game events available to this port."},
+    {"events.subscribe", "events", "subscribe", "any", "", "Subscribe to a documented lifecycle or simulation event."},
+    {"events.unsubscribe", "events", "unsubscribe", "any", "", "Remove an event subscription owned by this mod."},
+    {"player.get", "player", "get", "any", "game.read", "Read the active player and controlled character state."},
+    {"player.set", "player", "set", "simulation", "game.write", "Set current HP to a validated integer value within the selected character's native health range."},
+    {"player.heal", "player", "heal", "simulation", "game.write", "Apply bounded healing to the active player character through native game state."},
+    {"player.damage", "player", "damage", "simulation", "game.write", "Apply bounded health damage to the active player character through native game state."},
+    {"player.status_add", "player", "status_add", "simulation", "game.write", "Apply a registered status effect to a player."},
+    {"player.status_remove", "player", "status_remove", "simulation", "game.write", "Remove a mod-owned or supported status effect."},
+    {"party.list", "party", "list", "any", "game.read", "Read party members and their stable handles."},
+    {"party.active", "party", "active", "any", "game.read", "Read the active party member."},
+    {"party.set_active", "party", "set_active", "simulation", "game.write", "Change the active party member when the game allows it."},
+    {"party.recruit", "party", "recruit", "simulation", "game.write", "Recruit a supported character through the game rules."},
+    {"economy.get", "economy", "get", "any", "game.read", "Read the current wallet balance and native currency limit."},
+    {"economy.add", "economy", "add", "simulation", "game.write", "Add currency through the game's wallet rules."},
+    {"economy.spend", "economy", "spend", "simulation", "game.write", "Spend currency when the wallet has sufficient funds."},
+    {"world.get", "world", "get", "any", "game.read", "Read world, map, region, and current dungeon-floor identity."},
+    {"world.transition", "world", "transition", "simulation", "game.write", "Request a validated map, region, or floor transition."},
+    {"world.register_dungeon", "world", "register_dungeon", "content", "content.register", "Register additional floors on a supported native dungeon map."},
+    {"world.set_time", "world", "set_time", "simulation", "game.write", "Set time as a normalized fraction of the native world cycle."},
+    {"world.story_flag_get", "world", "story_flag_get", "any", "game.read", "Read a native story flag by its game-specific numeric id."},
+    {"world.story_flag_set", "world", "story_flag_set", "simulation", "game.write", "Set or clear a native story flag by its game-specific numeric id."},
+    {"world.story_value_get", "world", "story_value_get", "any", "game.read", "Read a native integer story counter."},
+    {"world.story_value_set", "world", "story_value_set", "simulation", "game.write", "Set a native integer story counter within the game's storage range."},
+    {"world.map_flag_get", "world", "map_flag_get", "any", "game.read", "Read a native per-map flag such as treasure-box state."},
+    {"world.map_flag_set", "world", "map_flag_set", "simulation", "game.write", "Set or clear a native per-map flag."},
+    {"entities.query", "entities", "query", "any", "game.read", "Query native entities using filters supported by the active game adapter."},
+    {"entities.get", "entities", "get", "any", "game.read", "Resolve a generation-checked entity handle."},
+    {"entities.spawn", "entities", "spawn", "simulation", "game.write", "Spawn a registered entity definition."},
+    {"entities.despawn", "entities", "despawn", "simulation", "game.write", "Despawn an entity spawned by this mod."},
+    {"entities.set_active_limit", "entities", "set_active_limit", "simulation", "game.write", "Set how many monsters stay awake at once and report the floor's monster slot count."},
+    {"combat.get", "combat", "get", "any", "game.read", "Read the supported native enemy health and status snapshot."},
+    {"combat.damage", "combat", "damage", "simulation", "game.write", "Apply bounded scripted damage through a generation-checked enemy handle."},
+    {"combat.heal", "combat", "heal", "simulation", "game.write", "Restore bounded health to a live native enemy."},
+    {"combat.register_formula", "combat", "register_formula", "content", "content.register", "Register an owned combat formula or modifier."},
+    {"locations.list", "locations", "list", "any", "game.read", "List built-in and registered mod locations supported by the active game."},
+    {"locations.get", "locations", "get", "any", "game.read", "Read a built-in or registered location and native availability status."},
+    {"locations.register", "locations", "register", "content", "content.register", "Register a namespaced map or location definition with transitions and resources."},
+    {"dungeons.list", "dungeons", "list", "any", "game.read", "List native dungeons and mod-registered additions supported by this game."},
+    {"dungeons.get", "dungeons", "get", "any", "game.read", "Read a native dungeon or registered extension and its floors."},
+    {"dungeons.register", "dungeons", "register", "content", "content.register", "Register additional floors on a supported native dungeon map."},
+    {"dungeons.set_layout", "dungeons", "set_layout", "simulation", "game.write", "Set room count, room area and room sizes for floors built after the call; an empty table restores the native layout."},
+    {"dungeons.floor_rules_get", "dungeons", "floor_rules_get", "any", "game.read", "Read active and per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
+    {"dungeons.floor_rules_set", "dungeons", "floor_rules_set", "simulation", "game.write", "Override active or per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
+    {"dungeons.loot_get", "dungeons", "loot_get", "any", "game.read", "Read active floor treasure chest contents and monster drop tables."},
+    {"dungeons.loot_override", "dungeons", "loot_override", "simulation", "game.write", "Override floor treasure chest contents or monster drop tables."},
+    {"georama.get", "georama", "get", "any", "game.read", "Read settlement reconstruction state and placed pieces."},
+    {"georama.element_set", "georama", "element_set", "simulation", "game.write", "Toggle a defined optional visual element on a native Georama plot."},
+    {"georama.request_set", "georama", "request_set", "simulation", "game.write", "Set a saved native Georama request's completion state."},
+    {"georama.request_known_set", "georama", "request_known_set", "simulation", "game.write", "Set whether a saved native Georama request is known to the player."},
+    {"georama.condition_set", "georama", "condition_set", "simulation", "game.write", "Set whether a saved native Georama analysis condition is met."},
+    {"georama.register", "georama", "register", "content", "content.register", "Register a data-only Georama piece variant inheriting native model and placement rules."},
+    {"georama.place", "georama", "place", "simulation", "game.write", "Place a registered georama piece through native placement rules."},
+    {"georama.remove", "georama", "remove", "simulation", "game.write", "Remove a placed georama piece through native rules."},
+    {"georama.river_set", "georama", "river_set", "simulation", "game.write", "Set or clear one cell in a saved town's native river grid."},
+    {"skills.list", "skills", "list", "any", "game.read", "List mod-owned skill trees and progression nodes."},
+    {"skills.get", "skills", "get", "any", "game.read", "Read mod-owned skill ranks, prerequisites, and unlock state."},
+    {"skills.register", "skills", "register", "content", "content.register", "Register a namespaced mod-owned skill tree and progression nodes."},
+    {"skills.unlock", "skills", "unlock", "simulation", "game.write", "Advance a skill rank after mod-defined prerequisites pass."},
+    {"skills.set_rank", "skills", "set_rank", "simulation", "game.write", "Set a skill rank within its registered progression limits."},
+    {"models.register", "models", "register", "content", "content.register", "Register a package-owned model and its logical resource ids."},
+    {"models.unregister", "models", "unregister", "content", "content.register", "Remove an unused model binding owned by this mod."},
+    {"models.replace", "models", "replace", "content", "content.register", "Replace a model through conflict-checked native asset bindings."},
+    {"models.resolve", "models", "resolve", "any", "game.read", "Resolve a native monster model table entry and report its asset paths and override state."},
+    {"models.remove", "models", "remove", "content", "content.register", "Restore a native model row previously replaced by this mod."},
+    {"animations.register", "animations", "register", "content", "content.register", "Bind a model-embedded motion index to a stable mod animation id."},
+    {"animations.play", "animations", "play", "simulation", "game.write", "Play a registered animation on a compatible entity."},
+    {"animations.stop", "animations", "stop", "simulation", "game.write", "Stop an animation started by this mod."},
+    {"combat.styles_list", "combat", "styles_list", "any", "game.read", "List fighting-style definitions supported by the active game."},
+    {"combat.styles_get", "combat", "styles_get", "any", "game.read", "Read a fighting-style move set, rules, and compatibility."},
+    {"combat.styles_register", "combat", "styles_register", "content", "content.register", "Register a fighting style and its move/animation bindings."},
+    {"combat.styles_set_active", "combat", "styles_set_active", "simulation", "game.write", "Switch to a compatible fighting style through native combat rules."},
+    {"scripts.register_function", "scripts", "register_function", "content", "content.register", "Register a namespaced callable function exposed by this mod."},
+    {"scripts.list_functions", "scripts", "list_functions", "any", "game.read", "List this mod's exported functions and exports from its loaded declared dependencies."},
+    {"scripts.call_function", "scripts", "call_function", "simulation", "game.write", "Call an explicitly exposed mod function with validated JSON arguments."},
+    {"scripts.unregister_function", "scripts", "unregister_function", "content", "content.register", "Remove a callable function owned by this mod."},
+    {"items.list", "items", "list", "any", "game.read", "List built-in and registered mod item definitions."},
+    {"items.get", "items", "get", "any", "game.read", "Read one item definition by stable id."},
+    {"items.register", "items", "register", "content", "content.register", "Register a data-defined item without replacing a game asset."},
+    {"items.give", "items", "give", "simulation", "game.write", "Give a built-in or registered item to an inventory."},
+    {"items.remove", "items", "remove", "simulation", "game.write", "Remove a quantity of an item from an inventory."},
+    {"items.use", "items", "use", "simulation", "game.write", "Use an owned item through validated native item rules."},
+    {"shops.list", "shops", "list", "any", "game.read", "List native town and dungeon shops and their item lineups."},
+    {"shops.get", "shops", "get", "any", "game.read", "Read one native shop's goods, currency mode, and item buy/sell prices."},
+    {"shops.register_item", "shops", "register_item", "content", "content.register", "Add a native or mod-registered item or weapon to a shop's goods list."},
+    {"shops.remove_item", "shops", "remove_item", "content", "content.register", "Remove an item or weapon from a shop's goods list."},
+    {"shops.set_price", "shops", "set_price", "content", "content.register", "Set the buy and sell prices for an item or weapon in native shops."},
+    {"weapons.list", "weapons", "list", "any", "game.read", "List built-in and registered weapon definitions."},
+    {"weapons.get", "weapons", "get", "any", "game.read", "Read a weapon definition and current state."},
+    {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon and supported behavior."},
+    {"weapons.give", "weapons", "give", "simulation", "game.write", "Give a native or registered weapon to a compatible character."},
+    {"weapons.equip", "weapons", "equip", "simulation", "game.write", "Equip a weapon through the game's equipment rules."},
+    {"weapons.upgrade", "weapons", "upgrade", "simulation", "game.write", "Upgrade a weapon through supported progression rules."},
+    {"weapons.abs_get", "weapons", "abs_get", "any", "game.read", "Read accumulated ABS experience, next-level ABS threshold, and synthesis points on an owned weapon."},
+    {"weapons.abs_add", "weapons", "abs_add", "simulation", "game.write", "Grant ABS experience or synthesis points to an owned weapon."},
+    {"weapons.attachments_get", "weapons", "attachments_get", "any", "game.read", "Read fitted attachments or synthesis capacity on an owned weapon."},
+    {"weapons.attachment_insert", "weapons", "attachment_insert", "simulation", "game.write", "Insert an attachment into an owned weapon slot or synthesize an attachment into a weapon."},
+    {"weapons.attachment_remove", "weapons", "attachment_remove", "simulation", "game.write", "Remove a fitted attachment from an owned weapon slot back to the attachment bag."},
+    {"weapons.build_up_list", "weapons", "build_up_list", "any", "game.read", "List native and mod-registered build-up evolution targets for a weapon."},
+    {"weapons.build_up_register", "weapons", "build_up_register", "content", "content.register", "Register a custom build-up evolution path from a source weapon to a target weapon."},
+    {"weapons.synthesize", "weapons", "synthesize", "simulation", "game.write", "Status-break a qualifying owned weapon into a SynthSphere attachment in Chronicle."},
+    {"weapons.spectrumize", "weapons", "spectrumize", "simulation", "game.write", "Spectrumize an owned weapon or item into a synthesized attachment in Chronicle Two."},
+    {"characters.list", "characters", "list", "any", "game.read", "List character definitions and visible instances."},
+    {"characters.get", "characters", "get", "any", "game.read", "Read character stats, state, and stable handle."},
+    {"characters.register", "characters", "register", "content", "content.register", "Register a data-defined character or enemy."},
+    {"characters.spawn", "characters", "spawn", "simulation", "game.write", "Spawn a registered character or enemy."},
+    {"quests.get", "quests", "get", "any", "game.read", "Read this mod's quest definitions and objective progress."},
+    {"quests.register", "quests", "register", "content", "content.register", "Register namespaced quest objectives and optional currency, item, or weapon rewards."},
+    {"quests.start", "quests", "start", "simulation", "game.write", "Start a registered quest."},
+    {"quests.advance", "quests", "advance", "simulation", "game.write", "Advance an objective through validated quest state."},
+    {"scripts.list_hooks", "scripts", "list_hooks", "any", "game.read", "List supported native script and simulation hooks."},
+    {"scripts.call", "scripts", "call", "simulation", "game.write", "Call the active native hook implementation once from its owned override callback."},
+    {"scripts.override", "scripts", "override", "content", "scripts.override", "Install or replace an owned callback for a supported native script or simulation hook."},
+    {"content.list", "content", "list", "any", "game.read", "List registered typed data definitions owned by enabled mods."},
+    {"content.register", "content", "register", "content", "content.register", "Register a typed item, weapon, character, dungeon, or Georama piece definition supported by this game."},
+    {"content.unregister", "content", "unregister", "content", "content.register", "Remove a mod-owned pending definition before it is materialized in native game tables."},
+    {"save.get", "save", "get", "any", "game.read", "Read namespaced save data and migration version."},
+    {"save.set", "save", "set", "simulation", "game.write", "Write bounded namespaced save data."},
+    {"save.migrate", "save", "migrate", "load", "game.write", "Run an owned save migration at the save-load boundary."},
+    {"input.bind", "input", "bind", "any", "game.write", "Bind a namespaced action to a keyboard or controller input."},
+    {"input.unbind", "input", "unbind", "any", "game.write", "Remove an input binding owned by this mod."},
+    {"input.state", "input", "state", "any", "game.read", "Read a named action state without exposing raw device memory."},
+    {"input.consume", "input", "consume", "input", "game.write", "Consume a named action in the active input context."},
+    {"input.axis", "input", "axis", "any", "game.read", "Read a processed gamepad stick or trigger axis as a normalized value."},
+    {"input.context_push", "input", "context_push", "any", "game.write", "Push an owner-scoped modal input context onto the priority stack."},
+    {"input.context_pop", "input", "context_pop", "any", "game.write", "Remove an input context owned by this mod using its token."},
+    {"input.context_get", "input", "context_get", "any", "game.read", "Read the active input context and priority stack."},
+    {"audio.play", "audio", "play", "simulation", "game.write", "Play a registered sound or music cue."},
+    {"audio.stop", "audio", "stop", "simulation", "game.write", "Stop playback owned by this mod."},
+    {"audio.register", "audio", "register", "content", "content.register", "Register a supported audio resource."},
+    {"render.layer_register", "render", "layer_register", "render", "content.register", "Register a bounded owner-scoped HUD text layer."},
+    {"render.layer_remove", "render", "layer_remove", "render", "content.register", "Remove a HUD text layer owned by this mod."},
+    {"render.bar_register", "render", "bar_register", "render", "content.register", "Register or update a bounded owner-scoped HUD progress bar."},
+    {"render.bar_remove", "render", "bar_remove", "render", "content.register", "Remove a HUD progress bar owned by this mod."},
+    {"render.camera_get", "render", "camera_get", "any", "game.read", "Read the active dungeon camera pose."},
+    {"render.camera_set", "render", "camera_set", "render", "game.write", "Set bounded distance, height, or angle on the active dungeon follow camera."},
+    {"ui.register", "ui", "register", "content", "content.register", "Register an owned button in the in-game MoonFactory manager."},
+    {"ui.remove", "ui", "remove", "content", "content.register", "Remove an owned MoonFactory manager button."},
+    {"ui.notify", "ui", "notify", "any", "game.write", "Show a bounded notice in the mod manager."},
+    {"physics.query", "physics", "query", "simulation", "game.read", "Find live monster actor origins inside a sphere; this does not test collision geometry."},
+    {"physics.velocity_get", "physics", "velocity_get", "simulation", "game.read", "Read velocity from a stable entity handle."},
+    {"physics.velocity_set", "physics", "velocity_set", "simulation", "game.write", "Set velocity through the simulation adapter."},
+    {"resources.load", "resources", "load", "any", "content.register", "Load a package-owned resource using adapter rules."},
+    {"resources.release", "resources", "release", "any", "content.register", "Release a resource handle owned by this mod."},
+    {"resources.resolve", "resources", "resolve", "any", "game.read", "Resolve a logical resource id and report its source."},
+    {"resources.override", "resources", "override", "content", "content.register", "Override a native asset path with a package resource."},
+    {"resources.unoverride", "resources", "unoverride", "content", "content.register", "Remove a native asset override owned by this mod."},
+    {"localization.register", "localization", "register", "content", "content.register", "Register mod-owned localized strings."},
+    {"localization.get", "localization", "get", "any", "game.read", "Resolve a localized string with fallback rules."},
+    {"commands.register", "commands", "register", "content", "content.register", "Register a namespaced developer or player command."},
+    {"commands.execute", "commands", "execute", "ui", "game.write", "Execute an enabled command through its owning callback."},
+    {"commands.unregister", "commands", "unregister", "content", "content.register", "Remove a command owned by this mod."},
+    {"compat.list", "compat", "list", "any", "", "List API operation support for this game and build."},
+    {"compat.supports", "compat", "supports", "any", "", "Query support for a versioned API operation."},
+    {"debug.inspect", "debug", "inspect", "any", "debug.inspect", "Read a bounded snapshot of the current native scene context."},
+    {"debug.profile", "debug", "profile", "any", "debug.inspect", "Read bounded per-mod resource and registration counters."},
+    {"debug.overlay_register", "debug", "overlay_register", "render", "debug.inspect", "Register or update an owner-scoped one-line diagnostic overlay."},
+    {"api.list", "api", "list", "any", "", "List all catalogued operations and capability status."},
+    {"api.supports", "api", "supports", "any", "", "Query one operation capability by canonical path."},
+    {"api.call", "api", "call", "any", "", "Invoke an operation by canonical path."},
+};
+
+constexpr EventSpec kEventCatalog[] = {
+    {"runtime.started", "runtime", "both", "The MoonFactory runtime has started."},
+    {"runtime.stopping", "runtime", "both", "The MoonFactory runtime is stopping."},
+    {"runtime.loaded", "runtime", "both", "A mod package has loaded."},
+    {"runtime.unloaded", "runtime", "both", "A mod package has unloaded."},
+    {"settings.changed", "settings", "both", "A setting owned by this mod changed in the manager."},
+    {"ui.action", "ui", "both", "A manager action owned by this mod was activated."},
+    {"game.tick", "game", "both", "A simulation frame was pumped."},
+    {"game.scene.will_enter", "scene", "both", "A scene is about to initialize."},
+    {"game.scene.entered", "scene", "both", "A scene finished initialization."},
+    {"game.world.location_changed", "world", "both", "A world location changed; published at scene initialization when detectable and polled within scenes."},
+    {"game.item_used", "items", "both", "A mod API item-use call completed."},
+    {"game.item_given", "items", "both", "An item or weapon was added through a MoonFactory grant API."},
+    {"game.item_picked_up", "items", "both", "A native dungeon pickup was added to the player's inventory."},
+    {"game.item_removed", "items", "both", "An item was removed through the MoonFactory inventory API."},
+    {"game.shop.purchased", "shops", "both", "A shop purchase or shop inventory change completed."},
+    {"game.enemy_spawned", "characters", "both", "A registered mod-owned enemy spawned successfully."},
+    {"game.enemy_defeated", "combat", "both", "The game accepted an enemy death."},
+    {"game.weapon.upgraded", "weapons", "both", "A native weapon upgrade changed the weapon."},
+    {"game.weapon.equipped", "weapons", "both", "The active weapon changed through a supported API."},
+    {"game.weapon.abs_gained", "weapons", "both", "An owned weapon gained ABS experience or synthesis points."},
+    {"game.weapon.built_up", "weapons", "both", "A weapon evolved into a build-up target or synthesized into a sphere/spectol."},
+    {"game.weapon.broken", "weapons", "both", "A weapon broke or was status-broken / spectrumized."},
+    {"game.chest.opened", "dungeons", "both", "A dungeon treasure chest was opened or its loot table was updated."},
+    {"game.floor.cleared", "dungeons", "both", "A dungeon floor was cleared or its restriction rules changed."},
+    {"game.party.active_changed", "party", "both", "The active party member changed through a supported API."},
+    {"game.party.recruited", "party", "chronicle-two", "A townsperson joined or replaced the current companion."},
+    {"game.story_flag_changed", "world", "both", "A native story flag changed through a supported API."},
+    {"game.story_value_changed", "world", "both", "A native story counter changed through a supported API."},
+    {"game.map_flag_changed", "world", "both", "A native map flag changed through a supported API."},
+    {"game.georama.request_changed", "georama", "both", "A native Georama request changed through a supported API."},
+    {"game.georama.element_changed", "georama", "chronicle", "A native Chronicle plot element changed."},
+    {"game.georama.condition_changed", "georama", "chronicle-two", "A Chronicle Two analysis condition changed."},
+    {"game.georama.request_known_changed", "georama", "chronicle-two", "A Chronicle Two Georama request became known or unknown."},
+    {"game.georama.river_changed", "georama", "chronicle-two", "A Chronicle Two river cell changed."},
+    {"game.georama.piece_placed", "georama", "both", "A Georama piece was placed."},
+    {"game.georama.piece_removed", "georama", "both", "A Georama piece was removed."},
+    {"quests.started", "quests", "both", "A registered quest became active."},
+    {"quests.objective_advanced", "quests", "both", "A quest objective advanced."},
+    {"quests.completed", "quests", "both", "All objectives in a quest are complete."},
+    {"skills.rank_changed", "skills", "both", "A skill rank changed."},
+    {"skills.unlocked", "skills", "both", "A skill's rank first became positive."},
+};
+
+constexpr std::array<std::string_view, 8> kKnownPermissions = {
+    "storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override",
+    "debug.inspect", "native.extension",
+};
+
+} // namespace
+
+std::span<const ApiOperationSpec> ApiCatalog() { return kApiCatalog; }
+std::span<const EventSpec> EventCatalog() { return kEventCatalog; }
+
+const ApiOperationSpec *FindApiOperation(std::string_view path) {
+    const auto found = std::ranges::find(kApiCatalog, path, &ApiOperationSpec::path);
+    return found == std::end(kApiCatalog) ? nullptr : &*found;
+}
+
+bool IsCoreApiOperation(std::string_view path) {
+    return path == "info.get" || path == "compat.list" || path == "compat.supports" ||
+           path == "api.list" || path == "api.supports" || path == "api.call" ||
+           path == "events.list" || path == "events.subscribe" || path == "events.unsubscribe" ||
+           path == "save.get" || path == "save.set" ||
+           path == "save.migrate" ||
+           path == "quests.get" || path == "quests.register" || path == "quests.start" ||
+           path == "quests.advance" ||
+           path == "localization.register" || path == "localization.get" || path == "resources.load" ||
+           path == "resources.resolve" || path == "resources.release" || path == "resources.override" ||
+           path == "resources.unoverride" || path == "ui.register" ||
+           path == "ui.remove" || path == "ui.notify" || path == "commands.register" ||
+           path == "commands.execute" || path == "commands.unregister" ||
+           path == "scripts.register_function" || path == "scripts.list_functions" || path == "scripts.call_function" ||
+           path == "scripts.unregister_function" || path == "scripts.list_hooks" || path == "scripts.call" ||
+           path == "scripts.override" ||
+           path == "skills.list" || path == "skills.get" || path == "skills.register" ||
+           path == "skills.unlock" || path == "skills.set_rank" ||
+           path == "debug.profile";
+}
+
+namespace {
+
+std::string UnsupportedReason(std::string_view game_id, const ApiOperationSpec &operation) {
+    const std::string game = game_id == "chronicle-two" ? "Chronicle Two" : "Chronicle";
+    if (operation.domain == "locations") {
+        return game + " does not yet load mod-authored maps or their transition metadata.";
+    }
+    if (operation.domain == "dungeons") {
+        if (game_id == "chronicle-two") {
+            return "Chronicle Two can append floors to existing dungeons, but does not yet register complete new dungeon graphs.";
+        }
+        return "Chronicle can append procedural floors to native dungeons 0-4, but does not yet register standalone maps, custom geometry, or authored room assets.";
+    }
+    if (operation.domain == "georama") {
+        if (game_id == "chronicle-two") {
+            if (operation.path == "georama.element_set") {
+                return "Chronicle Two's Georama pieces do not use Chronicle's per-plot optional-element table.";
+            }
+            if (operation.operation == "request_set") {
+                return "Chronicle Two can reveal existing requests and change analysis conditions, but request completion rewards and linked native progression are not bound yet.";
+            }
+            return "This Chronicle Two Georama operation has no verified native binding yet.";
+        }
+        return "Chronicle does not expose separate saved analysis-condition or river-grid state; its Georama APIs operate on native plot elements, requests, and placed pieces.";
+    }
+    if (operation.domain == "entities") {
+        if (game_id == "chronicle-two") {
+            return "Chronicle Two supports live dungeon-monster handles and can despawn enemies created by characters.spawn; NPC and world-object spawning are not bound yet.";
+        }
+        return "Chronicle supports generation-checked enemy handles and owner-only despawn for mod-spawned non-mimics; NPC and world-object spawning are not bound yet.";
+    }
+    if (operation.domain == "combat") {
+        if (game_id == "chronicle-two") {
+            if (operation.path.starts_with("combat.styles_")) {
+                return "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.";
+            }
+            if (operation.path == "combat.register_formula") {
+                return "This Chronicle Two build has no combat-formula registry or native damage hook.";
+            }
+            return "This Chronicle Two combat operation has no verified native binding.";
+        }
+        if (operation.path == "combat.register_formula") {
+            return "This Chronicle build has no combat-formula registry or native damage hook.";
+        }
+        return "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.";
+    }
+    if (operation.domain == "characters") {
+        if (game_id == "chronicle-two" && operation.operation == "spawn") {
+            return "Chronicle Two can spawn registered enemies only while an active dungeon manager and inherited game assets are available.";
+        }
+        if (game_id == "chronicle-two" && operation.operation == "register") {
+            return "Chronicle Two can register data-defined enemy variants that inherit a native model and AI script.";
+        }
+        return "Playable-character records are readable, but mod-defined characters and spawn routines are not bound yet.";
+    }
+    if (operation.domain == "models") {
+        return "The port has no package-backed native model loader binding for this operation yet.";
+    }
+    if (operation.domain == "animations") {
+        return "The port has no validated native rig and animation binding for this operation yet.";
+    }
+    if (operation.domain == "scripts") {
+        return "The active scene event-program hook is supported; this operation does not target any other native script VM.";
+    }
+    if (operation.domain == "content") {
+        return "Typed item and weapon paths exist, but the generic content registry is not bound to native game tables yet.";
+    }
+    if (operation.domain == "render") {
+        return "Bounded follow-camera orbit changes are available; owned render callbacks and draw layers are not bound.";
+    }
+    if (operation.domain == "physics") {
+        if (game_id == "chronicle-two") {
+            return "Chronicle Two exposes live-monster velocity reads and writes plus bounded sphere queries over live monster actor origins; native collider and world-geometry tests are not exposed.";
+        }
+        if (operation.path == "physics.query") {
+            return "Chronicle can query live monster actor origins inside a bounded sphere; native collider and world-geometry tests are not exposed.";
+        }
+        if (operation.path == "physics.velocity_set") {
+            return "Chronicle writes native enemy movement intent; the next AI or movement step may replace it.";
+        }
+        return "Chronicle exposes live enemy movement intent through physics.velocity_get; collision geometry queries are not exposed.";
+    }
+    if (operation.domain == "weapons" && operation.operation == "upgrade") {
+        return game + " weapon upgrade progression is not yet bound to the mod API.";
+    }
+    if (operation.path == "weapons.synthesize" && game_id == "chronicle-two") {
+        return "Chronicle Two uses weapons.spectrumize to spectrumize weapons and items into synthesized attachments.";
+    }
+    if (operation.path == "weapons.spectrumize" && game_id == "chronicle") {
+        return "Chronicle uses weapons.synthesize to status-break level 5+ weapons into SynthSphere attachments.";
+    }
+    if (operation.path == "weapons.attachment_remove" && game_id == "chronicle-two") {
+        return "Chronicle Two synthesizes attachments permanently into weapons and does not have removable attachment slots.";
+    }
+    if (operation.domain == "party" && game_id == "chronicle") {
+        if (operation.path == "party.recruit") {
+            return "Chronicle has a story-ordered playable cast but no separate NPC companion recruitment routine.";
+        }
+        return "Chronicle native party switching is available only during safe active-dungeon play.";
+    }
+    return game + " has no tested native binding for " + std::string(operation.path) + " yet.";
+}
+
+} // namespace
+
+void CompleteApiCapabilityLedger(std::string_view game_id, std::vector<ApiCapability> &capabilities) {
+    for (const ApiOperationSpec &operation : ApiCatalog()) {
+        if (IsCoreApiOperation(operation.path)) continue;
+        const auto found = std::ranges::find(capabilities, operation.path, &ApiCapability::path);
+        if (found != capabilities.end()) continue;
+        capabilities.push_back({std::string(operation.path), false, UnsupportedReason(game_id, operation)});
+    }
+}
+
+std::string_view ApiCallStatusName(ApiCallStatus status) {
+    switch (status) {
+        case ApiCallStatus::Ok: return "ok";
+        case ApiCallStatus::Unsupported: return "unsupported";
+        case ApiCallStatus::InvalidArgument: return "invalid_argument";
+        case ApiCallStatus::PermissionDenied: return "permission_denied";
+        case ApiCallStatus::PhaseViolation: return "phase_violation";
+        case ApiCallStatus::Failed: return "failed";
+    }
+    return "failed";
+}
+
+bool IsKnownPermission(std::string_view permission) {
+    return std::ranges::find(kKnownPermissions, permission) != kKnownPermissions.end();
+}
+
+} // namespace moonmod

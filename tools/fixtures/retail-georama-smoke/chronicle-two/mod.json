@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.retail-georama-probe",
+  "name": "Retail Georama Probe",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Verifies Chronicle Two registers, places, and removes a data-only Georama variant against retail town data.",
+  "framework_api": 1,
+  "games": ["chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write"]
+}

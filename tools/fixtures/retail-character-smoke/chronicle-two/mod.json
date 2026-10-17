@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.retail-character-probe",
+  "name": "MoonFactory Retail Character Probe",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Headless retail-data proof for a new model path, native enemy registration, and live physics access.",
+  "framework_api": 1,
+  "games": ["chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write", "debug.inspect"]
+}

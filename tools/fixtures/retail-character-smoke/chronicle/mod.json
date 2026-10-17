@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.retail-character-probe",
+  "name": "MoonFactory Chronicle Retail Character Probe",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Retail-data proof for package-owned Chronicle model loading, enemy spawning, and live physics APIs.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write", "debug.inspect"]
+}

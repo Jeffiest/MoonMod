@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.manager-ui.status",
+  "name": "MoonFactory Status Preview",
+  "version": "1.0.0",
+  "author": "MoonFactory Verification",
+  "description": "Adds an active quest with progress for the mod manager Journal screenshot.",
+  "framework_api": 1,
+  "games": ["chronicle", "chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.write"]
+}

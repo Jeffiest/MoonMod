@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "example.first-steps",
+  "name": "First Steps",
+  "version": "1.0.0",
+  "author": "MoonFactory Example",
+  "description": "A cross-game quest with Gilda and a custom item reward, a skill tree, and manager actions.",
+  "framework_api": 1,
+  "games": ["chronicle", "chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write"],
+  "settings": [
+    {"id": "show_log", "name": "Log when loaded", "type": "boolean", "default": true}
+  ]
+}

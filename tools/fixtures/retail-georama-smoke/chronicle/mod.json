@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.retail-georama-probe",
+  "name": "Retail Georama Probe",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Registers a data-only Georama variant and exercises native placement and saved-layout round trips.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write"]
+}

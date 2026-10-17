@@ -1,0 +1,2930 @@
+{
+  "format_version": 1,
+  "generated_at_utc": "2026-10-16T14:11:09.363Z",
+  "status": "passed",
+  "python_tests": {
+    "status": "passed",
+    "executed": 13,
+    "passed": 13,
+    "failed": 0,
+    "cases": [
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_builds_a_separate_offline_image_and_fingerprints_it",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_cli_will_not_run_dc2tk_after_static_inventory_failure",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_external_build_is_disabled_for_static_only_mod_dir",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_offline_image_build_refuses_to_overwrite_or_replace_the_disc",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_rejects_asset_paths_that_escape_the_mod_folder",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_reports_build_only_components_symbols_and_asset_provenance",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_reports_duplicate_asset_ids_across_add_and_replace",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_runs_the_mods_offline_dc2tk_tests",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_runs_the_users_dc2tk_mod_check_command",
+        "status": "passed"
+      },
+      {
+        "name": "test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_scans_external_example_folder_and_fingerprints_directory_assets",
+        "status": "passed"
+      },
+      {
+        "name": "test_moonfactory_cli.MoonFactoryCliTests.test_can_target_one_game_and_refuses_to_overwrite",
+        "status": "passed"
+      },
+      {
+        "name": "test_moonfactory_cli.MoonFactoryCliTests.test_creates_cross_game_starter_with_requested_identity",
+        "status": "passed"
+      },
+      {
+        "name": "test_moonfactory_examples.MoonFactoryExampleTests.test_first_steps_is_a_complete_cross_game_package",
+        "status": "passed"
+      }
+    ]
+  },
+  "ports": [
+    {
+      "name": "Chronicle",
+      "status": "passed",
+      "native_tests": {
+        "status": "passed",
+        "exit_code": 0,
+        "executed": 67,
+        "passed": 67,
+        "failed": 0,
+        "cases": [
+          {
+            "name": "PlatformPad.TriggerAxisNormalization",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldTransitionApi.QueuesOnlyNativeSettlementRoutesFromPlayableScenes",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldTransitionApi.QueuesRegisteredDungeonFloorForTheNativeEntranceMenu",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldTimeApi.ReadsAndSetsNormalizedNativeTimeAndRejectsInvalidInput",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldFlagsApi.ReadsAndWritesNativeStoryAndMapFlagsWithBounds",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWeaponsApi.ListsAndReadsNativeWeaponDefinitionsAndOwnedState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWeaponsApi.EquipsOwnedCompatibleWeaponOnlyFromTownAndReportsChanges",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWeaponsApi.RegistersPersistsAndGrantsNativeWeaponDefinitions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWeaponsApi.PublishesNativeUpgradeForQuestObjectivesOnNextPump",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModRenderApi.RegistersUpdatesAndRemovesOwnedHudTextLayer",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModRenderApi.ReadsActiveDungeonCameraPoseAndRejectsUnavailableContext",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerPartyApi.ReadsHealsAndDamagesActiveMemberAndListsJoinedRoster",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerPartyApi.SwitchesThroughNativeRoutineAndEnforcesDungeonPartyRules",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerPartyApi.IncludesNativePositionInActiveDungeonPlayerSnapshot",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerPartyApi.SetsExactHpForActiveAndNamedCharactersWithinNativeRange",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerPartyApi.AppliesNativeStatusRulesAndRemovesAilments",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginAbi.ValidatesCCompiledV1DescriptorAndDeclaredPermissions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginAbi.RejectsMismatchedIdsHostVersionsAndUndeclaredPermissions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginAbi.RejectsShortTablesUnsupportedMajorsAndMissingCallbacks",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginHash.FingerprintsLibraryContentsWithSha256",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginRuntime.RequiresPackageContainedLibraryAndExplicitPermission",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModLocationsApi.ListsAndResolvesNativeWorldMapDestinations",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModLocationsApi.RegistersNamespacedFieldAliasAndTransitionsIntoAndBackOut",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModItemsApi.ListsAndReadsBuiltInChronicleItemDefinitions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModItemRegistration.LuaAddsAndUsesDataOnlyItemWithStableNativeSlot",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModItemRegistration.RefusesItemsAfterTheReservedNativeSlotsAreAllocated",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModInputApi.BindsReadsConsumesUnbindsAndCleansUpOnOwnerUnload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.ReadsNativeTownPlotsRequestsAndPlacedParts",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.SetsDefinedPlotElementsThroughActiveNativeEditorState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.PlacesAndRemovesNativePlotPartsWithStaleSafeIds",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.PublishesChangedWorldWritesOnceForQuestObjectives",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.RegistersStableDataOnlyPieceVariantsInExtendedNativeSlots",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModExamplePackage.FirstStepsRunsQuestSkillAndManagerActions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEntitiesApi.KeepsModOwnedEnemyActiveWithinNativeViewBudget",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEntitiesApi.QueriesLiveDungeonMonstersAndRejectsUnsupportedFilters",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEntitiesApi.DespawnsOwnedLiveEnemyAndClearsNativeReferencesWithoutKillCredit",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEconomyApi.ReadsCreditsClampsAddsAndRejectsInvalidOrUnaffordableSpending",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDungeonsApi.ListsNativeDungeonCatalogAndResolvesStableAndLocalIds",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDungeonsApi.RegistersProceduralFloorsAndExtendsNativeEnemyLayouts",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDebugInspect.ReturnsBoundedNativeSceneSnapshot",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDebugInspect.RegistersAndUnloadsOwnedOverlay",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCommands.ExecutesOwnerScopedCallbacksFromApiAndManagerAndCleansUp",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCommands.RequiresManifestPermissionsForRegistrationAndExecution",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCombatApi.ReadsLiveDungeonMonsterHealthStatusAndEmptyCombatState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCombatApi.AppliesGenerationCheckedDamageAndQueuesNativeHitOrDeathEvents",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCharacterRegistration.RegistersADataOnlyEnemyVariantThroughTheNativeModelResolver",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModModelRegistration.OwnedCustomAssetBindsToNativeMonsterAndCharacterTables",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAnimationRegistration.BindsOwnedModelMotionAndRejectsPlaybackWithoutOwnedSpawn",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentApi.GenericContentRegistrationAndListingUseTheTypedCharacterAdapter",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentApi.KeepsCharacterVariantUntilRegisteredChildIsRemoved",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentApi.KeepsCharacterVariantWhileRegisteredModelUsesIt",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentApi.KeepsCharacterVariantWhileLoadedOrTrackedByActiveDungeon",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAudio.PackageSoundMixesStopsAndIsCleanedUpByOwner",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAudio.LuaPackageCallsAudioApiAndHeadlessMixerAdvancesIt",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAudio.PackageWithoutAudioPermissionsCannotRegisterOrPlay",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.ChronicleExposesCapabilityCheckedContentOperations",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.ChronicleTwoExposesCapabilityCheckedContentOperations",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.RejectsCapabilitiesWithoutNativeHandlers",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.ChronicleAdapterReportsEveryNonCoreOperation",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.RequiredCapabilityLedgerRejectsMissingOperation",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.RequiredCapabilityLedgerRejectsUnsupportedOperationWithoutReason",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.PublishesWorldLocationChangesForQuestObjectives",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMonsterAssets",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideLoadsThroughBothFileReadersAndRestoresRetailAsset",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideRejectsPathTraversalAndFallsBackForOversizedFiles",
+            "status": "passed"
+          }
+        ]
+      },
+      "headless_smoke": "passed",
+      "retail_data_smoke": {
+        "status": "passed",
+        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicle\\data",
+        "exit_code": 0,
+        "timed_out": false,
+        "frames": 120,
+        "phase": "startup",
+        "capture_validated": false,
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-b6875a74cc9840d38365c633ed595b0a\\startup.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-b6875a74cc9840d38365c633ed595b0a\\run.log",
+        "note": "A successful startup and screenshot file are checked; screenshot pixels and in-game scene content are not validated by this smoke."
+      },
+      "retail_location_smoke": {
+        "status": "not_requested",
+        "location_id": null,
+        "source_map_id": null,
+        "texture_source_map": null,
+        "map_script_probe": "not_run",
+        "registered_map_index": null,
+        "queued_marker": null,
+        "loaded_marker": null,
+        "return_queued_marker": null,
+        "returned_marker": null,
+        "data_root": null,
+        "exit_code": null,
+        "entry_exit_code": null,
+        "timed_out": false,
+        "entry_screenshot": null,
+        "return_screenshot": null,
+        "screenshot": null,
+        "entry_log": null,
+        "log": null,
+        "note": "Retail-data map registration, entry, loading, and return proof."
+      },
+      "retail_gameplay_smoke": {
+        "status": "passed",
+        "checkpoint": "Norune Village entry before the first simulation frame and verified the mod-owned data-only tonic plus a registered and granted mod weapon",
+        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicle\\data",
+        "exit_code": 0,
+        "timed_out": false,
+        "frames": 1,
+        "input_script": null,
+        "capture_validated": false,
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fb3044221d3044a0b5b034f4b657bc3e\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fb3044221d3044a0b5b034f4b657bc3e\\run.log",
+        "note": "The executable accepts the retail data and scripted gameplay checkpoint and writes a screenshot; visual scene content is reviewed separately."
+      },
+      "retail_item_smoke": {
+        "status": "passed",
+        "mod_id": "moonfactory.retail-item-probe",
+        "verification_marker": "MOONFACTORY_RETAIL_ITEM_OK|moonfactory.retail-item-probe:retail-starlight-tonic|",
+        "weapon_verification_marker": "MOONFACTORY_RETAIL_WEAPON_OK|moonfactory.retail-item-probe:retail-starlight-blade|",
+        "enemy_defeat_event_marker": null,
+        "enemy_defeat_quest_marker": null,
+        "enemy_defeat_queued_marker": null,
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fb3044221d3044a0b5b034f4b657bc3e\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fb3044221d3044a0b5b034f4b657bc3e\\run.log",
+        "content_registry_marker": "MOONFACTORY_RETAIL_CONTENT_OK|",
+        "note": "The enabled Lua package registers, grants, and uses a data-only healing item, registers and grants a data-only weapon through the generic content API, then lists it from the content registry. The smoke requires success markers and a screenshot file; it does not visually inspect the capture."
+      },
+      "retail_georama_smoke": {
+        "status": "not_applicable",
+        "registration_marker": null,
+        "placement_marker": null,
+        "removal_marker": null,
+        "initial_stock_hook": null,
+        "screenshot": null,
+        "log": null,
+        "note": "Uses a disposable save to register a solid data-only variant in an appended native editor slot, then place and remove it through the native editor routines with saved-layout readback. The variant inherits a retail template model and collision; custom geometry, visual persistence after process reload, and compatibility with player saves remain unverified."
+      },
+      "retail_dungeon_smoke": {
+        "status": "not_applicable",
+        "dungeon_id": "moonfactory.retail-dungeon-probe:moon-vault",
+        "floor_id": null,
+        "native_floor_id": null,
+        "context": null,
+        "verification_marker": null,
+        "camera_verification_marker": null,
+        "screenshot": null,
+        "log": null
+      },
+      "retail_character_smoke": {
+        "status": "not_applicable",
+        "character_id": "moonfactory.retail-character-probe:retail-sentinel",
+        "entity_handle": null,
+        "verification_marker": null,
+        "dungeon_floor_marker": null,
+        "native_floor_id": null,
+        "model_asset_path": null,
+        "model_verification_marker": null,
+        "model_replacement_verification_marker": null,
+        "overlay_registration_marker": null,
+        "enemy_defeat_quest_marker": null,
+        "enemy_defeat_queued_marker": null,
+        "animation_play_verification_marker": null,
+        "animation_stop_verification_marker": null,
+        "animation_despawn_cleanup_verification_marker": null,
+        "screenshot": null,
+        "log": null
+      },
+      "retail_physics_smoke": {
+        "status": "not_applicable",
+        "operation": "physics.velocity_set",
+        "verification_marker": null,
+        "screenshot": null,
+        "log": null
+      },
+      "retail_physics_query_smoke": {
+        "status": "not_applicable",
+        "operation": "physics.query",
+        "verification_marker": null,
+        "semantics": "Sphere query over live monster actor origins; does not test collision geometry.",
+        "screenshot": null,
+        "log": null
+      },
+      "headless_preflight": {
+        "status": "passed",
+        "executable": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\darkcloud.exe",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\smoke-preflight-fixture\\preflight.log",
+        "note": "The Lua runtime and API catalog load before retail game startup; the fixture resolves native monster model assets, registers and resolves procedural native dungeon floors through both API names, calls dungeons.list/get, and checks the locations.list no-save path. The assetless fixture then stops at the first required retail resource."
+      },
+      "api_catalog": {
+        "report": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\smoke-preflight-fixture\\preflight.log",
+        "operation_count": 137,
+        "supported_count": 125,
+        "unsupported_count": 12,
+        "domains": [
+          {
+            "domain": "animations",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "api",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "audio",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "characters",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "combat",
+            "operation_count": 8,
+            "supported_count": 3,
+            "unsupported_count": 5
+          },
+          {
+            "domain": "commands",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "compat",
+            "operation_count": 2,
+            "supported_count": 2,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "content",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "debug",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "dungeons",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "economy",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "entities",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "events",
+            "operation_count": 2,
+            "supported_count": 2,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "georama",
+            "operation_count": 9,
+            "supported_count": 6,
+            "unsupported_count": 3
+          },
+          {
+            "domain": "info",
+            "operation_count": 1,
+            "supported_count": 1,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "input",
+            "operation_count": 8,
+            "supported_count": 8,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "items",
+            "operation_count": 6,
+            "supported_count": 6,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "localization",
+            "operation_count": 2,
+            "supported_count": 2,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "locations",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "models",
+            "operation_count": 5,
+            "supported_count": 5,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "party",
+            "operation_count": 4,
+            "supported_count": 3,
+            "unsupported_count": 1
+          },
+          {
+            "domain": "physics",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "player",
+            "operation_count": 6,
+            "supported_count": 6,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "quests",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "render",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "resources",
+            "operation_count": 5,
+            "supported_count": 5,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "save",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "scripts",
+            "operation_count": 6,
+            "supported_count": 3,
+            "unsupported_count": 3
+          },
+          {
+            "domain": "skills",
+            "operation_count": 5,
+            "supported_count": 5,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "ui",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "weapons",
+            "operation_count": 6,
+            "supported_count": 6,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "world",
+            "operation_count": 10,
+            "supported_count": 10,
+            "unsupported_count": 0
+          }
+        ],
+        "operations": [
+          {
+            "path": "info.get",
+            "domain": "info",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "events.subscribe",
+            "domain": "events",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "events.unsubscribe",
+            "domain": "events",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.get",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.set",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.heal",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.damage",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.status_add",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.status_remove",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.list",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.active",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.set_active",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.recruit",
+            "domain": "party",
+            "status": "unsupported",
+            "reason": "Chronicle has a story-ordered playable cast but no separate NPC companion recruitment routine."
+          },
+          {
+            "path": "economy.get",
+            "domain": "economy",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "economy.add",
+            "domain": "economy",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "economy.spend",
+            "domain": "economy",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.transition",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.register_dungeon",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.set_time",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_flag_get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_flag_set",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_value_get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_value_set",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.map_flag_get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.map_flag_set",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.query",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.get",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.spawn",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.despawn",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.get",
+            "domain": "combat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.damage",
+            "domain": "combat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.heal",
+            "domain": "combat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.register_formula",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Chronicle supports bounded scripted enemy damage and healing, but has no verified hook for replacing the native damage formula."
+          },
+          {
+            "path": "locations.list",
+            "domain": "locations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "locations.get",
+            "domain": "locations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "locations.register",
+            "domain": "locations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.list",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.get",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.register",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.get",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.element_set",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.request_set",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.request_known_set",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle does not store Georama request knowledge separately from native plot progress."
+          },
+          {
+            "path": "georama.condition_set",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle does not expose separate saved analysis-condition or river-grid state; its Georama APIs operate on native plot elements, requests, and placed pieces."
+          },
+          {
+            "path": "georama.register",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.place",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.remove",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.river_set",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle does not expose separate saved analysis-condition or river-grid state; its Georama APIs operate on native plot elements, requests, and placed pieces."
+          },
+          {
+            "path": "skills.list",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.get",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.register",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.unlock",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.set_rank",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.register",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.unregister",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.replace",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.resolve",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.remove",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "animations.register",
+            "domain": "animations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "animations.play",
+            "domain": "animations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "animations.stop",
+            "domain": "animations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.styles_list",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "combat.styles_get",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "combat.styles_register",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "combat.styles_set_active",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "scripts.register_function",
+            "domain": "scripts",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "scripts.call_function",
+            "domain": "scripts",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "scripts.unregister_function",
+            "domain": "scripts",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.list",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.get",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.register",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.give",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.remove",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.use",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.list",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.get",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.register",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.give",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.equip",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.upgrade",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.list",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.get",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.register",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.spawn",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.get",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.register",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.start",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.advance",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "scripts.list_hooks",
+            "domain": "scripts",
+            "status": "unsupported",
+            "reason": "Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet."
+          },
+          {
+            "path": "scripts.call",
+            "domain": "scripts",
+            "status": "unsupported",
+            "reason": "Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet."
+          },
+          {
+            "path": "scripts.override",
+            "domain": "scripts",
+            "status": "unsupported",
+            "reason": "Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet."
+          },
+          {
+            "path": "content.list",
+            "domain": "content",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "content.register",
+            "domain": "content",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "content.unregister",
+            "domain": "content",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "save.get",
+            "domain": "save",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "save.set",
+            "domain": "save",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "save.migrate",
+            "domain": "save",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.bind",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.unbind",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.state",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.consume",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.axis",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.context_push",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.context_pop",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.context_get",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "audio.play",
+            "domain": "audio",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "audio.stop",
+            "domain": "audio",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "audio.register",
+            "domain": "audio",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.layer_register",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.layer_remove",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.camera_get",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.camera_set",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "ui.register",
+            "domain": "ui",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "ui.remove",
+            "domain": "ui",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "ui.notify",
+            "domain": "ui",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "physics.query",
+            "domain": "physics",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "physics.velocity_get",
+            "domain": "physics",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "physics.velocity_set",
+            "domain": "physics",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.load",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.release",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.resolve",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.override",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.unoverride",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "localization.register",
+            "domain": "localization",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "localization.get",
+            "domain": "localization",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "commands.register",
+            "domain": "commands",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "commands.execute",
+            "domain": "commands",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "commands.unregister",
+            "domain": "commands",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "compat.list",
+            "domain": "compat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "compat.supports",
+            "domain": "compat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "debug.inspect",
+            "domain": "debug",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "debug.profile",
+            "domain": "debug",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "debug.overlay_register",
+            "domain": "debug",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "api.list",
+            "domain": "api",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "api.supports",
+            "domain": "api",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "api.call",
+            "domain": "api",
+            "status": "supported",
+            "reason": ""
+          }
+        ],
+        "validation": {
+          "status": "passed",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "ChronicleTwo",
+      "status": "passed",
+      "native_tests": {
+        "status": "passed",
+        "exit_code": 0,
+        "executed": 68,
+        "passed": 68,
+        "failed": 0,
+        "cases": [
+          {
+            "name": "PlatformPad.TriggerAxisNormalization",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldTransitionApi.QueuesNativeTownsAndRejectsUnregisteredInteriorMaps",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldFlagsApi.ReadsAndWritesNativeStoryAndMapFlagsWithBounds",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldApi.ReadsNativeMapAndDungeonContext",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWorldApi.SetsNormalizedTimeAndRejectsInvalidOrMissingSave",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWeaponsApi.ListsNativeDefinitionsAndReadsOwnedWeaponState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModWeaponRegistration.AddsNamedWeaponWithNativeAssetsAndOverriddenStats",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModRenderApi.RegistersUpdatesAndRemovesOwnedHudTextLayer",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModRenderApi.ReadsActiveDungeonCameraPoseAndRejectsUnavailableContext",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerApi.ReadsHealsAndDamagesActiveNativeCharacterWithHealthClamp",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerApi.IncludesNativePositionInActiveDungeonPlayerSnapshot",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerApi.HealsAndDamagesNamedNativeHealthGaugesWithoutSwitchingActiveCharacter",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerApi.SetsExactHpForActiveAndNamedCharactersWithinNativeRange",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPlayerApi.AppliesNativeStatusRulesAndClearsTimedEffects",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPartyEvents.PublishesChangedPartyWritesOnceForQuestObjectives",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPartyEvents.PublishesWeaponEquipForQuestObjectivesOnNextPump",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPartyApi.ReadsNativePartyMaskAndActiveCharacter",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPartyApi.ChangesActiveCharacterThroughNativeQuickChangeRules",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModPartyApi.RecruitsTownspersonAndReportsNativeCompanionReplacement",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginAbi.ValidatesCCompiledV1DescriptorAndDeclaredPermissions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginAbi.RejectsMismatchedIdsHostVersionsAndUndeclaredPermissions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginAbi.RejectsShortTablesUnsupportedMajorsAndMissingCallbacks",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginHash.FingerprintsLibraryContentsWithSha256",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginRuntime.RequiresPackageContainedLibraryAndExplicitPermission",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModLocationsApi.ReportsNativeMapCatalogAvailabilityAndValidatesLookups",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModLocationRegistration.RegistersOwnedMapAssetsAndQueuesNativeEntryTransition",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModItemRegistration.DataOnlyConsumableEntersNativeTablesAndInventory",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModInputApi.BindsReadsConsumesUnbindsAndCleansUpOnOwnerUnload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.ReadsNativeTownPlacementsAndAnalysisState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.SetsCompletionThroughNativeRequestConditions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.ReadsBoundedSavedRiverGridCells",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.SetsNativeRiverGridCellsPersistsReadbackAndIsIdempotent",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.RegistersDataOnlyPieceVariantIntoNativeBuildDefinitions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.PlacesRegisteredPieceWithNativeRulesAndPersistsSavedLayout",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModGeoramaApi.PublishesChangedWorldWritesOnceForQuestObjectives",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModExamplePackage.FirstStepsRunsQuestSkillAndManagerActions",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEntitiesApi.QueriesLiveDungeonMonstersAndRejectsUnsupportedFilters",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEntitiesApi.DespawnsOwnedMonsterWithoutKillSideEffectsAndInvalidatesItsHandle",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModEconomyApi.UsesNativeWalletClampAndNeverAllowsNegativeBalance",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDungeonRegistration.AddedFloorUsesNativeGraphAndTransitionQueries",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDungeonRegistration.ExtendedFloorProgressSurvivesStableIdSaveReload",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDebugInspect.ReturnsBoundedNativeSceneSnapshot",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModDebugInspect.RegistersAndUnloadsOwnedOverlay",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentE2E.LuaRegistrationMaterializesDungeonAndUsableDataOnlyItem",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCommands.ExecutesOwnerScopedCallbacksFromApiAndManagerAndCleansUp",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCommands.RequiresManifestPermissionsForRegistrationAndExecution",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCombatApi.ReadsLiveDungeonMonsterHealthStatusAndEmptyCombatState",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModModelRegistration.OwnedCustomAssetsBindToANativeCharacterDefinition",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAnimationRegistration.OwnsModelMotionBindingsAndRejectsPlaybackWithoutALiveSpawn",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModCharacterRegistration.LuaAdapterAddsADataOnlyEnemyToTheNativeMonsterTable",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentApi.GenericContentRegistrationAndListingUseTheTypedCharacterAdapter",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModContentApi.UnregistersPendingTypedDefinitionsAndEnforcesOwnership",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAudio.PackageSoundMixesStopsAndIsCleanedUpByOwner",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAudio.LuaPackageCallsAudioApiAndHeadlessMixerAdvancesIt",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModAudio.PackageWithoutAudioPermissionsCannotRegisterOrPlay",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.ChronicleExposesCapabilityCheckedContentOperations",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.ChronicleTwoExposesCapabilityCheckedContentOperations",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.RejectsCapabilitiesWithoutNativeHandlers",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.ChronicleTwoAdapterReportsEveryNonCoreOperation",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.RequiredCapabilityLedgerRejectsMissingOperation",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.RequiredCapabilityLedgerRejectsUnsupportedOperationWithoutReason",
+            "status": "passed"
+          },
+          {
+            "name": "MoonModApi.PublishesWorldLocationChangesForQuestObjectives",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideLoadsThroughDataReaderAndRestoresIndexedAsset",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMonsterAssets",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMapAssets",
+            "status": "passed"
+          },
+          {
+            "name": "DataRead.NativeResourceOverrideRejectsPathTraversalAndFallsBackForOversizedFiles",
+            "status": "passed"
+          }
+        ]
+      },
+      "headless_smoke": "passed",
+      "retail_data_smoke": {
+        "status": "passed",
+        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicletwo\\data",
+        "exit_code": 0,
+        "timed_out": false,
+        "frames": 120,
+        "phase": "startup",
+        "capture_validated": false,
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-034d9bf17bd24c7f8e5c7e9b5fceb1cf\\startup.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-034d9bf17bd24c7f8e5c7e9b5fceb1cf\\run.log",
+        "note": "A successful startup and screenshot file are checked; screenshot pixels and in-game scene content are not validated by this smoke."
+      },
+      "retail_location_smoke": {
+        "status": "not_requested",
+        "location_id": null,
+        "source_map_id": null,
+        "texture_source_map": null,
+        "map_script_probe": "not_run",
+        "registered_map_index": null,
+        "queued_marker": null,
+        "loaded_marker": null,
+        "return_queued_marker": null,
+        "returned_marker": null,
+        "data_root": null,
+        "exit_code": null,
+        "entry_exit_code": null,
+        "timed_out": false,
+        "entry_screenshot": null,
+        "return_screenshot": null,
+        "screenshot": null,
+        "entry_log": null,
+        "log": null,
+        "note": "Retail-data map registration, entry, loading, and return proof."
+      },
+      "retail_gameplay_smoke": {
+        "status": "passed",
+        "checkpoint": "Underground Channel floor 1 item use, mod annex entry, and live data-only enemy spawn and completed a character-filtered quest from the native enemy-defeat event and verified the mod-owned data-only tonic plus a registered and granted mod weapon and entered the mod-owned connected floor, spawned a data-only enemy, and adjusted the live dungeon camera through Lua",
+        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicletwo\\data",
+        "exit_code": 0,
+        "timed_out": false,
+        "frames": 2400,
+        "input_script": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\MoonFactory\\tools\\fixtures\\retail-item-smoke\\enter-annex.input",
+        "capture_validated": false,
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fbece07349844547be81012d36ca2d8e\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fbece07349844547be81012d36ca2d8e\\run.log",
+        "note": "The executable accepts the retail data and scripted gameplay checkpoint and writes a screenshot; visual scene content is reviewed separately."
+      },
+      "retail_item_smoke": {
+        "status": "passed",
+        "mod_id": "moonfactory.retail-item-probe",
+        "verification_marker": "MOONFACTORY_RETAIL_ITEM_OK|moonfactory.retail-item-probe:retail-starlight-tonic|",
+        "weapon_verification_marker": "MOONFACTORY_RETAIL_WEAPON_OK|moonfactory.retail-item-probe:retail-starlight-blade|",
+        "enemy_defeat_event_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_EVENT|moonfactory.retail-item-probe:retail-annex-sentinel|chronicle-two:monster:0:1|combat|1024",
+        "enemy_defeat_quest_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEST_OK|moonfactory.retail-item-probe:annex-sentinel-hunt|chronicle-two:monster:0:1",
+        "enemy_defeat_queued_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEUED|chronicle-two:monster:0:1",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fbece07349844547be81012d36ca2d8e\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fbece07349844547be81012d36ca2d8e\\run.log",
+        "content_registry_marker": null,
+        "note": "The enabled Lua package registers, grants, and uses data-only item and weapon content, enters a connected annex, then verifies a filtered quest completes from a native enemy-defeat event. The event handle must match the lethal native damage request; weapon, dungeon, camera, and quest markers plus a screenshot file are required. The capture is not visually inspected."
+      },
+      "retail_georama_smoke": {
+        "status": "not_applicable",
+        "registration_marker": null,
+        "placement_marker": null,
+        "removal_marker": null,
+        "initial_stock_hook": null,
+        "screenshot": null,
+        "log": null,
+        "note": "Uses a disposable save and test-only built stock to verify a Lua-registered data-only Georama variant is materialized by the retail map loader, placed and removed through native edit routines, and read back from the town layout. Visual persistence after process reload and compatibility with player saves remain unverified."
+      },
+      "retail_dungeon_smoke": {
+        "status": "passed",
+        "dungeon_id": "moonfactory.retail-item-probe:retail-moon-vault",
+        "floor_id": "moonfactory.retail-item-probe:retail-moon-vault.annex",
+        "native_floor_id": 9,
+        "context": "dungeon",
+        "verification_marker": "MOONFACTORY_RETAIL_DUNGEON_OK|moonfactory.retail-item-probe:retail-moon-vault.annex|",
+        "camera_verification_marker": "MOONFACTORY_RETAIL_CAMERA_OK|",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fbece07349844547be81012d36ca2d8e\\gameplay.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-fbece07349844547be81012d36ca2d8e\\run.log",
+        "note": "The enabled Lua package enters its connected annex through world.transition, spawns a data-only enemy, resolves it with entities.get, verifies the active native dungeon floor, and adjusts the live follow camera through render.camera_set. The annex reuses native room geometry and enemy assets.",
+        "entity_handle": "chronicle-two:monster:0:1"
+      },
+      "retail_character_smoke": {
+        "status": "not_applicable",
+        "character_id": "moonfactory.retail-character-probe:retail-sentinel",
+        "entity_handle": null,
+        "verification_marker": null,
+        "dungeon_floor_marker": null,
+        "native_floor_id": null,
+        "model_asset_path": null,
+        "model_verification_marker": null,
+        "model_replacement_verification_marker": null,
+        "overlay_registration_marker": null,
+        "enemy_defeat_quest_marker": null,
+        "enemy_defeat_queued_marker": null,
+        "animation_play_verification_marker": null,
+        "animation_stop_verification_marker": null,
+        "animation_despawn_cleanup_verification_marker": null,
+        "screenshot": null,
+        "log": null
+      },
+      "retail_physics_smoke": {
+        "status": "not_applicable",
+        "operation": "physics.velocity_set",
+        "verification_marker": null,
+        "screenshot": null,
+        "log": null
+      },
+      "retail_physics_query_smoke": {
+        "status": "not_applicable",
+        "operation": "physics.query",
+        "verification_marker": null,
+        "semantics": "Sphere query over live monster actor origins; does not test collision geometry.",
+        "screenshot": null,
+        "log": null
+      },
+      "headless_preflight": null,
+      "api_catalog": {
+        "report": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\smoke-fixture\\save\\moonmod-api-report.json",
+        "operation_count": 137,
+        "supported_count": 128,
+        "unsupported_count": 9,
+        "domains": [
+          {
+            "domain": "animations",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "api",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "audio",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "characters",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "combat",
+            "operation_count": 8,
+            "supported_count": 3,
+            "unsupported_count": 5
+          },
+          {
+            "domain": "commands",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "compat",
+            "operation_count": 2,
+            "supported_count": 2,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "content",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "debug",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "dungeons",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "economy",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "entities",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "events",
+            "operation_count": 2,
+            "supported_count": 2,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "georama",
+            "operation_count": 9,
+            "supported_count": 8,
+            "unsupported_count": 1
+          },
+          {
+            "domain": "info",
+            "operation_count": 1,
+            "supported_count": 1,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "input",
+            "operation_count": 8,
+            "supported_count": 8,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "items",
+            "operation_count": 6,
+            "supported_count": 6,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "localization",
+            "operation_count": 2,
+            "supported_count": 2,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "locations",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "models",
+            "operation_count": 5,
+            "supported_count": 5,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "party",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "physics",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "player",
+            "operation_count": 6,
+            "supported_count": 6,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "quests",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "render",
+            "operation_count": 4,
+            "supported_count": 4,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "resources",
+            "operation_count": 5,
+            "supported_count": 5,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "save",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "scripts",
+            "operation_count": 6,
+            "supported_count": 3,
+            "unsupported_count": 3
+          },
+          {
+            "domain": "skills",
+            "operation_count": 5,
+            "supported_count": 5,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "ui",
+            "operation_count": 3,
+            "supported_count": 3,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "weapons",
+            "operation_count": 6,
+            "supported_count": 6,
+            "unsupported_count": 0
+          },
+          {
+            "domain": "world",
+            "operation_count": 10,
+            "supported_count": 10,
+            "unsupported_count": 0
+          }
+        ],
+        "operations": [
+          {
+            "path": "info.get",
+            "domain": "info",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "events.subscribe",
+            "domain": "events",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "events.unsubscribe",
+            "domain": "events",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.get",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.set",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.heal",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.damage",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.status_add",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "player.status_remove",
+            "domain": "player",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.list",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.active",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.set_active",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "party.recruit",
+            "domain": "party",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "economy.get",
+            "domain": "economy",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "economy.add",
+            "domain": "economy",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "economy.spend",
+            "domain": "economy",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.transition",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.register_dungeon",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.set_time",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_flag_get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_flag_set",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_value_get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.story_value_set",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.map_flag_get",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "world.map_flag_set",
+            "domain": "world",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.query",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.get",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.spawn",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "entities.despawn",
+            "domain": "entities",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.get",
+            "domain": "combat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.damage",
+            "domain": "combat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.heal",
+            "domain": "combat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.register_formula",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Chronicle Two supports bounded scripted enemy damage and healing, but has no verified hook for replacing the native damage formula."
+          },
+          {
+            "path": "locations.list",
+            "domain": "locations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "locations.get",
+            "domain": "locations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "locations.register",
+            "domain": "locations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.list",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.get",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "dungeons.register",
+            "domain": "dungeons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.get",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.element_set",
+            "domain": "georama",
+            "status": "unsupported",
+            "reason": "Chronicle Two's Georama pieces do not use Chronicle's per-plot optional-element table."
+          },
+          {
+            "path": "georama.request_set",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.request_known_set",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.condition_set",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.register",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.place",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.remove",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "georama.river_set",
+            "domain": "georama",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.list",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.get",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.register",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.unlock",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "skills.set_rank",
+            "domain": "skills",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.register",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.unregister",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.replace",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.resolve",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "models.remove",
+            "domain": "models",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "animations.register",
+            "domain": "animations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "animations.play",
+            "domain": "animations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "animations.stop",
+            "domain": "animations",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "combat.styles_list",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "combat.styles_get",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "combat.styles_register",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "combat.styles_set_active",
+            "domain": "combat",
+            "status": "unsupported",
+            "reason": "Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope."
+          },
+          {
+            "path": "scripts.register_function",
+            "domain": "scripts",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "scripts.call_function",
+            "domain": "scripts",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "scripts.unregister_function",
+            "domain": "scripts",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.list",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.get",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.register",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.give",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.remove",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "items.use",
+            "domain": "items",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.list",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.get",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.register",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.give",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.equip",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "weapons.upgrade",
+            "domain": "weapons",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.list",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.get",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.register",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "characters.spawn",
+            "domain": "characters",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.get",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.register",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.start",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "quests.advance",
+            "domain": "quests",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "scripts.list_hooks",
+            "domain": "scripts",
+            "status": "unsupported",
+            "reason": "Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet."
+          },
+          {
+            "path": "scripts.call",
+            "domain": "scripts",
+            "status": "unsupported",
+            "reason": "Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet."
+          },
+          {
+            "path": "scripts.override",
+            "domain": "scripts",
+            "status": "unsupported",
+            "reason": "Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet."
+          },
+          {
+            "path": "content.list",
+            "domain": "content",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "content.register",
+            "domain": "content",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "content.unregister",
+            "domain": "content",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "save.get",
+            "domain": "save",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "save.set",
+            "domain": "save",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "save.migrate",
+            "domain": "save",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.bind",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.unbind",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.state",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.consume",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.axis",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.context_push",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.context_pop",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "input.context_get",
+            "domain": "input",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "audio.play",
+            "domain": "audio",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "audio.stop",
+            "domain": "audio",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "audio.register",
+            "domain": "audio",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.layer_register",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.layer_remove",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.camera_get",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "render.camera_set",
+            "domain": "render",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "ui.register",
+            "domain": "ui",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "ui.remove",
+            "domain": "ui",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "ui.notify",
+            "domain": "ui",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "physics.query",
+            "domain": "physics",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "physics.velocity_get",
+            "domain": "physics",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "physics.velocity_set",
+            "domain": "physics",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.load",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.release",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.resolve",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.override",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "resources.unoverride",
+            "domain": "resources",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "localization.register",
+            "domain": "localization",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "localization.get",
+            "domain": "localization",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "commands.register",
+            "domain": "commands",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "commands.execute",
+            "domain": "commands",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "commands.unregister",
+            "domain": "commands",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "compat.list",
+            "domain": "compat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "compat.supports",
+            "domain": "compat",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "debug.inspect",
+            "domain": "debug",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "debug.profile",
+            "domain": "debug",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "debug.overlay_register",
+            "domain": "debug",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "api.list",
+            "domain": "api",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "api.supports",
+            "domain": "api",
+            "status": "supported",
+            "reason": ""
+          },
+          {
+            "path": "api.call",
+            "domain": "api",
+            "status": "supported",
+            "reason": ""
+          }
+        ],
+        "validation": {
+          "status": "passed",
+          "error": null
+        }
+      }
+    }
+  ]
+}

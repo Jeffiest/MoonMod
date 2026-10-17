@@ -1,0 +1,1574 @@
+Running Moon Factory Python verification (bridge scanner, package CLI, examples)...
+test_builds_a_separate_offline_image_and_fingerprints_it (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_builds_a_separate_offline_image_and_fingerprints_it) ... ok
+test_cli_will_not_run_dc2tk_after_static_inventory_failure (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_cli_will_not_run_dc2tk_after_static_inventory_failure) ... ok
+test_external_build_is_disabled_for_static_only_mod_dir (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_external_build_is_disabled_for_static_only_mod_dir) ... ok
+test_offline_image_build_refuses_to_overwrite_or_replace_the_disc (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_offline_image_build_refuses_to_overwrite_or_replace_the_disc) ... ok
+test_rejects_asset_paths_that_escape_the_mod_folder (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_rejects_asset_paths_that_escape_the_mod_folder) ... ok
+test_reports_build_only_components_symbols_and_asset_provenance (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_reports_build_only_components_symbols_and_asset_provenance) ... ok
+test_reports_duplicate_asset_ids_across_add_and_replace (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_reports_duplicate_asset_ids_across_add_and_replace) ... ok
+test_runs_the_mods_offline_dc2tk_tests (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_runs_the_mods_offline_dc2tk_tests) ... ok
+test_runs_the_users_dc2tk_mod_check_command (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_runs_the_users_dc2tk_mod_check_command) ... ok
+test_scans_external_example_folder_and_fingerprints_directory_assets (test_chronicle_two_script_bridge.ChronicleTwoScriptBridgeTests.test_scans_external_example_folder_and_fingerprints_directory_assets) ... ok
+test_can_target_one_game_and_refuses_to_overwrite (test_moonfactory_cli.MoonFactoryCliTests.test_can_target_one_game_and_refuses_to_overwrite) ... ok
+test_creates_cross_game_starter_with_requested_identity (test_moonfactory_cli.MoonFactoryCliTests.test_creates_cross_game_starter_with_requested_identity) ... ok
+test_first_steps_is_a_complete_cross_game_package (test_moonfactory_examples.MoonFactoryExampleTests.test_first_steps_is_a_complete_cross_game_package) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.248s
+
+OK
+Moon Factory bridge report: C:\Users\armor\AppData\Local\Temp\moon-factory-c2script-izg4as0v\report.json
+Moon Factory bridge report: C:\Users\armor\AppData\Local\Temp\moon-factory-c2script-knm_1zqg\report.json
+Running Chronicle MoonFactory native verification...
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+Note: Google Test filter = MoonMod*.*:DataRead.NativeResourceOverride*:PlatformPad.TriggerAxisNormalization
+[==========] Running 67 tests from 30 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from PlatformPad
+[ RUN      ] PlatformPad.TriggerAxisNormalization
+[       OK ] PlatformPad.TriggerAxisNormalization (0 ms)
+[----------] 1 test from PlatformPad (0 ms total)
+
+[----------] 2 tests from MoonModWorldTransitionApi
+[ RUN      ] MoonModWorldTransitionApi.QueuesOnlyNativeSettlementRoutesFromPlayableScenes
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWorldTransitionApi.QueuesOnlyNativeSettlementRoutesFromPlayableScenes (0 ms)
+[ RUN      ] MoonModWorldTransitionApi.QueuesRegisteredDungeonFloorForTheNativeEntranceMenu
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWorldTransitionApi.QueuesRegisteredDungeonFloorForTheNativeEntranceMenu (0 ms)
+[----------] 2 tests from MoonModWorldTransitionApi (0 ms total)
+
+[----------] 1 test from MoonModWorldTimeApi
+[ RUN      ] MoonModWorldTimeApi.ReadsAndSetsNormalizedNativeTimeAndRejectsInvalidInput
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWorldTimeApi.ReadsAndSetsNormalizedNativeTimeAndRejectsInvalidInput (0 ms)
+[----------] 1 test from MoonModWorldTimeApi (0 ms total)
+
+[----------] 1 test from MoonModWorldFlagsApi
+[ RUN      ] MoonModWorldFlagsApi.ReadsAndWritesNativeStoryAndMapFlagsWithBounds
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWorldFlagsApi.ReadsAndWritesNativeStoryAndMapFlagsWithBounds (0 ms)
+[----------] 1 test from MoonModWorldFlagsApi (0 ms total)
+
+[----------] 4 tests from MoonModWeaponsApi
+[ RUN      ] MoonModWeaponsApi.ListsAndReadsNativeWeaponDefinitionsAndOwnedState
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWeaponsApi.ListsAndReadsNativeWeaponDefinitionsAndOwnedState (6 ms)
+[ RUN      ] MoonModWeaponsApi.EquipsOwnedCompatibleWeaponOnlyFromTownAndReportsChanges
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWeaponsApi.EquipsOwnedCompatibleWeaponOnlyFromTownAndReportsChanges (0 ms)
+[ RUN      ] MoonModWeaponsApi.RegistersPersistsAndGrantsNativeWeaponDefinitions
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 377
+get weapon!! 377
+[       OK ] MoonModWeaponsApi.RegistersPersistsAndGrantsNativeWeaponDefinitions (11 ms)
+[ RUN      ] MoonModWeaponsApi.PublishesNativeUpgradeForQuestObjectivesOnNextPump
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModWeaponsApi.PublishesNativeUpgradeForQuestObjectivesOnNextPump (18 ms)
+[----------] 4 tests from MoonModWeaponsApi (37 ms total)
+
+[----------] 2 tests from MoonModRenderApi
+[ RUN      ] MoonModRenderApi.RegistersUpdatesAndRemovesOwnedHudTextLayer
+[       OK ] MoonModRenderApi.RegistersUpdatesAndRemovesOwnedHudTextLayer (0 ms)
+[ RUN      ] MoonModRenderApi.ReadsActiveDungeonCameraPoseAndRejectsUnavailableContext
+[       OK ] MoonModRenderApi.ReadsActiveDungeonCameraPoseAndRejectsUnavailableContext (0 ms)
+[----------] 2 tests from MoonModRenderApi (0 ms total)
+
+[----------] 5 tests from MoonModPlayerPartyApi
+[ RUN      ] MoonModPlayerPartyApi.ReadsHealsAndDamagesActiveMemberAndListsJoinedRoster
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModPlayerPartyApi.ReadsHealsAndDamagesActiveMemberAndListsJoinedRoster (0 ms)
+[ RUN      ] MoonModPlayerPartyApi.SwitchesThroughNativeRoutineAndEnforcesDungeonPartyRules
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModPlayerPartyApi.SwitchesThroughNativeRoutineAndEnforcesDungeonPartyRules (0 ms)
+[ RUN      ] MoonModPlayerPartyApi.IncludesNativePositionInActiveDungeonPlayerSnapshot
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModPlayerPartyApi.IncludesNativePositionInActiveDungeonPlayerSnapshot (0 ms)
+[ RUN      ] MoonModPlayerPartyApi.SetsExactHpForActiveAndNamedCharactersWithinNativeRange
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModPlayerPartyApi.SetsExactHpForActiveAndNamedCharactersWithinNativeRange (0 ms)
+[ RUN      ] MoonModPlayerPartyApi.AppliesNativeStatusRulesAndRemovesAilments
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModPlayerPartyApi.AppliesNativeStatusRulesAndRemovesAilments (0 ms)
+[----------] 5 tests from MoonModPlayerPartyApi (1 ms total)
+
+[----------] 3 tests from MoonModNativePluginAbi
+[ RUN      ] MoonModNativePluginAbi.ValidatesCCompiledV1DescriptorAndDeclaredPermissions
+[       OK ] MoonModNativePluginAbi.ValidatesCCompiledV1DescriptorAndDeclaredPermissions (0 ms)
+[ RUN      ] MoonModNativePluginAbi.RejectsMismatchedIdsHostVersionsAndUndeclaredPermissions
+[       OK ] MoonModNativePluginAbi.RejectsMismatchedIdsHostVersionsAndUndeclaredPermissions (0 ms)
+[ RUN      ] MoonModNativePluginAbi.RejectsShortTablesUnsupportedMajorsAndMissingCallbacks
+[       OK ] MoonModNativePluginAbi.RejectsShortTablesUnsupportedMajorsAndMissingCallbacks (0 ms)
+[----------] 3 tests from MoonModNativePluginAbi (0 ms total)
+
+[----------] 1 test from MoonModNativePluginHash
+[ RUN      ] MoonModNativePluginHash.FingerprintsLibraryContentsWithSha256
+[       OK ] MoonModNativePluginHash.FingerprintsLibraryContentsWithSha256 (1 ms)
+[----------] 1 test from MoonModNativePluginHash (1 ms total)
+
+[----------] 2 tests from MoonModNativePluginRuntime
+[ RUN      ] MoonModNativePluginRuntime.RequiresPackageContainedLibraryAndExplicitPermission
+[       OK ] MoonModNativePluginRuntime.RequiresPackageContainedLibraryAndExplicitPermission (12 ms)
+[ RUN      ] MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload
+[       OK ] MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload (42 ms)
+[----------] 2 tests from MoonModNativePluginRuntime (54 ms total)
+
+[----------] 1 test from MoonModManagerUi
+[ RUN      ] MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload
+[       OK ] MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload (37 ms)
+[----------] 1 test from MoonModManagerUi (37 ms total)
+
+[----------] 2 tests from MoonModLocationsApi
+[ RUN      ] MoonModLocationsApi.ListsAndResolvesNativeWorldMapDestinations
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModLocationsApi.ListsAndResolvesNativeWorldMapDestinations (0 ms)
+[ RUN      ] MoonModLocationsApi.RegistersNamespacedFieldAliasAndTransitionsIntoAndBackOut
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModLocationsApi.RegistersNamespacedFieldAliasAndTransitionsIntoAndBackOut (5 ms)
+[----------] 2 tests from MoonModLocationsApi (5 ms total)
+
+[----------] 1 test from MoonModItemsApi
+[ RUN      ] MoonModItemsApi.ListsAndReadsBuiltInChronicleItemDefinitions
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 148
+vol = 50
+GetITEM No === 148
+vol = 50
+GetITEM No === 148
+vol = 50
+GetITEM No === 148
+vol = 50
+trueNo = 148
+GetITEM No === 145
+vol = 30
+trueNo = 145
+GetITEM No === 145
+vol = 30
+trueNo = 145
+GetITEM No === 145
+vol = 30
+GetITEM No === 145
+vol = 30
+[       OK ] MoonModItemsApi.ListsAndReadsBuiltInChronicleItemDefinitions (17 ms)
+[----------] 1 test from MoonModItemsApi (17 ms total)
+
+[----------] 2 tests from MoonModItemRegistration
+[ RUN      ] MoonModItemRegistration.LuaAddsAndUsesDataOnlyItemWithStableNativeSlot
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 143
+vol = 25
+GetITEM No === 143
+vol = 25
+trueNo = 143
+GetITEM No === 144
+vol = 15
+trueNo = 144
+GetITEM No === 156
+vol = 0
+trueNo = 156
+prev status = 116
+GetITEM No === 157
+vol = 0
+trueNo = 157
+prev status = 112
+GetITEM No === 158
+vol = 0
+trueNo = 158
+prev status = 96
+GetITEM No === 184
+vol = 0
+trueNo = 184
+prev status = 64
+GetITEM No === 156
+vol = 0
+trueNo = 156
+prev status = 4
+GetITEM No === 194
+vol = 0
+trueNo = 194
+prev status = 116
+GetITEM No === 143
+vol = 25
+GetITEM No === 143
+vol = 25
+trueNo = 143
+GetITEM No === 144
+vol = 15
+trueNo = 144
+GetITEM No === 156
+vol = 0
+trueNo = 156
+prev status = 116
+GetITEM No === 157
+vol = 0
+trueNo = 157
+prev status = 112
+GetITEM No === 158
+vol = 0
+trueNo = 158
+prev status = 96
+GetITEM No === 184
+vol = 0
+trueNo = 184
+prev status = 64
+GetITEM No === 156
+vol = 0
+trueNo = 156
+prev status = 4
+GetITEM No === 194
+vol = 0
+trueNo = 194
+prev status = 116
+[       OK ] MoonModItemRegistration.LuaAddsAndUsesDataOnlyItemWithStableNativeSlot (52 ms)
+[ RUN      ] MoonModItemRegistration.RefusesItemsAfterTheReservedNativeSlotsAreAllocated
+[       OK ] MoonModItemRegistration.RefusesItemsAfterTheReservedNativeSlotsAreAllocated (55 ms)
+[----------] 2 tests from MoonModItemRegistration (107 ms total)
+
+[----------] 1 test from MoonModInputApi
+[ RUN      ] MoonModInputApi.BindsReadsConsumesUnbindsAndCleansUpOnOwnerUnload
+[       OK ] MoonModInputApi.BindsReadsConsumesUnbindsAndCleansUpOnOwnerUnload (6 ms)
+[----------] 1 test from MoonModInputApi (6 ms total)
+
+[----------] 5 tests from MoonModGeoramaApi
+[ RUN      ] MoonModGeoramaApi.ReadsNativeTownPlotsRequestsAndPlacedParts
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModGeoramaApi.ReadsNativeTownPlotsRequestsAndPlacedParts (1 ms)
+[ RUN      ] MoonModGeoramaApi.SetsDefinedPlotElementsThroughActiveNativeEditorState
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModGeoramaApi.SetsDefinedPlotElementsThroughActiveNativeEditorState (0 ms)
+[ RUN      ] MoonModGeoramaApi.PlacesAndRemovesNativePlotPartsWithStaleSafeIds
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModGeoramaApi.PlacesAndRemovesNativePlotPartsWithStaleSafeIds (1 ms)
+[ RUN      ] MoonModGeoramaApi.PublishesChangedWorldWritesOnceForQuestObjectives
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModGeoramaApi.PublishesChangedWorldWritesOnceForQuestObjectives (55 ms)
+[ RUN      ] MoonModGeoramaApi.RegistersStableDataOnlyPieceVariantsInExtendedNativeSlots
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModGeoramaApi.RegistersStableDataOnlyPieceVariantsInExtendedNativeSlots (12 ms)
+[----------] 5 tests from MoonModGeoramaApi (70 ms total)
+
+[----------] 1 test from MoonModExamplePackage
+[ RUN      ] MoonModExamplePackage.FirstStepsRunsQuestSkillAndManagerActions
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModExamplePackage.FirstStepsRunsQuestSkillAndManagerActions (35 ms)
+[----------] 1 test from MoonModExamplePackage (35 ms total)
+
+[----------] 3 tests from MoonModEntitiesApi
+[ RUN      ] MoonModEntitiesApi.KeepsModOwnedEnemyActiveWithinNativeViewBudget
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModEntitiesApi.KeepsModOwnedEnemyActiveWithinNativeViewBudget (0 ms)
+[ RUN      ] MoonModEntitiesApi.QueriesLiveDungeonMonstersAndRejectsUnsupportedFilters
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModEntitiesApi.QueriesLiveDungeonMonstersAndRejectsUnsupportedFilters (0 ms)
+[ RUN      ] MoonModEntitiesApi.DespawnsOwnedLiveEnemyAndClearsNativeReferencesWithoutKillCredit
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModEntitiesApi.DespawnsOwnedLiveEnemyAndClearsNativeReferencesWithoutKillCredit (0 ms)
+[----------] 3 tests from MoonModEntitiesApi (1 ms total)
+
+[----------] 1 test from MoonModEconomyApi
+[ RUN      ] MoonModEconomyApi.ReadsCreditsClampsAddsAndRejectsInvalidOrUnaffordableSpending
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModEconomyApi.ReadsCreditsClampsAddsAndRejectsInvalidOrUnaffordableSpending (0 ms)
+[----------] 1 test from MoonModEconomyApi (0 ms total)
+
+[----------] 2 tests from MoonModDungeonsApi
+[ RUN      ] MoonModDungeonsApi.ListsNativeDungeonCatalogAndResolvesStableAndLocalIds
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModDungeonsApi.ListsNativeDungeonCatalogAndResolvesStableAndLocalIds (0 ms)
+[ RUN      ] MoonModDungeonsApi.RegistersProceduralFloorsAndExtendsNativeEnemyLayouts
+[       OK ] MoonModDungeonsApi.RegistersProceduralFloorsAndExtendsNativeEnemyLayouts (1 ms)
+[----------] 2 tests from MoonModDungeonsApi (1 ms total)
+
+[----------] 2 tests from MoonModDebugInspect
+[ RUN      ] MoonModDebugInspect.ReturnsBoundedNativeSceneSnapshot
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModDebugInspect.ReturnsBoundedNativeSceneSnapshot (0 ms)
+[ RUN      ] MoonModDebugInspect.RegistersAndUnloadsOwnedOverlay
+[       OK ] MoonModDebugInspect.RegistersAndUnloadsOwnedOverlay (0 ms)
+[----------] 2 tests from MoonModDebugInspect (0 ms total)
+
+[----------] 2 tests from MoonModCommands
+[ RUN      ] MoonModCommands.ExecutesOwnerScopedCallbacksFromApiAndManagerAndCleansUp
+[       OK ] MoonModCommands.ExecutesOwnerScopedCallbacksFromApiAndManagerAndCleansUp (7 ms)
+[ RUN      ] MoonModCommands.RequiresManifestPermissionsForRegistrationAndExecution
+[       OK ] MoonModCommands.RequiresManifestPermissionsForRegistrationAndExecution (5 ms)
+[----------] 2 tests from MoonModCommands (12 ms total)
+
+[----------] 2 tests from MoonModCombatApi
+[ RUN      ] MoonModCombatApi.ReadsLiveDungeonMonsterHealthStatusAndEmptyCombatState
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModCombatApi.ReadsLiveDungeonMonsterHealthStatusAndEmptyCombatState (0 ms)
+[ RUN      ] MoonModCombatApi.AppliesGenerationCheckedDamageAndQueuesNativeHitOrDeathEvents
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModCombatApi.AppliesGenerationCheckedDamageAndQueuesNativeHitOrDeathEvents (0 ms)
+[----------] 2 tests from MoonModCombatApi (0 ms total)
+
+[----------] 1 test from MoonModCharacterRegistration
+[ RUN      ] MoonModCharacterRegistration.RegistersADataOnlyEnemyVariantThroughTheNativeModelResolver
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+[       OK ] MoonModCharacterRegistration.RegistersADataOnlyEnemyVariantThroughTheNativeModelResolver (0 ms)
+[----------] 1 test from MoonModCharacterRegistration (0 ms total)
+
+[----------] 1 test from MoonModModelRegistration
+[ RUN      ] MoonModModelRegistration.OwnedCustomAssetBindsToNativeMonsterAndCharacterTables
+[       OK ] MoonModModelRegistration.OwnedCustomAssetBindsToNativeMonsterAndCharacterTables (3 ms)
+[----------] 1 test from MoonModModelRegistration (3 ms total)
+
+[----------] 1 test from MoonModAnimationRegistration
+[ RUN      ] MoonModAnimationRegistration.BindsOwnedModelMotionAndRejectsPlaybackWithoutOwnedSpawn
+[       OK ] MoonModAnimationRegistration.BindsOwnedModelMotionAndRejectsPlaybackWithoutOwnedSpawn (2 ms)
+[----------] 1 test from MoonModAnimationRegistration (2 ms total)
+
+[----------] 4 tests from MoonModContentApi
+[ RUN      ] MoonModContentApi.GenericContentRegistrationAndListingUseTheTypedCharacterAdapter
+[       OK ] MoonModContentApi.GenericContentRegistrationAndListingUseTheTypedCharacterAdapter (0 ms)
+[ RUN      ] MoonModContentApi.KeepsCharacterVariantUntilRegisteredChildIsRemoved
+[       OK ] MoonModContentApi.KeepsCharacterVariantUntilRegisteredChildIsRemoved (0 ms)
+[ RUN      ] MoonModContentApi.KeepsCharacterVariantWhileRegisteredModelUsesIt
+[       OK ] MoonModContentApi.KeepsCharacterVariantWhileRegisteredModelUsesIt (2 ms)
+[ RUN      ] MoonModContentApi.KeepsCharacterVariantWhileLoadedOrTrackedByActiveDungeon
+[       OK ] MoonModContentApi.KeepsCharacterVariantWhileLoadedOrTrackedByActiveDungeon (0 ms)
+[----------] 4 tests from MoonModContentApi (3 ms total)
+
+[----------] 3 tests from MoonModAudio
+[ RUN      ] MoonModAudio.PackageSoundMixesStopsAndIsCleanedUpByOwner
+[       OK ] MoonModAudio.PackageSoundMixesStopsAndIsCleanedUpByOwner (8 ms)
+[ RUN      ] MoonModAudio.LuaPackageCallsAudioApiAndHeadlessMixerAdvancesIt
+[       OK ] MoonModAudio.LuaPackageCallsAudioApiAndHeadlessMixerAdvancesIt (12 ms)
+[ RUN      ] MoonModAudio.PackageWithoutAudioPermissionsCannotRegisterOrPlay
+[       OK ] MoonModAudio.PackageWithoutAudioPermissionsCannotRegisterOrPlay (7 ms)
+[----------] 3 tests from MoonModAudio (28 ms total)
+
+[----------] 7 tests from MoonModApi
+[ RUN      ] MoonModApi.ChronicleExposesCapabilityCheckedContentOperations
+[       OK ] MoonModApi.ChronicleExposesCapabilityCheckedContentOperations (104 ms)
+[ RUN      ] MoonModApi.ChronicleTwoExposesCapabilityCheckedContentOperations
+[       OK ] MoonModApi.ChronicleTwoExposesCapabilityCheckedContentOperations (103 ms)
+[ RUN      ] MoonModApi.RejectsCapabilitiesWithoutNativeHandlers
+[       OK ] MoonModApi.RejectsCapabilitiesWithoutNativeHandlers (0 ms)
+[ RUN      ] MoonModApi.ChronicleAdapterReportsEveryNonCoreOperation
+[       OK ] MoonModApi.ChronicleAdapterReportsEveryNonCoreOperation (0 ms)
+[ RUN      ] MoonModApi.RequiredCapabilityLedgerRejectsMissingOperation
+[       OK ] MoonModApi.RequiredCapabilityLedgerRejectsMissingOperation (0 ms)
+[ RUN      ] MoonModApi.RequiredCapabilityLedgerRejectsUnsupportedOperationWithoutReason
+[       OK ] MoonModApi.RequiredCapabilityLedgerRejectsUnsupportedOperationWithoutReason (0 ms)
+[ RUN      ] MoonModApi.PublishesWorldLocationChangesForQuestObjectives
+[       OK ] MoonModApi.PublishesWorldLocationChangesForQuestObjectives (15 ms)
+[----------] 7 tests from MoonModApi (224 ms total)
+
+[----------] 3 tests from DataRead
+[ RUN      ] DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMonsterAssets
+[       OK ] DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMonsterAssets (78 ms)
+[ RUN      ] DataRead.NativeResourceOverrideLoadsThroughBothFileReadersAndRestoresRetailAsset
+[       OK ] DataRead.NativeResourceOverrideLoadsThroughBothFileReadersAndRestoresRetailAsset (53 ms)
+[ RUN      ] DataRead.NativeResourceOverrideRejectsPathTraversalAndFallsBackForOversizedFiles
+[       OK ] DataRead.NativeResourceOverrideRejectsPathTraversalAndFallsBackForOversizedFiles (50 ms)
+[----------] 3 tests from DataRead (183 ms total)
+
+[----------] Global test environment tear-down
+[==========] 67 tests from 30 test suites ran. (842 ms total)
+[  PASSED  ] 67 tests.
+moonmod: ignored oversized or unreadable native resource override for dun/pack/maindat.pac
+
+Running Chronicle executable MoonFactory Lua preflight...
+MOONFACTORY_PREFLIGHT_OK|137; retail game boot waits for extracted data
+Running Chronicle retail-data headless startup smoke...
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+SaveData size = 78272
+SND_INF= title.txt 
+exporting the game text to C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\Chronicle\port\build\moonmod-api-verification\retail-data-smoke-328a0ee0dad945328dc51d7a268d099b\save\lang-export
+config: saved C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\Chronicle\port\build\moonmod-api-verification\retail-data-smoke-328a0ee0dad945328dc51d7a268d099b\save\config.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan32.json
+Vulkan validation: Layer VK_LAYER_OW_OVERLAY uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan validation: Layer VK_LAYER_OW_OBS_HOOK uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan: using NVIDIA GeForce RTX 4070 Ti (Vulkan 1.4.351), offscreen
+compiling shaders 0/504
+compiling shaders 126/504
+compiling shaders 252/504
+compiling shaders 378/504
+compiling shaders 504/504
+gfx: 504 pipelines ready in 0.21 s
+the data has no languages.json; run dcdata extract again
+
+Running Chronicle retail-data character and physics smoke (600 headless frames)...
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+GetITEM No === 258
+get weapon!! 258
+bgm = 1
+sound set = 0
+rev0 = STUDIO_C 30
+rev1 = STUDIO_A 5
+SND_INF= bgm1.txt 
+core 0 rev = 4 15
+SND_INF= snd0.txt 
+SND_INF= bgm100.txt 
+core 0 rev = 4 40
+SND_INF= snd100.txt 
+offset 1
+[258] c01w01.chr
+MainVisualData  	0/38000
+MotionData      	0/10000
+CharaModelBuffer	110647/210000
+MasekiModelBuffer	0/65000
+MapVisualData   	0/688000
+MonstorModelBuffer	0/-1
+SystemScriptBuffer	0/35000
+StartLogoBuffer	    0/5000
+BtMesBuffer	        7441/10500
+BtSteebMesBuffer	0/3500
+set eff sucsess !
+SND_INF= voice0.txt 
+voice err 
+pack = igetfx.mds
+pack = igetfxb.mds
+MainVisualData  	20756/38000
+MotionData      	9256/10000
+CharaModelBuffer	110647/210000
+MasekiModelBuffer	61448/65000
+MapVisualData   	0/688000
+MonstorModelBuffer	0/-1
+SystemScriptBuffer	34259/35000
+StartLogoBuffer	    4684/5000
+BtMesBuffer	        7441/10500
+BtSteebMesBuffer	0/3500
+********** system mem !!!
+tex enter end 
+fire.img
+debug = 1
+pack = dun/etc/itemget_s/d01i02m.mds
+pack = dun/etc/itemget_b/d01i01m.mds
+TotalMem = 688000
+MapVisualData   [2da71080]  180488/2752000
+MonstorData     [2da71080]  0/507512
+[s]9
+[s]28
+[s]47
+[s]58
+[s]57
+[s]6
+[s]4
+[s]39
+[s]27
+[s]35
+[s]24
+[s]43
+[s]23
+[s]21
+[s]36
+[s]30
+[s]5
+safeNum = 60, escapeCnt = 17
+map build success!!
+[s]15
+[s]44
+[s]18
+[s]28
+[s]12
+[s]25
+[s]36
+[s]23
+[s]36
+[s]46
+[s]2
+safeNum = 47, escapeCnt = 11
+map build success!!
+MainVisualData  	20756/38000
+MotionData      	9256/10000
+CharaModelBuffer	110647/210000
+MasekiModelBuffer	61448/65000
+MapVisualData   	180488/688000
+MonstorModelBuffer	66981/507512
+SystemScriptBuffer	34259/35000
+StartLogoBuffer	    4684/5000
+BtMesBuffer	        7441/10500
+BtSteebMesBuffer	2768/3500
+check ---> -1
+dun/d01/stair_mos/in01.chr
+go dungeon
+************ item = -1 ************ 
+exporting the game text to C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\Chronicle\port\build\moonmod-api-verification\retail-gameplay-smoke-2a40fcb467974c8db38505d27a6aa526\save\lang-export
+config: saved C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\Chronicle\port\build\moonmod-api-verification\retail-gameplay-smoke-2a40fcb467974c8db38505d27a6aa526\save\config.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan32.json
+Vulkan validation: Layer VK_LAYER_OW_OVERLAY uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan validation: Layer VK_LAYER_OW_OBS_HOOK uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan: using NVIDIA GeForce RTX 4070 Ti (Vulkan 1.4.351), offscreen
+compiling shaders 0/504
+compiling shaders 126/504
+compiling shaders 252/504
+compiling shaders 378/504
+compiling shaders 504/504
+gfx: 504 pipelines ready in 0.18 s
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_DEBUG_OVERLAY_OK|moonfactory.retail-character-probe:character-probe|CHARACTER PROBE READY
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_RENDER_LAYER_OK|moonfactory.retail-character-probe:character-probe-hud|MOONMOD HUD VERIFIED|true
+the data has no languages.json; run dcdata extract again
+font: thin variant from C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\Chronicle\port\build\moonmod-api-verification\lang\font_thin.ttf
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_MODEL_REPLACE_OK|0|dun/monstor/moon_sentinel.chr|restored
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_FLOOR_QUEUED|moonfactory.retail-character-probe:sentinel-depths:sentinel-floor|15
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_DUNGEON_ENTERED|dungeon
+font: message text from C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\Chronicle\port\build\moonmod-api-verification\lang\font.ttf
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_FLOOR_OK|moonfactory.retail-character-probe:sentinel-depths:sentinel-floor|dungeon|15
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_PHYSICS_QUERY_OK|moonfactory.retail-character-probe:retail-sentinel|1
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_MODEL_OK|moonfactory.retail-character-probe:retail-sentinel-model|dun/monstor/moon_sentinel.chr|loaded
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_OK|moonfactory.retail-character-probe:retail-sentinel|0|chronicle:monster:15:6
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ENEMY_SPAWNED_EVENT|moonfactory.retail-character-probe:retail-sentinel|chronicle:monster:15:6|1024|15|6|moonfactory.retail-character-probe|70
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_COMBAT_ROUNDTRIP_OK|moonfactory.retail-character-probe:retail-sentinel|chronicle:monster:15:6|300|300|1
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_VELOCITY_SET_OK|moonfactory.retail-character-probe:retail-sentinel|1.0|0.0|0.0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ANIMATION_PLAY_OK|moonfactory.retail-character-probe:retail-sentinel-idle|chronicle:monster:15:6|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ANIMATION_STOP_OK|moonfactory.retail-character-probe:retail-sentinel-idle|chronicle:monster:15:6|true
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ANIMATION_DESPAWN_CLEANUP_OK|moonfactory.retail-character-probe:retail-sentinel-idle|chronicle:monster:15:6|true
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_SPAWNED|chronicle:monster:15:8
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ENEMY_SPAWNED_EVENT|moonfactory.retail-character-probe:retail-sentinel|chronicle:monster:15:8|1024|15|8|moonfactory.retail-character-probe|72
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEUED|chronicle:monster:15:8
+moonmod[error][moonfactory.retail-character-probe]: event 'game.tick' failed: [string "main.lua"]:318: physics.velocity_get failed: the entity handle is stale because its monster slot was reused
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEST_OK|moonfactory.retail-character-probe:sentinel-hunt|chronicle:monster:15:8
+
+Running ChronicleTwo MoonFactory native verification...
+Note: Google Test filter = MoonMod*.*:DataRead.NativeResourceOverride*:PlatformPad.TriggerAxisNormalization
+[==========] Running 68 tests from 34 test suites.
+[----------] Global test environment set-up.
+[----------] 1 test from PlatformPad
+[ RUN      ] PlatformPad.TriggerAxisNormalization
+[       OK ] PlatformPad.TriggerAxisNormalization (0 ms)
+[----------] 1 test from PlatformPad (0 ms total)
+
+[----------] 1 test from MoonModWorldTransitionApi
+[ RUN      ] MoonModWorldTransitionApi.QueuesNativeTownsAndRejectsUnregisteredInteriorMaps
+[       OK ] MoonModWorldTransitionApi.QueuesNativeTownsAndRejectsUnregisteredInteriorMaps (4 ms)
+[----------] 1 test from MoonModWorldTransitionApi (4 ms total)
+
+[----------] 1 test from MoonModWorldFlagsApi
+[ RUN      ] MoonModWorldFlagsApi.ReadsAndWritesNativeStoryAndMapFlagsWithBounds
+size : 64
+[       OK ] MoonModWorldFlagsApi.ReadsAndWritesNativeStoryAndMapFlagsWithBounds (0 ms)
+[----------] 1 test from MoonModWorldFlagsApi (0 ms total)
+
+[----------] 2 tests from MoonModWorldApi
+[ RUN      ] MoonModWorldApi.ReadsNativeMapAndDungeonContext
+size : 64
+[       OK ] MoonModWorldApi.ReadsNativeMapAndDungeonContext (0 ms)
+[ RUN      ] MoonModWorldApi.SetsNormalizedTimeAndRejectsInvalidOrMissingSave
+size : 64
+[       OK ] MoonModWorldApi.SetsNormalizedTimeAndRejectsInvalidOrMissingSave (0 ms)
+[----------] 2 tests from MoonModWorldApi (0 ms total)
+
+[----------] 1 test from MoonModWeaponsApi
+[ RUN      ] MoonModWeaponsApi.ListsNativeDefinitionsAndReadsOwnedWeaponState
+size : 64
+[       OK ] MoonModWeaponsApi.ListsNativeDefinitionsAndReadsOwnedWeaponState (1 ms)
+[----------] 1 test from MoonModWeaponsApi (1 ms total)
+
+[----------] 1 test from MoonModWeaponRegistration
+[ RUN      ] MoonModWeaponRegistration.AddsNamedWeaponWithNativeAssetsAndOverriddenStats
+size : 64
+[       OK ] MoonModWeaponRegistration.AddsNamedWeaponWithNativeAssetsAndOverriddenStats (0 ms)
+[----------] 1 test from MoonModWeaponRegistration (0 ms total)
+
+[----------] 2 tests from MoonModRenderApi
+[ RUN      ] MoonModRenderApi.RegistersUpdatesAndRemovesOwnedHudTextLayer
+[       OK ] MoonModRenderApi.RegistersUpdatesAndRemovesOwnedHudTextLayer (0 ms)
+[ RUN      ] MoonModRenderApi.ReadsActiveDungeonCameraPoseAndRejectsUnavailableContext
+[       OK ] MoonModRenderApi.ReadsActiveDungeonCameraPoseAndRejectsUnavailableContext (0 ms)
+[----------] 2 tests from MoonModRenderApi (0 ms total)
+
+[----------] 5 tests from MoonModPlayerApi
+[ RUN      ] MoonModPlayerApi.ReadsHealsAndDamagesActiveNativeCharacterWithHealthClamp
+size : 64
+[       OK ] MoonModPlayerApi.ReadsHealsAndDamagesActiveNativeCharacterWithHealthClamp (0 ms)
+[ RUN      ] MoonModPlayerApi.IncludesNativePositionInActiveDungeonPlayerSnapshot
+size : 64
+[       OK ] MoonModPlayerApi.IncludesNativePositionInActiveDungeonPlayerSnapshot (0 ms)
+[ RUN      ] MoonModPlayerApi.HealsAndDamagesNamedNativeHealthGaugesWithoutSwitchingActiveCharacter
+size : 64
+[       OK ] MoonModPlayerApi.HealsAndDamagesNamedNativeHealthGaugesWithoutSwitchingActiveCharacter (0 ms)
+[ RUN      ] MoonModPlayerApi.SetsExactHpForActiveAndNamedCharactersWithinNativeRange
+size : 64
+[       OK ] MoonModPlayerApi.SetsExactHpForActiveAndNamedCharactersWithinNativeRange (0 ms)
+[ RUN      ] MoonModPlayerApi.AppliesNativeStatusRulesAndClearsTimedEffects
+size : 64
+[       OK ] MoonModPlayerApi.AppliesNativeStatusRulesAndClearsTimedEffects (0 ms)
+[----------] 5 tests from MoonModPlayerApi (1 ms total)
+
+[----------] 2 tests from MoonModPartyEvents
+[ RUN      ] MoonModPartyEvents.PublishesChangedPartyWritesOnceForQuestObjectives
+size : 64
+[       OK ] MoonModPartyEvents.PublishesChangedPartyWritesOnceForQuestObjectives (31 ms)
+[ RUN      ] MoonModPartyEvents.PublishesWeaponEquipForQuestObjectivesOnNextPump
+size : 64
+[       OK ] MoonModPartyEvents.PublishesWeaponEquipForQuestObjectivesOnNextPump (13 ms)
+[----------] 2 tests from MoonModPartyEvents (44 ms total)
+
+[----------] 3 tests from MoonModPartyApi
+[ RUN      ] MoonModPartyApi.ReadsNativePartyMaskAndActiveCharacter
+size : 64
+[       OK ] MoonModPartyApi.ReadsNativePartyMaskAndActiveCharacter (0 ms)
+[ RUN      ] MoonModPartyApi.ChangesActiveCharacterThroughNativeQuickChangeRules
+size : 64
+[       OK ] MoonModPartyApi.ChangesActiveCharacterThroughNativeQuickChangeRules (0 ms)
+[ RUN      ] MoonModPartyApi.RecruitsTownspersonAndReportsNativeCompanionReplacement
+size : 64
+[       OK ] MoonModPartyApi.RecruitsTownspersonAndReportsNativeCompanionReplacement (0 ms)
+[----------] 3 tests from MoonModPartyApi (1 ms total)
+
+[----------] 3 tests from MoonModNativePluginAbi
+[ RUN      ] MoonModNativePluginAbi.ValidatesCCompiledV1DescriptorAndDeclaredPermissions
+[       OK ] MoonModNativePluginAbi.ValidatesCCompiledV1DescriptorAndDeclaredPermissions (0 ms)
+[ RUN      ] MoonModNativePluginAbi.RejectsMismatchedIdsHostVersionsAndUndeclaredPermissions
+[       OK ] MoonModNativePluginAbi.RejectsMismatchedIdsHostVersionsAndUndeclaredPermissions (0 ms)
+[ RUN      ] MoonModNativePluginAbi.RejectsShortTablesUnsupportedMajorsAndMissingCallbacks
+[       OK ] MoonModNativePluginAbi.RejectsShortTablesUnsupportedMajorsAndMissingCallbacks (0 ms)
+[----------] 3 tests from MoonModNativePluginAbi (0 ms total)
+
+[----------] 1 test from MoonModNativePluginHash
+[ RUN      ] MoonModNativePluginHash.FingerprintsLibraryContentsWithSha256
+[       OK ] MoonModNativePluginHash.FingerprintsLibraryContentsWithSha256 (1 ms)
+[----------] 1 test from MoonModNativePluginHash (1 ms total)
+
+[----------] 2 tests from MoonModNativePluginRuntime
+[ RUN      ] MoonModNativePluginRuntime.RequiresPackageContainedLibraryAndExplicitPermission
+[       OK ] MoonModNativePluginRuntime.RequiresPackageContainedLibraryAndExplicitPermission (3 ms)
+[ RUN      ] MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload
+[       OK ] MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload (42 ms)
+[----------] 2 tests from MoonModNativePluginRuntime (46 ms total)
+
+[----------] 1 test from MoonModManagerUi
+[ RUN      ] MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload
+[       OK ] MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload (39 ms)
+[----------] 1 test from MoonModManagerUi (39 ms total)
+
+[----------] 1 test from MoonModLocationsApi
+[ RUN      ] MoonModLocationsApi.ReportsNativeMapCatalogAvailabilityAndValidatesLookups
+[       OK ] MoonModLocationsApi.ReportsNativeMapCatalogAvailabilityAndValidatesLookups (0 ms)
+[----------] 1 test from MoonModLocationsApi (0 ms total)
+
+[----------] 1 test from MoonModLocationRegistration
+[ RUN      ] MoonModLocationRegistration.RegistersOwnedMapAssetsAndQueuesNativeEntryTransition
+[       OK ] MoonModLocationRegistration.RegistersOwnedMapAssetsAndQueuesNativeEntryTransition (7 ms)
+[----------] 1 test from MoonModLocationRegistration (7 ms total)
+
+[----------] 1 test from MoonModItemRegistration
+[ RUN      ] MoonModItemRegistration.DataOnlyConsumableEntersNativeTablesAndInventory
+size : 64
+[       OK ] MoonModItemRegistration.DataOnlyConsumableEntersNativeTablesAndInventory (0 ms)
+[----------] 1 test from MoonModItemRegistration (0 ms total)
+
+[----------] 1 test from MoonModInputApi
+[ RUN      ] MoonModInputApi.BindsReadsConsumesUnbindsAndCleansUpOnOwnerUnload
+[       OK ] MoonModInputApi.BindsReadsConsumesUnbindsAndCleansUpOnOwnerUnload (6 ms)
+[----------] 1 test from MoonModInputApi (6 ms total)
+
+[----------] 7 tests from MoonModGeoramaApi
+[ RUN      ] MoonModGeoramaApi.ReadsNativeTownPlacementsAndAnalysisState
+size : 64
+[       OK ] MoonModGeoramaApi.ReadsNativeTownPlacementsAndAnalysisState (0 ms)
+[ RUN      ] MoonModGeoramaApi.SetsCompletionThroughNativeRequestConditions
+size : 64
+[       OK ] MoonModGeoramaApi.SetsCompletionThroughNativeRequestConditions (0 ms)
+[ RUN      ] MoonModGeoramaApi.ReadsBoundedSavedRiverGridCells
+size : 64
+[       OK ] MoonModGeoramaApi.ReadsBoundedSavedRiverGridCells (0 ms)
+[ RUN      ] MoonModGeoramaApi.SetsNativeRiverGridCellsPersistsReadbackAndIsIdempotent
+size : 64
+arena: ? 576000 bytes at 00000218098C0600 (above 4 GiB)
+[       OK ] MoonModGeoramaApi.SetsNativeRiverGridCellsPersistsReadbackAndIsIdempotent (0 ms)
+[ RUN      ] MoonModGeoramaApi.RegistersDataOnlyPieceVariantIntoNativeBuildDefinitions
+arena: ? 131072 bytes at 0000021809950000 (above 4 GiB)
+size : 64
+[       OK ] MoonModGeoramaApi.RegistersDataOnlyPieceVariantIntoNativeBuildDefinitions (0 ms)
+[ RUN      ] MoonModGeoramaApi.PlacesRegisteredPieceWithNativeRulesAndPersistsSavedLayout
+size : 64
+[       OK ] MoonModGeoramaApi.PlacesRegisteredPieceWithNativeRulesAndPersistsSavedLayout (1 ms)
+[ RUN      ] MoonModGeoramaApi.PublishesChangedWorldWritesOnceForQuestObjectives
+size : 64
+arena: ? 576000 bytes at 00000218099B0600 (above 4 GiB)
+[       OK ] MoonModGeoramaApi.PublishesChangedWorldWritesOnceForQuestObjectives (59 ms)
+[----------] 7 tests from MoonModGeoramaApi (63 ms total)
+
+[----------] 1 test from MoonModExamplePackage
+[ RUN      ] MoonModExamplePackage.FirstStepsRunsQuestSkillAndManagerActions
+size : 64
+[       OK ] MoonModExamplePackage.FirstStepsRunsQuestSkillAndManagerActions (21 ms)
+[----------] 1 test from MoonModExamplePackage (21 ms total)
+
+[----------] 2 tests from MoonModEntitiesApi
+[ RUN      ] MoonModEntitiesApi.QueriesLiveDungeonMonstersAndRejectsUnsupportedFilters
+size : 64
+[       OK ] MoonModEntitiesApi.QueriesLiveDungeonMonstersAndRejectsUnsupportedFilters (0 ms)
+[ RUN      ] MoonModEntitiesApi.DespawnsOwnedMonsterWithoutKillSideEffectsAndInvalidatesItsHandle
+[       OK ] MoonModEntitiesApi.DespawnsOwnedMonsterWithoutKillSideEffectsAndInvalidatesItsHandle (0 ms)
+[----------] 2 tests from MoonModEntitiesApi (1 ms total)
+
+[----------] 1 test from MoonModEconomyApi
+[ RUN      ] MoonModEconomyApi.UsesNativeWalletClampAndNeverAllowsNegativeBalance
+size : 64
+[       OK ] MoonModEconomyApi.UsesNativeWalletClampAndNeverAllowsNegativeBalance (0 ms)
+[----------] 1 test from MoonModEconomyApi (0 ms total)
+
+[----------] 2 tests from MoonModDungeonRegistration
+[ RUN      ] MoonModDungeonRegistration.AddedFloorUsesNativeGraphAndTransitionQueries
+arena: ? 65536 bytes at 0000021809980000 (above 4 GiB)
+arena: ? 65536 bytes at 000002180B640000 (above 4 GiB)
+[       OK ] MoonModDungeonRegistration.AddedFloorUsesNativeGraphAndTransitionQueries (1 ms)
+[ RUN      ] MoonModDungeonRegistration.ExtendedFloorProgressSurvivesStableIdSaveReload
+arena: ? 65536 bytes at 000002180B660000 (above 4 GiB)
+[       OK ] MoonModDungeonRegistration.ExtendedFloorProgressSurvivesStableIdSaveReload (0 ms)
+[----------] 2 tests from MoonModDungeonRegistration (1 ms total)
+
+[----------] 2 tests from MoonModDebugInspect
+[ RUN      ] MoonModDebugInspect.ReturnsBoundedNativeSceneSnapshot
+[       OK ] MoonModDebugInspect.ReturnsBoundedNativeSceneSnapshot (0 ms)
+[ RUN      ] MoonModDebugInspect.RegistersAndUnloadsOwnedOverlay
+[       OK ] MoonModDebugInspect.RegistersAndUnloadsOwnedOverlay (0 ms)
+[----------] 2 tests from MoonModDebugInspect (0 ms total)
+
+[----------] 1 test from MoonModContentE2E
+[ RUN      ] MoonModContentE2E.LuaRegistrationMaterializesDungeonAndUsableDataOnlyItem
+size : 64
+arena: ? 65536 bytes at 000002180B680000 (above 4 GiB)
+[       OK ] MoonModContentE2E.LuaRegistrationMaterializesDungeonAndUsableDataOnlyItem (27 ms)
+[----------] 1 test from MoonModContentE2E (27 ms total)
+
+[----------] 2 tests from MoonModCommands
+[ RUN      ] MoonModCommands.ExecutesOwnerScopedCallbacksFromApiAndManagerAndCleansUp
+[       OK ] MoonModCommands.ExecutesOwnerScopedCallbacksFromApiAndManagerAndCleansUp (8 ms)
+[ RUN      ] MoonModCommands.RequiresManifestPermissionsForRegistrationAndExecution
+[       OK ] MoonModCommands.RequiresManifestPermissionsForRegistrationAndExecution (6 ms)
+[----------] 2 tests from MoonModCommands (15 ms total)
+
+[----------] 1 test from MoonModCombatApi
+[ RUN      ] MoonModCombatApi.ReadsLiveDungeonMonsterHealthStatusAndEmptyCombatState
+size : 64
+[       OK ] MoonModCombatApi.ReadsLiveDungeonMonsterHealthStatusAndEmptyCombatState (0 ms)
+[----------] 1 test from MoonModCombatApi (0 ms total)
+
+[----------] 1 test from MoonModModelRegistration
+[ RUN      ] MoonModModelRegistration.OwnedCustomAssetsBindToANativeCharacterDefinition
+[       OK ] MoonModModelRegistration.OwnedCustomAssetsBindToANativeCharacterDefinition (3 ms)
+[----------] 1 test from MoonModModelRegistration (3 ms total)
+
+[----------] 1 test from MoonModAnimationRegistration
+[ RUN      ] MoonModAnimationRegistration.OwnsModelMotionBindingsAndRejectsPlaybackWithoutALiveSpawn
+[       OK ] MoonModAnimationRegistration.OwnsModelMotionBindingsAndRejectsPlaybackWithoutALiveSpawn (2 ms)
+[----------] 1 test from MoonModAnimationRegistration (2 ms total)
+
+[----------] 1 test from MoonModCharacterRegistration
+[ RUN      ] MoonModCharacterRegistration.LuaAdapterAddsADataOnlyEnemyToTheNativeMonsterTable
+size : 64
+[       OK ] MoonModCharacterRegistration.LuaAdapterAddsADataOnlyEnemyToTheNativeMonsterTable (0 ms)
+[----------] 1 test from MoonModCharacterRegistration (0 ms total)
+
+[----------] 2 tests from MoonModContentApi
+[ RUN      ] MoonModContentApi.GenericContentRegistrationAndListingUseTheTypedCharacterAdapter
+[       OK ] MoonModContentApi.GenericContentRegistrationAndListingUseTheTypedCharacterAdapter (0 ms)
+[ RUN      ] MoonModContentApi.UnregistersPendingTypedDefinitionsAndEnforcesOwnership
+[       OK ] MoonModContentApi.UnregistersPendingTypedDefinitionsAndEnforcesOwnership (0 ms)
+[----------] 2 tests from MoonModContentApi (0 ms total)
+
+[----------] 3 tests from MoonModAudio
+[ RUN      ] MoonModAudio.PackageSoundMixesStopsAndIsCleanedUpByOwner
+[       OK ] MoonModAudio.PackageSoundMixesStopsAndIsCleanedUpByOwner (9 ms)
+[ RUN      ] MoonModAudio.LuaPackageCallsAudioApiAndHeadlessMixerAdvancesIt
+[       OK ] MoonModAudio.LuaPackageCallsAudioApiAndHeadlessMixerAdvancesIt (11 ms)
+[ RUN      ] MoonModAudio.PackageWithoutAudioPermissionsCannotRegisterOrPlay
+[       OK ] MoonModAudio.PackageWithoutAudioPermissionsCannotRegisterOrPlay (8 ms)
+[----------] 3 tests from MoonModAudio (30 ms total)
+
+[----------] 7 tests from MoonModApi
+[ RUN      ] MoonModApi.ChronicleExposesCapabilityCheckedContentOperations
+[       OK ] MoonModApi.ChronicleExposesCapabilityCheckedContentOperations (123 ms)
+[ RUN      ] MoonModApi.ChronicleTwoExposesCapabilityCheckedContentOperations
+[       OK ] MoonModApi.ChronicleTwoExposesCapabilityCheckedContentOperations (123 ms)
+[ RUN      ] MoonModApi.RejectsCapabilitiesWithoutNativeHandlers
+[       OK ] MoonModApi.RejectsCapabilitiesWithoutNativeHandlers (0 ms)
+[ RUN      ] MoonModApi.ChronicleTwoAdapterReportsEveryNonCoreOperation
+[       OK ] MoonModApi.ChronicleTwoAdapterReportsEveryNonCoreOperation (0 ms)
+[ RUN      ] MoonModApi.RequiredCapabilityLedgerRejectsMissingOperation
+[       OK ] MoonModApi.RequiredCapabilityLedgerRejectsMissingOperation (0 ms)
+[ RUN      ] MoonModApi.RequiredCapabilityLedgerRejectsUnsupportedOperationWithoutReason
+[       OK ] MoonModApi.RequiredCapabilityLedgerRejectsUnsupportedOperationWithoutReason (0 ms)
+[ RUN      ] MoonModApi.PublishesWorldLocationChangesForQuestObjectives
+[       OK ] MoonModApi.PublishesWorldLocationChangesForQuestObjectives (17 ms)
+[----------] 7 tests from MoonModApi (266 ms total)
+
+[----------] 4 tests from DataRead
+[ RUN      ] DataRead.NativeResourceOverrideLoadsThroughDataReaderAndRestoresIndexedAsset
+[       OK ] DataRead.NativeResourceOverrideLoadsThroughDataReaderAndRestoresIndexedAsset (9 ms)
+[ RUN      ] DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMonsterAssets
+[       OK ] DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMonsterAssets (84 ms)
+[ RUN      ] DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMapAssets
+[       OK ] DataRead.NativeResourceOverrideCanSupplyBoundedUnindexedMapAssets (100 ms)
+[ RUN      ] DataRead.NativeResourceOverrideRejectsPathTraversalAndFallsBackForOversizedFiles
+[       OK ] DataRead.NativeResourceOverrideRejectsPathTraversalAndFallsBackForOversizedFiles (5 ms)
+[----------] 4 tests from DataRead (199 ms total)
+
+[----------] Global test environment tear-down
+[==========] 68 tests from 34 test suites ran. (794 ms total)
+[  PASSED  ] 68 tests.
+dataread: indexed 1 files under C:\Users\armor\AppData\Local\Temp\moonmod_world_transition_1623521169620500
+dataread: indexed 0 files under C:\Users\armor\AppData\Local\Temp\moonmod_world_transition_1623521169620500\empty
+moonmod: registered weapon test.moonmod.weapon-probe:moonblade as game item 511 (vanilla assets from 32)
+dataread: indexed 1 files under C:\Users\armor\AppData\Local\Temp\moonmod_location_registration_1623521312630200
+moonmod: registered item test.moonmod.item-probe:starlight-tonic as game item 511 (vanilla assets from 274)
+moonmod: registered floor test.moonmod.dungeon-probe:moon-vault.annex as dungeon 0 floor 2 from floor 1
+moonmod: registered floor test.moonmod.dungeon-probe:moon-vault.gallery as dungeon 0 floor 3 from floor 2
+moonmod: registered floor test.moonmod.dungeon-probe:moon-vault.annex as dungeon 0 floor 2 from floor 1
+moonmod: registered floor test.moonmod.dungeon-probe:moon-vault.gallery as dungeon 0 floor 3 from floor 2
+moonmod: registered item test.content-e2e:cure-all as game item 511 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:cure-curse as game item 510 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:cure-dry as game item 509 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:cure-poison as game item 508 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:cure-slow as game item 507 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:cure-stone as game item 506 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:cure-stop as game item 505 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:power-draught as game item 504 (vanilla assets from 274)
+moonmod: registered item test.content-e2e:starlight-tonic as game item 503 (vanilla assets from 274)
+moonmod: registered floor test.content-e2e:moon-vault.annex as dungeon 0 floor 2 from floor 1
+moonmod: registered floor test.content-e2e:moon-vault.gallery as dungeon 0 floor 3 from floor 2
+dataread: indexed 3 files under C:\Users\armor\AppData\Local\Temp\dataread_1623521764092500\data
+dataread: indexed 3 files under C:\Users\armor\AppData\Local\Temp\dataread_1623521773606300\data
+dataread: indexed 3 files under C:\Users\armor\AppData\Local\Temp\dataread_1623521857849600\data
+dataread: indexed 3 files under C:\Users\armor\AppData\Local\Temp\dataread_1623521958544700\data
+moonmod: ignored oversized or unreadable native resource override for dir/sub/file.bin
+
+Running ChronicleTwo executable headless smoke...
+arena: MainBuffer 109051904 bytes at 000002640D800000 (above 4 GiB)
+size : 64
+dataread: indexed 2 files under C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\smoke-fixture\data
+script timing startup: 0 scripts, 0 mismatches, 0.000 seconds
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan32.json
+Vulkan validation: Layer VK_LAYER_OW_OVERLAY uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan validation: Layer VK_LAYER_OW_OBS_HOOK uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan: using NVIDIA GeForce RTX 4070 Ti (Vulkan 1.4.351), offscreen
+compiling shaders 0/840
+compiling shaders 210/840
+compiling shaders 420/840
+compiling shaders 630/840
+compiling shaders 840/840
+gfx: 840 pipelines ready in 0.52 s
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|info.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|events.subscribe|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|events.unsubscribe|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.heal|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.damage|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.status_add|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.status_remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.active|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.set_active|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.recruit|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|economy.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|economy.add|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|economy.spend|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.transition|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.register_dungeon|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.set_time|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_flag_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_flag_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_value_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_value_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.map_flag_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.map_flag_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.query|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.spawn|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.despawn|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.damage|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.heal|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.register_formula|unsupported|Chronicle Two supports bounded scripted enemy damage and healing, but has no verified hook for replacing the native damage formula.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|locations.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|locations.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|locations.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|dungeons.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|dungeons.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|dungeons.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.element_set|unsupported|Chronicle Two's Georama pieces do not use Chronicle's per-plot optional-element table.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.request_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.request_known_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.condition_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.place|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.river_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.unlock|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.set_rank|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.unregister|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.replace|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.resolve|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|animations.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|animations.play|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|animations.stop|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_list|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_get|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_register|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_set_active|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.register_function|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.call_function|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.unregister_function|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.give|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.use|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.give|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.equip|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.upgrade|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.spawn|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.start|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.advance|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.list_hooks|unsupported|Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.call|unsupported|Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.override|unsupported|Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|content.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|content.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|content.unregister|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|save.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|save.set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|save.migrate|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.bind|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.unbind|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.state|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.consume|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.axis|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.context_push|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.context_pop|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.context_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|audio.play|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|audio.stop|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|audio.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.layer_register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.layer_remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.camera_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.camera_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|ui.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|ui.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|ui.notify|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|physics.query|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|physics.velocity_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|physics.velocity_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.load|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.release|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.resolve|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.override|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.unoverride|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|localization.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|localization.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|commands.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|commands.execute|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|commands.unregister|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|compat.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|compat.supports|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|debug.inspect|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|debug.profile|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|debug.overlay_register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|api.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|api.supports|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|api.call|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_CATALOG_COUNT|137
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_LOCATION_REGISTERED|chronicle-two:location:moonmod.headless-probe:moon-cave
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_RESOLVE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_REPLACE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_UNREGISTER_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_REGISTER_OK|moonmod.headless-probe:headless-model
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ANIMATIONS_NO_DUNGEON_OK|moonmod.headless-probe:headless-idle
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_GEORAMA_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_FUTURE_DOMAINS_UNSUPPORTED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SCRIPT_FUNCTIONS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SKILLS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_QUEST_CAPABILITIES_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_RESOURCES_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_UI_NOTIFY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_UI_ACTIONS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_INPUT_CONTEXTS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PHYSICS_VELOCITY_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PHYSICS_VELOCITY_SET_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_INPUT_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_DEBUG_PROFILE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPON_EQUIP_EMPTY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPON_UPGRADE_EMPTY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPONS_EMPTY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPON_PENDING:moonmod.headless-probe:headless-blade
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CONTENT_REGISTRY_OK|3
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CONTENT_UNREGISTER_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_LOCALIZATION_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ITEM_PENDING:moonmod.headless-probe:headless-probe
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ITEMS_PENDING_LISTED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PLAYER_SET_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_STATUS_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PARTY_SET_ACTIVE_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PARTY_RECRUIT_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CHARACTER_REGISTERED:moonmod.headless-probe:headless-sentinel
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CHARACTER_SPAWN_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_QUERY_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_QUERY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_TIME_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_FLAGS_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_COMBAT_DAMAGE_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_COMBAT_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ENTITIES_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ENTITY_SPAWN_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ENTITY_DESPAWN_OWNERSHIP_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_DUNGEON_PENDING:moonmod.headless-probe:headless-vault
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CONTENT_ALL_TYPES_OK|6
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_QUEST_LIFECYCLE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_QUESTS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_STORAGE_INITIALIZED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_API_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SAVE_MIGRATED
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_SUPPORT|locations.list|true|
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_SUPPORT|locations.get|true|
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_LIST_COUNT|3
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_ENTRY|1|chronicle-two:location:probe-town|Moon Factory Fixture Town|georama|2
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_ENTRY|2|chronicle-two:location:probe-field|Moon Factory Fixture Field|interior|4
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_ENTRY|3|chronicle-two:location:moonmod.headless-probe:moon-cave|Moon Factory Cave|interior|-1
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_DEBUG_INSPECT_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_TRANSITION_CONTEXT_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MOD_LOCATION_TRANSITION_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_LOCATIONS_OK|3
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SCENE_WILL_ENTER:title:3
+texture: IMG pointer has no catalog source
+mglib: frame 3 written to C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\smoke-fixture\save/smoke.png
+arena: MainBuffer 109051904 bytes at 000002380C900000 (above 4 GiB)
+size : 64
+dataread: indexed 2 files under C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\smoke-fixture\data
+script timing startup: 0 scripts, 0 mismatches, 0.000 seconds
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan32.json
+Vulkan validation: Layer VK_LAYER_OW_OVERLAY uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan validation: Layer VK_LAYER_OW_OBS_HOOK uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan: using NVIDIA GeForce RTX 4070 Ti (Vulkan 1.4.351), offscreen
+compiling shaders 0/840
+compiling shaders 210/840
+compiling shaders 420/840
+compiling shaders 630/840
+compiling shaders 840/840
+gfx: 840 pipelines ready in 0.61 s
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|info.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|events.subscribe|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|events.unsubscribe|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.heal|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.damage|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.status_add|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|player.status_remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.active|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.set_active|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|party.recruit|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|economy.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|economy.add|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|economy.spend|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.transition|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.register_dungeon|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.set_time|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_flag_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_flag_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_value_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.story_value_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.map_flag_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|world.map_flag_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.query|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.spawn|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|entities.despawn|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.damage|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.heal|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.register_formula|unsupported|Chronicle Two supports bounded scripted enemy damage and healing, but has no verified hook for replacing the native damage formula.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|locations.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|locations.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|locations.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|dungeons.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|dungeons.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|dungeons.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.element_set|unsupported|Chronicle Two's Georama pieces do not use Chronicle's per-plot optional-element table.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.request_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.request_known_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.condition_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.place|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|georama.river_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.unlock|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|skills.set_rank|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.unregister|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.replace|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.resolve|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|models.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|animations.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|animations.play|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|animations.stop|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_list|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_get|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_register|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|combat.styles_set_active|unsupported|Fighting-style work is deferred while authored model rigs and native move-animation bindings remain out of scope.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.register_function|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.call_function|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.unregister_function|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.give|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|items.use|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.give|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.equip|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|weapons.upgrade|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|characters.spawn|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.start|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|quests.advance|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.list_hooks|unsupported|Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.call|unsupported|Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|scripts.override|unsupported|Mod-to-mod Lua functions are available, but this game-native hook operation has no stable adapter binding yet.
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|content.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|content.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|content.unregister|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|save.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|save.set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|save.migrate|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.bind|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.unbind|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.state|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.consume|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.axis|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.context_push|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.context_pop|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|input.context_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|audio.play|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|audio.stop|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|audio.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.layer_register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.layer_remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.camera_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|render.camera_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|ui.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|ui.remove|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|ui.notify|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|physics.query|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|physics.velocity_get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|physics.velocity_set|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.load|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.release|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.resolve|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.override|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|resources.unoverride|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|localization.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|localization.get|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|commands.register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|commands.execute|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|commands.unregister|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|compat.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|compat.supports|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|debug.inspect|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|debug.profile|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|debug.overlay_register|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|api.list|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|api.supports|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_STATUS|api.call|supported|
+moonmod[info][moonmod.headless-probe]: MOONMOD_API_CATALOG_COUNT|137
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_LOCATION_REGISTERED|chronicle-two:location:moonmod.headless-probe:moon-cave
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_RESOLVE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_REPLACE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_UNREGISTER_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MODEL_REGISTER_OK|moonmod.headless-probe:headless-model
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ANIMATIONS_NO_DUNGEON_OK|moonmod.headless-probe:headless-idle
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_GEORAMA_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_FUTURE_DOMAINS_UNSUPPORTED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SCRIPT_FUNCTIONS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SKILLS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_QUEST_CAPABILITIES_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_RESOURCES_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_UI_NOTIFY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_UI_ACTIONS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_INPUT_CONTEXTS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PHYSICS_VELOCITY_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PHYSICS_VELOCITY_SET_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_INPUT_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_DEBUG_PROFILE_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPON_EQUIP_EMPTY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPON_UPGRADE_EMPTY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPONS_EMPTY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WEAPON_PENDING:moonmod.headless-probe:headless-blade
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CONTENT_REGISTRY_OK|3
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CONTENT_UNREGISTER_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_LOCALIZATION_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ITEM_PENDING:moonmod.headless-probe:headless-probe
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ITEMS_PENDING_LISTED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PLAYER_SET_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_STATUS_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PARTY_SET_ACTIVE_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_PARTY_RECRUIT_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CHARACTER_REGISTERED:moonmod.headless-probe:headless-sentinel
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CHARACTER_SPAWN_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_QUERY_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_QUERY_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_TIME_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_FLAGS_NO_SAVE
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_COMBAT_DAMAGE_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_COMBAT_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ENTITIES_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ENTITY_SPAWN_NO_DUNGEON
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_ENTITY_DESPAWN_OWNERSHIP_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_DUNGEON_PENDING:moonmod.headless-probe:headless-vault
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_CONTENT_ALL_TYPES_OK|6
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_QUEST_PERSISTED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_QUESTS_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_STORAGE_RELOADED
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_API_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SAVE_MIGRATION_RELOADED
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_SUPPORT|locations.list|true|
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_SUPPORT|locations.get|true|
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_LIST_COUNT|3
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_ENTRY|1|chronicle-two:location:probe-town|Moon Factory Fixture Town|georama|2
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_ENTRY|2|chronicle-two:location:probe-field|Moon Factory Fixture Field|interior|4
+moonmod[info][moonmod.headless-probe]: MOONMOD_LOCATION_ENTRY|3|chronicle-two:location:moonmod.headless-probe:moon-cave|Moon Factory Cave|interior|-1
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_DEBUG_INSPECT_OK
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_WORLD_TRANSITION_CONTEXT_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_MOD_LOCATION_TRANSITION_GUARD
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_LOCATIONS_OK|3
+moonmod[info][moonmod.headless-probe]: MOONMOD_HEADLESS_SCENE_WILL_ENTER:title:3
+texture: IMG pointer has no catalog source
+mglib: frame 3 written to C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\smoke-fixture\save/smoke.png
+
+SMOKE_OK
+Running ChronicleTwo retail-data headless startup smoke...
+arena: MainBuffer 109051904 bytes at 0000024916900000 (above 4 GiB)
+size : 64
+arena: ItemMessages 40960 bytes at 0000020884D70000 (above 4 GiB)
+arena: InfoStack 320000 bytes at 0000020884D80E00 (above 4 GiB)
+rm 14159
+size : 64
+arena: ? 4096 bytes at 0000020884DD0000 (above 4 GiB)
+arena: ? 32768 bytes at 0000020884DE0000 (above 4 GiB)
+arena: ? 32768 bytes at 0000020884DF0000 (above 4 GiB)
+arena: ? 4096 bytes at 0000020884E00000 (above 4 GiB)
+arena: ? 4096 bytes at 0000020884E10000 (above 4 GiB)
+arena: ? 32768 bytes at 0000020884E20000 (above 4 GiB)
+arena: SystemSeStack 25600 bytes at 0000020884E30C00 (above 4 GiB)
+arena: ? 49152 bytes at 0000020884E40000 (above 4 GiB)
+GeoData Remain = 42kbyte
+arena: ? 37376 bytes at 0000020884E50E00 (above 4 GiB)
+size : 64
+main_data remain = 106417kb
+MIDI stop! 12
+##### 14
+8f2ebf38 s19.img
+arena: ? 1228800 bytes at 0000020889BA0000 (above 4 GiB)
+5:9
+remain 1978kByte
+load sound 500
+Reverb 4 40
+MIDI stop! 1
+dataread: indexed 7511 files under C:\Users\armor\AppData\Local\chronicletwo\data
+script timing startup: 1356 scripts, 0 mismatches, 5.593 seconds
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan32.json
+Vulkan validation: Layer VK_LAYER_OW_OVERLAY uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan validation: Layer VK_LAYER_OW_OBS_HOOK uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan: using NVIDIA GeForce RTX 4070 Ti (Vulkan 1.4.351), offscreen
+compiling shaders 0/840
+compiling shaders 210/840
+compiling shaders 420/840
+compiling shaders 630/840
+compiling shaders 840/840
+gfx: 840 pipelines ready in 0.59 s
+mglib: frame 120 written to C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\retail-data-smoke-d2fa1d6a919743bbba654038a4ce69ca\startup.png
+
+Running ChronicleTwo retail-data floor-one character and physics smoke (180 headless frames)...
+arena: MainBuffer 109051904 bytes at 000001DF88ED0000 (above 4 GiB)
+size : 64
+arena: ItemMessages 40960 bytes at 000001DF84E90000 (above 4 GiB)
+arena: InfoStack 320000 bytes at 000001DF8F6E0E00 (above 4 GiB)
+rm 14159
+size : 64
+arena: ? 4096 bytes at 000001DF84EA0000 (above 4 GiB)
+arena: ? 32768 bytes at 000001DF84EB0000 (above 4 GiB)
+arena: ? 32768 bytes at 000001DF8F730000 (above 4 GiB)
+arena: ? 4096 bytes at 000001DF8F740000 (above 4 GiB)
+arena: ? 4096 bytes at 000001DF8F750000 (above 4 GiB)
+arena: ? 32768 bytes at 000001DF8F760000 (above 4 GiB)
+arena: SystemSeStack 25600 bytes at 000001DF8F770C00 (above 4 GiB)
+arena: ? 49152 bytes at 000001DF8F780000 (above 4 GiB)
+GeoData Remain = 42kbyte
+arena: ? 37376 bytes at 000001DF8F790E00 (above 4 GiB)
+size : 64
+main_data remain = 106496kb
+##### 14
+[0] FLOOR :::    1 ----->> 1 
+menu_stack ptr : 0000007AC74FEADC
+load sound 1601
+MIDI stop! 10
+MIDI stop! 10
+Reverb 4 20
+REVERB 4 35
+TEXBLK_LAST = 174
+arena: ? 1228800 bytes at 000001DF949A0000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF98AD0000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF98C00000 (above 4 GiB)
+arena: ? 409600 bytes at 000001DF98D30000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF98DA0000 (above 4 GiB)
+arena: ? 409600 bytes at 000001DF98ED0000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF98F40000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF99070000 (above 4 GiB)
+[0]STACK 66572/68500
+[1]STACK 7754/40000
+[2]STACK 491/7000
+[3]STACK 376/4650
+[4]STACK 192/3000
+[5]STACK 2245/10348
+[6]STACK 3935/4948
+arena: ? 1228800 bytes at 000001DF991A0000 (above 4 GiB)
+SCRIPT FILE map/d/d01/d01_1.stb
+arena: ? 131136 bytes at 000001DF992D0FC0 (above 4 GiB)
+arena: ? 20544 bytes at 000001DF99300FC0 (above 4 GiB)
+load sound 1601
+Reverb 4 20
+RUN SYS_SCRIPT 1000
+[0] FLOOR :::    1 ----->> 1 
+RESET SCRIPT RUN !!
+MIDI stop! 10
+MIDI stop! 12
+MIDI stop! 9
+MIDI stop! 8
+load sound 1600
+Reverb 4 20
+a77bb768 d01m01a.img
+arena: ? 1228800 bytes at 000001DF99310000 (above 4 GiB)
+5:203
+remain 91398kByte
+rand = 1614
+3,3 [10][4]
+6,3 [10][8]
+9,4 [10][2]
+11,5 [10][10]
+11,8 [10][1]
+4,9 [10][1]
+4,10 [10][4]
+4,11 [10][4]
+7,11 [10][8]
+EXIT INDEX = 4
+EXIT INDEX = 3
+arena: ? 409600 bytes at 000001DF99440000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF994B0000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF995E0000 (above 4 GiB)
+arena: ? 409600 bytes at 000001DF99710000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF99780000 (above 4 GiB)
+arena: ? 1228800 bytes at 000001DF998B0000 (above 4 GiB)
+---- EVENT LOAD FILE [snd2/event/EV_100_105.snd] ----
+---- EVENT LOAD FILE [snd2/sp/sp_030.snd] ----
+---- EVENT LOAD FILE [event/e100/e100/e100_1.txt] ----
+---- EVENT LOAD FILE [event/e100/e100/e100_mints.chr] ----
+---- EVENT LOAD FILE [item/helpreceiver.chr] ----
+arena: ? 1228800 bytes at 000001DF999E0000 (above 4 GiB)
+---- EVENT LOAD FILE [event/e100/e100/e100_2d_1.img] ----
+_SPRITE_SET_PUTSIZE:512,512
+_SPRITE_SET_POS:256.000000,256.000000
+_SPRITE_SET_PUTSIZE:512,512
+_SPRITE_SET_POS:256.000000,256.000000
+mono 
+dataread: indexed 7511 files under C:\Users\armor\AppData\Local\chronicletwo\data
+script timing startup: 1356 scripts, 0 mismatches, 5.522 seconds
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win32.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Launcher\Portal\Extras\Overlay\EOSOverlayVkLayer-Win64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan64.json
+Vulkan validation: loader_get_json: Failed to open JSON file C:\Users\armor\AppData\Local\Medal\HookDLL\MedalHook_Vulkan_134334607670241677\medal-vulkan32.json
+Vulkan validation: Layer VK_LAYER_OW_OVERLAY uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan validation: Layer VK_LAYER_OW_OBS_HOOK uses API version 1.2 which is older than the application specified API version of 1.4. May cause issues.
+Vulkan: using NVIDIA GeForce RTX 4070 Ti (Vulkan 1.4.351), offscreen
+compiling shaders 0/840
+compiling shaders 210/840
+compiling shaders 420/840
+compiling shaders 630/840
+compiling shaders 840/840
+gfx: 840 pipelines ready in 0.66 s
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_DEBUG_OVERLAY_OK|moonfactory.retail-character-probe:character-probe|CHARACTER PROBE READY
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_RENDER_LAYER_OK|moonfactory.retail-character-probe:character-probe-hud|MOONMOD HUD VERIFIED|true
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_MODEL_REPLACE_OK|0|dungeon/monster/moon_sentinel.chr|restored
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_TEMPLATE|1|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_SPAWN_CALL|1|moonfactory.retail-character-probe:retail-sentinel
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_WAIT|1|characters.spawn requires an active Chronicle Two dungeon
+script timing: mainchr/c01.stb: 6 instructions (assign 0, cue 0, inline 0, float 0, inverse 0, inverse float 0, convert 0, integer 0, anchors 0, windows 6)
+script timing: map/d/d01/d01_1.stb: 40 instructions (assign 5, cue 1, inline 3, float 0, inverse 0, inverse float 0, convert 0, integer 0, anchors 0, windows 0)
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_DUNGEON_ENTERED|dungeon
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_TEMPLATE|31|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_SPAWN_CALL|31|moonfactory.retail-character-probe:retail-sentinel
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_TEMPLATE|61|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_SPAWN_CALL|61|moonfactory.retail-character-probe:retail-sentinel
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_TEMPLATE|91|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_SPAWN_CALL|91|moonfactory.retail-character-probe:retail-sentinel
+script timing: dungeon/monster/e201a.stb: 5 instructions (assign 0, cue 0, inline 0, float 0, inverse 0, inverse float 0, convert 1, integer 0, anchors 0, windows 0)
+script timing: dungeon/monster/e203a.stb: 5 instructions (assign 0, cue 0, inline 0, float 0, inverse 0, inverse float 0, convert 1, integer 0, anchors 0, windows 0)
+script timing: dungeon/monster/e211a.stb: 5 instructions (assign 0, cue 0, inline 0, float 0, inverse 0, inverse float 0, convert 1, integer 0, anchors 0, windows 0)
+texture: IMG pointer has no catalog source
+texture: IMG pointer has no catalog source
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_TEMPLATE|121|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_SPAWN_CALL|121|moonfactory.retail-character-probe:retail-sentinel
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ANIMATION_PLAY_OK|moonfactory.retail-character-probe:retail-sentinel-idle|chronicle-two:monster:18:1|0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_MODEL_OK|moonfactory.retail-character-probe:retail-sentinel-model|dungeon/monster/moon_sentinel.chr|loaded
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_PHYSICS_QUERY_OK|moonfactory.retail-character-probe:retail-sentinel|1
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_CHARACTER_OK|moonfactory.retail-character-probe:retail-sentinel|0|chronicle-two:monster:18:1
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_VELOCITY_SET_OK|moonfactory.retail-character-probe:retail-sentinel|1.0
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_COMBAT_ROUNDTRIP_OK|moonfactory.retail-character-probe:retail-sentinel|chronicle-two:monster:18:1|300|300|1
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ANIMATION_STOP_OK|moonfactory.retail-character-probe:retail-sentinel-idle|chronicle-two:monster:18:1|true
+moonmod[info][moonfactory.retail-character-probe]: MOONFACTORY_RETAIL_ANIMATION_DESPAWN_CLEANUP_OK|moonfactory.retail-character-probe:retail-sentinel-idle|chronicle-two:monster:18:1|true
+mglib: frame 180 written to C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\ChronicleTwo\port\build\moonmod-api-verification\retail-gameplay-smoke-bbb79f9c71cc4238827a37a7daef40f3\gameplay.png
+
+MoonFactory headless verification failed. Report: C:\Users\armor\Documents\Codex\2026-10-14\i-want-to-build-an-all\MoonFactory\artifacts\verification-report.json

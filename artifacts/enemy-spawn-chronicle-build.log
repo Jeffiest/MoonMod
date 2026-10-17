@@ -1,0 +1,7 @@
+[0/2] Re-checking globbed directories...
+[1/280] Copying the button symbols
+[2/280] Copying the port's translated strings and message font
+[3/280] Listing port/src's PORT_OVERRIDE definitions
+[4/7] Building CXX object port/CMakeFiles/dc_port.dir/src/moonmod/chronicle_adapter.cpp.obj
+[5/7] Linking CXX executable darkcloud.exe
+[6/7] Linking CXX executable darkcloud_tests.exe

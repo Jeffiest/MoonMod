@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.retail-item-probe",
+  "name": "MoonFactory Retail Item Probe",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Headless retail-data proof for a Lua-registered data-only item.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.read", "game.write"]
+}

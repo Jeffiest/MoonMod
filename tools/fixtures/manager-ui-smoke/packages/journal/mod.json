@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.manager-ui.journal",
+  "name": "MoonFactory Journal Preview",
+  "version": "1.0.0",
+  "author": "MoonFactory Verification",
+  "description": "Adds a sample quest for the mod manager Journal screenshot.",
+  "framework_api": 1,
+  "games": ["chronicle", "chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.write"]
+}

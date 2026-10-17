@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "example.weapon-quest-reward",
+  "name": "Weapon Quest Reward",
+  "version": "1.0.0",
+  "author": "MoonFactory Example",
+  "description": "A cross-game quest that rewards one native weapon.",
+  "framework_api": 1,
+  "games": ["chronicle", "chronicle-two"],
+  "entry": "main.lua",
+  "permissions": ["content.register", "game.write"]
+}

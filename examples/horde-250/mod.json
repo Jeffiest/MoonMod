@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonfactory.horde-250",
+  "name": "Horde 250",
+  "version": "1.0.0",
+  "author": "MoonFactory",
+  "description": "Test mod: spawns 250 monsters around the player on the first dungeon floor entered and keeps them all awake.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write", "content.register"]
+}
