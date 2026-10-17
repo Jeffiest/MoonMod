@@ -97,20 +97,22 @@ local function apply_mode()
     local rooms = math.max(2, math.min(64, setting("maze_rooms", 24)))
     local area = math.max(8, math.min(46, setting("maze_area", 40)))
     area = math.max(area, 4)
-    api("dungeons.set_layout", game.dungeons.set_layout, {
+    local layout = api("dungeons.set_layout", game.dungeons.set_layout, {
       rooms = rooms,
       area = area,
       room_min = 2,
       room_max = 3
     })
+    if layout then run.layout_applied = true end
   elseif run.mode == MODE_HORDE then
     -- Large native rooms and a higher awake limit create a denser simultaneous fight.
-    api("dungeons.set_layout", game.dungeons.set_layout, {
+    local layout = api("dungeons.set_layout", game.dungeons.set_layout, {
       rooms = 10,
       area = 46,
       room_min = 4,
       room_max = 6
     })
+    if layout then run.layout_applied = true end
     if run.previous_active_limit == nil then
       local changed = api("entities.set_active_limit", game.entities.set_active_limit, {
         active = setting("horde_active_limit", 16)
@@ -125,11 +127,15 @@ local function apply_mode()
 end
 
 local function restore_runtime()
-  api("dungeons.set_layout reset", game.dungeons.set_layout, {})
+  if run.layout_applied then
+    api("dungeons.set_layout reset", game.dungeons.set_layout, {})
+    run.layout_applied = false
+  end
   if run.previous_active_limit ~= nil then
     api("entities.set_active_limit restore", game.entities.set_active_limit, {
       active = run.previous_active_limit
     })
+    run.previous_active_limit = nil
   end
 end
 
@@ -270,6 +276,7 @@ moonmod.on("game.world.location_changed", function(location)
   if location.context == "town" and location.previous
       and location.previous.context == "dungeon" then
     restore_runtime()
+    save_run()
     if run.bank_on_return then
       bank_run()
     else
@@ -293,6 +300,7 @@ moonmod.on("runtime.unloaded", function()
   -- The native floor layout and awake limit are global runtime settings.
   -- Restore them even when this package is disabled mid-run.
   restore_runtime()
+  if run.active then save_run() end
 end)
 
 moonmod.log("info", "Dungeon Expeditions loaded for Chronicle.")
