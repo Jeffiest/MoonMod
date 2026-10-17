@@ -8,7 +8,7 @@
   "framework_api": 1,
   "games": ["chronicle"],
   "entry": "main.lua",
-  "permissions": ["game.read", "game.write"],
+  "permissions": ["storage.read", "storage.write", "game.read", "game.write", "content.register"],
   "settings": [
     {
       "id": "maze_rooms",
