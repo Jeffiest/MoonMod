@@ -777,4 +777,3 @@ bool HandleManagerInput(const ManagerInput &input) {
 }
 
 } // namespace moonmod
-
