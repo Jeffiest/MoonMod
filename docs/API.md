@@ -708,7 +708,14 @@ assert(game.dungeons.set_layout({})) -- back to the native layout
 
 `rooms` (2-64) is required unless resetting with `{}`; `area` (8-46 in Chronicle, default 46; 8-30 in Chronicle Two, default 30) is the side of the corner rooms are placed in; `room_min`/`room_max` (Chronicle 3-6, Chronicle Two 2-6; default 3-4) bound each room's side; Chronicle needs 3 because it puts a room's door on the middle cell of a wall and a 2-cell wall would put it on a corner, which has no door piece, and `area` must exceed `room_max`. In Chronicle Two, `room_min`/`room_max` also filter the floor builder's preset room table (`CreateRandomRoom`). The layout is global, stays until changed (unloading the mod does not reset it) and is not saved; a floor already built keeps its layout.
 
+### Seamless concurrent floor progression
+
+Chronicle supports seamless dungeon floor progression without loading screens or confirmation dialog popups. When the player uses the gate key on the exit door, the exit gate opens physically and unlocks an antechamber containing two physical doorways:
+- **Door A (Forward / Next Floor)**: Stepping through the forward threshold transitions directly onto Floor $N+1$ via the standby dungeon buffer (`GAME_TASK_URA_SWAP`) with 0 loading screens and no modal menu interaction.
+- **Door B (Side / Village Exit)**: Stepping through the side doorway steps directly out into the dungeon's connected town/village scene (`MapJump`) without popup menus.
+
 ### ChronicleTwo added dungeon floors
+
 
 ```lua
 local dungeon = assert(game.dungeons.register({

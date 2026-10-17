@@ -1,11 +1,11 @@
 {
   "format_version": 1,
-  "generated_at_utc": "2026-10-17T16:24:58.873Z",
+  "generated_at_utc": "2026-10-17T18:12:12.915Z",
   "status": "passed",
   "python_tests": {
     "status": "passed",
-    "executed": 14,
-    "passed": 14,
+    "executed": 16,
+    "passed": 16,
     "failed": 0,
     "cases": [
       {
@@ -54,6 +54,14 @@
       },
       {
         "name": "test_moonfactory_cli.MoonFactoryCliTests.test_creates_cross_game_starter_with_requested_identity",
+        "status": "passed"
+      },
+      {
+        "name": "test_moonfactory_examples.MoonFactoryExampleTests.test_ascension_package_structure",
+        "status": "passed"
+      },
+      {
+        "name": "test_moonfactory_examples.MoonFactoryExampleTests.test_dungeon_plus_package_structure",
         "status": "passed"
       },
       {
@@ -416,8 +424,8 @@
         "frames": 120,
         "phase": "startup",
         "capture_validated": false,
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-bff3b657dd5a45a4bbada0674705c3d5\\startup.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-bff3b657dd5a45a4bbada0674705c3d5\\run.log",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-b9d203c841b74da0b9f42b4d978235e3\\startup.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-data-smoke-b9d203c841b74da0b9f42b4d978235e3\\run.log",
         "note": "A successful startup and screenshot file are checked; screenshot pixels and in-game scene content are not validated by this smoke."
       },
       "manager_ui_smoke": {
@@ -456,37 +464,34 @@
         "note": "Retail-data map registration, entry, loading, and return proof."
       },
       "retail_gameplay_smoke": {
-        "status": "passed",
-        "checkpoint": "Norune Village entry before the first simulation frame and verified the mod-owned data-only tonic plus a registered and granted mod weapon plus a native quest weapon reward",
-        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicle\\data",
-        "exit_code": 0,
+        "status": "not_requested",
+        "checkpoint": null,
+        "data_root": null,
+        "exit_code": null,
         "timed_out": false,
-        "frames": 1,
+        "frames": null,
         "input_script": null,
         "capture_validated": false,
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\gameplay.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\run.log",
-        "note": "The executable accepts the retail data and scripted gameplay checkpoint and writes a screenshot; visual scene content is reviewed separately."
+        "screenshot": null,
+        "log": null
       },
       "retail_item_smoke": {
-        "status": "passed",
+        "status": "not_requested",
         "mod_id": "moonfactory.retail-item-probe",
-        "verification_marker": "MOONFACTORY_RETAIL_ITEM_OK|moonfactory.retail-item-probe:retail-starlight-tonic|",
-        "item_capacity_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ITEM_CAPACITY_OK|12|142",
-        "weapon_verification_marker": "MOONFACTORY_RETAIL_WEAPON_OK|moonfactory.retail-item-probe:retail-starlight-blade|",
-        "item_given_quest_marker": "MOONFACTORY_RETAIL_ITEM_GIVEN_QUEST_OK|moonfactory.retail-item-probe:retail-item-grants|2",
-        "weapon_quest_reward_marker": "MOONFACTORY_RETAIL_WEAPON_QUEST_REWARD_OK|moonfactory.retail-item-probe:retail-quest-blade|1",
-        "item_removed_quest_marker": "MOONFACTORY_RETAIL_ITEM_REMOVED_QUEST_OK|moonfactory.retail-item-probe:retail-item-removals|1",
+        "verification_marker": null,
+        "item_capacity_marker": null,
+        "weapon_verification_marker": null,
+        "item_given_quest_marker": null,
+        "weapon_quest_reward_marker": null,
+        "item_removed_quest_marker": null,
         "native_item_pickup_marker": null,
         "enemy_spawned_event_marker": null,
         "enemy_defeat_event_marker": null,
         "enemy_defeat_quest_marker": null,
         "enemy_defeat_queued_marker": null,
         "error_lines": [],
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\gameplay.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ae491a52744d49de9732236d5521d65c\\run.log",
-        "content_registry_marker": "MOONFACTORY_RETAIL_CONTENT_OK|",
-        "note": "The enabled Lua package registers and reads back 12 data-only consumables, proving allocation can use a safe native row beyond the 11 legacy reserved rows. It then uses a data-only healing item, checks deferred game.item_given and game.item_removed delivery advances filtered quests, grants a data-only weapon directly, and verifies a completed quest pays a second weapon through the native inventory API. The smoke requires success markers and a screenshot file; it does not visually inspect the capture."
+        "screenshot": null,
+        "log": null
       },
       "retail_georama_smoke": {
         "status": "not_applicable",
@@ -558,8 +563,8 @@
         "run_count": 2,
         "marker_count": 194,
         "normalized_reports": [
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-278fd099dc414570a543421f1168022d-a\\normalized-report.txt",
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-278fd099dc414570a543421f1168022d-b\\normalized-report.txt"
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-147beaefc20e4e34a13d8fd8a3e000d4-a\\normalized-report.txt",
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\Chronicle\\port\\build\\moonmod-api-verification\\determinism-147beaefc20e4e34a13d8fd8a3e000d4-b\\normalized-report.txt"
         ],
         "error": null,
         "note": "Each synthetic headless probe is repeated from two clean roots; stable API and feature markers must match."
@@ -2234,8 +2239,8 @@
         "frames": 120,
         "phase": "startup",
         "capture_validated": false,
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-4cc6050a79144b3cad5a32d4df17b838\\startup.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-4cc6050a79144b3cad5a32d4df17b838\\run.log",
+        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-f60e68f71a9647d784b21a49535336b9\\startup.png",
+        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-data-smoke-f60e68f71a9647d784b21a49535336b9\\run.log",
         "note": "A successful startup and screenshot file are checked; screenshot pixels and in-game scene content are not validated by this smoke."
       },
       "manager_ui_smoke": {
@@ -2274,37 +2279,34 @@
         "note": "Retail-data map registration, entry, loading, and return proof."
       },
       "retail_gameplay_smoke": {
-        "status": "passed",
-        "checkpoint": "Underground Channel floor 1 item use, mod annex entry, and live data-only enemy spawn and completed a character-filtered quest from native enemy-spawn and enemy-defeat events and verified the mod-owned data-only tonic plus a registered and granted mod weapon plus a native quest weapon reward and entered the mod-owned connected floor, spawned a data-only enemy, and adjusted the live dungeon camera through Lua",
-        "data_root": "C:\\Users\\armor\\AppData\\Local\\chronicletwo\\data",
-        "exit_code": 0,
+        "status": "not_requested",
+        "checkpoint": null,
+        "data_root": null,
+        "exit_code": null,
         "timed_out": false,
-        "frames": 2400,
-        "input_script": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\MoonFactory\\tools\\fixtures\\retail-item-smoke\\enter-annex.input",
+        "frames": null,
+        "input_script": null,
         "capture_validated": false,
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\gameplay.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\run.log",
-        "note": "The executable accepts the retail data and scripted gameplay checkpoint and writes a screenshot; visual scene content is reviewed separately."
+        "screenshot": null,
+        "log": null
       },
       "retail_item_smoke": {
-        "status": "passed",
+        "status": "not_requested",
         "mod_id": "moonfactory.retail-item-probe",
-        "verification_marker": "MOONFACTORY_RETAIL_ITEM_OK|moonfactory.retail-item-probe:retail-starlight-tonic|",
+        "verification_marker": null,
         "item_capacity_marker": null,
-        "weapon_verification_marker": "MOONFACTORY_RETAIL_WEAPON_OK|moonfactory.retail-item-probe:retail-starlight-blade|",
-        "item_given_quest_marker": "MOONFACTORY_RETAIL_ITEM_GIVEN_QUEST_OK|moonfactory.retail-item-probe:retail-item-grants|2",
-        "weapon_quest_reward_marker": "MOONFACTORY_RETAIL_WEAPON_QUEST_REWARD_OK|moonfactory.retail-item-probe:retail-quest-blade|1",
-        "item_removed_quest_marker": "MOONFACTORY_RETAIL_ITEM_REMOVED_QUEST_OK|moonfactory.retail-item-probe:retail-item-removals|1",
-        "native_item_pickup_marker": "MOONFACTORY_RETAIL_NATIVE_ITEM_PICKUP_OK|chronicle-two:item:274|1",
-        "enemy_spawned_event_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_SPAWNED_EVENT|moonfactory.retail-item-probe:retail-annex-sentinel|chronicle-two:monster:0:1|1024|0|1|moonfactory.retail-item-probe|125",
-        "enemy_defeat_event_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_EVENT|moonfactory.retail-item-probe:retail-annex-sentinel|chronicle-two:monster:0:1|combat|1024",
-        "enemy_defeat_quest_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEST_OK|moonfactory.retail-item-probe:annex-sentinel-hunt|chronicle-two:monster:0:1",
-        "enemy_defeat_queued_marker": "moonmod[info][moonfactory.retail-item-probe]: MOONFACTORY_RETAIL_ENEMY_DEFEAT_QUEUED|chronicle-two:monster:0:1",
+        "weapon_verification_marker": null,
+        "item_given_quest_marker": null,
+        "weapon_quest_reward_marker": null,
+        "item_removed_quest_marker": null,
+        "native_item_pickup_marker": null,
+        "enemy_spawned_event_marker": null,
+        "enemy_defeat_event_marker": null,
+        "enemy_defeat_quest_marker": null,
+        "enemy_defeat_queued_marker": null,
         "error_lines": [],
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\gameplay.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\run.log",
-        "content_registry_marker": null,
-        "note": "The enabled Lua package verifies a built-in dungeon pickup emits game.item_picked_up and completes a matching quest, then registers a data-only healing item, uses one of two native inventory copies, removes the other, and verifies deferred game.item_given and game.item_removed delivery advances filtered quests. It grants a data-only weapon directly and verifies a completed quest pays a second weapon through the native inventory API, enters a connected annex, and completes a filtered quest from a native enemy-defeat event. Pickup, weapon, dungeon, camera, quest markers, and a screenshot file are required. The capture is not visually inspected."
+        "screenshot": null,
+        "log": null
       },
       "retail_georama_smoke": {
         "status": "not_applicable",
@@ -2317,17 +2319,15 @@
         "note": "Uses a disposable save and test-only built stock to verify a Lua-registered data-only Georama variant is materialized by the retail map loader, placed and removed through native edit routines, and read back from the town layout. Visual persistence after process reload and compatibility with player saves remain unverified."
       },
       "retail_dungeon_smoke": {
-        "status": "passed",
+        "status": "not_applicable",
         "dungeon_id": "moonfactory.retail-item-probe:retail-moon-vault",
-        "floor_id": "moonfactory.retail-item-probe:retail-moon-vault.annex",
-        "native_floor_id": 9,
-        "context": "dungeon",
-        "verification_marker": "MOONFACTORY_RETAIL_DUNGEON_OK|moonfactory.retail-item-probe:retail-moon-vault.annex|",
-        "camera_verification_marker": "MOONFACTORY_RETAIL_CAMERA_OK|",
-        "screenshot": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\gameplay.png",
-        "log": "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\retail-gameplay-smoke-ea78d29658c14d609df5be5513f02f07\\run.log",
-        "note": "The enabled Lua package enters its connected annex through world.transition, spawns a data-only enemy, resolves it with entities.get, verifies the active native dungeon floor, and adjusts the live follow camera through render.camera_set. The annex reuses native room geometry and enemy assets.",
-        "entity_handle": "chronicle-two:monster:0:1"
+        "floor_id": null,
+        "native_floor_id": null,
+        "context": null,
+        "verification_marker": null,
+        "camera_verification_marker": null,
+        "screenshot": null,
+        "log": null
       },
       "retail_character_smoke": {
         "status": "not_applicable",
@@ -2373,8 +2373,8 @@
         "run_count": 2,
         "marker_count": 470,
         "normalized_reports": [
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-239707bec22c4f41b193c5ad5c30da33-a\\normalized-report.txt",
-          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-239707bec22c4f41b193c5ad5c30da33-b\\normalized-report.txt"
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-55970fbc29a7431096925d53d3b88106-a\\normalized-report.txt",
+          "C:\\Users\\armor\\Documents\\Codex\\2026-10-14\\i-want-to-build-an-all\\ChronicleTwo\\port\\build\\moonmod-api-verification\\determinism-55970fbc29a7431096925d53d3b88106-b\\normalized-report.txt"
         ],
         "error": null,
         "note": "Each synthetic headless probe is repeated from two clean roots; stable API and feature markers must match."

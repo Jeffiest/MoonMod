@@ -64,3 +64,5 @@ Chronicle's location registration has native adapter coverage and a retail-data 
 
 - **`moonmod.dungeon-plus`**: Per-floor NG+ difficulty tiers (Tiers 1-5) using `game.dungeons.set_layout` for procedural chamber scaling, dynamic monster resilience scaling via `game.combat.register_formula`, clear bonuses awarding native gems and slayer attachments, and export of `current_tier` callable by other mods.
 - **`moonmod.ascension`**: Modern RPG progression layer featuring character XP, leveling up to level 40, Paragon ranks, max HP scaling, custom skill trees (`might` and `vitality`) via `game.skills.register`, dynamic combat damage formulas, and kill XP rewards via `game.enemy_defeated`.
+- **Seamless concurrent floor progression**: Native physical exit gate interaction removing modal confirmation windows (`DngEscapeMsgInit`, `BT_GAME_MODE_ESCAPE_MSG`), constructing physical antechambers with forward (Next Floor $N+1$ via `GAME_TASK_URA_SWAP`) and lateral (Village return via `MapJump`) trigger volumes, executing 0 loading screen and 0 menu prompt floor traversals.
+

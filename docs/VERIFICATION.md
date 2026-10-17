@@ -53,7 +53,10 @@ Both Lua runtimes now expose owner-scoped `commands.register/execute/unregister`
 
 The playable-character query and wallet slices now have native adapter assertions on both ports. ChronicleTwo's two-launch headless probe also checks that each new operation is present in the machine-readable capability report; wallet mutation remains covered by the native-state fixtures so an empty game-data smoke cannot report a false mutation pass.
 
+Seamless concurrent dungeon floor progression is verified in Chronicle: using the gate key on the exit door opens the exit gate physically without showing the native modal escape window (`DngEscapeMsgInit`, `BT_GAME_MODE_ESCAPE_MSG`). The opened gate unlocks an antechamber with two spatial trigger volumes: Door A (forward, crossing along world +Z) increments `UserStatus->cur_floor` and swaps the active floor buffer via `GAME_TASK_URA_SWAP` with 0 loading screen frames; Door B (lateral, crossing along world +X) returns the player directly to the connected settlement scene via `MapJump`. Unit tests in `port/src/tests/moonmod_dungeons_api_test.cpp` verify physical gate opening, antechamber volume bounds, and portal crossings for Door A and Door B.
+
 ## Required proof levels
+
 
 1. **Lua contract tests** load packages through the real runtime and verify API discovery, supported/unsupported results, callback isolation, owner cleanup, settings, storage, and event ordering.
 2. **Native adapter tests** exercise each advertised game capability against the game's actual state objects. A capability without an adapter test is not stable.
