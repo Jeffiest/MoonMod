@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.dungeon-plus",
+  "name": "Dungeon+",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Per-floor NG+ difficulty tiers (Tiers 1-5) with scaled procedural layouts, tougher enemies, richer gilda, and floor clear bonuses.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": [
+    "game.read",
+    "game.write",
+    "content.register",
+    "storage.read",
+    "storage.write"
+  ]
+}

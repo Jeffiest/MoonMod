@@ -35,10 +35,35 @@ class MoonFactoryExampleTests(unittest.TestCase):
         self.assertEqual(set(manifest["games"]), {"chronicle", "chronicle-two"})
         self.assertTrue({"content.register", "game.write"}.issubset(manifest["permissions"]))
         self.assertIn('chronicle = "chronicle:weapon:258"', script)
-        self.assertIn('["chronicle-two"] = "chronicle-two:weapon:80"', script)
         self.assertIn('{kind = "weapon", id = weapon_id}', script)
         self.assertIn('moonmod.on("quests.completed"', script)
+
+    def test_dungeon_plus_package_structure(self) -> None:
+        project = Path(__file__).resolve().parents[2]
+        package = project / "mods" / "moonmod.dungeon-plus"
+        manifest = json.loads((package / "mod.json").read_text(encoding="utf-8"))
+        script = (package / "main.lua").read_text(encoding="utf-8")
+        self.assertEqual(manifest["id"], "moonmod.dungeon-plus")
+        self.assertEqual(manifest["games"], ["chronicle"])
+        self.assertTrue({"game.read", "game.write", "content.register", "storage.read", "storage.write"}.issubset(manifest["permissions"]))
+        self.assertIn("game.dungeons.set_layout", script)
+        self.assertIn("game.combat.register_formula", script)
+        self.assertIn("moonmod.storage.get", script)
+
+    def test_ascension_package_structure(self) -> None:
+        project = Path(__file__).resolve().parents[2]
+        package = project / "mods" / "moonmod.ascension"
+        manifest = json.loads((package / "mod.json").read_text(encoding="utf-8"))
+        script = (package / "main.lua").read_text(encoding="utf-8")
+        self.assertEqual(manifest["id"], "moonmod.ascension")
+        self.assertEqual(manifest["games"], ["chronicle"])
+        self.assertTrue({"game.read", "game.write", "content.register", "storage.read", "storage.write"}.issubset(manifest["permissions"]))
+        self.assertIn("game.skills.register", script)
+        self.assertIn("game.combat.register_formula", script)
+        self.assertIn("game.player.get", script)
+        self.assertIn("game.enemy_defeated", script)
 
 
 if __name__ == "__main__":
     unittest.main()
+

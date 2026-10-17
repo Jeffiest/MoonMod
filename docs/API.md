@@ -701,12 +701,12 @@ Chronicle's `game.dungeons.list()` returns the seven native dungeons plus mod-re
 Retail Chronicle builds every floor on a 20 x 20 grid and places at most 6 rooms (3-4 cells wide) in its top-left 16 x 16 corner. The Chronicle PC port enlarges the grid to 48 x 48 (`DNG_GRID`) and the room table to 64 (`DNG_ROOM_MAX`). Chronicle Two builds procedural floors on a 30 x 30 grid (`DNG_GRID = 30`) and enlarges its room table from 8 to 64 (`DNG_ROOM_MAX = 64`). Without a mod setting, floors still use the retail room count, area, and sizes.
 
 ```lua
-local layout = assert(game.dungeons.set_layout({rooms = 24, area = 26, room_min = 2, room_max = 5}))
+local layout = assert(game.dungeons.set_layout({rooms = 24, area = 26, room_min = 3, room_max = 5}))
 -- every floor built after this call uses the layout
 assert(game.dungeons.set_layout({})) -- back to the native layout
 ```
 
-`rooms` (2-64) is required unless resetting with `{}`; `area` (8-46 in Chronicle, default 46; 8-30 in Chronicle Two, default 30) is the side of the corner rooms are placed in; `room_min`/`room_max` (2-6, default 3-4) bound each room's side, and `area` must exceed `room_max`. In Chronicle Two, `room_min`/`room_max` also filter the floor builder's preset room table (`CreateRandomRoom`). The layout is global, stays until changed (unloading the mod does not reset it) and is not saved; a floor already built keeps its layout.
+`rooms` (2-64) is required unless resetting with `{}`; `area` (8-46 in Chronicle, default 46; 8-30 in Chronicle Two, default 30) is the side of the corner rooms are placed in; `room_min`/`room_max` (Chronicle 3-6, Chronicle Two 2-6; default 3-4) bound each room's side; Chronicle needs 3 because it puts a room's door on the middle cell of a wall and a 2-cell wall would put it on a corner, which has no door piece, and `area` must exceed `room_max`. In Chronicle Two, `room_min`/`room_max` also filter the floor builder's preset room table (`CreateRandomRoom`). The layout is global, stays until changed (unloading the mod does not reset it) and is not saved; a floor already built keeps its layout.
 
 ### ChronicleTwo added dungeon floors
 

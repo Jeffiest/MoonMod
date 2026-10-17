@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.ascension",
+  "name": "Ascension",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "A modern-RPG progression layer: character levels and XP, skill trees with combat passives, Paragon ranks, and level-up rewards.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": [
+    "game.read",
+    "game.write",
+    "content.register",
+    "storage.read",
+    "storage.write"
+  ]
+}
