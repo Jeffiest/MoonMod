@@ -11,4 +11,3 @@
   "dependencies": ["moonmod.ascension"],
   "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"]
 }
-
