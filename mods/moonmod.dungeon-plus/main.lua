@@ -374,4 +374,3 @@ moonmod.on("game.tick",function()
 end)
 sync(game.world.get());update_combat();layout(default_tier())
 moonmod.log("info",string.format("Dungeon+ initialized: %d legacy prices, feats, bounties, mutators, tiers and speed variation",price_changes))
-
