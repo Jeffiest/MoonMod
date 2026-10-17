@@ -444,4 +444,3 @@ bool IsKnownPermission(std::string_view permission) {
 }
 
 } // namespace moonmod
-
