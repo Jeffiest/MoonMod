@@ -185,4 +185,3 @@ inline float ApplyCombatDamageBonuses(float damage, const Json &bonuses) {
 }
 
 } // namespace moonmod
-
