@@ -1,0 +1,2 @@
+# Keep patches byte-exact so git apply works on any OS.
+ports/**/*.patch -text

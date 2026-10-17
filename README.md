@@ -92,3 +92,7 @@ See:
 - [ChronicleTwo-Script bridge design](docs/CHRONICLETWO_SCRIPT_BRIDGE.md)
 - [Delivery roadmap](docs/ROADMAP.md)
 - [Manifest schema](manifest.schema.json)
+
+## Playing with MoonFactory
+
+MoonFactory runs inside the Chronicle PC port. To build Chronicle with MoonFactory from your own disc, follow `ports/chronicle/README.md`.

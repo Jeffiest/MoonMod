@@ -58,6 +58,7 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"dungeons.get", "dungeons", "get", "any", "game.read", "Read a native dungeon or registered extension and its floors."},
     {"dungeons.register", "dungeons", "register", "content", "content.register", "Register additional floors on a supported native dungeon map."},
     {"dungeons.set_layout", "dungeons", "set_layout", "simulation", "game.write", "Set room count, room area and room sizes for floors built after the call; an empty table restores the native layout."},
+    {"dungeons.set_exit_room", "dungeons", "set_exit_room", "simulation", "game.write", "Turn the walk-through exit room on or off for floors built after the call."},
     {"dungeons.floor_rules_get", "dungeons", "floor_rules_get", "any", "game.read", "Read active and per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
     {"dungeons.floor_rules_set", "dungeons", "floor_rules_set", "simulation", "game.write", "Override active or per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
     {"dungeons.loot_get", "dungeons", "loot_get", "any", "game.read", "Read active floor treasure chest contents and monster drop tables."},
