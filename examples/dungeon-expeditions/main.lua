@@ -16,7 +16,12 @@ local function notify(message, frames)
 end
 
 local function api(label, callback, argument)
-  local result, err = callback(argument)
+  local result, err
+  if argument == nil then
+    result, err = callback()
+  else
+    result, err = callback(argument)
+  end
   if not result then
     moonmod.log("warning", label .. " failed: " .. tostring(err and err.message or "unknown error"))
   end
@@ -185,7 +190,10 @@ local function start_run(mode)
   }
 
   local location = api("world.get", game.world.get)
-  if location then track_floor(location) end
+  if location and location.context == "dungeon" then
+    run.entered_dungeon = true
+    track_floor(location)
+  end
   apply_mode()
   save_run()
 
