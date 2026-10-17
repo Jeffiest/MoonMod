@@ -45,4 +45,3 @@ moonmod.on("ui.action", function(action)
     game.ui.notify({message = "Ascension imported " .. count .. " mastery records"})
   end
 end)
-
