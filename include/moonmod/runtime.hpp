@@ -116,4 +116,3 @@ private:
 Runtime &SharedRuntime();
 
 } // namespace moonmod
-
