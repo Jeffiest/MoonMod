@@ -79,6 +79,7 @@ struct Runtime::Impl {
 
     RuntimeConfig config;
     Json profile = DefaultProfile();
+    Json session_enabled = Json::object();
     std::filesystem::path profile_file;
     std::vector<ModRecord> records;
     std::vector<std::pair<std::string, std::unique_ptr<LuaMod>>> modules;
@@ -310,7 +311,7 @@ struct Runtime::Impl {
     }
 
     bool EnabledFromProfile(std::string_view id) const {
-        const Json &enabled = profile["enabled"];
+        const Json &enabled = session_enabled;
         const auto  found = enabled.find(std::string(id));
         return found != enabled.end() && found->is_boolean() && found->get<bool>();
     }
@@ -374,6 +375,8 @@ struct Runtime::Impl {
                 if (manifest) {
                     record.manifest = std::move(*manifest);
                     record.enabled = EnabledFromProfile(record.id);
+                    record.enabled_next_launch = profile["enabled"].value(record.id, false);
+                    record.restart_required = record.enabled != record.enabled_next_launch;
                     record.native_trusted = NativeTrustedFromProfile(record);
                     record.state = record.enabled ? ModState::Ready : ModState::Disabled;
                     if (record.manifest.framework_api > config.framework_api ||
@@ -940,6 +943,7 @@ bool Runtime::Start(RuntimeConfig config, std::string &error) {
     impl_->observed_world_location = nullptr;
     std::string profile_error;
     if (!impl_->LoadProfile(profile_error)) impl_->Log("warning", "", profile_error);
+    impl_->session_enabled = impl_->profile["enabled"];
     impl_->Discover();
     impl_->LoadEnabled();
     impl_->running = true;
@@ -1011,11 +1015,14 @@ bool Runtime::SetEnabled(std::string_view id, bool enabled, std::string &error) 
         error = record->status_message;
         return false;
     }
+    const Json previous=impl_->profile["enabled"];
     impl_->profile["enabled"][record->id] = enabled;
-    if (!impl_->SaveProfile(error)) return false;
-    record->enabled = enabled;
-    impl_->Discover();
-    impl_->LoadEnabled();
+    if (!impl_->SaveProfile(error)) {
+        impl_->profile["enabled"]=previous;
+        return false;
+    }
+    record->enabled_next_launch = enabled;
+    record->restart_required = record->enabled != enabled;
     return true;
 }
 
@@ -1349,3 +1356,4 @@ Runtime &SharedRuntime() {
 }
 
 } // namespace moonmod
+
