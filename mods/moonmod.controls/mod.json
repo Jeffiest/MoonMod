@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.controls",
+  "name": "Controls",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Dungeon quick-item hotkeys, party shortcuts, and first-person toggle using MoonFactory input actions.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write"],
+  "settings": [
+    {"id":"first_person_key","name":"First-person view key","type":"choice","default":"V","choices":["V","B","N","F1","F2","F3","F4","F5"]},
+    {"id":"quick_1_key","name":"Quick item slot 1 key","type":"choice","default":"1","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"quick_2_key","name":"Quick item slot 2 key","type":"choice","default":"2","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"quick_3_key","name":"Quick item slot 3 key","type":"choice","default":"3","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"party_1_key","name":"Toan party key","type":"choice","default":"4","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"party_2_key","name":"Xiao party key","type":"choice","default":"5","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"party_3_key","name":"Goro party key","type":"choice","default":"6","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"party_4_key","name":"Ruby party key","type":"choice","default":"7","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"party_5_key","name":"Ungaga party key","type":"choice","default":"8","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]},
+    {"id":"party_6_key","name":"Osmond party key","type":"choice","default":"9","choices":["1","2","3","4","5","6","7","8","9","F1","F2","F3"]}
+  ]
+}

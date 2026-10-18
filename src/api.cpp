@@ -14,7 +14,7 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"events.subscribe", "events", "subscribe", "any", "", "Subscribe to a documented lifecycle or simulation event."},
     {"events.unsubscribe", "events", "unsubscribe", "any", "", "Remove an event subscription owned by this mod."},
     {"player.get", "player", "get", "any", "game.read", "Read the active player and controlled character state."},
-    {"player.set", "player", "set", "simulation", "game.write", "Set current HP to a validated integer value within the selected character's native health range."},
+    {"player.set", "player", "set", "simulation", "game.write", "Set current HP or Chronicle maximum HP, or Chronicle water, within the selected character's native bounds."},
     {"player.heal", "player", "heal", "simulation", "game.write", "Apply bounded healing to the active player character through native game state."},
     {"player.damage", "player", "damage", "simulation", "game.write", "Apply bounded health damage to the active player character through native game state."},
     {"player.status_add", "player", "status_add", "simulation", "game.write", "Apply a registered status effect to a player."},
@@ -28,11 +28,13 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"party.list", "party", "list", "any", "game.read", "Read party members and their stable handles."},
     {"party.active", "party", "active", "any", "game.read", "Read the active party member."},
     {"party.set_active", "party", "set_active", "simulation", "game.write", "Change the active party member when the game allows it."},
+    {"party.town_active", "party", "town_active", "simulation", "game.read", "Read Chronicle's selected playable body for the active town scene."},
+    {"party.town_set_active", "party", "town_set_active", "simulation", "game.write", "Select a joined Chronicle party character as the town avatar through its native town model and motion path."},
     {"party.recruit", "party", "recruit", "simulation", "game.write", "Recruit a supported character through the game rules."},
     {"economy.get", "economy", "get", "any", "game.read", "Read the current wallet balance and native currency limit."},
     {"economy.add", "economy", "add", "simulation", "game.write", "Add currency through the game's wallet rules."},
     {"economy.spend", "economy", "spend", "simulation", "game.write", "Spend currency when the wallet has sufficient funds."},
-    {"world.get", "world", "get", "any", "game.read", "Read world, map, region, and current dungeon-floor identity."},
+    {"world.get", "world", "get", "any", "game.read", "Read world, map, region, current dungeon-floor identity, and native adventure day where exposed."},
     {"world.transition", "world", "transition", "simulation", "game.write", "Request a validated map, region, or floor transition."},
     {"world.register_dungeon", "world", "register_dungeon", "content", "content.register", "Register additional floors on a supported native dungeon map."},
     {"world.set_time", "world", "set_time", "simulation", "game.write", "Set time as a normalized fraction of the native world cycle."},
@@ -44,14 +46,17 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"world.map_flag_set", "world", "map_flag_set", "simulation", "game.write", "Set or clear a native per-map flag."},
     {"entities.query", "entities", "query", "any", "game.read", "Query native entities using filters supported by the active game adapter."},
     {"entities.get", "entities", "get", "any", "game.read", "Resolve a generation-checked entity handle."},
+    {"entities.set_stats", "entities", "set_stats", "simulation", "game.write", "Set bounded health, defense, EXP, Gilda, or validated native drop-item fields on a live Chronicle enemy."},
+    {"entities.scale_set", "entities", "scale_set", "simulation", "game.write", "Set an owner-scoped visual size multiplier on a live Chronicle enemy; native scale is restored when the owner is unloaded."},
     {"entities.spawn", "entities", "spawn", "simulation", "game.write", "Spawn a registered entity definition."},
     {"entities.despawn", "entities", "despawn", "simulation", "game.write", "Despawn an entity spawned by this mod."},
     {"entities.set_active_limit", "entities", "set_active_limit", "simulation", "game.write", "Set how many monsters stay awake at once and report the floor's monster slot count."},
     {"combat.get", "combat", "get", "any", "game.read", "Read the supported native enemy health and status snapshot."},
     {"combat.damage", "combat", "damage", "simulation", "game.write", "Apply bounded scripted damage through a generation-checked enemy handle."},
+    {"combat.status_add", "combat", "status_add", "simulation", "game.write", "Apply a supported timed status to a live enemy through its generation-checked handle."},
     {"combat.heal", "combat", "heal", "simulation", "game.write", "Restore bounded health to a live native enemy."},
-    {"combat.register_player_formula", "combat", "register_player_formula", "simulation", "game.write", "Register an owned modifier for native incoming player damage."},
-    {"combat.register_formula", "combat", "register_formula", "content", "content.register", "Register an owned combat formula or modifier."},
+    {"combat.register_player_formula", "combat", "register_player_formula", "simulation", "game.write", "Register an owned modifier for native incoming player damage, optionally filtered by weapon or character."},
+    {"combat.register_formula", "combat", "register_formula", "content", "content.register", "Register an owned damage modifier, optionally filtered by weapon, enemy model, or Chronicle target HP, with chance, uniform random, and Chronicle timed-ramp multipliers."},
     {"locations.list", "locations", "list", "any", "game.read", "List built-in and registered mod locations supported by the active game."},
     {"locations.get", "locations", "get", "any", "game.read", "Read a built-in or registered location and native availability status."},
     {"locations.register", "locations", "register", "content", "content.register", "Register a namespaced map or location definition with transitions and resources."},
@@ -62,6 +67,8 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"dungeons.set_badges", "dungeons", "set_badges", "simulation", "game.write", "Publish owned native floor-list tier badges 0..5."},
     {"ui.open_skills", "ui", "open_skills", "simulation", "content.register", "Open the owning package skill tree in the manager."},
     {"dungeons.set_modifiers", "dungeons", "set_modifiers", "simulation", "game.write", "Set owned additive generation bonuses in percent (0..300): rooms, monsters, chests, chest_value; {} clears this owner."},
+    {"dungeons.set_population", "dungeons", "set_population", "simulation", "game.write", "Scale generated monster and chest targets by realized room count using inclusive per-room min/max ratios; native minimums and engine slot limits still apply; {} clears this owner."},
+    {"dungeons.set_enemy_survival", "dungeons", "set_enemy_survival", "simulation", "game.write", "Set this mod's chance for eligible ordinary Chronicle enemies to survive one lethal hit; {} clears this owner."},
     {"dungeons.set_layout", "dungeons", "set_layout", "simulation", "game.write", "Set room count, room area and room sizes for floors built after the call; an empty table restores the native layout."},
     {"dungeons.set_exit_room", "dungeons", "set_exit_room", "simulation", "game.write", "Turn the walk-through exit room on or off for floors built after the call."},
     {"dungeons.floor_rules_get", "dungeons", "floor_rules_get", "any", "game.read", "Read active and per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
@@ -115,13 +122,17 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"shops.get", "shops", "get", "any", "game.read", "Read one native shop's goods, currency mode, and item buy/sell prices."},
     {"shops.register_item", "shops", "register_item", "content", "content.register", "Add a native or mod-registered item or weapon to a shop's goods list."},
     {"shops.remove_item", "shops", "remove_item", "content", "content.register", "Remove an item or weapon from a shop's goods list."},
+    {"shops.set_items", "shops", "set_items", "content", "content.register", "Replace a native Chronicle shop's item list with an owner-restored list of up to 20 goods."},
     {"shops.set_price", "shops", "set_price", "content", "content.register", "Set the buy and sell prices for an item or weapon in native shops."},
     {"weapons.list", "weapons", "list", "any", "game.read", "List built-in and registered weapon definitions."},
     {"weapons.get", "weapons", "get", "any", "game.read", "Read a weapon definition and current state."},
+    {"weapons.definition_set", "weapons", "definition_set", "content", "content.register", "Apply an owner-scoped override to a built-in Chronicle weapon definition; Chronicle restores the original data when that owner unloads."},
     {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon and supported behavior."},
     {"weapons.give", "weapons", "give", "simulation", "game.write", "Give a native or registered weapon to a compatible character."},
     {"weapons.equip", "weapons", "equip", "simulation", "game.write", "Equip a weapon through the game's equipment rules."},
     {"weapons.upgrade", "weapons", "upgrade", "simulation", "game.write", "Upgrade a weapon through supported progression rules."},
+    {"weapons.stats_set", "weapons", "stats_set", "simulation", "game.write", "Set bounded combat stats on one owned Chronicle weapon instance."},
+    {"weapons.durability_set", "weapons", "durability_set", "simulation", "game.write", "Set current durability on one owned Chronicle weapon instance within its native capacity."},
     {"weapons.abs_get", "weapons", "abs_get", "any", "game.read", "Read accumulated ABS experience, next-level ABS threshold, and synthesis points on an owned weapon."},
     {"weapons.abs_add", "weapons", "abs_add", "simulation", "game.write", "Grant ABS experience or synthesis points to an owned weapon."},
     {"weapons.attachments_get", "weapons", "attachments_get", "any", "game.read", "Read fitted attachments or synthesis capacity on an owned weapon."},
@@ -153,8 +164,10 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"content.unregister", "content", "unregister", "content", "content.register", "Remove a mod-owned pending definition before it is materialized in native game tables."},
     {"save.get", "save", "get", "any", "game.read", "Read namespaced save data and migration version."},
     {"save.set", "save", "set", "simulation", "game.write", "Write bounded namespaced save data."},
+    {"save.slot_id", "save", "slot_id", "any", "game.read", "Read the active Chronicle native save slot number for slot-scoped mod state."},
     {"save.migrate", "save", "migrate", "load", "game.write", "Run an owned save migration at the save-load boundary."},
     {"input.bind", "input", "bind", "any", "game.write", "Bind a namespaced action to a keyboard or controller input."},
+    {"input.wheel_mode_set", "input", "wheel_mode_set", "simulation", "game.write", "Route mouse-wheel notches to Left/Right or Up/Down during play; an empty request restores native camera-zoom routing."},
     {"input.unbind", "input", "unbind", "any", "game.write", "Remove an input binding owned by this mod."},
     {"input.state", "input", "state", "any", "game.read", "Read a named action state without exposing raw device memory."},
     {"input.consume", "input", "consume", "input", "game.write", "Consume a named action in the active input context."},
@@ -171,6 +184,7 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"render.bar_remove", "render", "bar_remove", "render", "content.register", "Remove a HUD progress bar owned by this mod."},
     {"render.camera_get", "render", "camera_get", "any", "game.read", "Read the active dungeon camera pose."},
     {"render.camera_set", "render", "camera_set", "render", "game.write", "Set bounded distance, height, or angle on the active dungeon follow camera."},
+    {"render.town_camera_set", "render", "town_camera_set", "simulation", "game.write", "Enable or disable an owner-scoped overhead camera during safe town walking."},
     {"ui.register", "ui", "register", "content", "content.register", "Register an owned button in the in-game MoonFactory manager."},
     {"ui.remove", "ui", "remove", "content", "content.register", "Remove an owned MoonFactory manager button."},
     {"ui.notify", "ui", "notify", "any", "game.write", "Show a bounded notice in the mod manager."},
@@ -220,6 +234,7 @@ constexpr EventSpec kEventCatalog[] = {
     {"game.shop.purchased", "shops", "both", "A shop purchase or shop inventory change completed."},
     {"game.enemy_spawned", "characters", "both", "A registered mod-owned enemy spawned successfully."},
     {"game.enemy_defeated", "combat", "both", "The game accepted an enemy death."},
+    {"game.enemy_hit", "combat", "chronicle", "A native weapon hit damaged an enemy; includes attacker, weapon, target, model, element, and final damage."},
     {"game.weapon.upgraded", "weapons", "both", "A native weapon upgrade changed the weapon."},
     {"game.weapon.equipped", "weapons", "both", "The active weapon changed through a supported API."},
     {"game.weapon.abs_gained", "weapons", "both", "An owned weapon gained ABS experience or synthesis points."},
@@ -287,6 +302,15 @@ namespace {
 
 std::string UnsupportedReason(std::string_view game_id, const ApiOperationSpec &operation) {
     const std::string game = game_id == "chronicle-two" ? "Chronicle Two" : "Chronicle";
+    if (operation.path == "weapons.definition_set" && game_id == "chronicle-two") {
+        return "Chronicle Two does not expose mutable native base weapon definitions; this owner-scoped override is currently bound only in Chronicle.";
+    }
+    if (operation.path == "shops.set_items" && game_id == "chronicle-two") {
+        return "Chronicle Two shop catalogs are not exposed as a mutable native list; this owner-restored shop replacement is currently bound only in Chronicle.";
+    }
+    if (operation.path == "save.slot_id" && game_id == "chronicle-two") {
+        return "Chronicle Two does not yet expose a verified native save-slot identifier.";
+    }
     if (operation.domain == "photos") {
         return "Chronicle has no photography, idea, or scoop system; this domain is bound only in Chronicle Two.";
     }

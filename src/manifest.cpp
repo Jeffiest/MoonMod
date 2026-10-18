@@ -283,7 +283,7 @@ std::optional<ModManifest> ReadManifest(const std::filesystem::path &package_roo
         return std::nullopt;
     }
     if (!RejectUnknownFields(document, {"schema_version", "id", "name", "version", "author", "description",
-                                        "framework_api", "games", "entry", "dependencies", "load_after",
+                                        "framework_api", "games", "entry", "dependencies", "optional_dependencies", "load_after",
                                         "load_before", "permissions", "settings", "native_extension"}, error)) {
         return std::nullopt;
     }
@@ -324,6 +324,7 @@ std::optional<ModManifest> ReadManifest(const std::filesystem::path &package_roo
     manifest.framework_api = api->get<int>();
     if (!ReadStringList(document, "games", manifest.games, 2, true, error) ||
         !ReadStringList(document, "dependencies", manifest.dependencies, 64, false, error) ||
+        !ReadStringList(document, "optional_dependencies", manifest.optional_dependencies, 64, false, error) ||
         !ReadStringList(document, "load_after", manifest.load_after, 64, false, error) ||
         !ReadStringList(document, "load_before", manifest.load_before, 64, false, error) ||
         !ReadStringList(document, "permissions", manifest.permissions, 64, false, error) ||
@@ -376,7 +377,13 @@ std::optional<ModManifest> ReadManifest(const std::filesystem::path &package_roo
             return std::nullopt;
         }
     }
-    for (const auto *ids : {&manifest.dependencies, &manifest.load_after, &manifest.load_before}) {
+    for (const std::string &dependency : manifest.optional_dependencies) {
+        if (std::ranges::find(manifest.dependencies, dependency) != manifest.dependencies.end()) {
+            error = "optional dependency '" + dependency + "' is also declared as a required dependency";
+            return std::nullopt;
+        }
+    }
+    for (const auto *ids : {&manifest.dependencies, &manifest.optional_dependencies, &manifest.load_after, &manifest.load_before}) {
         for (const std::string &id : *ids) {
             if (!IsValidModId(id)) {
                 error = "dependency and load-order references must use valid mod ids";

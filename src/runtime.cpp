@@ -428,7 +428,8 @@ struct Runtime::Impl {
             return {ApiCallStatus::Failed, nullptr, "script function owner is not loaded"};
         }
         if (caller_id != owner_id &&
-            std::ranges::find(caller->manifest.dependencies, owner_id) == caller->manifest.dependencies.end()) {
+            std::ranges::find(caller->manifest.dependencies, owner_id) == caller->manifest.dependencies.end() &&
+            std::ranges::find(caller->manifest.optional_dependencies, owner_id) == caller->manifest.optional_dependencies.end()) {
             return {ApiCallStatus::PermissionDenied, nullptr,
                     "calling another mod's functions requires a declared dependency"};
         }
@@ -453,6 +454,10 @@ struct Runtime::Impl {
         }
         std::vector<std::string> owners;
         for (const std::string &dependency_id : caller->manifest.dependencies) {
+            const ModRecord *dependency = Find(dependency_id);
+            if (dependency != nullptr && dependency->state == ModState::Loaded) owners.push_back(dependency_id);
+        }
+        for (const std::string &dependency_id : caller->manifest.optional_dependencies) {
             const ModRecord *dependency = Find(dependency_id);
             if (dependency != nullptr && dependency->state == ModState::Loaded) owners.push_back(dependency_id);
         }
@@ -654,6 +659,9 @@ struct Runtime::Impl {
             if (!candidate[i]) continue;
             const ModManifest &manifest = records[i].manifest;
             for (const std::string &dependency : manifest.dependencies) {
+                if (const auto found = index.find(dependency); found != index.end()) add_edge(found->second, i);
+            }
+            for (const std::string &dependency : manifest.optional_dependencies) {
                 if (const auto found = index.find(dependency); found != index.end()) add_edge(found->second, i);
             }
             for (const std::string &after : manifest.load_after) {
@@ -886,7 +894,7 @@ bool Runtime::Start(RuntimeConfig config, std::string &error) {
                 runtime->QueueChangedState("game.weapon.equipped", mod_id, result.value);
             } else if (result.status == ApiCallStatus::Ok &&
                        (operation.path == "shops.register_item" || operation.path == "shops.remove_item" ||
-                        operation.path == "shops.set_price")) {
+                        operation.path == "shops.set_items" || operation.path == "shops.set_price")) {
                 runtime->QueueChangedState("game.shop.purchased", mod_id, result.value);
             } else if (result.status == ApiCallStatus::Ok && operation.path == "dungeons.floor_rules_set" &&
                        result.value.value("changed", false)) {
@@ -1348,6 +1356,81 @@ bool Runtime::StepSetting(std::string_view mod_id, std::string_view setting_id, 
             return false;
     }
     return impl_->PersistSetting(*record, *setting, std::move(value), error);
+}
+
+bool Runtime::SetSettings(std::span<const SettingUpdate> updates, std::string &error) {
+    error.clear();
+    if (updates.empty()) return true;
+    struct ValidatedUpdate {
+        const ModRecord *record;
+        const SettingDefinition *setting;
+        const Json *value;
+    };
+    std::vector<ValidatedUpdate> validated;
+    std::set<std::pair<std::string, std::string>> unique;
+    validated.reserve(updates.size());
+    for (const SettingUpdate &update : updates) {
+        const ModRecord *record = impl_->Find(update.mod_id);
+        if (record == nullptr || !record->valid_manifest) {
+            error = "a preset package is unavailable";
+            return false;
+        }
+        const SettingDefinition *setting = impl_->FindSetting(*record, update.setting_id);
+        if (setting == nullptr) {
+            error = "a preset setting is unavailable: " + update.mod_id + ":" + update.setting_id;
+            return false;
+        }
+        const Json &value = update.value;
+        bool valid = false;
+        switch (setting->type) {
+            case SettingType::Boolean:
+                valid = value.is_boolean();
+                break;
+            case SettingType::Integer:
+                valid = value.is_number_integer() && value.get<double>() >= setting->minimum &&
+                        value.get<double>() <= setting->maximum;
+                break;
+            case SettingType::Number:
+                valid = value.is_number() && std::isfinite(value.get<double>()) &&
+                        value.get<double>() >= setting->minimum && value.get<double>() <= setting->maximum;
+                break;
+            case SettingType::String:
+                valid = value.is_string() && value.get_ref<const std::string &>().size() <= 256;
+                break;
+            case SettingType::Choice:
+                valid = value.is_string() &&
+                        std::ranges::find(setting->choices, value.get<std::string>()) != setting->choices.end();
+                break;
+        }
+        if (!valid) {
+            error = "a preset value is invalid for " + update.mod_id + ":" + update.setting_id;
+            return false;
+        }
+        if (!unique.emplace(update.mod_id, update.setting_id).second) {
+            error = "a preset contains a duplicate setting";
+            return false;
+        }
+        validated.push_back({record, setting, &update.value});
+    }
+
+    Json previous = impl_->profile;
+    for (const ValidatedUpdate &update : validated) {
+        impl_->profile["settings"][update.record->id][update.setting->id] = *update.value;
+    }
+    if (!impl_->SaveProfile(error)) {
+        impl_->profile = std::move(previous);
+        return false;
+    }
+    for (const ValidatedUpdate &update : validated) {
+        const auto loaded = std::ranges::find_if(impl_->modules, [&](const auto &entry) {
+            return entry.first == update.record->id;
+        });
+        if (loaded != impl_->modules.end()) {
+            loaded->second->Emit("settings.changed",
+                                 {{"id", update.setting->id}, {"value", impl_->SettingValue(*update.record, *update.setting)}});
+        }
+    }
+    return true;
 }
 
 Runtime &SharedRuntime() {

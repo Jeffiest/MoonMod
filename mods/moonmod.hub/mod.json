@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.hub",
+  "name": "MoonMod Hub",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Quick links to the integrated progression, dungeon, controls, and autosave pages in the MoonFactory Mod Manager.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["content.register"]
+}

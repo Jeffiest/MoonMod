@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.expanded-town",
+  "name": "Expanded Town Camera",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Toggle the legacy overhead camera while walking in towns.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write", "content.register"],
+  "settings": [
+    {"id": "town_camera_key", "name": "Overhead camera key", "type": "choice", "default": "O", "choices": ["O", "F1", "F2", "F3", "F4", "F5"]},
+    {"id": "camera_height", "name": "Overhead height", "type": "integer", "default": 90, "min": 40, "max": 500, "step": 10},
+    {"id": "camera_back", "name": "Camera offset", "type": "integer", "default": 22, "min": -200, "max": 200, "step": 2}
+  ]
+}

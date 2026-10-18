@@ -80,6 +80,7 @@ bool RegisterManagerAction(std::string_view owner_id, std::string_view local_id,
 bool RemoveManagerAction(std::string_view owner_id, std::string_view local_id);
 void RemoveManagerActions(std::string_view owner_id);
 std::vector<ManagerUiAction> ManagerActions(std::string_view owner_id);
+std::vector<ManagerUiAction> ManagerDisplayActions(std::string_view owner_id);
 ApiCallResult ManagerQuests(std::string_view owner_id);
 std::vector<ManagerJournalQuest> ManagerJournalQuests();
 std::string ManagerQuestRewardSummary(const Json &quest);

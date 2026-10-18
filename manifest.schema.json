@@ -16,6 +16,7 @@
     "games": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["chronicle", "chronicle-two"]}},
     "entry": {"type": "string", "maxLength": 128},
     "dependencies": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
+    "optional_dependencies": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "load_after": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "load_before": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "permissions": {"type": "array", "maxItems": 64, "items": {"enum": ["storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override", "debug.inspect", "native.extension"]}, "uniqueItems": true},
