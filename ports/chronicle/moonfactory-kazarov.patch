@@ -1,3 +1,42 @@
+diff --git a/port/platform/arena.cpp b/port/platform/arena.cpp
+index 0717e5a..b197230 100644
+--- a/port/platform/arena.cpp
++++ b/port/platform/arena.cpp
+@@ -77,6 +77,19 @@ bool ArenaContains(const void *pointer) {
+     return MapHolds(g_blocks, address) || MapHolds(g_retired, address);
+ }
+ 
++std::size_t ArenaRoomAt(const void *pointer) {
++    const auto address = reinterpret_cast<std::uintptr_t>(pointer);
++    for (const Block &block : g_blocks) {
++        const auto base = reinterpret_cast<std::uintptr_t>(block.memory.base);
++        const std::uintptr_t start = base - block.memory.lead;
++        const std::uintptr_t end = base + block.memory.capacity;
++        if (address >= start && address < end) {
++            return end - address;
++        }
++    }
++    return 0;
++}
++
+ void ArenaRequireOneAbove4GiB(const void *const *bases, std::size_t count) {
+ #ifndef NDEBUG
+     for (std::size_t i = 0; i < count; i++) {
+diff --git a/port/platform/arena.hpp b/port/platform/arena.hpp
+index a78be3f..15ba765 100644
+--- a/port/platform/arena.hpp
++++ b/port/platform/arena.hpp
+@@ -23,6 +23,10 @@ void ArenaClearAll();
+ // Retired blocks count: the game can still hold a pointer into one.
+ bool ArenaContains(const void *pointer);
+ 
++// Bytes from pointer to the end of the live block holding it (its lead counts), 0 when no live block
++// holds it: what a read into that pointer can write before the guard page.
++std::size_t ArenaRoomAt(const void *pointer);
++
+ // Takes the bases rather than reading the blocks, so tests drive the check ArenaBlock runs.
+ void ArenaRequireOneAbove4GiB(const void *const *bases, std::size_t count);
+ 
 diff --git a/port/platform/input.cpp b/port/platform/input.cpp
 index fd138f4..c04a1da 100644
 --- a/port/platform/input.cpp
@@ -297,6 +336,53 @@ index 6bbdee1..84ab9f0 100644
  void InputSetMenuNavigation(bool on);
  
  void InputSetDeveloperMenu(bool on);
+diff --git a/port/platform/overlay.cpp b/port/platform/overlay.cpp
+index 9b808dc..6e7daea 100644
+--- a/port/platform/overlay.cpp
++++ b/port/platform/overlay.cpp
+@@ -98,7 +98,7 @@ int OverlayPixelSize(const gfx::LogicalMapping &mapping) {
+     return std::max(1, static_cast<int>(std::lround(std::min(mapping.scale_x, mapping.scale_y))));
+ }
+ 
+-void OverlayDrawText(std::string_view text, const gfx::LogicalMapping &mapping, int pixel, int x, int y) {
++void OverlayDrawText(std::string_view text, const gfx::LogicalMapping &mapping, int pixel, int x, int y, bool backdrop) {
+     if (text.empty() || mapping.scale_x <= 0.0f || mapping.scale_y <= 0.0f) {
+         return;
+     }
+@@ -121,8 +121,8 @@ void OverlayDrawText(std::string_view text, const gfx::LogicalMapping &mapping,
+             columns += glyph->advance;
+         }
+     }
+-    std::vector<gfx::Vertex2D> backdrop;
+-    quad(backdrop, x, y, x + (columns + 2 * kOverlayPadding) * pixel,
++    std::vector<gfx::Vertex2D> backdrop_quads;
++    quad(backdrop_quads, x, y, x + (columns + 2 * kOverlayPadding) * pixel,
+          y + (kFontHeight + 2 * kOverlayPadding) * pixel, 0, kBackdropAlpha);
+ 
+     // One quad per run of equal coverage in a glyph row; coverage becomes alpha (0x80 is opaque).
+@@ -155,7 +155,7 @@ void OverlayDrawText(std::string_view text, const gfx::LogicalMapping &mapping,
+ 
+     gfx::DrawState blended;
+     blended.blend = true;
+-    gfx::Draw2D(gfx::Primitive::Quads, backdrop, {}, blended);
++    if (backdrop) gfx::Draw2D(gfx::Primitive::Quads, backdrop_quads, {}, blended);
+     if (!glyphs.empty()) {
+         gfx::Draw2D(gfx::Primitive::Quads, glyphs, {}, blended);
+     }
+diff --git a/port/platform/overlay.hpp b/port/platform/overlay.hpp
+index 94bab9e..6d57030 100644
+--- a/port/platform/overlay.hpp
++++ b/port/platform/overlay.hpp
+@@ -27,7 +27,8 @@ int OverlayPixelSize(const gfx::LogicalMapping &mapping);
+ // Draws text on the current target, which mapping describes, with its top-left corner at target
+ // pixel (x, y): a translucent black backdrop kOverlayPadding font pixels around it, then white glyphs,
+ // each font pixel `pixel` target pixels square. Inside a frame or a recording.
+-void OverlayDrawText(std::string_view text, const gfx::LogicalMapping &mapping, int pixel, int x, int y);
++void OverlayDrawText(std::string_view text, const gfx::LogicalMapping &mapping, int pixel, int x, int y,
++                     bool backdrop = true);
+ 
+ // text at the top-left corner of the main target, as it is mapped now, recorded into a display list
+ // of its own for RenderOptions::overlay. Outside a frame or a recording.
 diff --git a/port/platform/window.cpp b/port/platform/window.cpp
 index 3762cc1..9ed8cc5 100644
 --- a/port/platform/window.cpp

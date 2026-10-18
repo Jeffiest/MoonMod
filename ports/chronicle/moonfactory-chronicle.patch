@@ -1436,7 +1436,7 @@ index 20e41f73..7b15ec3d 100644
  void TownMouseApply(CCamera *shown, CEditGround *ground, int map, int mode);
 +
 diff --git a/port/src/dataread.cpp b/port/src/dataread.cpp
-index edf90fa0..d53d015c 100644
+index edf90fa0..f78a3b09 100644
 --- a/port/src/dataread.cpp
 +++ b/port/src/dataread.cpp
 @@ -2,6 +2,7 @@
@@ -1456,15 +1456,17 @@ index edf90fa0..d53d015c 100644
  #include <string>
  #include <string_view>
  #include <unordered_map>
-@@ -18,6 +21,7 @@
+@@ -17,7 +20,9 @@
+ #include "../../tools/dcdata/dcdata.hpp"
  #include "language.h"
  #include "localize.hpp"
++#include "platform/arena.hpp"
  #include "platform/paths.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
  
  namespace fs = std::filesystem;
  
-@@ -27,6 +31,13 @@ std::unordered_map<std::string, fs::path> data_index;
+@@ -27,6 +32,15 @@ std::unordered_map<std::string, fs::path> data_index;
  bool                                      data_indexed;
  BG_READ_INFO                              bg_read_info[32];
  
@@ -1473,12 +1475,14 @@ index edf90fa0..d53d015c 100644
 +// advanced the retail read-buffer pointer.
 +constexpr std::uintmax_t kVirtualMonsterAssetLimit = 2ull * 1024ull * 1024ull;
 +constexpr std::uintmax_t kVirtualMapAssetLimit = 8ull * 1024ull * 1024ull;
++// A new floor pack (dun/<map>.cfg, dun/mpd_pack/<map>.mpd): BtMapJumpLoad stops at 6,400,000 bytes.
++constexpr std::uintmax_t kVirtualFloorPackLimit = 6400000ull;
 +constexpr std::uintmax_t kUnlimitedRead = std::numeric_limits<std::uintmax_t>::max();
 +
  // Everything up to the first colon is a device, as retail's LoadFile2 has it; sim: and host:
  // were development devices that reached the same tree, so they are dropped like cdrom0:.
  std::string_view StripDevice(std::string_view path) {
-@@ -73,21 +84,24 @@ const fs::path *Lookup(std::string_view path) {
+@@ -73,21 +87,24 @@ const fs::path *Lookup(std::string_view path) {
  
  // The drive wrote whole sectors, so up to 2047 bytes past the file were overwritten and callers
  // sized their buffers for that; the tail is zeroed rather than left as whatever was there.
@@ -1506,25 +1510,70 @@ index edf90fa0..d53d015c 100644
      return static_cast<int>(size);
  }
  
-@@ -113,6 +127,39 @@ void Localized(std::string_view path, void *buffer, int *size) {
+@@ -113,6 +130,113 @@ void Localized(std::string_view path, void *buffer, int *size) {
      LocalizeFile(path, buffer, dcdata::SectorsFor(static_cast<std::uint64_t>(*size)) * dcdata::kSector, size);
  }
  
-+fs::path NativeAssetSource(std::string_view game_path, const fs::path &base_file) {
-+    const std::optional<fs::path> replacement =
-+        moonmod::FindNativeResourceOverride(dcdata::FoldPath(StripDevice(game_path)));
++// How far an override may grow past its retail file, by kind (DC1_PORT_SIZE_LIMITS.md). Each of these
++// loaders reads into the free tail of an arena and advances it by the size it got, so the read only has
++// to fit the block it lands in; ReadIntoRoom checks that. 0: the kind keeps its retail size.
++struct GrowthLimit {
++    std::uintmax_t bytes;
++    const char    *why;
++};
++
++GrowthLimit OverrideGrowthLimit(std::string_view path) {
++    const auto ends = [path](std::string_view tail) { return path.ends_with(tail); };
++    // The opening's text goes to a fixed 68,992-byte VisualData block (title/opening.cpp MesBuffer).
++    if (path.starts_with("opdat/")) return {ends(".mes") ? 68992u : 0u, "opening text buffer"};
++    if (ends(".mpd")) return {6399999u, "BtMapJumpLoad's 6,400,000-byte map check"};
++    if (ends(".cfg")) return {1024u * 1024u, ".cfg limit"};
++    if (ends(".chr")) return {16u * 1024u * 1024u, ".chr limit"};
++    if (ends(".stb")) return {4u * 1024u * 1024u, ".stb limit"};
++    if (ends(".mes")) return {1024u * 1024u, ".mes limit"};
++    if (ends(".snd")) return {16u * 1024u * 1024u, ".snd limit"};
++    if (ends(".scn")) return {8u * 1024u * 1024u, "Georama scene limit"};
++    if (ends(".edt")) return {64u * 1024u, "Georama layout buffer (editground.cpp)"};
++    return {0, "this kind is held to its retail size"};
++}
++
++// A replacement no larger than the retail file is used as before. A larger one is used when its kind
++// may grow, it is under that kind's limit and its whole sectors fit the arena block buffer is in;
++// otherwise the retail file is read and the log names the limit.
++fs::path NativeAssetSource(std::string_view game_path, const fs::path &base_file, const void *buffer) {
++    const std::string folded = dcdata::FoldPath(StripDevice(game_path));
++    const std::optional<fs::path> replacement = moonmod::FindNativeResourceOverride(folded);
 +    if (!replacement) return base_file;
 +    std::error_code error;
 +    const std::uintmax_t original_size = fs::file_size(base_file, error);
 +    if (error) return base_file;
 +    const std::uintmax_t replacement_size = fs::file_size(*replacement, error);
-+    if (!error && replacement_size > 0 && replacement_size <= original_size &&
-+        replacement_size <= static_cast<std::uintmax_t>(std::numeric_limits<int>::max())) {
-+        return *replacement;
++    if (error || replacement_size == 0 ||
++        replacement_size > static_cast<std::uintmax_t>(std::numeric_limits<int>::max())) {
++        std::fprintf(stderr, "moonmod: ignored empty or unreadable native resource override for %s\n", folded.c_str());
++        return base_file;
 +    }
-+    std::fprintf(stderr, "moonmod: ignored oversized or unreadable native resource override for %.*s\n",
-+                 static_cast<int>(game_path.size()), game_path.data());
-+    return base_file;
++    if (replacement_size <= original_size) return *replacement;
++    const GrowthLimit limit = OverrideGrowthLimit(folded);
++    const std::uintmax_t padded = dcdata::SectorsFor(replacement_size) * dcdata::kSector;
++    const std::uintmax_t room = ArenaRoomAt(buffer);
++    if (limit.bytes == 0 || replacement_size > limit.bytes) {
++        std::fprintf(stderr,
++                     "moonmod: refused override for %s: %ju bytes, retail %ju, limit %ju (%s)\n",
++                     folded.c_str(), replacement_size, original_size,
++                     limit.bytes == 0 ? original_size : limit.bytes, limit.why);
++        return base_file;
++    }
++    if (padded > room) {
++        std::fprintf(stderr,
++                     "moonmod: refused override for %s: %ju bytes (%ju with sector padding), retail %ju, "
++                     "destination buffer has %ju bytes\n",
++                     folded.c_str(), replacement_size, padded, original_size, room);
++        return base_file;
++    }
++    std::fprintf(stderr, "moonmod: override for %s grows %ju -> %ju bytes (limit %ju, buffer room %ju)\n",
++                 folded.c_str(), original_size, replacement_size, limit.bytes, room);
++    return *replacement;
 +}
 +
 +bool IsVirtualMonsterAssetPath(std::string_view path) {
@@ -1543,10 +1592,39 @@ index edf90fa0..d53d015c 100644
 +           });
 +}
 +
++// dun/<map>.cfg or dun/mpd_pack/<map>.mpd with a 1-15 character [a-z0-9_] map name.
++bool IsVirtualFloorPackPath(std::string_view path) {
++    std::string_view extension;
++    if (path.starts_with("dun/mpd_pack/")) {
++        path.remove_prefix(13);
++        extension = ".mpd";
++    } else if (path.starts_with("dun/")) {
++        path.remove_prefix(4);
++        extension = ".cfg";
++    } else {
++        return false;
++    }
++    if (!path.ends_with(extension)) return false;
++    path.remove_suffix(4);
++    return !path.empty() && path.size() <= 15 && std::all_of(path.begin(), path.end(), [](unsigned char c) {
++        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
++    });
++}
++
++// gedit/mod/<name>.scn: a Georama variant's own scene file (see ChronicleLoadModPartModel).
++bool IsVirtualGeoramaScenePath(std::string_view path) {
++    if (!path.starts_with("gedit/mod/") || !path.ends_with(".scn")) return false;
++    path.remove_prefix(10);
++    path.remove_suffix(4);
++    return !path.empty() && path.size() <= 15 && std::all_of(path.begin(), path.end(), [](unsigned char c) {
++        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
++    });
++}
++
  } // namespace
  
  PORT_OVERRIDE void InitCDFile() {
-@@ -165,12 +212,29 @@ PORT_OVERRIDE int LoadFile2(char *path, void *buffer, int *out_size, int mode) {
+@@ -165,12 +289,31 @@ PORT_OVERRIDE int LoadFile2(char *path, void *buffer, int *out_size, int mode) {
      if (out_size) {
          *out_size = 0;
      }
@@ -1564,6 +1642,8 @@ index edf90fa0..d53d015c 100644
 +        const std::optional<fs::path> virtual_asset = moonmod::FindNativeResourceOverride(game_path);
 +        if (!buffer || !virtual_asset) return 0;
 +        const std::uintmax_t limit = IsVirtualMonsterAssetPath(game_path) ? kVirtualMonsterAssetLimit
++                                     : IsVirtualFloorPackPath(game_path)  ? kVirtualFloorPackLimit
++                                     : IsVirtualGeoramaScenePath(game_path) ? kVirtualMapAssetLimit
 +                                                                           : (alias ? kVirtualMapAssetLimit : 0);
 +        if (limit == 0) return 0;
 +        int size = ReadWhole(*virtual_asset, buffer, limit);
@@ -1572,7 +1652,7 @@ index edf90fa0..d53d015c 100644
 +        if (out_size) *out_size = size;
 +        return 1;
 +    }
-+    const fs::path source = alias && exact_override ? *exact_override : NativeAssetSource(path, *file);
++    const fs::path source = alias && exact_override ? *exact_override : NativeAssetSource(path, *file, buffer);
 +    int size = ReadWhole(source, buffer, alias ? kVirtualMapAssetLimit : kUnlimitedRead);
 +    if (size < 0) return 0;
 +    const std::string localization_path = alias && !has_override ? *alias : std::string(path);
@@ -1580,7 +1660,7 @@ index edf90fa0..d53d015c 100644
      if (out_size) {
          *out_size = size;
      }
-@@ -216,6 +280,17 @@ PORT_OVERRIDE void InitReadBG() {
+@@ -216,6 +359,17 @@ PORT_OVERRIDE void InitReadBG() {
      }
  }
  
@@ -1598,7 +1678,7 @@ index edf90fa0..d53d015c 100644
  PORT_OVERRIDE void StartReadBG() {
      InitReadBG();
  }
-@@ -246,12 +321,35 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
+@@ -246,12 +400,35 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
      if (reinterpret_cast<std::uintptr_t>(buffer) % 64) {
          printf("/*/*/*/*/not 64byte align at %p %s\n", static_cast<void *>(buffer), name);
      }
@@ -1630,7 +1710,7 @@ index edf90fa0..d53d015c 100644
 +        if (out_size) *out_size = localized_size;
 +        return 1;
 +    }
-+    const fs::path source = alias && exact_override ? *exact_override : NativeAssetSource(name, *file);
++    const fs::path source = alias && exact_override ? *exact_override : NativeAssetSource(name, *file, buffer);
 +    int size = ReadWhole(source, buffer, alias ? kVirtualMapAssetLimit : kUnlimitedRead);
 +    if (size < 0) return 0;
 +    const std::string localization_path = alias && !has_override ? *alias : std::string(name);
@@ -5033,10 +5113,10 @@ index 5e4e17ed..4f573899 100644
          if (drawn && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..e7306196
+index 00000000..109e3031
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,471 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5228,6 +5308,8 @@ index 00000000..e7306196
 +    {"render.bar_remove", "render", "bar_remove", "render", "content.register", "Remove a HUD progress bar owned by this mod."},
 +    {"render.camera_get", "render", "camera_get", "any", "game.read", "Read the active dungeon camera pose."},
 +    {"render.camera_set", "render", "camera_set", "render", "game.write", "Set bounded distance, height, or angle on the active dungeon follow camera."},
++    {"dungeons.lighting_get", "dungeons", "lighting_get", "any", "game.read", "Read the active floor's fog, background and ambient light, front and back side."},
++    {"dungeons.lighting_set", "dungeons", "lighting_set", "simulation", "game.write", "Set the active floor's fog, background or ambient light until the next floor loads."},
 +    {"render.town_camera_set", "render", "town_camera_set", "simulation", "game.write", "Enable or disable an owner-scoped overhead camera during safe town walking."},
 +    {"render.first_person_toggle", "render", "first_person_toggle", "simulation", "game.write", "Request the native dungeon first-person view transition."},
 +    {"ui.register", "ui", "register", "content", "content.register", "Register an owned button in the in-game MoonFactory manager."},
@@ -5911,10 +5993,10 @@ index 00000000..f11b202d
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..30180ce0
+index 00000000..e7edcd40
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,8618 @@
+@@ -0,0 +1,8776 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
@@ -5987,6 +6069,9 @@ index 00000000..30180ce0
 +};
 +extern ITEM_MONEY_ENTRY PriceList[296];
 +void WeaponLevelUpValueCalc(WEAPON_HAVE *src, WEAPON_HAVE *dst, int levels, int unused);
++
++// Which side of the floor the dungeon draws (0 front, 1 the back side), set by dun/movechara.cpp.
++extern s32 lightingMode;
 +
 +namespace moonmod {
 +int ChronicleNativeMonsterModelId(::CMonstorUnit *unit, int slot);
@@ -6335,6 +6420,7 @@ index 00000000..30180ce0
 +    std::string name;
 +    int source_floor = -1;
 +    int native_floor_id = -1;
++    std::string map; // own floor pack: dun/<map>.cfg + dun/mpd_pack/<map>.mpd, empty = native
 +    bool has_enemy_override = false;
 +    std::vector<std::string> enemy_character_ids;
 +    std::vector<int> enemy_model_ids;
@@ -6356,6 +6442,8 @@ index 00000000..30180ce0
 +    int town_id = -1;
 +    int stock = 1;
 +    int native_part_id = -1;
++    std::string model_scene;
++    std::string model_part;
 +};
 +
 +struct ModLocation {
@@ -8615,6 +8703,12 @@ index 00000000..30180ce0
 +    return result;
 +}
 +
++bool IsModFloorMapName(std::string_view name) {
++    return !name.empty() && name.size() <= 15 && std::all_of(name.begin(), name.end(), [](unsigned char c) {
++        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
++    });
++}
++
 +Json ModDungeonJson(const ModDungeon &dungeon) {
 +    Json floors = Json::array();
 +    for (const ModDungeonFloor &floor : dungeon.floors) {
@@ -8622,6 +8716,7 @@ index 00000000..30180ce0
 +                      {"native_floor_id", floor.native_floor_id}, {"mod_owned", true},
 +                      {"status", "registered"}};
 +        if (floor.has_enemy_override) entry["enemies"] = floor.enemy_character_ids;
++        if (!floor.map.empty()) entry["map"] = floor.map;
 +        floors.push_back(std::move(entry));
 +    }
 +    const int native_id = dungeon.native_dungeon_id;
@@ -8650,8 +8745,8 @@ index 00000000..30180ce0
 +    const Json &definition = args[0];
 +    for (auto field = definition.begin(); field != definition.end(); ++field) {
 +        if (field.key() != "id" && field.key() != "name" && field.key() != "template_part_id" &&
-+            field.key() != "town_id" && field.key() != "stock" && field.key() != "assets") {
-+            return Invalid("Georama piece definitions accept only id, name, template_part_id, town_id, stock, and empty assets");
++            field.key() != "town_id" && field.key() != "stock" && field.key() != "assets" && field.key() != "model") {
++            return Invalid("Georama piece definitions accept only id, name, template_part_id, town_id, stock, model, and empty assets");
 +        }
 +    }
 +    const auto id_it = definition.find("id");
@@ -8664,6 +8759,26 @@ index 00000000..30180ce0
 +    const std::string &display_name = name_it->get_ref<const std::string &>();
 +    if (display_name.empty() || display_name.size() > 47 || display_name.find('\0') != std::string::npos) {
 +        return Invalid("piece name must contain 1-47 bytes and fit the native Georama menu");
++    }
++    std::string model_scene;
++    std::string model_part;
++    if (const auto model_it = definition.find("model"); model_it != definition.end()) {
++        if (!model_it->is_object() || model_it->size() != 2 || !model_it->contains("scene") ||
++            !model_it->contains("part") || !(*model_it)["scene"].is_string() || !(*model_it)["part"].is_string()) {
++            return Invalid("model must be {scene = scene file path, part = part archive name}");
++        }
++        model_scene = (*model_it)["scene"].get<std::string>();
++        model_part = (*model_it)["part"].get<std::string>();
++        std::ranges::transform(model_scene, model_scene.begin(), [](unsigned char c) { return std::tolower(c); });
++        const bool mod_scene = model_scene.starts_with("gedit/mod/");
++        if (model_scene.size() > 63 || !model_scene.starts_with("gedit/") || !model_scene.ends_with(".scn") ||
++            model_scene.find("..") != std::string::npos || model_part.empty() || model_part.size() > 31 ||
++            !InputId(model_part)) {
++            return Invalid("model.scene must be a gedit/.../*.scn path and model.part a part archive name");
++        }
++        if (mod_scene && !NativeResourceOverrideOwnedBy(mod_id, model_scene)) {
++            return Failed("a gedit/mod/ scene must be this mod's own resource override");
++        }
 +    }
 +    int town_id = -1;
 +    int stock = 1;
@@ -8725,6 +8840,9 @@ index 00000000..30180ce0
 +
 +    ModGeoramaPiece piece{qualified_id, std::string(mod_id), display_name, template_part_id, town_id,
 +                          stock, native_part_id};
++    piece.model_scene = model_scene;
++    piece.model_part = model_part;
++    SetChronicleModGeoramaPieceModel(native_part_id, model_scene.c_str(), model_part.c_str());
 +    auto [registered_piece, inserted] = g_mod_georama_pieces.emplace(qualified_id, std::move(piece));
 +    (void)inserted;
 +    g_mod_georama_piece_by_native_id[native_part_id] = qualified_id;
@@ -8803,8 +8921,8 @@ index 00000000..30180ce0
 +        if (!floor_definition.is_object()) return Invalid("each floor definition must be an object");
 +        for (auto field = floor_definition.begin(); field != floor_definition.end(); ++field) {
 +            if (field.key() != "id" && field.key() != "name" && field.key() != "source_floor" &&
-+                field.key() != "enemies") {
-+                return Invalid("Chronicle floor definitions accept only id, name, source_floor, and enemies");
++                field.key() != "enemies" && field.key() != "map") {
++                return Invalid("Chronicle floor definitions accept only id, name, source_floor, enemies, and map");
 +            }
 +        }
 +        const auto floor_id_it = floor_definition.find("id");
@@ -8826,6 +8944,19 @@ index 00000000..30180ce0
 +            : floor_name_it->get<std::string>();
 +        if (floor_name.empty() || floor_name.size() > 95 || floor_name.find('\0') != std::string::npos) {
 +            return Invalid("floor name must contain 1-95 UTF-8 bytes");
++        }
++        std::string floor_map;
++        const auto map_it = floor_definition.find("map");
++        if (map_it != floor_definition.end()) {
++            if (!map_it->is_string()) return Invalid("floor map must be a floor pack name");
++            floor_map = map_it->get<std::string>();
++            if (!IsModFloorMapName(floor_map)) {
++                return Invalid("floor map must be 1-15 lowercase letters, digits or '_'");
++            }
++            if (!NativeResourceOverrideOwnedBy(mod_id, "dun/" + floor_map + ".cfg") ||
++                !NativeResourceOverrideOwnedBy(mod_id, "dun/mpd_pack/" + floor_map + ".mpd")) {
++                return Failed("a floor map needs this mod's overrides of dun/<map>.cfg and dun/mpd_pack/<map>.mpd");
++            }
 +        }
 +        bool has_enemy_override = false;
 +        std::vector<std::string> enemy_character_ids;
@@ -8888,6 +9019,7 @@ index 00000000..30180ce0
 +        floor.name = floor_name;
 +        floor.source_floor = source_floor;
 +        floor.native_floor_id = native_floor_id;
++        floor.map = std::move(floor_map);
 +        floor.has_enemy_override = has_enemy_override;
 +        floor.enemy_character_ids = std::move(enemy_character_ids);
 +        floor.enemy_model_ids = std::move(enemy_model_ids);
@@ -12408,6 +12540,98 @@ index 00000000..30180ce0
 +            {}};
 +}
 +
++// The active floor's fog, background and ambient light: what the floor script's FOG, BG_COL and
++// AMBIENT lines set (and URA_ for the back side), which the dungeon draw reapplies every frame
++// (port/src/dun/gameloop.cpp). Values hold until the next floor reads its own script.
++Json DungeonLightingSide(const float *fog_rate, const u8 *fog_color, const u8 *background, const float *ambient) {
++    return {{"fog",
++             {{"near", fog_rate[0]}, {"far", fog_rate[1]}, {"min", fog_rate[2]}, {"max", fog_rate[3]},
++              {"r", fog_color[0]}, {"g", fog_color[1]}, {"b", fog_color[2]}}},
++            {"background", {{"r", background[0]}, {"g", background[1]}, {"b", background[2]}}},
++            {"ambient", {{"r", ambient[0]}, {"g", ambient[1]}, {"b", ambient[2]}}}};
++}
++
++ApiCallResult ReadDungeonLighting(const Json &args) {
++    if (!args.is_array() || !args.empty()) return Invalid("dungeons.lighting_get takes no arguments");
++    if (mode != GAME_MODE_DUNGEON) return Failed("there is no active Chronicle dungeon floor");
++    return {ApiCallStatus::Ok,
++            {{"side", lightingMode == 0 ? "front" : "back"},
++             {"front", DungeonLightingSide(main_fogRate, main_fogColor, main_bgColor, main_ambientlight)},
++             {"back", DungeonLightingSide(sub_fogRate, sub_fogColor, sub_bgColor, sub_ambientlight)}},
++            {}};
++}
++
++ApiCallResult SetDungeonLighting(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].empty()) {
++        return Invalid("expected {side?, fog?, background?, ambient?}");
++    }
++    const Json &definition = args[0];
++    for (auto field = definition.begin(); field != definition.end(); ++field) {
++        if (field.key() != "side" && field.key() != "fog" && field.key() != "background" && field.key() != "ambient") {
++            return Invalid("dungeons.lighting_set only accepts side, fog, background and ambient");
++        }
++    }
++    if (mode != GAME_MODE_DUNGEON) return Failed("there is no active Chronicle dungeon floor");
++    std::string side = "both";
++    if (definition.contains("side")) {
++        if (!definition["side"].is_string()) return Invalid("side must be \"front\", \"back\" or \"both\"");
++        side = definition["side"].get<std::string>();
++        if (side != "front" && side != "back" && side != "both") {
++            return Invalid("side must be \"front\", \"back\" or \"both\"");
++        }
++    }
++    // every field is checked before anything is written
++    struct Field {
++        const char *group;
++        const char *key;
++        float minimum;
++        float maximum;
++    };
++    static constexpr Field kFields[] = {
++        {"fog", "near", 0.0f, 100000.0f}, {"fog", "far", 0.0f, 100000.0f}, {"fog", "min", 0.0f, 255.0f},
++        {"fog", "max", 0.0f, 255.0f},     {"fog", "r", 0.0f, 255.0f},      {"fog", "g", 0.0f, 255.0f},
++        {"fog", "b", 0.0f, 255.0f},       {"background", "r", 0.0f, 255.0f}, {"background", "g", 0.0f, 255.0f},
++        {"background", "b", 0.0f, 255.0f}, {"ambient", "r", 0.0f, 255.0f}, {"ambient", "g", 0.0f, 255.0f},
++        {"ambient", "b", 0.0f, 255.0f},
++    };
++    for (const char *group : {"fog", "background", "ambient"}) {
++        if (!definition.contains(group)) continue;
++        const Json &values = definition[group];
++        if (!values.is_object()) return Invalid(std::string(group) + " must be a table");
++        for (auto value = values.begin(); value != values.end(); ++value) {
++            const Field *known = nullptr;
++            for (const Field &field : kFields) {
++                if (std::string_view(field.group) == group && value.key() == field.key) known = &field;
++            }
++            if (known == nullptr) return Invalid(std::string(group) + "." + value.key() + " is not a lighting field");
++            if (!value->is_number()) return Invalid(std::string(group) + "." + value.key() + " must be a number");
++            const float number = value->get<float>();
++            if (!std::isfinite(number) || number < known->minimum || number > known->maximum) {
++                return Invalid(std::string(group) + "." + value.key() + " is outside its range");
++            }
++        }
++    }
++    const auto apply = [&definition](float *fog_rate, u8 *fog_color, u8 *background, float *ambient) {
++        const auto number = [&definition](const char *group, const char *key) -> std::optional<float> {
++            if (!definition.contains(group) || !definition[group].contains(key)) return std::nullopt;
++            return definition[group][key].get<float>();
++        };
++        if (auto v = number("fog", "near")) fog_rate[0] = *v;
++        if (auto v = number("fog", "far")) fog_rate[1] = *v;
++        if (auto v = number("fog", "min")) fog_rate[2] = *v;
++        if (auto v = number("fog", "max")) fog_rate[3] = *v;
++        const char *channels[3] = {"r", "g", "b"};
++        for (int c = 0; c < 3; ++c) {
++            if (auto v = number("fog", channels[c])) fog_color[c] = static_cast<u8>(*v);
++            if (auto v = number("background", channels[c])) background[c] = static_cast<u8>(*v);
++            if (auto v = number("ambient", channels[c])) ambient[c] = *v;
++        }
++    };
++    if (side != "back") apply(main_fogRate, main_fogColor, main_bgColor, main_ambientlight);
++    if (side != "front") apply(sub_fogRate, sub_fogColor, sub_bgColor, sub_ambientlight);
++    return ReadDungeonLighting(Json::array());
++}
++
 +ApiCallResult SetDungeonCamera(const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].empty()) {
 +        return Invalid("expected {distance?, height?, angle?} with at least one camera field");
@@ -13892,6 +14116,8 @@ index 00000000..30180ce0
 +    if (operation.path == "input.context_get") return GetInputContext(args);
 +    if (operation.path == "render.camera_get") return ReadDungeonCamera(args);
 +    if (operation.path == "render.camera_set") return SetDungeonCamera(args);
++    if (operation.path == "dungeons.lighting_get") return ReadDungeonLighting(args);
++    if (operation.path == "dungeons.lighting_set") return SetDungeonLighting(args);
 +    if (operation.path == "render.town_camera_set") return SetTownCamera(mod_id, args);
 +    if (operation.path == "render.layer_register") return RegisterRenderLayer(mod_id, args);
 +    if (operation.path == "render.layer_remove") return RemoveRenderLayer(mod_id, args);
@@ -14382,6 +14608,8 @@ index 00000000..30180ce0
 +    config.api_capabilities.push_back({"characters.register", true, {}});
 +    config.api_capabilities.push_back({"render.camera_get", true, {}});
 +    config.api_capabilities.push_back({"render.camera_set", true, {}});
++    config.api_capabilities.push_back({"dungeons.lighting_get", true, {}});
++    config.api_capabilities.push_back({"dungeons.lighting_set", true, {}});
 +    config.api_capabilities.push_back({"render.town_camera_set", true, {}});
 +    config.api_capabilities.push_back({"render.first_person_toggle", true, {}});
 +    config.api_capabilities.push_back({"save.autosave_set", true, {}});
@@ -14533,6 +14761,18 @@ index 00000000..30180ce0
 +}
 +
 +} // namespace moonmod
++
++// Floor pack BtMapJumpLoad should read for a mod-registered floor, or nullptr for the native one.
++const char *ChronicleModFloorMap(int dungeon, int floor) {
++    for (const auto &[id, mod_dungeon] : moonmod::g_mod_dungeons) {
++        (void)id;
++        if (mod_dungeon.native_dungeon_id != dungeon) continue;
++        for (const auto &mod_floor : mod_dungeon.floors) {
++            if (mod_floor.native_floor_id == floor && !mod_floor.map.empty()) return mod_floor.map.c_str();
++        }
++    }
++    return nullptr;
++}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
 index 00000000..716a4250
@@ -22827,10 +23067,16 @@ index ee8b9d59..2a720439 100644
 +    PASS_REGULAR_EXPRESSION "MOONFACTORY_PREFLIGHT_OK"
 +    TIMEOUT 120 RUN_SERIAL TRUE LABELS gpu)
 diff --git a/port/src/tests/data_read_test.cpp b/port/src/tests/data_read_test.cpp
-index cb5dea09..5e718f6c 100644
+index cb5dea09..65548739 100644
 --- a/port/src/tests/data_read_test.cpp
 +++ b/port/src/tests/data_read_test.cpp
-@@ -11,6 +11,7 @@
+@@ -6,11 +6,13 @@
+ #include <string>
+ #include <vector>
+ 
++#include "platform/arena.hpp"
+ #include "platform/paths.hpp"
+ #include "data_fixture.hpp"
  #include "dataread.hpp"
  #include "dataread_port.hpp"
  #include "exitcodes.hpp"
@@ -22838,7 +23084,7 @@ index cb5dea09..5e718f6c 100644
  #include "platform_fixture.hpp"
  
  using namespace datafix;
-@@ -97,6 +98,191 @@ TEST(DataRead, Loadfile2ReadsExactSizeAndZeroFills) {
+@@ -97,6 +99,224 @@ TEST(DataRead, Loadfile2ReadsExactSizeAndZeroFills) {
      fs::remove_all(dir);
  }
  
@@ -23025,6 +23271,39 @@ index cb5dea09..5e718f6c 100644
 +    ASSERT_EQ(LoadFile2(Mutable("dun/pack/maindat.pac"), buffer, &size, 0), 1);
 +    EXPECT_EQ(size, 5000);
 +    EXPECT_TRUE(Equals(buffer, disc.files[0].data));
++}
++
++// A kind that may grow (.snd) is read larger than retail into an arena block it fits, and the retail file
++// is read instead when the destination is not an arena block (no known room).
++TEST(DataRead, NativeResourceOverrideGrowsPastRetailOnlyIntoArenaRoom) {
++    fs::path dir = InstallStandardData("read_native_override_grows");
++    const Disc disc = StandardDisc();
++    const fs::path package = dir / "mods" / "test.asset-grow";
++    const Bytes grown = Pattern(3000, 0x63);
++    WriteBytes(package / "resources" / "b01.snd", grown);
++    moonmod::ResetNativeResourceOverridesForTests();
++    struct ResetOverrides {
++        ~ResetOverrides() { moonmod::ResetNativeResourceOverridesForTests(); }
++    } reset;
++    const moonmod::ApiCallResult registered = moonmod::RegisterNativeResourceOverride(
++        "test.asset-grow", package,
++        moonmod::Json::array({{{"path", "resources/b01.snd"}, {"game_path", "sound/bgm/b01.snd"}}}));
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++
++    static const char arena_key = 0;
++    unsigned char *arena = ArenaBlock(&arena_key, 8192);
++    int size = 0;
++    ASSERT_EQ(LoadFile2(Mutable("sound/bgm/b01.snd"), arena, &size, 0), 1);
++    EXPECT_EQ(size, 3000);
++    EXPECT_TRUE(Equals(arena, grown));
++
++    // 3000 bytes pad to 4096; 2048 bytes before the block's end is too little.
++    ASSERT_EQ(LoadFile2(Mutable("sound/bgm/b01.snd"), arena + 8192 - 2048, &size, 0), 1);
++    EXPECT_EQ(size, 1);
++
++    Clear();
++    ASSERT_EQ(LoadFile2(Mutable("sound/bgm/b01.snd"), buffer, &size, 0), 1);
++    EXPECT_EQ(size, 1);
 +}
 +
  TEST(DataRead, LanguagesFromTheExtraction) {
@@ -65074,10 +65353,10 @@ index ecc64ed8..32e22eec 100644
  STATIC_ASSERT(sizeof(CDungeonMap) == 0x10B10);
 +#endif
 diff --git a/ps2/include/editpartsinfo.hpp b/ps2/include/editpartsinfo.hpp
-index 2473f05e..7bf53b00 100644
+index 2473f05e..c4884e33 100644
 --- a/ps2/include/editpartsinfo.hpp
 +++ b/ps2/include/editpartsinfo.hpp
-@@ -3,6 +3,35 @@
+@@ -3,6 +3,40 @@
  #include "common.h"
  
  struct EPARTS_FUNC_DATA;
@@ -65105,6 +65384,11 @@ index 2473f05e..7bf53b00 100644
 +bool RegisterChronicleModGeoramaPiece(int part_id, int town_id, int template_part_id, int stock,
 +                                      const char *id, const char *owner, const char *name);
 +bool UnregisterChronicleModGeoramaPiece(int part_id);
++// Gives a registered variant its own model: the part archive `part` inside the scene file `scene`
++// (a retail gedit/<town>/scene.scn or a mod's gedit/mod/<name>.scn). Empty strings clear it.
++bool SetChronicleModGeoramaPieceModel(int part_id, const char *scene, const char *part);
++// editloop.cpp: rebuilds a part's models from that archive; false leaves the template's models.
++bool ChronicleLoadModPartModel(CMapParts *parts, const char *scene, const char *part);
 +bool GetChronicleModGeoramaPiece(int part_id, CHRONICLE_MOD_GEORAMA_PIECE *out_piece);
 +int FindChronicleModGeoramaPiece(const char *id);
 +EDIT_PARTS_ATRA *GetChronicleModGeoramaAtra(int town_id, int part_id);
@@ -67915,10 +68199,23 @@ index db82e278..aa28c705 100644
                  model = map->box_collision_model;
                  model->SetPosition(map->boxes[k].pos);
 diff --git a/ps2/src/editground.cpp b/ps2/src/editground.cpp
-index 6c23f397..9ccf8621 100644
+index 6c23f397..52c9eb83 100644
 --- a/ps2/src/editground.cpp
 +++ b/ps2/src/editground.cpp
-@@ -45,7 +45,7 @@ int CEditGround::SetMapParts(int parts_no, float x, float y, float z, int rot_y)
+@@ -3,6 +3,12 @@
+ 
+ #include "editground.hpp"
+ 
++#ifdef PORT
++#include <cstddef>
++// port platform/arena.hpp; ps2/src does not see the platform headers.
++unsigned char *ArenaBlock(const void *owner, std::size_t bytes, std::size_t lead);
++#endif
++
+ #include <cstdlib>
+ #include <cstring>
+ 
+@@ -45,7 +51,7 @@ int CEditGround::SetMapParts(int parts_no, float x, float y, float z, int rot_y)
          return -1;
      }
  
@@ -67927,7 +68224,7 @@ index 6c23f397..9ccf8621 100644
          return -1;
      }
  
-@@ -1394,7 +1394,7 @@ void CEditGround::DrawPartsCursor(int plot, float *position, float *model_pos, i
+@@ -1394,7 +1400,7 @@ void CEditGround::DrawPartsCursor(int plot, float *position, float *model_pos, i
      int             subtype;
      float           step;
  
@@ -67936,7 +68233,22 @@ index 6c23f397..9ccf8621 100644
          sceVu0CopyVector(model_pos, position);
          return;
      }
-@@ -1634,7 +1634,7 @@ void CEditGround::Load(char *data) {
+@@ -1607,7 +1613,14 @@ void CEditGround::Save(char *path) {
+ }
+ 
+ void CEditGround::Load(char *data) {
++#ifdef PORT
++    // Retail read the layout into 4000 bytes of stack; an arena block lets a mod's layout grow to 64 KiB
++    // (dataread.cpp checks the room before reading a larger override).
++    static const char layout_key = 0;
++    char *buffer = reinterpret_cast<char *>(ArenaBlock(&layout_key, 64 * 1024, 0));
++#else
+     char                buffer[4000];
++#endif
+     GROUND_SAVE_HEADER *header;
+     char               *file;
+     SV_GRD_PART        *record;
+@@ -1634,7 +1647,7 @@ void CEditGround::Load(char *data) {
      for (i = 0; i < header->count; i++, record++) {
          int parts_id = record->part_id;
  
@@ -67945,7 +68257,7 @@ index 6c23f397..9ccf8621 100644
              break;
          }
  
-@@ -1650,7 +1650,7 @@ void CEditGround::Load(char *data) {
+@@ -1650,7 +1663,7 @@ void CEditGround::Load(char *data) {
      for (i = 0; i < header->count; i++, record++) {
          int parts_id = record->part_id;
  
@@ -67954,7 +68266,7 @@ index 6c23f397..9ccf8621 100644
              break;
          }
  
-@@ -1673,7 +1673,7 @@ void CEditGround::Load(char *data) {
+@@ -1673,7 +1686,7 @@ void CEditGround::Load(char *data) {
      for (i = 0; i < header->count; i++, record++) {
          int parts_id = record->part_id;
  
@@ -67964,7 +68276,7 @@ index 6c23f397..9ccf8621 100644
          }
  
 diff --git a/ps2/src/editloop.cpp b/ps2/src/editloop.cpp
-index 0bddbbfa..109d1e71 100644
+index 0bddbbfa..f3cd5baf 100644
 --- a/ps2/src/editloop.cpp
 +++ b/ps2/src/editloop.cpp
 @@ -766,7 +766,10 @@ int EditInit(void *param) {
@@ -68011,11 +68323,107 @@ index 0bddbbfa..109d1e71 100644
      pEditGround->plot_parts = ObjParts;
      pEditGround->river_parts = RiverParts;
      pEditGround->road_parts = RoadParts;
+@@ -5248,6 +5254,91 @@ static inline CFrame *GetCameraFrame(CMapParts *parts) {
+  * @address 0x1828B0
+  * @size 0x754
+  */
++EPARTS_INFO_HEADER *LoadPTS(CMapParts *parts, unsigned int *archive, MAP_PARTS_INFO *info, OBJ_ANIME_SEQ *anime, EDIT_EFFECT_INFO *effects, EDIT_OBJECT_TIMER *timers, ED_EVENT_POINT *points, CMapParts *shared);
++
++#ifdef PORT
++/**
++ * PORT: a Georama variant's own model. Reads the scene file once (kept for the session, since the
++ * loaded frames may point into it), finds the part archive by name and loads its models over the
++ * copy of the template part, keeping the template's footprint, functions and plot data.
++ */
++bool ChronicleLoadModPartModel(CMapParts *parts, const char *scene, const char *part) {
++    struct SceneFile {
++        char   path[64];
++        u_int *data;
++    };
++    static SceneFile scenes[8] = {};
++    u_int           *data = NULL;
++    for (SceneFile &file : scenes) {
++        if (file.data != NULL && strcmp(file.path, scene) == 0) data = file.data;
++    }
++    if (data == NULL) {
++        SceneFile *slot = NULL;
++        for (SceneFile &file : scenes) {
++            if (file.data == NULL) {
++                slot = &file;
++                break;
++            }
++        }
++        if (slot == NULL) return false;
++        const int capacity = 8 * 1024 * 1024 + 4096;
++        char     *raw = (char *) malloc(capacity + 64);
++        u_int    *buffer = (u_int *) (((uintptr_t) raw + 63) & ~(uintptr_t) 63);
++        int       size = 0;
++        if (raw == NULL) return false;
++        if (LoadFile2((char *) scene, buffer, &size, 0) == 0 || size <= 0 || size > 8 * 1024 * 1024) {
++            free(raw);
++            return false;
++        }
++        strcpy(slot->path, scene);
++        slot->data = buffer;
++        data = buffer;
++    }
++
++    EPARTS_ARCHIVE *record = (EPARTS_ARCHIVE *) SearchPTS(data, (char *) part);
++    if (record == NULL || record->lod0_size <= 0) return false;
++    char *names[9] = {NULL};
++    names[0] = (char *) record + record->lod0_offset;
++    if (record->lod1_size > 0) names[1] = (char *) record + record->lod1_offset;
++    if (record->lod2_size > 0) names[2] = (char *) record + record->lod2_offset;
++    if (record->lod3_size > 0) names[3] = (char *) record + record->lod3_offset;
++    if (record->shadow_size > 0) names[4] = (char *) record + record->shadow_offset;
++    if (record->collision_size > 0) names[5] = (char *) record + record->collision_offset;
++    if (record->shade_size > 0) names[6] = (char *) record + record->shade_offset;
++    if (record->extra_size > 0) names[7] = (char *) record + record->extra_offset;
++    if (record->camera_size > 0) names[8] = (char *) record + record->camera_offset;
++
++    for (int k = 0; k < 4; k++) parts->SetFrame(NULL, k);
++    parts->shadow_frame = NULL;
++    parts->shade_frame = NULL;
++    parts->ripple_frame = NULL;
++    parts->camera_frame = NULL;
++    LoadMapObject(parts, (u_int **) names, &DataBuffer__2);
++    if (parts->frame[0] == NULL) return false;
++
++    CBoxVu0 bound;
++    CBoxVu0 part_bound;
++    parts->frame[0]->GetBoundBox(&bound, 1);
++    if (CFrame *collision = parts->GetCollisionFrame()) {
++        collision->GetBoundBox(&part_bound, 1);
++        VectorMaxMin(bound.max, bound.min, bound.max, bound.min, part_bound.max, part_bound.min);
++    }
++    if (CFrame *camera = GetCameraFrame(parts)) {
++        camera->GetBoundBox(&part_bound, 1);
++        VectorMaxMin(bound.max, bound.min, bound.max, bound.min, part_bound.max, part_bound.min);
++    }
++    memcpy(&parts->bound, &bound, sizeof(CBoxVu0));
++    for (int k = 3; k >= 0; k--) {
++        if (parts->frame[k] != NULL) {
++            parts->preview_frame = (int) parts->frame[k];
++            break;
++        }
++    }
++    std::fprintf(stderr, "moonmod: Georama variant part %d uses model %s from %s\n", parts->parts_no, part, scene);
++    return true;
++}
++#endif
++
+ EPARTS_INFO_HEADER *LoadPTS(CMapParts *parts, unsigned int *archive, MAP_PARTS_INFO *info, OBJ_ANIME_SEQ *anime, EDIT_EFFECT_INFO *effects, EDIT_OBJECT_TIMER *timers, ED_EVENT_POINT *points, CMapParts *shared) {
+     EPARTS_INFO_HEADER *source;
+     EPARTS_ARCHIVE     *record = (EPARTS_ARCHIVE *) archive;
 diff --git a/ps2/src/editpartsinfo.cpp b/ps2/src/editpartsinfo.cpp
-index 4517bb72..d75d262d 100644
+index 4517bb72..7031a0d6 100644
 --- a/ps2/src/editpartsinfo.cpp
 +++ b/ps2/src/editpartsinfo.cpp
-@@ -6,8 +6,23 @@
+@@ -3,11 +3,29 @@
+ 
+ #include "editpartsinfo.hpp"
+ 
++#include <cstdio>
  #include <cstring>
  
  #include "editatra.hpp"
@@ -68028,6 +68436,8 @@ index 4517bb72..d75d262d 100644
 +CHRONICLE_MOD_GEORAMA_PIECE g_chronicle_mod_georama_pieces[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
 +EDITPARTS_INFO g_chronicle_mod_georama_info[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
 +EDIT_PARTS_ATRA g_chronicle_mod_georama_atra[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
++char g_chronicle_mod_georama_scene[CHRONICLE_GEORAMA_MOD_PART_COUNT][64] = {};
++char g_chronicle_mod_georama_model[CHRONICLE_GEORAMA_MOD_PART_COUNT][32] = {};
 +
 +int ModGeoramaPieceIndex(int part_id) {
 +    const int index = part_id - CHRONICLE_GEORAMA_NATIVE_PART_COUNT;
@@ -68039,7 +68449,7 @@ index 4517bb72..d75d262d 100644
  /**
   * Reports whether an editable part is placed and still has work available.
   *
-@@ -17,11 +32,132 @@
+@@ -17,11 +35,153 @@
   */
  int CheckPartsInfo(EDITPARTS_INFO *info);
  
@@ -68077,9 +68487,22 @@ index 4517bb72..d75d262d 100644
 +    return true;
 +}
 +
++bool SetChronicleModGeoramaPieceModel(int part_id, const char *scene, const char *part) {
++    const int index = ModGeoramaPieceIndex(part_id);
++    if (index < 0 || scene == NULL || part == NULL || std::strlen(scene) >= sizeof(g_chronicle_mod_georama_scene[0]) ||
++        std::strlen(part) >= sizeof(g_chronicle_mod_georama_model[0]) || (scene[0] == '\0') != (part[0] == '\0')) {
++        return false;
++    }
++    std::strcpy(g_chronicle_mod_georama_scene[index], scene);
++    std::strcpy(g_chronicle_mod_georama_model[index], part);
++    return true;
++}
++
 +bool UnregisterChronicleModGeoramaPiece(int part_id) {
 +    const int index = ModGeoramaPieceIndex(part_id);
 +    if (index < 0 || g_chronicle_mod_georama_pieces[index].part_id != part_id) return false;
++    g_chronicle_mod_georama_scene[index][0] = '\0';
++    g_chronicle_mod_georama_model[index][0] = '\0';
 +    std::memset(&g_chronicle_mod_georama_pieces[index], 0, sizeof(g_chronicle_mod_georama_pieces[index]));
 +    std::memset(&g_chronicle_mod_georama_info[index], 0, sizeof(g_chronicle_mod_georama_info[index]));
 +    std::memset(&g_chronicle_mod_georama_atra[index], 0, sizeof(g_chronicle_mod_georama_atra[index]));
@@ -68146,6 +68569,12 @@ index 4517bb72..d75d262d 100644
 +        parts[piece.part_id].parts_no = piece.part_id;
 +        parts[piece.part_id].handle = piece.part_id;
 +        parts[piece.part_id].info = &info;
++        if (g_chronicle_mod_georama_scene[index][0] != '\0' &&
++            !ChronicleLoadModPartModel(&parts[piece.part_id], g_chronicle_mod_georama_scene[index],
++                                       g_chronicle_mod_georama_model[index])) {
++            std::fprintf(stderr, "moonmod: Georama piece %s keeps its template model (%s in %s not loaded)\n", piece.id,
++                         g_chronicle_mod_georama_model[index], g_chronicle_mod_georama_scene[index]);
++        }
 +        piece.materialized = 1;
 +    }
 +}
@@ -68154,6 +68583,8 @@ index 4517bb72..d75d262d 100644
 +    std::memset(g_chronicle_mod_georama_pieces, 0, sizeof(g_chronicle_mod_georama_pieces));
 +    std::memset(g_chronicle_mod_georama_info, 0, sizeof(g_chronicle_mod_georama_info));
 +    std::memset(g_chronicle_mod_georama_atra, 0, sizeof(g_chronicle_mod_georama_atra));
++    std::memset(g_chronicle_mod_georama_scene, 0, sizeof(g_chronicle_mod_georama_scene));
++    std::memset(g_chronicle_mod_georama_model, 0, sizeof(g_chronicle_mod_georama_model));
 +}
 +
  EDITPARTS_INFO *CEditPartsInfo::GetPartsInfo(int index) {
@@ -68173,7 +68604,7 @@ index 4517bb72..d75d262d 100644
      return &parts[index];
  }
  
-@@ -76,11 +212,11 @@ int CEditPartsInfo::GetRequest(int index) {
+@@ -76,11 +236,11 @@ int CEditPartsInfo::GetRequest(int index) {
  int CEditPartsInfo::GetNextPartsNum(int index) {
      int remaining = 0;
  
@@ -68187,7 +68618,7 @@ index 4517bb72..d75d262d 100644
          }
  
          if (CheckPartsInfo(info) != 0) {
-@@ -100,9 +236,8 @@ int CEditPartsInfo::GetNextParts(int index) {
+@@ -100,9 +260,8 @@ int CEditPartsInfo::GetNextParts(int index) {
              if (CheckPartsInfo(info) != 0) {
                  return index;
              }
@@ -68198,7 +68629,7 @@ index 4517bb72..d75d262d 100644
      }
  }
  
-@@ -110,6 +245,10 @@ void CEditPartsInfo::Clear() {
+@@ -110,6 +269,10 @@ void CEditPartsInfo::Clear() {
      for (int plot = 0; plot < 24; plot++) {
          parts[plot].placed = false;
      }
@@ -68209,7 +68640,7 @@ index 4517bb72..d75d262d 100644
  }
  
  void CEditPartsInfo::Save(int georama_no, CSaveData *save_data) {
-@@ -200,6 +339,14 @@ void CEditPartsInfo::Initialize(int georama_no) {
+@@ -200,6 +363,14 @@ void CEditPartsInfo::Initialize(int georama_no) {
  
      unk_1624 = 0;
  
@@ -68924,7 +69355,7 @@ index b418ea0d..2981fcc9 100644
              NowMonstorUnit->chara[i][0].GetPosition(other_position);
              float distance = DistVector(position, other_position);
 diff --git a/ps2/src/shot_freefuncs.cpp b/ps2/src/shot_freefuncs.cpp
-index d32b5ad5..77c0d564 100644
+index d32b5ad5..5b2131d3 100644
 --- a/ps2/src/shot_freefuncs.cpp
 +++ b/ps2/src/shot_freefuncs.cpp
 @@ -3,15 +3,11 @@
@@ -69006,6 +69437,26 @@ index d32b5ad5..77c0d564 100644
  
      if (floor + 1 == last_floor) {
          set2DSprite(Vif1Packet, frame, CRect_i_(0x23C, y + 0x12, 0x26, 0x11), CRect_i_(0x78, 0x9E, 0x26, 0x12));
+@@ -1212,7 +1213,19 @@ static inline int ArenaLimit(CDataAlloc2<1> &arena) {
+  * @address 0x1B20E0
+  * @size 0x70C
+  */
++#ifdef PORT
++const char *ChronicleModFloorMap(int dungeon, int floor);
++#endif
++
+ int BtMapJumpLoad(char *map_name) {
++#ifdef PORT
++    // A floor added by game.dungeons.register with its own map reads that floor pack instead.
++    if (const char *mod_map = ChronicleModFloorMap(UserStatus->cur_georama, UserStatus->cur_floor)) {
++        fprintf(stderr, "moonmod: floor %d of dungeon %d reads floor pack %s (script asked for %s)\n",
++                UserStatus->cur_floor + 1, UserStatus->cur_georama, mod_map, map_name);
++        map_name = const_cast<char *>(mod_map);
++    }
++#endif
+     char mpd_path[64];
+     char cfg_path[64];
+     char mes_path[64];
 diff --git a/ps2/src/shot_utils.cpp b/ps2/src/shot_utils.cpp
 index 312c88e5..9a2e6e20 100644
 --- a/ps2/src/shot_utils.cpp
