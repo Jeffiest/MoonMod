@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <map>
 #include <optional>
+#include <random>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -16,6 +17,13 @@
 #include "moonmod/api.hpp"
 
 namespace moonmod {
+
+// Uniform [0, 1). Not std::rand(): the Chronicle port replaces rand() with the PS2 version, whose
+// range is 0..2^31-1, not RAND_MAX, so rand()/RAND_MAX multiplied damage thousands of times.
+inline double FormulaRandom01() {
+    static std::mt19937 engine{std::random_device{}()};
+    return std::uniform_real_distribution<double>(0.0, 1.0)(engine);
+}
 
 // A bounded modifier registry shared by both game adapters. Native hit
 // pipelines call Apply() only after their own defense, elemental, and damage-block rules.
@@ -211,12 +219,11 @@ public:
                     100.0 * target_hp >= *formula.target_hp_below_percent * target_max_hp) continue;
             }
             if (formula.operation == "chance_multiply") {
-                const double roll = 100.0 * static_cast<double>(std::rand()) /
-                    (static_cast<double>(RAND_MAX) + 1.0);
+                const double roll = 100.0 * FormulaRandom01();
                 if (roll >= formula.chance) continue;
                 result *= formula.value;
             } else if (formula.operation == "random_multiply") {
-                const double unit = static_cast<double>(std::rand()) / (static_cast<double>(RAND_MAX) + 1.0);
+                const double unit = FormulaRandom01();
                 result *= formula.min_value + (formula.max_value - formula.min_value) * unit;
             } else if (formula.operation == "ramp_multiply") {
                 if (!formula.ramp_started || frame < formula.ramp_last_frame ||

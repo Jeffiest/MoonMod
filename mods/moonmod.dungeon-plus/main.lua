@@ -1,11 +1,33 @@
--- Dungeon+ folds the compatible Windows dungeon suite into MoonFactory.
--- Status, bestiary and progression are shown through manager Actions and Journal.
-local MAX_TIER=5
-local function checked(v,e) if v==nil then error(type(e)=="table" and e.message or tostring(e)) end return v end
-local function save(k,v) checked(moonmod.storage.set(k,v)) end
-local function notify(s) game.ui.notify({message=s:sub(1,190)}) end
-local function setting(k,d) local v=moonmod.settings.get(k);return type(v)==type(d) and v or d end
-local function integer(v,lo,hi) if type(v)~="number" or v~=v then return lo end return math.max(lo,math.min(hi,math.floor(v))) end
+-- Dungeon+: replay floors at Tiers 1-5 (Square/Triangle on the floor list), floor mutators, a bounty
+-- on every floor, kill streaks, a bestiary and trophies in the Journal tab, enemies that get back up,
+-- and the DarkCloud-Expanded weapon, price and shop data (BSD-2-Clause, (c) Gundorada Workshop).
+-- Storage keys and trophy ids are the same as the previous version, so progress carries over.
+
+local MAX_TIER = 5
+local function try(fn, ...)
+  local ok, value = pcall(fn, ...)
+  if ok then return value end
+  return nil
+end
+local function toast(message, frames) try(game.ui.notify, {message = message:sub(1, 190), duration_frames = frames or 240}) end
+local function setting(id, fallback)
+  local value = moonmod.settings.get(id)
+  if type(value) ~= type(fallback) then return fallback end
+  return value
+end
+local function clamp(v, lo, hi) v = tonumber(v) or lo; return math.max(lo, math.min(hi, math.floor(v))) end
+local function store(key, value) moonmod.storage.set(key, value) end
+
+-- Difficulty preset: scales the tunables below instead of replacing them.
+local PRESETS = {
+  relaxed  = {mutator = 0.6, revive = 0.4, tier_hp = 0.7, reward = 1.5, speed = 0.9},
+  normal   = {mutator = 1.0, revive = 1.0, tier_hp = 1.0, reward = 1.0, speed = 1.0},
+  hardcore = {mutator = 1.6, revive = 1.6, tier_hp = 1.4, reward = 0.75, speed = 1.15}
+}
+local function preset() return PRESETS[setting("difficulty_preset", "normal")] or PRESETS.normal end
+local function reward(amount) return clamp(amount * setting("feats_reward_scale", 100) / 100 * preset().reward + 0.5, 0, 32767) end
+local function pay(amount) if amount > 0 then try(game.economy.add, {amount = amount}) end end
+
 -- Enemy labels used by the legacy Dungeon Feats bestiary and notifications.
 -- The table is keyed by Chronicle's native monster-table index.
 local ENEMY_NAMES={
@@ -27,421 +49,475 @@ local ENEMY_NAMES={
  [100]="King Prickly",[101]="Ice Barrier",[102]="Ice Prison",[103]="Ice Meteor",[104]="Ice Tornado",[105]="Gacious",[106]="Dark Genie (Final Form)",
  [111]="Gemron (Fire)",[112]="Nikapous",[113]="White Fang (Enhanced)",[114]="Arthur (Enhanced)",[115]="Sil (Enhanced)",[116]="Halloween (Enhanced)"
 }
-local function apply_generation_settings()
- local monster_min=integer(setting("monsters_per_room_min",150),0,300)/100
- local monster_max=math.max(monster_min,integer(setting("monsters_per_room_max",300),0,300)/100)
- local chest_min=integer(setting("chests_per_room_min",75),0,150)/100
- local chest_max=math.max(chest_min,integer(setting("chests_per_room_max",150),0,150)/100)
- checked(game.dungeons.set_population({monsters_per_room={min=monster_min,max=monster_max},chests_per_room={min=chest_min,max=chest_max}}))
- checked(game.dungeons.set_enemy_survival({chance_percent=integer(setting("enemy_revive_chance",25),0,100)}))
-end
-local function scaled_feat_reward(amount)
- return integer(math.floor(amount*integer(setting("feats_reward_scale",100),0,300)/100+0.5),0,32767)
-end
--- Harder AI's five checked enemy-script edits are bundled as native STB
--- overrides. Owner-scoped resource registration removes them when Dungeon+
--- unloads, and the native reader retains its size and format safeguards.
-local HARDER_AI_SCRIPTS={"e01a.stb","e118a.stb","e119a.stb","e124a.stb","e50a.stb"}
-for _,name in ipairs(HARDER_AI_SCRIPTS) do
- local override,err=game.resources.override({path="resources/dun/monstor/"..name,game_path="dun/monstor/"..name})
- if not override then moonmod.log("warn","Harder AI script override "..name..": "..(type(err)=="table" and err.message or tostring(err))) end
-end
-local function default_tier() return integer(moonmod.storage.get("default_tier") or 0,0,MAX_TIER) end
-local function floor_key(d,f) return tostring(d)..":"..tostring(f) end
-local function tier_of(d,f)
- if d==nil or f==nil then return 0 end
- local t=(moonmod.storage.get("floor_tiers") or {})[floor_key(d,f)]
- return integer(t==nil and default_tier() or t,0,MAX_TIER)
-end
-local function layout(t)
- checked(game.dungeons.set_layout(t==0 and {} or {rooms=24+t*4,area=30+t*2,room_min=3,room_max=math.min(5,3+math.floor((t-1)/2))}))
- apply_generation_settings()
-end
-moonmod.on("settings.changed",function(event)
- if event.id=="monsters_per_room_min" or event.id=="monsters_per_room_max" or
-    event.id=="chests_per_room_min" or event.id=="chests_per_room_max" or
-    event.id=="enemy_revive_chance" then
-  apply_generation_settings()
- end
-end)
-local function visit_key(w) return floor_key(w.dungeon_id,w.floor_id)..":"..tostring(w.floor_seed)..":"..tostring(w.back_floor) end
-local function hash(s) local h=5381;for i=1,#s do h=(h*33+s:byte(i))%2147483647 end;return h end
-
-local MUTATORS={
- glass={name="Glass Cannon",text="Deal and take 50% more damage"},
- iron={name="Iron Hide",text="Enemies take 25% less damage and pay double Gilda"},
- bounty={name="Bounty",text="Enemies carry 2.5 times the Gilda"},
- spring={name="Fountain",text="Water slowly refills"},
- scorched={name="Scorched",text="Water drains faster"},
- lucky={name="Lucky Day",text="15% chance to deal double damage"}
-}
-local MUTATOR_IDS={"glass","iron","bounty","spring","scorched","lucky"}
-local function mutator_for(dungeon)
- local world=game.world.get() or {}
- -- Match the legacy mod: town and floor zero never roll a mutator.
- if (dungeon or 0)<0 or (world.floor_id or 0)<=0 then return nil end
- local chance=integer(setting("mutator_chance",35)+3*math.max(0,dungeon or 0),0,100)
- if math.random(100)>chance then return nil end
- return MUTATOR_IDS[math.random(#MUTATOR_IDS)]
+local function enemy_name(key)
+  local n = tonumber(key)
+  return n and (ENEMY_NAMES[n] or ("Enemy " .. n)) or tostring(key or "?")
 end
 
-local active_tier,reward_tier=0,0
-local token,entered_frame,seen,cleared=nil,0,0,false
-local current_mutator,current_frame=nil,0
-local defeated,speed_variants={},{}
-local mutator_rewards,tier_scale_records={},{}
-local streak,streak_last=0,-10000
-local bounty_cursor,bestiary_cursor=0,0
-local badges_dirty=true
-local function update_combat()
- checked(game.combat.register_formula({id="dungeon-plus-lucky-day",operation="chance_multiply",value=2,
-  chance=current_mutator=="lucky" and 15 or 0,priority=90}))
- local out=current_mutator=="glass" and 1.5 or (current_mutator=="iron" and 0.75 or 1)
- local incoming=current_mutator=="glass" and 1.5 or 1
- checked(game.combat.register_formula({id="dungeon-plus-mutator-outgoing",operation="multiply",value=out,priority=110}))
- checked(game.combat.register_player_formula({id="dungeon-plus-mutator-incoming",operation="multiply",value=incoming,priority=110}))
-end
-local function bounty_records() return moonmod.storage.get("floor_bounties_v1") or {} end
-local function bounty_state()
- if not token then return nil end
- local all=bounty_records();local state=all[token]
- if not state then state={target=false,count=0,paid=false};all[token]=state;save("floor_bounties_v1",all) end
- if state.target==false then state.target=nil end
- return state
-end
-local function save_bounty(state) local all=bounty_records();all[token]=state;save("floor_bounties_v1",all) end
-local function sync(world)
- local next_token=world and world.context=="dungeon" and type(world.dungeon_id)=="number" and type(world.floor_id)=="number" and visit_key(world) or nil
- if next_token==token then return end
- local entering_floor=next_token~=nil
- token=next_token;entered_frame=current_frame;seen=0;cleared=false;defeated={};speed_variants={};mutator_rewards={};tier_scale_records={};streak=0;streak_last=-10000
- active_tier=token and tier_of(world.dungeon_id,world.floor_id) or 0;reward_tier=active_tier
- current_mutator=token and mutator_for(world.dungeon_id) or nil
- -- Legacy Floor Bounty resets on every floor_change, including a revisit to
- -- the same dungeon/floor/seed after leaving it. Do not resume stale progress.
- if entering_floor then save_bounty({target=false,count=0,paid=false}) end
- bounty_state();update_combat()
- if not token then layout(default_tier())
- elseif current_mutator then notify("FLOOR MUTATOR: "..MUTATORS[current_mutator].name.." — "..MUTATORS[current_mutator].text) end
-end
-moonmod.on("game.dungeon.generating",function(e) layout(tier_of(e.dungeon_id,e.floor_id)) end)
-moonmod.on("game.world.location_changed",function() sync(game.world.get()) end)
-
--- Native quest state is the Dungeon Feats/Trophies journal in the manager.
-local QUESTS={
- {"first_blood","First Blood",1,100,true},{"hunter","Hunter",100,500,true},
- {"slayer","Slayer",500,2000,true},{"exterminator","Exterminator",2000,10000,true},
- {"streak_10","On a Roll",1,500},{"streak_25","Unstoppable",1,2500},
- {"clear_5","Floor Sweeper",5,500},{"clear_25","Dungeon Cleaner",25,3000},{"clear_100","Purifier",100,12000},
- {"species_20","Collector",20,1500},{"species_60","Completionist",60,8000},{"bounty_25","Bounty Hunter",25,5000}
-}
-for _,q in ipairs(QUESTS) do
- checked(game.quests.register({id=q[1],title=q[2],description="Dungeon Feats",
-  objectives={{id="progress",title=q[5] and (q[3].." enemy defeats") or q[2],target=q[3],event=q[5] and "game.enemy_defeated" or nil}},
-  rewards={{kind="currency",amount=q[4]}}}))
- local state=checked(game.quests.get({id=q[1]}))
- if state.status=="registered" then checked(game.quests.start({id=q[1]})) end
-end
-game.events.subscribe("quests.completed",function(event)
- local prefix="moonmod.dungeon-plus:"
- if type(event.id)~="string" or event.id:sub(1,#prefix)~=prefix then return end
- local adjusted=moonmod.storage.get("feats_reward_scaled_v1") or {}
- if adjusted[event.id] then return end
- local scale=integer(setting("feats_reward_scale",100),0,300)
- for _,reward in ipairs(event.rewards or {}) do
-  if reward.kind=="currency" then
-   local requested=integer(reward.requested or 0,0,32767)
-   local result=type(reward.result)=="table" and reward.result or {}
-   local actual=integer(result.added or 0,0,32767)
-   local wallet=game.economy.get()
-   if wallet and type(wallet.amount)=="number" and type(wallet.max_amount)=="number" then
-    local prior=math.max(0,wallet.amount-actual)
-    local target=math.min(math.floor(requested*scale/100+0.5),math.max(0,wallet.max_amount-prior))
-    local delta=target-actual
-    if delta>0 then
-     while delta>0 do local chunk=math.min(32767,delta);checked(game.economy.add({amount=chunk}));delta=delta-chunk end
-    elseif delta<0 then
-     while delta<0 do local chunk=math.min(32767,-delta);checked(game.economy.spend({amount=chunk}));delta=delta+chunk end
-    end
-   end
-   break
-  end
- end
- adjusted[event.id]=true;save("feats_reward_scaled_v1",adjusted)
-end)
-local function advance_quest(id)
- local q=game.quests.get({id=id})
- if q and q.status=="active" then local o=q.objectives and q.objectives[1];if o and (o.progress or 0)<o.target then checked(game.quests.advance({id=id,objective="progress"})) end end
-end
-local function stats() return moonmod.storage.get("dungeon_feats_v1") or {kills=0,best_streak=0,floors=0,species={},bounties=0} end
-local function save_stats(s) save("dungeon_feats_v1",s) end
-local function species_total(s) local n=0;for _ in pairs(s) do n=n+1 end;return n end
-local function rewards() local r=moonmod.storage.get("clear_rewards_v2");if type(r)~="table" then return {pending={},paid={}} end;r.pending=r.pending or {};r.paid=r.paid or {};return r end
-local gems={96,97,98,99,100,101,102,103,104,105,106,107}
-local slayers={112,113,114,115,116,117,118,119,120,121}
-local function claim(verbose)
- local r=rewards();local count=0
- while #r.pending>0 do local got=game.items.give({id="chronicle:item:"..r.pending[1],count=1});if not got or (got.added or 0)<1 then break end;table.remove(r.pending,1);count=count+1;save("clear_rewards_v2",r) end
- if verbose or count>0 then notify(string.format("Dungeon+ rewards: %d delivered, %d pending",count,#r.pending)) end
-end
-local function clear_tier_reward()
- local r=rewards();for _,paid in ipairs(r.paid) do if paid==token then return end end
- for _=1,reward_tier do r.pending[#r.pending+1]=gems[math.random(#gems)] end
- if reward_tier>=3 then r.pending[#r.pending+1]=slayers[math.random(#slayers)] end
- r.paid[#r.paid+1]=token;if #r.paid>128 then table.remove(r.paid,1) end;save("clear_rewards_v2",r);claim(true)
-end
-local function floor_clear()
- if cleared then return end;cleared=true
- local s=stats();s.floors=(s.floors or 0)+1;save_stats(s)
- advance_quest("clear_5");advance_quest("clear_25");advance_quest("clear_100")
- local w=game.world.get() or {}
- -- Match Dungeon Feats' legacy clear payout: (50 + 25 * floor) *
- -- (1 + dungeon), bounded to the native per-call currency limit.
- local clear_reward=scaled_feat_reward((50+25*math.max(0,w.floor_id or 0))*(1+math.max(0,w.dungeon_id or 0)))
- if clear_reward>0 then game.economy.add({amount=clear_reward}) end
- notify("FLOOR CLEARED: +"..clear_reward.." Gilda")
- if reward_tier>0 then clear_tier_reward() end
-end
-local function set_current(t)
- local w=game.world.get();if not w or w.context~="dungeon" then notify("Enter a dungeon to change this floor's tier");return end
- sync(w);local all=moonmod.storage.get("floor_tiers") or {};all[floor_key(w.dungeon_id,w.floor_id)]=t;save("floor_tiers",all)
- active_tier=t;reward_tier=math.min(reward_tier,t);update_combat();badges_dirty=true;notify("Floor tier "..t.."; layout changes on next generation")
+-- Harder AI: five enemy scripts whose get-up chance is raised to 45%.
+for _, name in ipairs({"e01a.stb", "e118a.stb", "e119a.stb", "e124a.stb", "e50a.stb"}) do
+  local ok, err = game.resources.override({path = "resources/dun/monstor/" .. name, game_path = "dun/monstor/" .. name})
+  if not ok then moonmod.log("warn", "Harder AI " .. name .. ": " .. tostring(type(err) == "table" and err.message or err)) end
 end
 
-local function model_label(id)
- local n=tonumber(id);return n and (ENEMY_NAMES[n] or ("Enemy "..n)) or tostring(id or "Unknown enemy")
+-- Tiers -----------------------------------------------------------------------------------------------
+local function tiers() local t = moonmod.storage.get("floor_tiers"); return type(t) == "table" and t or {} end
+local function default_tier() return clamp(moonmod.storage.get("default_tier") or 0, 0, MAX_TIER) end
+local function floor_key(d, f) return tostring(d) .. ":" .. tostring(f) end
+local function tier_of(d, f)
+  if d == nil or f == nil then return 0 end
+  local t = tiers()[floor_key(d, f)]
+  return clamp(t == nil and default_tier() or t, 0, MAX_TIER)
 end
-local function bounty_reward(w)
- local d,f=math.max(0,w.dungeon_id or 0),math.max(0,w.floor_id or 0)
- -- Match the legacy math.floor exactly; in particular, odd dungeon IDs can
- -- produce half-Gilda rewards before the configured percentage is applied.
- return integer(math.floor((150+60*f)*(1+0.5*d)*integer(setting("bounty_reward_percent",100),0,300)/100),0,32767)
-end
-local function record_defeat(e)
- if e.entity and defeated[e.entity] then return end;if e.entity then defeated[e.entity]=true end
- local s=stats();s.kills=(s.kills or 0)+1
- local frame=type(e.frame)=="number" and e.frame or current_frame
- if frame-streak_last<=480 then streak=streak+1 else streak=1 end;streak_last=frame
- if streak>(s.best_streak or 0) then s.best_streak=streak end
- local key=type(e.native_model_id)=="number" and tostring(e.native_model_id) or (type(e.character_id)=="string" and ("mod:"..e.character_id) or nil)
- local species=s.species or {}
- if key then
-  local fresh=species[key]==nil;species[key]=(species[key] or 0)+1;s.species=species
-  local species_kills=species[key]
-  if fresh then advance_quest("species_20");advance_quest("species_60");notify("Bestiary: "..model_label(key:gsub("^mod:","")).." discovered") end
-  if species_kills==10 or species_kills==50 or species_kills==150 then
-   local reward=scaled_feat_reward(species_kills*2)
-   if reward>0 then game.economy.add({amount=reward}) end
-   notify("Bestiary: "..model_label(key:gsub("^mod:","")).." x"..species_kills.."  +"..reward.." Gilda")
-  end
- end
- save_stats(s)
- if streak==5 or streak==10 or streak%20==0 then local w=game.world.get() or {};local bonus=scaled_feat_reward(math.min(32767,streak*5*(1+math.max(0,w.dungeon_id or 0))));if bonus>0 then game.economy.add({amount=bonus}) end;notify("KILL STREAK x"..streak.."! +"..bonus.." Gilda") end
- if streak>=10 then advance_quest("streak_10") end;if streak>=25 then advance_quest("streak_25") end
- local b=bounty_state()
- if b and not b.paid and key then
-  if not b.target then b.target=key end
-  if b.target==key then
-   b.count=(b.count or 0)+1;local need=integer(setting("bounty_kills",6),1,20)
-   if b.count>=need then
-    b.paid=true;b.payout=bounty_reward(game.world.get() or {});save_bounty(b);game.economy.add({amount=b.payout})
-    s=stats();s.bounties=(s.bounties or 0)+1;save_stats(s);advance_quest("bounty_25");notify("BOUNTY COMPLETE: +"..b.payout.." Gilda")
-   else save_bounty(b) end
-  end
- end
- if active_tier>0 then game.economy.add({amount=5*active_tier}) end
-end
-moonmod.on("game.enemy_defeated",function(e) sync(game.world.get());record_defeat(e) end)
-
--- Give each native movement actor a stable speed roll. Knockback and falling are left alone.
-local function update_speeds()
- local variance=integer(setting("enemy_speed_variance",25),0,50);if not token then return end
- local base_speed=integer(setting("enemy_base_speed_percent",100),60,200)/100
- local q=game.entities.query({type="monster"});if not q or type(q.entities)~="table" then return end
- local alive={}
- for _,enemy in ipairs(q.entities) do
-  local h=enemy.entity_id or enemy.id
-  if h~=nil then
-   local k=type(h)=="string" and h or tostring(h);alive[k]=true
-   local m=game.physics.velocity_get({entity=h})
-   if m and m.source=="native_movement" and m.velocity then
-    local v=m.velocity;local speed=math.sqrt(v.x*v.x+v.z*v.z)
-    if speed>0.0001 then
-     local r=speed_variants[k]
-     if not r and variance>0 then r={roll=(hash(token..":speed:"..k)%20001)/10000-1,base=speed};speed_variants[k]=r
-     elseif r and (not r.last or math.abs(speed-r.last)>0.0005) then r.base=speed end
-     if r then
-      local target=r.base*base_speed*(1+r.roll*variance/100)
-      if math.abs(target-speed)>0.0005 then local scale=target/speed;local changed=game.physics.velocity_set({entity=h,velocity={x=v.x*scale,y=v.y,z=v.z*scale}});if changed then r.last=target end end
-     end
-    end
-   end
-  end
- end
- for k in pairs(speed_variants) do if not alive[k] then speed_variants[k]=nil end end
-end
-
--- Legacy mutators changed each living enemy's native payout once per life.
--- Apply that through the generation-checked stat API so the game's normal
--- reward path (including wallet caps) remains authoritative.
-local function update_mutator_rewards()
- if not token or (current_mutator~="iron" and current_mutator~="bounty") then return end
- local multiplier=current_mutator=="iron" and 2 or 2.5
- local q=game.entities.query({type="monster"});if not q or type(q.entities)~="table" then return end
- local alive={}
- for _,enemy in ipairs(q.entities) do
-  local handle=enemy.entity_id or enemy.id
-  if handle~=nil then
-   local key=type(handle)=="string" and handle or tostring(handle);alive[key]=true
-   local reward=enemy.combat and enemy.combat.reward_money
-   if enemy.revealed==true and type(reward)=="number" and not mutator_rewards[key] then
-    local target=math.min(2147483647,math.floor(reward*multiplier+0.5))
-    local changed=game.entities.set_stats({entity=handle,reward_money=target})
-    if changed then mutator_rewards[key]=true end
-   end
-  end
- end
- for key in pairs(mutator_rewards) do if not alive[key] then mutator_rewards[key]=nil end end
-end
-
--- Ascension owns tier stat writes when loaded so its champion and dungeon
--- multipliers share the same unmodified enemy baseline. Dungeon+ still works
--- by itself and applies these legacy per-tier native stats here.
-local function update_tier_enemy_stats()
- if not token or active_tier<=0 then return end
- local ok,owner=pcall(game.scripts.call_function,{id="moonmod.ascension:owns_dungeon_tier_scaling"})
- if ok and type(owner)=="table" and owner.active==true then return end
- local q=game.entities.query({type="monster"});if not q or type(q.entities)~="table" then return end
- local alive={}
- for _,enemy in ipairs(q.entities) do
-  local handle=enemy.entity_id or enemy.id
-  if handle~=nil then
-   local key=type(handle)=="string" and handle or tostring(handle);alive[key]=true
-   if enemy.revealed==true and not tier_scale_records[key] then
-    local hp=enemy.health and tonumber(enemy.health.maximum) or 0
-    local combat=enemy.combat or {}
-    if hp>0 then
-     local request={entity=handle,hp=math.min(1000000,math.floor(hp*(1+setting("tier_hp_percent",35)*active_tier/100)+0.5)),
-      max_hp=math.min(1000000,math.floor(hp*(1+setting("tier_hp_percent",35)*active_tier/100)+0.5)),
-      defense=math.min(32767,(tonumber(combat.defense) or 0)+setting("tier_defense",2)*active_tier),
-      reward_money=math.min(2147483647,math.floor(math.max(0,tonumber(combat.reward_money) or 0)*(1+setting("tier_gilda_percent",40)*active_tier/100)+0.5))}
-     local changed=game.entities.set_stats(request)
-     if changed then tier_scale_records[key]=true end
-    end
-   end
-  end
- end
- for key in pairs(tier_scale_records) do if not alive[key] then tier_scale_records[key]=nil end end
-end
-
--- Keep UI inside the existing manager's Actions, Skills, Quests and Journal pages.
-for _,a in ipairs({
- {"tier_up","This Floor: Raise Tier","Cycle this floor's tier from 0 to 5"},
- {"tier_reset","This Floor: Normal","Set the current floor's tier to zero"},
- {"default_up","Future Floors: Raise Default","Cycle the default tier for floors without an override"},
- {"claim_rewards","Claim Clear Rewards","Collect queued gems and slayers when attachment space is available"},
- {"status","Dungeon+ Status","Show tier, mutator, bounty, and pending rewards"},
- {"population_status","Room Population Status","Show realized rooms, target density, and native placement limits"},
- {"feats_status","Dungeon Feats Status","Show kill, streak, clear, bestiary, and bounty totals"},
- {"bestiary","Browse Bestiary","Cycle known and unseen native enemy types and mod enemies"},
- {"bounty_status","Floor Bounty Status","Inspect this floor's bounty target and progress"},
- {"mutator_status","Floor Mutator Status","Inspect this floor's mutator and effect"}
-}) do checked(game.ui.register({id=a[1],label=a[2],description=a[3]})) end
 local function publish_badges()
- local b=moonmod.storage.get("floor_tiers") or {};b.default=default_tier();checked(game.dungeons.set_badges(b))
+  local b = tiers()
+  b.default = default_tier()
+  try(game.dungeons.set_badges, b)
 end
-moonmod.on("ui.action",function(a)
- if a.id=="tier_up" then local w=game.world.get();if not w or w.context~="dungeon" then notify("Enter a dungeon first");return end;set_current((tier_of(w.dungeon_id,w.floor_id)+1)%6)
- elseif a.id=="tier_reset" then set_current(0)
- elseif a.id=="default_up" then local t=(default_tier()+1)%6;save("default_tier",t);layout(t);notify("Future floors default to Tier "..t)
- elseif a.id=="claim_rewards" then claim(true)
- elseif a.id=="status" then sync(game.world.get());local b=bounty_state();notify(string.format("DUNGEON+ T%d; default T%d; %s; bounty %s; pending %d",active_tier,default_tier(),current_mutator and MUTATORS[current_mutator].name or "no mutator",b and b.target and ((b.count or 0).."/"..integer(setting("bounty_kills",6),1,20)) or "unassigned",#rewards().pending))
- elseif a.id=="population_status" then
-  local w=game.world.get();if not w or w.context~="dungeon" then notify("Enter a dungeon to inspect room population");return end
-  local rooms=integer(w.room_count or 0,0,10000);local mmin=integer(setting("monsters_per_room_min",150),0,300)/100;local mmax=math.max(mmin,integer(setting("monsters_per_room_max",300),0,300)/100)
-  local cmin=integer(setting("chests_per_room_min",75),0,150)/100;local cmax=math.max(cmin,integer(setting("chests_per_room_max",150),0,150)/100)
-  local back=w.back_floor==true
-  local native_monsters=back and 8 or 15
-  local monster_bonus=integer(w.monster_bonus_percent or 0,0,300)
-  local chest_bonus=integer(w.chest_bonus_percent or 0,0,300)
-  local native_monster_target=math.ceil(native_monsters*(100+monster_bonus)/100)
-  local native_chest_min=math.ceil(4*(100+chest_bonus)/100)
-  local native_chest_max=math.ceil(7*(100+chest_bonus)/100)
-  local monster_scale=(100+monster_bonus)/100
-  local chest_scale=(100+chest_bonus)/100
-  local monster_target=math.min(255,math.max(native_monster_target,math.ceil(rooms*mmin*monster_scale)))
-  -- Native code reserves 16 of 64 physical box slots for mimics/specials; regular
-  -- generated chest targets therefore cap at 48. The event table has 384 slots.
-  local chest_target=math.min(48,math.max(native_chest_min,math.ceil(rooms*cmin*chest_scale)))
-  local monster_high=math.min(255,math.max(native_monster_target,math.ceil(rooms*mmax*monster_scale)))
-  local chest_high=math.min(48,math.max(native_chest_max,math.ceil(rooms*cmax*chest_scale)))
-  notify(string.format("ROOMS %d | MONSTER TARGET %d-%d (native %d +%d%%; cap 255) | CHEST TARGET %d-%d (native 4-7 +%d%%; cap 48; placements may fall short)",rooms,monster_target,monster_high,native_monsters,monster_bonus,chest_target,chest_high,chest_bonus))
- elseif a.id=="feats_status" then local s=stats();notify(string.format("KILLS %d; STREAK %d (BEST %d); CLEARS %d; SPECIES %d; BOUNTIES %d",s.kills or 0,streak,s.best_streak or 0,s.floors or 0,species_total(s.species or {}),s.bounties or 0))
- elseif a.id=="bestiary" then
-  local records=stats().species or {};local keys={}
-  for id in pairs(ENEMY_NAMES) do keys[#keys+1]=tostring(id) end
-  for key,count in pairs(records) do
-   local stable=tostring(key);local numeric=tonumber(stable)
-   if count>0 and (stable:sub(1,4)=="mod:" or (numeric~=nil and ENEMY_NAMES[numeric]==nil)) then keys[#keys+1]=stable end
-  end
-  table.sort(keys,function(left,right)
-   local a_num,b_num=tonumber(left),tonumber(right)
-   if a_num and b_num then return a_num<b_num end
-   if a_num then return true end;if b_num then return false end
-   return left<right
-  end)
-  if #keys==0 then notify("Bestiary is empty");return end
-  bestiary_cursor=bestiary_cursor%#keys+1;local key=keys[bestiary_cursor];local count=records[key] or 0
-  local progress=count==0 and "not seen yet" or (count.." defeats; "..(count<10 and "next reward at 10" or count<50 and "next reward at 50" or count<150 and "next reward at 150" or "milestones complete"))
-  notify(model_label(key:gsub("^mod:",""))..": "..progress)
- elseif a.id=="bounty_status" then sync(game.world.get());local b=bounty_state();if not b or not b.target then notify("Bounty target is assigned when the floor's enemy roster is available");return end;notify("BOUNTY "..model_label(b.target)..": "..(b.count or 0).."/"..integer(setting("bounty_kills",6),1,20)..(b.paid and " COMPLETE" or ""))
- elseif a.id=="mutator_status" then sync(game.world.get());if not current_mutator then notify("No mutator on this floor");return end;notify(MUTATORS[current_mutator].name..": "..MUTATORS[current_mutator].text)
- end
- if a.id=="tier_up" or a.id=="tier_reset" or a.id=="default_up" then badges_dirty=true end
-end)
-checked(game.scripts.register_function({id="current_tier",description="Current floor's Dungeon+ tier and scaling settings"},function()
- sync(game.world.get())
- return {tier=active_tier,mutator=current_mutator or "",hp_per_tier_percent=setting("tier_hp_percent",35),
-  defense_per_tier=setting("tier_defense",2),gilda_per_tier_percent=setting("tier_gilda_percent",40),
-  xp_per_tier_percent=setting("tier_xp_percent",25),champion_chance_per_tier=setting("tier_champion_chance",4)}
-end))
+local function apply_generation(tier)
+  try(game.dungeons.set_layout, tier == 0 and {} or
+      {rooms = 24 + tier * 4, area = 30 + tier * 2, room_min = 3, room_max = math.min(5, 3 + math.floor((tier - 1) / 2))})
+  local mmin = clamp(setting("monsters_per_room_min", 150), 0, 300) / 100
+  local mmax = math.max(mmin, clamp(setting("monsters_per_room_max", 300), 0, 300) / 100)
+  local cmin = clamp(setting("chests_per_room_min", 75), 0, 150) / 100
+  local cmax = math.max(cmin, clamp(setting("chests_per_room_max", 150), 0, 150) / 100)
+  try(game.dungeons.set_population, {monsters_per_room = {min = mmin, max = mmax}, chests_per_room = {min = cmin, max = cmax}})
+  try(game.dungeons.set_enemy_survival, {chance_percent = clamp(setting("enemy_revive_chance", 25) * preset().revive, 0, 100)})
+end
+moonmod.on("game.dungeon.generating", function(e) apply_generation(tier_of(e.dungeon_id, e.floor_id)) end)
 
-moonmod.on("game.tick",function(e)
- current_frame=type(e.frame)=="number" and e.frame or current_frame+1
- if current_frame%15~=0 then return end
- if badges_dirty then publish_badges() end
- local w=game.world.get();sync(w)
- if streak>0 and current_frame-streak_last>480 then streak=0 end
- if token then
-  local bounty=bounty_state()
-  if bounty and not bounty.target then
-   local roster=game.entities.query({type="monster"})
-   for _,enemy in ipairs(roster and roster.entities or {}) do
-    local key=type(enemy.native_model_id)=="number" and tostring(enemy.native_model_id) or
-      (type(enemy.character)=="string" and ("mod:"..enemy.character) or nil)
-    -- Legacy Floor Bounty skips key carriers and chooses the first living
-    -- ordinary enemy in native slot order.
-    local drop=enemy.definition and enemy.definition.drop_item
-    if key and (type(drop)~="number" or drop<0) then
-     bounty.target=key;save_bounty(bounty);break
+-- Square / Triangle (or [ ]) on the floor list change that floor's tier.
+assert(game.input.bind({id = "tier_down", keys = {"[", "E", "Gamepad:x"}}))
+assert(game.input.bind({id = "tier_up", keys = {"]", "Tab", "Gamepad:y"}}))
+local function step_selected_tier()
+  local down = game.input.consume({id = "tier_down"})
+  local up = game.input.consume({id = "tier_up"})
+  if not ((down and down.pressed) or (up and up.pressed)) then return end
+  local s = try(game.dungeons.selection)
+  if not s then return end
+  local t = tiers()
+  local next_tier = (tier_of(s.dungeon_id, s.floor_id) + ((up and up.pressed) and 1 or -1)) % (MAX_TIER + 1)
+  t[floor_key(s.dungeon_id, s.floor_id)] = next_tier
+  store("floor_tiers", t)
+  publish_badges()
+end
+
+-- Mutators ----------------------------------------------------------------------------------------------
+local MUTATORS = {
+  glass    = {name = "Glass Cannon", text = "you deal and take 50% more damage"},
+  iron     = {name = "Iron Hide", text = "enemies take 25% less damage but carry double Gilda"},
+  bounty   = {name = "Gold Rush", text = "enemies carry 2.5x Gilda"},
+  spring   = {name = "Fountain", text = "water slowly refills"},
+  scorched = {name = "Scorched", text = "water drains faster"},
+  lucky    = {name = "Lucky Day", text = "15% chance to deal double damage"}
+}
+local MUTATOR_IDS = {"glass", "iron", "bounty", "spring", "scorched", "lucky"}
+local function apply_mutator_formulas(m)
+  try(game.combat.register_formula, {id = "lucky", operation = "chance_multiply", value = 2, chance = m == "lucky" and 15 or 0, priority = 90})
+  try(game.combat.register_formula, {id = "mutator_out", operation = "multiply", value = m == "glass" and 1.5 or (m == "iron" and 0.75 or 1), priority = 110})
+  try(game.combat.register_player_formula, {id = "mutator_in", operation = "multiply", value = m == "glass" and 1.5 or 1, priority = 110})
+end
+
+-- Trophies (Journal tab) and stats ------------------------------------------------------------------
+local TROPHIES = {
+  {"first_blood", "First Blood", 1, 100, true}, {"hunter", "Hunter", 100, 500, true},
+  {"slayer", "Slayer", 500, 2000, true}, {"exterminator", "Exterminator", 2000, 10000, true},
+  {"streak_10", "On a Roll", 1, 500}, {"streak_25", "Unstoppable", 1, 2500},
+  {"clear_5", "Floor Sweeper", 5, 500}, {"clear_25", "Dungeon Cleaner", 25, 3000}, {"clear_100", "Purifier", 100, 12000},
+  {"species_20", "Collector", 20, 1500}, {"species_60", "Completionist", 60, 8000}, {"bounty_25", "Bounty Hunter", 25, 5000}
+}
+for _, q in ipairs(TROPHIES) do
+  try(game.quests.register, {id = q[1], title = q[2], description = "Dungeon+ trophy",
+      objectives = {{id = "progress", title = q[5] and (q[3] .. " enemy defeats") or q[2], target = q[3], event = q[5] and "game.enemy_defeated" or nil}},
+      rewards = {{kind = "currency", amount = q[4]}}})
+  local s = try(game.quests.get, {id = q[1]})
+  if s and s.status == "registered" then try(game.quests.start, {id = q[1]}) end
+end
+local function advance(id)
+  local q = try(game.quests.get, {id = id})
+  local o = q and q.status == "active" and q.objectives and q.objectives[1]
+  if o and (o.progress or 0) < o.target then try(game.quests.advance, {id = id, objective = "progress"}) end
+end
+game.events.subscribe("quests.completed", function(event)
+  if type(event.id) == "string" and event.id:find("^moonmod%.dungeon%-plus:") then
+    for _, q in ipairs(TROPHIES) do
+      if event.id:sub(-#q[1]) == q[1] then toast("TROPHY: " .. q[2] .. "  +" .. q[4] .. " Gilda", 360) end
     end
-   end
   end
- end
- if token and not cleared then
-  local p=game.player.get();local c=game.combat.get()
-  if p and p.hp>0 and c then
-   seen=math.max(seen,c.enemy_count or 0)
-   if current_frame-entered_frame>180 and seen>0 and c.enemy_count==0 then floor_clear() end
-  end
- end
- if token and current_mutator and current_frame%60==0 then
-  if current_mutator=="spring" then game.player.thirst_set({restore=1.5}) elseif current_mutator=="scorched" then game.player.thirst_set({restore=-1.0}) end
- end
- update_speeds()
- update_mutator_rewards()
- update_tier_enemy_stats()
 end)
+local function stats()
+  local s = moonmod.storage.get("dungeon_feats_v1")
+  if type(s) ~= "table" then s = {} end
+  s.kills, s.floors, s.bounties, s.best_streak = s.kills or 0, s.floors or 0, s.bounties or 0, s.best_streak or 0
+  s.species = type(s.species) == "table" and s.species or {}
+  return s
+end
+local function count_keys(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
+
+-- Current floor ----------------------------------------------------------------------------------------
+local floor = nil   -- {token, dungeon, number, tier, mutator, entered, seen, cleared, bounty, scaled = {}, speeds = {}}
+local frame = 0
+local streak, streak_last = 0, -100000
+
+local function enter_floor(world)
+  local token = world and world.context == "dungeon" and type(world.dungeon_id) == "number" and type(world.floor_id) == "number" and
+      (floor_key(world.dungeon_id, world.floor_id) .. ":" .. tostring(world.floor_seed) .. ":" .. tostring(world.back_floor)) or nil
+  if (floor and floor.token) == token then return end
+  if not token then
+    floor = nil
+    apply_mutator_formulas(nil)
+    apply_generation(default_tier())
+    return
+  end
+  floor = {token = token, dungeon = world.dungeon_id, number = world.floor_id, tier = tier_of(world.dungeon_id, world.floor_id),
+           entered = frame, seen = 0, cleared = false, scaled = {}, speeds = {}, champions = {}}
+  streak = 0
+  local chance = clamp((setting("mutator_chance", 35) + 3 * world.dungeon_id) * preset().mutator, 0, 100)
+  if world.floor_id > 0 and math.random(100) <= chance then floor.mutator = MUTATOR_IDS[math.random(#MUTATOR_IDS)] end
+  apply_mutator_formulas(floor.mutator)
+  local intro = floor.tier > 0 and ("TIER " .. floor.tier .. " FLOOR") or nil
+  if floor.mutator then
+    local m = MUTATORS[floor.mutator]
+    intro = (intro and intro .. "  |  " or "") .. m.name:upper() .. ": " .. m.text
+  end
+  if intro then toast(intro, 420) end
+end
+
+-- Ported from DarkCloud-Expanded (BSD-2-Clause, (c) Gundorada Workshop): mini-boss loot. Generated by port_loot.py.
+-- Enemy keys are indexes of this game's monster table (dc.monster_model(i)); item and weapon ids are the game's.
+local LEGACY_LOOT = {
+  attachmentsTableLucky = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106},
+  attachmentsTableUnlucky = {81, 82, 83, 84, 85, 91, 92, 93, 94, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120},
+  itemTableLucky = {178, 183},
+  itemTableUnlucky = {150, 235},
+  dungeons = {
+    [0] = {  -- Divine Beast Cavern
+      rare = {[0] = {260}, [96] = {282}, [97] = {303}},
+      common = {[0] = {260}, [1] = {290, 304}, [2] = {301}, [3] = {105}, [29] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [30] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [51] = {101, 95}, [69] = {98}, [96] = {96}, [97] = {106}, [98] = {104}},
+      boosts = {[260] = {attack = 15, elem = {0, 0, 0, 0, 50}, vs = {[1] = 50}}},
+      weapons_early = {259, 260, 262, 290}, weapons_late = {259, 260, 262, 270, 290, 301, 304}, split_floor = 8,
+      back_key = 224,
+    },
+    [1] = {  -- Wise Owl Forest
+      rare = {[4] = {272}, [7] = {303}, [9] = {328}, [10] = {302}, [11] = {302}, [12] = {302}, [13] = {302}, [14] = {302}, [15] = {302}, [16] = {302}},
+      common = {[9] = {327}, [10] = {183}, [11] = {183}, [12] = {183}, [13] = {183}, [14] = {183}, [15] = {183}, [16] = {183}, [70] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [71] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [99] = {103, 310}, [100] = {316}},
+      boosts = {[272] = {attack = 60, durability = 99, magic = 30}, [302] = {attack = 35, elem = {0, 0, 0, 40, 0}, vs = {[8] = 40}}},
+      weapons_early = {264, 270, 283, 284, 286, 291, 301, 303, 304}, weapons_late = {264, 270, 283, 284, 286, 291, 301, 303, 304, 316, 321, 328}, split_floor = 9,
+      back_key = 225,
+    },
+    [2] = {  -- Shipwreck
+      rare = {[22] = {268}, [23] = {192}, [24] = {293}, [67] = {283}},
+      common = {[19] = {100}, [20] = {321, 97}, [21] = {316, 178}, [22] = {106, 95}, [23] = {310}, [24] = {286}, [60] = {344}, [67] = {96}, [72] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [73] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [77] = {334}},
+      boosts = {[283] = {attack = 40, elem = {0, 0, 40, 0, 0}, vs = {[9] = 40}}, [293] = {s1 = 128}},
+      weapons_early = {261, 265, 282, 284, 286, 302, 305, 316, 319, 327, 328}, weapons_late = {261, 265, 282, 284, 286, 302, 305, 319, 327, 328, 333, 335, 343}, split_floor = 9,
+      back_key = 226,
+    },
+    [3] = {  -- Sun & Moon
+      rare = {[25] = {267, 266}, [27] = {360}, [44] = {288}, [56] = {335}, [65] = {307}},
+      common = {[25] = {183}, [26] = {368}, [27] = {178}, [31] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [32] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [43] = {178}, [44] = {176, 102}, [56] = {104, 98}, [63] = {104}, [65] = {96, 97, 106}},
+      boosts = {[335] = {attack = 30, elem = {0, 40, 0, 0, 0}, s2 = 2, vs = {[3] = 40}}},
+      weapons_early = {263, 272, 282, 288, 293, 306, 318, 334, 337, 344}, weapons_late = {263, 272, 282, 288, 293, 306, 318, 334, 337, 344, 349, 350, 359}, split_floor = 9,
+      back_key = 228,
+    },
+    [4] = {  -- Moon Sea
+      rare = {[28] = {322}, [48] = {351}, [54] = {339}, [58] = {328}, [62] = {368}, [64] = {321}, [68] = {266, 354}},
+      common = {[28] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [33] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [34] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [35] = {375, 359}, [48] = {105}, [49] = {178}, [54] = {343}, [58] = {317}, [62] = {102, 95, 105, 98}, [64] = {349}, [68] = {100}},
+      boosts = {[321] = {durability = 99, elem = {0, 99, 0, 0, 0}, endurance = 99, s1 = 2, s2 = 1, vs = {[2] = 99}}, [343] = {s1 = 128}, [351] = {s2 = 4}, [368] = {attack = 50, elem = {40, 0, 0, 0, 0}, magic = 30, vs = {[0] = 40, [4] = 20}}},
+      weapons_early = {272, 288, 281, 307, 322, 334, 344, 351, 352, 353}, weapons_late = {272, 288, 281, 307, 322, 334, 344, 351, 352, 353, 365, 374}, split_floor = 8,
+      back_key = 229,
+    },
+    [5] = {  -- Gallery of Time
+      rare = {[38] = {309}, [39] = {360}, [40] = {275}, [41] = {273}, [42] = {312}, [59] = {344}, [66] = {307}},
+      common = {[37] = {285}, [38] = {336}, [39] = {316}, [40] = {98}, [41] = {274}, [42] = {312}, [46] = {289, 294}, [57] = {97, 96, 106}, [59] = {344, 292}, [61] = {328}, [66] = {102}, [74] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [75] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}},
+      boosts = {[273] = {durability = 99, elem = {40, 0, 0, 0, 40}, s1 = 64, s2 = 4, vs = {[9] = 30}}, [275] = {durability = 99, s2 = 2}, [307] = {elem = {0, 0, 40, 0, 0}, vs = {[5] = 40, [6] = 40}}, [309] = {durability = 99, elem = {40, 0, 40, 0, 40}}, [312] = {attack = 80, durability = 99, magic = 50, s1 = 128, s2 = 32}, [328] = {elem = {0, 0, 50, 0, 0}}, [344] = {s2 = 32}, [360] = {durability = 99, elem = {0, 0, 0, 50, 0}, endurance = 99, s2 = 16, vs = {[2] = 40, [4] = 40}}},
+      weapons_early = {274, 281, 285, 292, 294, 308, 322, 336, 338, 339, 354, 360, 368, 375}, weapons_late = {274, 281, 285, 292, 294, 308, 322, 336, 338, 339, 354, 360, 368, 375}, split_floor = 99,
+      back_key = 230,
+    },
+    [6] = {  -- Demon Shaft
+      rare = {[111] = {339}, [112] = {269}, [121] = {334}, [122] = {325}, [132] = {328}, [143] = {271}, [144] = {338}, [154] = {336}},
+      common = {[111] = {107, 101}, [121] = {107, 97}, [122] = {311, 290}, [130] = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [131] = {192, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106}, [132] = {107, 100}, [133] = {310}, [143] = {107, 103}, [144] = {304}, [154] = {107, 102}},
+      boosts = {[271] = {elem = {0, 0, 0, 50, 0}}, [310] = {s2 = 32}, [328] = {elem = {0, 0, 50, 0, 0}}, [334] = {elem = {0, 50, 0, 0, 0}}},
+      weapons_early = {276, 273, 275, 281, 285, 309, 311, 323, 325, 340, 338, 355, 359, 370, 371}, weapons_late = {276, 273, 275, 281, 285, 309, 311, 323, 325, 340, 338, 355, 359, 370, 371}, split_floor = 99,
+      back_key = 231,
+    },
+  },
+}
+
+-- Champions: about one regular enemy in twelve (more at higher tiers) grows larger and tougher, pays
+-- triple Gilda and XP, and drops its DarkCloud-Expanded themed loot.
+local function pick(list) if type(list) == "table" and #list > 0 then return list[math.random(#list)] end end
+local function champion_loot(dungeon, number, model)
+  local data = LEGACY_LOOT.dungeons[dungeon]
+  if not data then return nil end
+  if data.rare[model] and math.random(100) <= 8 then return pick(data.rare[model]) end
+  if data.common[model] and math.random(100) <= 40 then return pick(data.common[model]) end
+  if math.random(100) <= 20 then return pick(number <= data.split_floor and data.weapons_early or data.weapons_late) end
+  return pick(math.random(100) <= 60 and LEGACY_LOOT.attachmentsTableLucky or LEGACY_LOOT.attachmentsTableUnlucky)
+end
+
+-- Enemy stats for tiers and Gilda mutators: applied once per living enemy.
+local function scale_enemies(roster)
+  local tier, m = floor.tier, floor.mutator
+  local money = (m == "iron" and 2 or (m == "bounty" and 2.5 or 1)) * (1 + setting("tier_gilda_percent", 40) * tier / 100)
+  local hp_scale = 1 + setting("tier_hp_percent", 35) * preset().tier_hp * tier / 100
+  local alive = {}
+  for _, e in ipairs(roster) do
+    local handle = e.entity_id or e.id
+    local key = tostring(handle)
+    alive[key] = true
+    if handle and e.revealed == true and not floor.scaled[key] then
+      local hp = e.health and tonumber(e.health.maximum) or 0
+      local combat = e.combat or {}
+      if hp > 0 then
+        local drop = e.definition and e.definition.drop_item
+        local champion = hp < 600 and (type(drop) ~= "number" or drop < 0) and
+            math.random(100) <= clamp(setting("champion_chance", 8) + 2 * tier, 0, 100)
+        local scale = champion and 3 or 1
+        local request = {entity = handle, reward_money = math.min(2147483647, math.floor(math.max(0, tonumber(combat.reward_money) or 0) * money * scale + 0.5))}
+        if tier > 0 or champion then
+          request.max_hp = math.min(1000000, math.floor(hp * hp_scale * scale + 0.5))
+          request.hp = request.max_hp
+          request.defense = math.min(32767, math.floor(((tonumber(combat.defense) or 0) + setting("tier_defense", 2) * tier) * (champion and 1.5 or 1)))
+        end
+        if (tier > 0 or champion or money ~= 1) and not try(game.entities.set_stats, request) then
+          request = nil
+        end
+        if request or (tier == 0 and not champion and money == 1) then floor.scaled[key] = true end
+        if request and champion then
+          floor.champions[key] = e.native_model_id
+          try(game.entities.scale_set, {entity = handle, scale = 1.5})
+          toast("A CHAMPION " .. enemy_name(e.native_model_id):upper() .. " stalks this floor!", 300)
+        end
+      end
+    end
+  end
+  for key in pairs(floor.scaled) do if not alive[key] then floor.scaled[key] = nil end end
+end
+
+-- Enemy speed: each enemy keeps its own random speed roll.
+local function vary_speeds(roster)
+  local variance = clamp(setting("enemy_speed_variance", 25), 0, 50)
+  local base = clamp(setting("enemy_base_speed_percent", 100), 60, 200) / 100 * preset().speed
+  if variance == 0 and base == 1 then return end
+  for _, e in ipairs(roster) do
+    local handle = e.entity_id or e.id
+    local motion = handle and try(game.physics.velocity_get, {entity = handle})
+    if motion and motion.source == "native_movement" and motion.velocity then
+      local v = motion.velocity
+      local speed = math.sqrt(v.x * v.x + v.z * v.z)
+      if speed > 0.0001 then
+        local key = tostring(handle)
+        local r = floor.speeds[key]
+        if not r then r = {roll = math.random() * 2 - 1, base = speed}; floor.speeds[key] = r
+        elseif not r.last or math.abs(speed - r.last) > 0.0005 then r.base = speed end
+        local target = r.base * base * (1 + r.roll * variance / 100)
+        if math.abs(target - speed) > 0.0005 and try(game.physics.velocity_set, {entity = handle, velocity = {x = v.x * target / speed, y = v.y, z = v.z * target / speed}}) then
+          r.last = target
+        end
+      end
+    end
+  end
+end
+
+local function pick_bounty(roster)
+  for _, e in ipairs(roster) do
+    local drop = e.definition and e.definition.drop_item
+    if type(e.native_model_id) == "number" and (type(drop) ~= "number" or drop < 0) then
+      floor.bounty = {target = tostring(e.native_model_id), count = 0, need = clamp(setting("bounty_kills", 6), 1, 20)}
+      toast("BOUNTY: defeat " .. floor.bounty.need .. " " .. enemy_name(floor.bounty.target), 300)
+      return
+    end
+  end
+end
+
+-- Clear rewards: gems (and a slayer from Tier 3) per tier, delivered when there is room.
+local GEMS = {96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107}
+local SLAYERS = {112, 113, 114, 115, 116, 117, 118, 119, 120, 121}
+local function pending_rewards()
+  local r = moonmod.storage.get("clear_rewards_v2")
+  if type(r) ~= "table" then r = {} end
+  r.pending, r.paid = type(r.pending) == "table" and r.pending or {}, type(r.paid) == "table" and r.paid or {}
+  return r
+end
+local function deliver_rewards(verbose)
+  local r, count = pending_rewards(), 0
+  while #r.pending > 0 do
+    local got = try(game.items.give, {id = "chronicle:item:" .. r.pending[1], count = 1})
+    if not got or (got.added or 0) < 1 then break end
+    table.remove(r.pending, 1)
+    count = count + 1
+  end
+  store("clear_rewards_v2", r)
+  if count > 0 or verbose then toast("Clear rewards: " .. count .. " delivered" .. (#r.pending > 0 and (", " .. #r.pending .. " waiting for space") or "")) end
+end
+
+local function floor_cleared()
+  floor.cleared = true
+  local s = stats()
+  s.floors = s.floors + 1
+  store("dungeon_feats_v1", s)
+  advance("clear_5"); advance("clear_25"); advance("clear_100")
+  local gilda = reward((50 + 25 * math.max(0, floor.number)) * (1 + math.max(0, floor.dungeon)))
+  pay(gilda)
+  toast("FLOOR CLEARED  +" .. gilda .. " Gilda", 300)
+  if floor.tier > 0 then
+    local r = pending_rewards()
+    for _, paid in ipairs(r.paid) do if paid == floor.token then return end end
+    for _ = 1, floor.tier do r.pending[#r.pending + 1] = GEMS[math.random(#GEMS)] end
+    if floor.tier >= 3 then r.pending[#r.pending + 1] = SLAYERS[math.random(#SLAYERS)] end
+    r.paid[#r.paid + 1] = floor.token
+    if #r.paid > 128 then table.remove(r.paid, 1) end
+    store("clear_rewards_v2", r)
+    deliver_rewards(true)
+  end
+end
+
+-- Kills: bestiary, streaks, bounty, tier bonus -------------------------------------------------------
+local counted = {}
+moonmod.on("game.enemy_defeated", function(e)
+  if e.entity then
+    if counted[e.entity] then return end
+    counted[e.entity] = true
+  end
+  enter_floor(try(game.world.get))
+  local s = stats()
+  s.kills = s.kills + 1
+  local key = type(e.native_model_id) == "number" and tostring(e.native_model_id) or nil
+  if key then
+    local fresh = s.species[key] == nil
+    s.species[key] = (s.species[key] or 0) + 1
+    local n = s.species[key]
+    if fresh then
+      advance("species_20"); advance("species_60")
+      toast("Bestiary: " .. enemy_name(key) .. " discovered (" .. count_keys(s.species) .. " known)")
+    elseif n == 10 or n == 50 or n == 150 then
+      local g = reward(n * 2)
+      pay(g)
+      toast("Bestiary: " .. enemy_name(key) .. " x" .. n .. "  +" .. g .. " Gilda")
+    end
+  end
+  local now = type(e.frame) == "number" and e.frame or frame
+  streak = (now - streak_last <= 480) and streak + 1 or 1
+  streak_last = now
+  s.best_streak = math.max(s.best_streak, streak)
+  if streak == 5 or streak == 10 or streak % 20 == 0 then
+    local g = reward(streak * 5 * (1 + math.max(0, floor and floor.dungeon or 0)))
+    pay(g)
+    toast("KILL STREAK x" .. streak .. "  +" .. g .. " Gilda", 240)
+  end
+  if streak >= 10 then advance("streak_10") end
+  if streak >= 25 then advance("streak_25") end
+  if floor and floor.bounty and not floor.bounty.paid and key == floor.bounty.target then
+    local b = floor.bounty
+    b.count = b.count + 1
+    if b.count >= b.need then
+      b.paid = true
+      local g = clamp(math.floor((150 + 60 * math.max(0, floor.number)) * (1 + 0.5 * math.max(0, floor.dungeon)) *
+          setting("bounty_reward_percent", 100) / 100 * preset().reward), 0, 32767)
+      pay(g)
+      s.bounties = s.bounties + 1
+      advance("bounty_25")
+      toast("BOUNTY COMPLETE  +" .. g .. " Gilda", 300)
+    else
+      toast("Bounty " .. b.count .. "/" .. b.need, 120)
+    end
+  end
+  if floor and floor.tier > 0 then pay(5 * floor.tier) end
+  local champion = floor and e.entity and floor.champions[tostring(e.entity)]
+  if champion then
+    floor.champions[tostring(e.entity)] = nil
+    local item = champion_loot(floor.dungeon, floor.number, champion)
+    local given = item and (item >= 257 and try(game.weapons.give, {id = "chronicle:weapon:" .. item}) or
+        try(game.items.give, {id = "chronicle:item:" .. item, count = 1}))
+    toast("CHAMPION DEFEATED" .. (given and "  -  loot added to your bag" or ""), 300)
+  end
+  store("dungeon_feats_v1", s)
+end)
+
+
+-- Periodic work: one handler. Input every frame, floor bookkeeping every 15, enemy speeds every 30.
+local badges_published = false
+moonmod.on("game.tick", function(e)
+  frame = e and e.frame or frame + 1
+  step_selected_tier()
+  if frame % 15 ~= 0 then return end
+  if not badges_published then publish_badges(); badges_published = true end
+  enter_floor(try(game.world.get))
+  if streak > 0 and frame - streak_last > 480 then streak = 0 end
+  if not floor then return end
+  local roster_result = try(game.entities.query, {type = "monster"})
+  local roster = roster_result and roster_result.entities or {}
+  if not floor.bounty then pick_bounty(roster) end
+  scale_enemies(roster)
+  if frame % 30 == 0 then vary_speeds(roster) end
+  if not floor.cleared and frame - floor.entered > 180 then
+    -- combat.remaining counts living monsters in every slot, awake or dormant.
+    local combat = try(game.combat.get)
+    local alive = combat and tonumber(combat.remaining)
+    if alive then floor.seen = math.max(floor.seen, alive) end
+    if alive and floor.seen > 0 and alive == 0 then
+      local p = try(game.player.get)
+      if p and p.hp > 0 then floor_cleared() end
+    end
+  end
+  if floor.mutator and frame % 60 == 0 then
+    if floor.mutator == "spring" then try(game.player.thirst_set, {restore = 1.5})
+    elseif floor.mutator == "scorched" then try(game.player.thirst_set, {restore = -1.0}) end
+  end
+end)
+
+-- Manager actions -------------------------------------------------------------------------------------
+local bestiary_cursor = 0
+for _, a in ipairs({
+  {"status", "This Floor", "Tier, mutator, bounty and streak"},
+  {"feats", "Stats", "Kills, clears, bounties, best streak and bestiary size"},
+  {"bestiary", "Browse Bestiary", "Step through every enemy type and your defeats"},
+  {"default_up", "Default Tier for New Floors", "Cycle the tier used by floors you have not set (0-5)"},
+  {"claim", "Deliver Clear Rewards", "Hand out gems and slayers that were waiting for inventory space"}
+}) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
+moonmod.on("ui.action", function(a)
+  if a.id == "status" then
+    if not floor then toast("Not in a dungeon"); return end
+    local b = floor.bounty
+    toast(string.format("TIER %d  |  %s  |  BOUNTY %s  |  STREAK %d", floor.tier,
+        floor.mutator and MUTATORS[floor.mutator].name or "no mutator",
+        b and (enemy_name(b.target) .. " " .. b.count .. "/" .. b.need .. (b.paid and " done" or "")) or "none yet", streak), 480)
+  elseif a.id == "feats" then
+    local s = stats()
+    toast(string.format("KILLS %d  |  CLEARS %d  |  BOUNTIES %d  |  BEST STREAK %d  |  BESTIARY %d", s.kills, s.floors, s.bounties,
+        s.best_streak, count_keys(s.species)), 480)
+  elseif a.id == "bestiary" then
+    local keys = {}
+    for id in pairs(ENEMY_NAMES) do keys[#keys + 1] = id end
+    table.sort(keys)
+    bestiary_cursor = bestiary_cursor % #keys + 1
+    local id = keys[bestiary_cursor]
+    local n = stats().species[tostring(id)] or 0
+    toast(bestiary_cursor .. "/" .. #keys .. "  " .. (n > 0 and enemy_name(id) or "???") .. "  -  " .. (n > 0 and (n .. " defeated") or "not seen yet"), 360)
+  elseif a.id == "default_up" then
+    local t = (default_tier() + 1) % (MAX_TIER + 1)
+    store("default_tier", t)
+    publish_badges()
+    apply_generation(t)
+    toast("New floors start at Tier " .. t)
+  elseif a.id == "claim" then
+    deliver_rewards(true)
+  end
+end)
+
+-- Ascension asks how much an enemy is worth: champions triple XP, each tier adds 25%.
+try(game.scripts.register_function, {id = "enemy_bonus", description = "XP multiplier for a defeated enemy"}, function(args)
+  local champion = floor and args and args.entity and floor.champions[tostring(args.entity)] ~= nil
+  return {xp_multiplier = (champion and 3 or 1) * (1 + 0.25 * (floor and floor.tier or 0)), champion = champion}
+end)
+-- Other mods (Adventurer) can ask for the current tier.
+try(game.scripts.register_function, {id = "current_tier", description = "Current floor's Dungeon+ tier"}, function()
+  return {tier = floor and floor.tier or 0, mutator = floor and floor.mutator or ""}
+end)
+
+moonmod.on("settings.changed", function() apply_generation(floor and floor.tier or default_tier()) end)
+apply_mutator_formulas(nil)
+apply_generation(default_tier())
 
 -- Weapon table edits from the legacy Expanded Data package (DarkCloud-Expanded, BSD-2-Clause).
 local LEGACY_WEAPON_BALANCE = {
@@ -684,8 +760,8 @@ local function load_shop_baseline()
  return base
 end
 local function update_daily_shops(day)
- if last_shop_attempt_frame and current_frame-last_shop_attempt_frame<300 then return end
- last_shop_attempt_frame=current_frame
+ if last_shop_attempt_frame and frame-last_shop_attempt_frame<300 then return end
+ last_shop_attempt_frame=frame
  if not base_shop_items then base_shop_items=load_shop_baseline();if not base_shop_items then return end end
  local cycle=(day%5)+1
  local complete=true
@@ -715,21 +791,13 @@ local function update_daily_shops(day)
  end
  if complete then last_shop_day=day else last_shop_day=nil end
 end
-moonmod.on("game.tick",function()
- local ok,world=pcall(game.world.get)
- if not ok or type(world)~="table" or type(world.day)~="number" then return end
- if world.day~=last_shop_day then update_daily_shops(math.floor(world.day)) end
-end)
-moonmod.on("game.world.location_changed",function() last_shop_day=nil end)
 
-checked(game.input.bind({id="entrance_tier_down",keys={"["}}))
-checked(game.input.bind({id="entrance_tier_up",keys={"]"}}))
-moonmod.on("game.tick",function()
- local down=game.input.consume({id="entrance_tier_down"});local up=game.input.consume({id="entrance_tier_up"})
- if not ((down and down.pressed) or (up and up.pressed)) then return end
- local s=game.dungeons.selection();if not s then return end
- local t=moonmod.storage.get("floor_tiers") or {};local delta=up and up.pressed and 1 or -1
- t[floor_key(s.dungeon_id,s.floor_id)]=(tier_of(s.dungeon_id,s.floor_id)+delta)%6;save("floor_tiers",t);badges_dirty=true
+-- Shops: check the daily stock on arrival somewhere new and every 10 seconds, not every frame.
+moonmod.on("game.world.location_changed", function() last_shop_day = nil end)
+moonmod.on("game.tick", function(e)
+  if (e and e.frame or 0) % 600 ~= 0 and last_shop_day ~= nil then return end
+  if (e and e.frame or 0) % 30 ~= 0 then return end
+  local world = try(game.world.get)
+  if world and type(world.day) == "number" and world.day ~= last_shop_day then update_daily_shops(math.floor(world.day)) end
 end)
-sync(game.world.get());update_combat();layout(default_tier())
-moonmod.log("info",string.format("Dungeon+ initialized: %d weapon definitions, %d legacy prices, daily stock rotation, feats, bounties, mutators, tiers, room-scaled population and enemy variety",legacy_weapon_changes,price_changes))
+moonmod.log("info", string.format("Dungeon+ ready: %d weapon definitions, %d prices", legacy_weapon_changes, price_changes))

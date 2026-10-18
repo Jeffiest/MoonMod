@@ -52,10 +52,10 @@ class MoonFactoryExampleTests(unittest.TestCase):
 
     def test_ascension_package_structure(self) -> None:
         project = Path(__file__).resolve().parents[2]
-        package = project / "mods" / "moonmod.ascension"
+        package = project / "mods" / "moonmod.adventurer"
         manifest = json.loads((package / "mod.json").read_text(encoding="utf-8"))
         script = (package / "main.lua").read_text(encoding="utf-8")
-        self.assertEqual(manifest["id"], "moonmod.ascension")
+        self.assertEqual(manifest["id"], "moonmod.adventurer")
         self.assertEqual(manifest["games"], ["chronicle"])
         self.assertTrue({"game.read", "game.write", "content.register", "storage.read", "storage.write"}.issubset(manifest["permissions"]))
         self.assertIn("game.skills.register", script)

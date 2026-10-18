@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.adventurer",
+  "name": "Ascension",
+  "version": "3.0.0",
+  "author": "Jeffiest",
+  "description": "Each character levels up on their own: more HP, damage and toughness, and skill points for a 17-skill tree (K). Hold L2 + Square / Triangle / Circle for Shockwave, Second Wind and Berserk, paid with Focus. Weapon mastery, crits, loot rolls and the DarkCloud-Expanded weapon abilities.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "optional_dependencies": ["moonmod.dungeon-plus"],
+  "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"],
+  "settings": [
+    {"id": "xp_rate", "name": "XP rate (%)", "type": "integer", "default": 100, "min": 25, "max": 300, "step": 25},
+    {"id": "xp_toasts", "name": "Show +XP after each kill", "type": "boolean", "default": true},
+    {"id": "weapon_loot_rolls", "name": "Weapons you pick up can roll bonus stats", "type": "boolean", "default": true},
+    {"id": "shockwave_radius", "name": "Shockwave radius", "type": "integer", "default": 220, "min": 100, "max": 500, "step": 20},
+    {"id": "durability_refund", "name": "Durability refund chance (%)", "type": "integer", "default": 30, "min": 0, "max": 100, "step": 10},
+    {"id": "water_refund", "name": "Thirst refund (%)", "type": "integer", "default": 20, "min": 0, "max": 100, "step": 10},
+    {"id": "shockwave_key", "name": "Shockwave keyboard key", "type": "choice", "default": "F4", "choices": ["F4", "F5", "F6", "F7", "F8", "F9", "Z", "X", "C"]},
+    {"id": "second_wind_key", "name": "Second Wind keyboard key", "type": "choice", "default": "F5", "choices": ["F4", "F5", "F6", "F7", "F8", "F9", "Z", "X", "C"]},
+    {"id": "berserk_key", "name": "Berserk keyboard key", "type": "choice", "default": "F6", "choices": ["F4", "F5", "F6", "F7", "F8", "F9", "Z", "X", "C"]}
+  ]
+}

@@ -176,6 +176,7 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"input.context_pop", "input", "context_pop", "any", "game.write", "Remove an input context owned by this mod using its token."},
     {"input.context_get", "input", "context_get", "any", "game.read", "Read the active input context and priority stack."},
     {"audio.play", "audio", "play", "simulation", "game.write", "Play a registered sound or music cue."},
+    {"input.block_native", "input", "block_native", "any", "game.write", "Hide named pad buttons from the game itself for a few frames (mods still read them)."},
     {"audio.stop", "audio", "stop", "simulation", "game.write", "Stop playback owned by this mod."},
     {"audio.register", "audio", "register", "content", "content.register", "Register a supported audio resource."},
     {"render.layer_register", "render", "layer_register", "render", "content.register", "Register a bounded owner-scoped HUD text layer."},

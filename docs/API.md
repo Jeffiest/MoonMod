@@ -171,7 +171,7 @@ Actions appear in the selected mod's **Actions** tab in the MoonFactory manager.
 ### Cross-package Mod Manager navigation
 
 ```lua
-local opened, err = game.ui.navigate({mod_id = "moonmod.ascension", tab = "skills"})
+local opened, err = game.ui.navigate({mod_id = "moonmod.adventurer", tab = "skills"})
 if not opened then game.ui.notify({message = err.message}) end
 ```
 

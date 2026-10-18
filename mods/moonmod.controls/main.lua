@@ -29,7 +29,8 @@ local function bind_actions()
       keys = {setting("party_" .. index .. "_key", tostring(index + 3))}}))
   end
   assert(game.input.bind({id = "first_person_toggle", keys = {setting("first_person_key", "V")}}))
-  assert(game.input.bind({id = "town_cycle", keys = {"Gamepad:back", "Backspace"}}))
+  -- Select is left to the game (it opens Georama); Backspace cycles town characters.
+  assert(game.input.bind({id = "town_cycle", keys = {"Backspace"}}))
 end
 bind_actions()
 moonmod.on("settings.changed", bind_actions)
@@ -63,9 +64,15 @@ moonmod.on("game.tick", function()
           local index = 1
           for i, id in ipairs(party_ids) do if id == current.id then index = i;break end end
           local switched = false
+          -- Only characters who have joined the party.
+          local joined = {}
+          local roster = game.party.list()
+          for _, member in ipairs(roster and (roster.members or roster) or {}) do
+            if type(member) == "table" and member.id then joined[member.id] = true end
+          end
           for step = 1, #party_ids - 1 do
             local candidate = party_ids[((index - 1 + step) % #party_ids) + 1]
-            local result = game.party.town_set_active({id = candidate})
+            local result = joined[candidate] and game.party.town_set_active({id = candidate})
             if result then switched = true;break end
           end
           if not switched then notify("No other joined town character is available") end

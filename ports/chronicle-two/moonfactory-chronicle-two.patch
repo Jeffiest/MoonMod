@@ -233,7 +233,7 @@ new file mode 100644
 index 00000000..0c35a2d9
 --- /dev/null
 +++ b/port/include/moonmod/combat_formula.hpp
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,318 @@
 +#pragma once
 +
 +#include <algorithm>
@@ -242,6 +242,7 @@ index 00000000..0c35a2d9
 +#include <cstdlib>
 +#include <map>
 +#include <optional>
++#include <random>
 +#include <ranges>
 +#include <string>
 +#include <string_view>
@@ -252,6 +253,13 @@ index 00000000..0c35a2d9
 +#include "moonmod/api.hpp"
 +
 +namespace moonmod {
++
++// Uniform [0, 1). Not std::rand(): the Chronicle port replaces rand() with the PS2 version, whose
++// range is 0..2^31-1, not RAND_MAX, so rand()/RAND_MAX multiplied damage thousands of times.
++inline double FormulaRandom01() {
++    static std::mt19937 engine{std::random_device{}()};
++    return std::uniform_real_distribution<double>(0.0, 1.0)(engine);
++}
 +
 +// A bounded modifier registry shared by both game adapters. Native hit
 +// pipelines call Apply() only after their own defense, elemental, and damage-block rules.
@@ -447,12 +455,11 @@ index 00000000..0c35a2d9
 +                    100.0 * target_hp >= *formula.target_hp_below_percent * target_max_hp) continue;
 +            }
 +            if (formula.operation == "chance_multiply") {
-+                const double roll = 100.0 * static_cast<double>(std::rand()) /
-+                    (static_cast<double>(RAND_MAX) + 1.0);
++                const double roll = 100.0 * FormulaRandom01();
 +                if (roll >= formula.chance) continue;
 +                result *= formula.value;
 +            } else if (formula.operation == "random_multiply") {
-+                const double unit = static_cast<double>(std::rand()) / (static_cast<double>(RAND_MAX) + 1.0);
++                const double unit = FormulaRandom01();
 +                result *= formula.min_value + (formula.max_value - formula.min_value) * unit;
 +            } else if (formula.operation == "ramp_multiply") {
 +                if (!formula.ramp_started || frame < formula.ramp_last_frame ||
@@ -550,7 +557,7 @@ new file mode 100644
 index 00000000..33f3479b
 --- /dev/null
 +++ b/port/include/moonmod/manager_ui.hpp
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,96 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -625,6 +632,12 @@ index 00000000..33f3479b
 +void           CloseManager();
 +bool           ManagerOpen();
 +void           ShowManagerNotice(std::string message, int duration_frames);
++// Notices still on screen over gameplay, oldest first.
++std::vector<std::string> GameToastLines();
++// True once after a mod opened a manager page outside the menu (the menu must open to show it).
++bool TakeManagerMenuOpenRequest();
++// True once after a page a mod opened during play (hotkey) was closed: the host menu closes too.
++bool TakeManagerHostCloseRequest();
 +void           AdvanceManagerUi();
 +bool           HandleManagerInput(const ManagerInput &input);
 +const ModRecord *ManagerSelectedMod();
@@ -1755,7 +1768,7 @@ new file mode 100644
 index 00000000..f9d0b2c6
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,471 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -1934,6 +1947,7 @@ index 00000000..f9d0b2c6
 +    {"input.context_pop", "input", "context_pop", "any", "game.write", "Remove an input context owned by this mod using its token."},
 +    {"input.context_get", "input", "context_get", "any", "game.read", "Read the active input context and priority stack."},
 +    {"audio.play", "audio", "play", "simulation", "game.write", "Play a registered sound or music cue."},
++    {"input.block_native", "input", "block_native", "any", "game.write", "Hide named pad buttons from the game itself for a few frames (mods still read them)."},
 +    {"audio.stop", "audio", "stop", "simulation", "game.write", "Stop playback owned by this mod."},
 +    {"audio.register", "audio", "register", "content", "content.register", "Register a supported audio resource."},
 +    {"render.layer_register", "render", "layer_register", "render", "content.register", "Register a bounded owner-scoped HUD text layer."},
@@ -13272,7 +13286,7 @@ new file mode 100644
 index 00000000..18d65543
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
-@@ -0,0 +1,853 @@
+@@ -0,0 +1,899 @@
 +#include "moonmod/manager_ui.hpp"
 +
 +#include <algorithm>
@@ -13697,6 +13711,12 @@ index 00000000..18d65543
 +
 +ManagerUiState &ManagerState() { return g_state; }
 +
++namespace {
++// The open page came from a mod during play: one cancel goes straight back to the game.
++bool g_opened_in_play = false;
++bool g_host_close_request = false;
++} // namespace
++
 +void OpenManager() {
 +    std::string notice = std::move(g_state.notice);
 +    const int notice_frames = g_state.notice_frames;
@@ -13710,6 +13730,7 @@ index 00000000..18d65543
 +}
 +
 +void CloseManager() {
++    g_opened_in_play = false;
 +    g_state.open = false;
 +    g_state.settings_focus = false;
 +    g_state.notice.clear();
@@ -13718,13 +13739,48 @@ index 00000000..18d65543
 +
 +bool ManagerOpen() { return g_state.open; }
 +
++namespace {
++// Notices also show over gameplay (the manager footer alone is invisible while playing).
++struct GameToast {
++    std::string text;
++    int frames = 0;
++};
++std::vector<GameToast> g_game_toasts;
++// Set when a mod opens a manager page during play: the dungeon loop opens its menu, where the manager draws.
++bool g_menu_open_request = false;
++} // namespace
++
++bool TakeManagerHostCloseRequest() {
++    const bool requested = g_host_close_request;
++    g_host_close_request = false;
++    return requested;
++}
++
++bool TakeManagerMenuOpenRequest() {
++    const bool requested = g_menu_open_request && g_state.open;
++    g_menu_open_request = false;
++    return requested;
++}
++
 +void ShowManagerNotice(std::string message, int duration_frames) {
++    const int frames = std::clamp(duration_frames, 1, 3600);
++    std::erase_if(g_game_toasts, [&message](const GameToast &toast) { return toast.text == message; });
++    g_game_toasts.push_back({message, std::max(frames, 180)});
++    if (g_game_toasts.size() > 4) g_game_toasts.erase(g_game_toasts.begin());
 +    g_state.notice = std::move(message);
-+    g_state.notice_frames = std::clamp(duration_frames, 1, 3600);
++    g_state.notice_frames = frames;
++}
++
++std::vector<std::string> GameToastLines() {
++    std::vector<std::string> lines;
++    for (const GameToast &toast : g_game_toasts) lines.push_back(toast.text);
++    return lines;
 +}
 +
 +void AdvanceManagerUi() {
 +    if (g_state.notice_frames > 0 && --g_state.notice_frames == 0) g_state.notice.clear();
++    for (GameToast &toast : g_game_toasts) --toast.frames;
++    std::erase_if(g_game_toasts, [](const GameToast &toast) { return toast.frames <= 0; });
 +}
 +
 +const ModRecord *ManagerSelectedMod() {
@@ -13924,7 +13980,11 @@ index 00000000..18d65543
 +    if (input.cancel || input.mouse_right ||
 +        (input.mouse_left && input.mouse_x >= 44 && input.mouse_x < 140 && input.mouse_y >= 422 && input.mouse_y < 449) ||
 +        (input.mouse_left && input.mouse_x >= 558 && input.mouse_x < 596 && input.mouse_y >= 76 && input.mouse_y < 111)) {
-+        if (g_state.settings_focus || g_state.native_trust_focus) {
++        if (g_opened_in_play) {
++            g_opened_in_play = false;
++            g_host_close_request = true;
++            CloseManager();
++        } else if (g_state.settings_focus || g_state.native_trust_focus) {
 +            g_state.settings_focus = false;
 +            g_state.native_trust_focus = false;
 +            g_state.detail_tab = 0;
@@ -15526,7 +15586,8 @@ new file mode 100644
 index 00000000..f7adcd40
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
-@@ -0,0 +1,1441 @@
+@@ -0,0 +1,1459 @@
++#include <chrono>
 +#include "moonmod/runtime.hpp"
 +
 +#include <algorithm>
@@ -16316,10 +16377,27 @@ index 00000000..f7adcd40
 +        }
 +    }
 +
++    // Per-mod time spent in game.tick, printed every 600 ticks when any mod averages over 0.5 ms.
++    std::map<std::string, double> tick_seconds;
++    int tick_samples = 0;
++
 +    void Emit(std::string_view event, const Json &payload) {
++        const bool tick = event == "game.tick";
 +        for (auto &[id, module] : modules) {
-+            (void)id;
++            const auto started = std::chrono::steady_clock::now();
 +            module->Emit(event, payload);
++            if (tick) tick_seconds[id] += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
++        }
++        if (tick && ++tick_samples >= 600) {
++            bool slow = false;
++            for (const auto &[id, seconds] : tick_seconds) slow = slow || seconds / tick_samples > 0.0005;
++            if (slow) {
++                std::printf("moonmod tick cost (ms per frame):");
++                for (const auto &[id, seconds] : tick_seconds) std::printf(" %s=%.2f", id.c_str(), 1000.0 * seconds / tick_samples);
++                std::printf("\n");
++            }
++            tick_seconds.clear();
++            tick_samples = 0;
 +        }
 +        for (auto &[id, plugin] : native_plugins) {
 +            (void)id;

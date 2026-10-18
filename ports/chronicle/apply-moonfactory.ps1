@@ -7,6 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $base = '50eaff633e4e02e5dbc6a7a6a84c7e34688cb738'
 $patch = Join-Path $PSScriptRoot 'moonfactory-chronicle.patch'
+$kazarovPatch = Join-Path $PSScriptRoot 'moonfactory-kazarov.patch'
+$kazarov = Join-Path $Chronicle 'tools\kazarov'
 
 if (-not (Test-Path (Join-Path $Chronicle '.git'))) {
     throw "$Chronicle is not a Chronicle git checkout (clone it with --recurse-submodules first)."
@@ -22,8 +24,12 @@ git -C $Chronicle submodule update --init --recursive
 
 git -C $Chronicle apply --check --whitespace=nowarn $patch
 if ($LASTEXITCODE -ne 0) { throw 'The patch does not apply cleanly to this checkout.' }
+git -C $kazarov apply --check --whitespace=nowarn $kazarovPatch
+if ($LASTEXITCODE -ne 0) { throw 'The Kazarov patch does not apply cleanly to tools\kazarov.' }
 git -C $Chronicle apply --whitespace=nowarn $patch
 if ($LASTEXITCODE -ne 0) { throw 'Applying the patch failed.' }
+git -C $kazarov apply --whitespace=nowarn $kazarovPatch
+if ($LASTEXITCODE -ne 0) { throw 'Applying the Kazarov patch failed.' }
 
 Write-Host "MoonFactory applied to $Chronicle (Chronicle $base)."
 Write-Host 'Next: put your disc image in rom/pal or rom/ntsc, then run build.bat windows-x64-release.'

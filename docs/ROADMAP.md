@@ -62,8 +62,9 @@ Chronicle's location registration has native adapter coverage and a retail-data 
 
 ## 4. Modern mod rewrites (ported from legacy windows branch)
 
-- **`moonmod.dungeon-plus`**: Chronicle source integration includes per-floor tiers/layouts, resilience and clear rewards, Dungeon Feats quests and bestiary, floor bounties, five floor mutators, native movement speed variation, and the static legacy shop-price rebalance. Daily shop rotations, hit procs, and bytecode AI edits remain unsupported.
-- **`moonmod.ascension`**: Chronicle source integration includes XP/level/Paragon progression, eighteen nodes across Might/Vitality/Focus, manager skill training, floor modifiers, and weapon mastery. Champion spawning, critical-hit effects, and other hit-triggered weapon effects remain unsupported.
+- **`moonmod.dungeon-plus`** (2.1): per-floor tiers 0-5 picked on the floor list (`[` `]`, or the gamepad), presets and mutators, a bounty and streaks per floor, a bestiary and trophies, champions (bigger, tougher enemies that drop the legacy dungeon loot), clear rewards, harder enemy AI, and the DarkCloud-Expanded weapon and shop data. Exports `current_tier` and `enemy_bonus` to other mods.
+- **`moonmod.adventurer`** (Ascension 3.0; replaces Ascension 1.6 and the Weapon Mastery migration and imports their saved progress): each character levels up on their own to 40, with max HP, damage and a 17-node skill tree in three branches (Might, Vitality, Focus). Spent points unlock Shockwave, Second Wind and Berserk, cast with L2 + Square / Triangle / Circle (F4-F6 on keyboard) and paid with a Focus bar. Also crits, weapon mastery, loot rolls, thirst and durability refunds, and the DarkCloud-Expanded weapon abilities.
+- **`moonmod.hub`**, **`moonmod.controls`**, **`moonmod.autosave`**, **`moonmod.expanded-town`**: hotkeys for the skill page (K, or L1+R1+R3) and the journal (J); party controls in town; autosave; a free town camera.
 - **Exit gate replacement (not done)**: a walk-through exit room with a stair to the next floor and a stair back to town. The Chronicle patch has an unfinished version, switched off; the earlier seamless mode is also off because it forced the next floor.
 
 

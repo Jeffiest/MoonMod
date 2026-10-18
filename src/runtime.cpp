@@ -1,3 +1,4 @@
+#include <chrono>
 #include "moonmod/runtime.hpp"
 
 #include <algorithm>
@@ -787,10 +788,27 @@ struct Runtime::Impl {
         }
     }
 
+    // Per-mod time spent in game.tick, printed every 600 ticks when any mod averages over 0.5 ms.
+    std::map<std::string, double> tick_seconds;
+    int tick_samples = 0;
+
     void Emit(std::string_view event, const Json &payload) {
+        const bool tick = event == "game.tick";
         for (auto &[id, module] : modules) {
-            (void)id;
+            const auto started = std::chrono::steady_clock::now();
             module->Emit(event, payload);
+            if (tick) tick_seconds[id] += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        }
+        if (tick && ++tick_samples >= 600) {
+            bool slow = false;
+            for (const auto &[id, seconds] : tick_seconds) slow = slow || seconds / tick_samples > 0.0005;
+            if (slow) {
+                std::printf("moonmod tick cost (ms per frame):");
+                for (const auto &[id, seconds] : tick_seconds) std::printf(" %s=%.2f", id.c_str(), 1000.0 * seconds / tick_samples);
+                std::printf("\n");
+            }
+            tick_seconds.clear();
+            tick_samples = 0;
         }
         for (auto &[id, plugin] : native_plugins) {
             (void)id;

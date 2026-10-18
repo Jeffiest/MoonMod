@@ -72,6 +72,12 @@ void           OpenManager();
 void           CloseManager();
 bool           ManagerOpen();
 void           ShowManagerNotice(std::string message, int duration_frames);
+// Notices still on screen over gameplay, oldest first.
+std::vector<std::string> GameToastLines();
+// True once after a mod opened a manager page outside the menu (the menu must open to show it).
+bool TakeManagerMenuOpenRequest();
+// True once after a page a mod opened during play (hotkey) was closed: the host menu closes too.
+bool TakeManagerHostCloseRequest();
 void           AdvanceManagerUi();
 bool           HandleManagerInput(const ManagerInput &input);
 const ModRecord *ManagerSelectedMod();

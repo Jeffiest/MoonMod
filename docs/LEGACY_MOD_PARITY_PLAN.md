@@ -1,5 +1,7 @@
 # Windows mod suite parity plan
 
+> 2026-10-18: Ascension 1.6 and the Weapon Mastery migration described below were replaced by Ascension 3.0 (`mods/moonmod.adventurer`), which imports their saved progress. This plan is kept as the record of the legacy-parity work.
+
 Scope: migrate the useful gameplay and presentation features from `Jeffiest/Chronicle`'s `windows` branch into MoonFactory's current Chronicle integration. Exclude test-only packages and co-op/network packages. Keep feature presentation inside the existing MoonFactory Mod Manager, including its Skills, Actions, Quests, and Journal views.
 
 Source inventory checked against `Jeffiest/Chronicle` branch `windows` at tree commit `50c29fcc288619b1a1a24192d1fe4ef12c06046a`: 17 gameplay/UI packages are in scope (`ascension`, `autosave`, `controls`, `dungeon_feats`, `dungeon_plus`, `enemy_variety`, `expanded_abilities`, `expanded_data`, `expanded_town`, `floor_bounty`, `floor_mutators`, `harder_ai`, `hub`, `mod_settings`, `native_menu`, `sturdy`, and `weapon_mastery`). Excluded are `coop` and the disabled test fixtures `data_test`, `engine_test`, `files_test`, and `net_test`. `combat_demo` and `regen_example` are disabled examples, not additional suite features; the regeneration example overlaps Ascension's Regeneration skill.

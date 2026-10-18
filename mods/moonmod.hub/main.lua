@@ -1,6 +1,6 @@
 local destinations = {
-  {id="ascension_skills", label="Ascension: Skill Tree", mod_id="moonmod.ascension", tab="skills"},
-  {id="ascension_actions", label="Ascension: Progression and Mastery", mod_id="moonmod.ascension", tab="actions"},
+  {id="adventurer_skills", label="Adventurer: Skill Tree", mod_id="moonmod.adventurer", tab="skills"},
+  {id="adventurer_actions", label="Adventurer: Progress", mod_id="moonmod.adventurer", tab="actions"},
   {id="dungeon_actions", label="Dungeon+: Floors and Rewards", mod_id="moonmod.dungeon-plus", tab="actions"},
   {id="dungeon_journal", label="Dungeon+: Trophy Journal", mod_id="moonmod.dungeon-plus", tab="journal"},
   {id="controls_settings", label="Controls: Shortcuts", mod_id="moonmod.controls", tab="settings"},
@@ -28,3 +28,32 @@ moonmod.on("ui.action", function(action)
     game.ui.notify({message=destination.label .. ": " .. tostring(type(err)=="table" and err.message or err)})
   end
 end)
+
+-- Hotkey: K, or L1+R1+R3 on a gamepad, opens the Ascension skill page (like the old hub mod).
+assert(game.input.bind({id = "hub_key", keys = {"K"}}))
+assert(game.input.bind({id = "hub_journal_key", keys = {"J"}}))
+assert(game.input.bind({id = "hub_l1", keys = {"Gamepad:leftshoulder"}}))
+assert(game.input.bind({id = "hub_r1", keys = {"Gamepad:rightshoulder"}}))
+assert(game.input.bind({id = "hub_r3", keys = {"Gamepad:rightstick"}}))
+local chord_down = false
+moonmod.on("game.tick", function()
+  local journal = game.input.consume({id = "hub_journal_key"})
+  if journal and journal.pressed then
+    local opened = game.ui.navigate({mod_id = "moonmod.dungeon-plus", tab = "journal"})
+    if not opened then game.ui.navigate({mod_id = "moonmod.dungeon-plus", tab = "actions"}) end
+  end
+  local key = game.input.consume({id = "hub_key"})
+  local l1 = game.input.state({id = "hub_l1"})
+  local r1 = game.input.state({id = "hub_r1"})
+  local r3 = game.input.state({id = "hub_r3"})
+  local chord = (l1 and l1.down and r1 and r1.down and r3 and r3.down) or false
+  if (key and key.pressed) or (chord and not chord_down) then
+    local opened, err = game.ui.navigate({mod_id = "moonmod.adventurer", tab = "skills"})
+    if not opened then
+      opened = game.ui.navigate({mod_id = "moonmod.adventurer", tab = "actions"})
+      if not opened then game.ui.notify({message = "Hub: " .. tostring(type(err) == "table" and err.message or err)}) end
+    end
+  end
+  chord_down = chord
+end)
+moonmod.log("info", "MoonMod Hub ready (K or L1+R1+R3 skills, J journal)")

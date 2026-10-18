@@ -422,6 +422,12 @@ int RowAt(float y, float top, float step, int visible, int first, int total) {
 
 ManagerUiState &ManagerState() { return g_state; }
 
+namespace {
+// The open page came from a mod during play: one cancel goes straight back to the game.
+bool g_opened_in_play = false;
+bool g_host_close_request = false;
+} // namespace
+
 void OpenManager() {
     std::string notice = std::move(g_state.notice);
     const int notice_frames = g_state.notice_frames;
@@ -435,6 +441,7 @@ void OpenManager() {
 }
 
 void CloseManager() {
+    g_opened_in_play = false;
     g_state.open = false;
     g_state.settings_focus = false;
     g_state.notice.clear();
@@ -443,13 +450,48 @@ void CloseManager() {
 
 bool ManagerOpen() { return g_state.open; }
 
+namespace {
+// Notices also show over gameplay (the manager footer alone is invisible while playing).
+struct GameToast {
+    std::string text;
+    int frames = 0;
+};
+std::vector<GameToast> g_game_toasts;
+// Set when a mod opens a manager page during play: the dungeon loop opens its menu, where the manager draws.
+bool g_menu_open_request = false;
+} // namespace
+
+bool TakeManagerHostCloseRequest() {
+    const bool requested = g_host_close_request;
+    g_host_close_request = false;
+    return requested;
+}
+
+bool TakeManagerMenuOpenRequest() {
+    const bool requested = g_menu_open_request && g_state.open;
+    g_menu_open_request = false;
+    return requested;
+}
+
 void ShowManagerNotice(std::string message, int duration_frames) {
+    const int frames = std::clamp(duration_frames, 1, 3600);
+    std::erase_if(g_game_toasts, [&message](const GameToast &toast) { return toast.text == message; });
+    g_game_toasts.push_back({message, std::max(frames, 180)});
+    if (g_game_toasts.size() > 4) g_game_toasts.erase(g_game_toasts.begin());
     g_state.notice = std::move(message);
-    g_state.notice_frames = std::clamp(duration_frames, 1, 3600);
+    g_state.notice_frames = frames;
+}
+
+std::vector<std::string> GameToastLines() {
+    std::vector<std::string> lines;
+    for (const GameToast &toast : g_game_toasts) lines.push_back(toast.text);
+    return lines;
 }
 
 void AdvanceManagerUi() {
     if (g_state.notice_frames > 0 && --g_state.notice_frames == 0) g_state.notice.clear();
+    for (GameToast &toast : g_game_toasts) --toast.frames;
+    std::erase_if(g_game_toasts, [](const GameToast &toast) { return toast.frames <= 0; });
 }
 
 const ModRecord *ManagerSelectedMod() {
@@ -649,7 +691,11 @@ bool HandleManagerInput(const ManagerInput &input) {
     if (input.cancel || input.mouse_right ||
         (input.mouse_left && input.mouse_x >= 44 && input.mouse_x < 140 && input.mouse_y >= 422 && input.mouse_y < 449) ||
         (input.mouse_left && input.mouse_x >= 558 && input.mouse_x < 596 && input.mouse_y >= 76 && input.mouse_y < 111)) {
-        if (g_state.settings_focus || g_state.native_trust_focus) {
+        if (g_opened_in_play) {
+            g_opened_in_play = false;
+            g_host_close_request = true;
+            CloseManager();
+        } else if (g_state.settings_focus || g_state.native_trust_focus) {
             g_state.settings_focus = false;
             g_state.native_trust_focus = false;
             g_state.detail_tab = 0;

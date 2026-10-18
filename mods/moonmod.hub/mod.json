@@ -8,5 +8,5 @@
   "framework_api": 1,
   "games": ["chronicle"],
   "entry": "main.lua",
-  "permissions": ["content.register"]
+  "permissions": ["game.read", "game.write", "content.register"]
 }
