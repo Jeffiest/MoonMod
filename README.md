@@ -95,4 +95,10 @@ See:
 
 ## Playing with MoonFactory
 
-MoonFactory runs inside the Chronicle PC port. To build Chronicle with MoonFactory from your own disc, follow `ports/chronicle/README.md`.
+MoonFactory runs inside the Chronicle and Chronicle Two PC ports. Build the matching game from your own disc:
+
+- [Chronicle installation](ports/chronicle/README.md)
+- [Chronicle Two installation and verification](ports/chronicle-two/README.md)
+
+Each integration pins the upstream source revision its patches support. Chronicle Two includes a required
+Kazarov input patch; use its installer so both patches are checked and applied together.
