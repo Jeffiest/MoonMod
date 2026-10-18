@@ -1,0 +1,212 @@
+diff --git a/include/platform/input.hpp b/include/platform/input.hpp
+index 0838874..ce788f0 100644
+--- a/include/platform/input.hpp
++++ b/include/platform/input.hpp
+@@ -44,6 +44,8 @@ struct InputPadState {
+     std::uint8_t  left_y = kInputAxisCentre;
+     std::uint8_t  right_x = kInputAxisCentre;
+     std::uint8_t  right_y = kInputAxisCentre;
++    std::uint8_t  left_trigger = 0;
++    std::uint8_t  right_trigger = 0;
+     // D-pad bits the left-stick keys add only while the game is not reading the left stick: the
+     // screens that read the d-pad alone (the developer menu, the dungeon loader).
+     std::uint16_t stick_dpad = 0;
+@@ -157,6 +159,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
+ // The stick byte the game's AxisCalibration reads as deflection * 128, deflection in [-1, 1]: the
+ // dead zone is stepped over, so any motion moves the game.
+ std::uint8_t InputStickByte(float deflection);
++// Normalizes an SDL gamepad trigger sample to its host input byte range (0..255).
++std::uint8_t InputTriggerByte(int raw_value);
+ 
+ // Rebinds one action ("cross", "up", "lx-", "rx", ...) to the names given: SDL key names, Mouse1 to
+ // Mouse5 (left, right, middle, X1, X2), and for the whole-axis actions lx ly rx ry MouseX or MouseY
+@@ -164,6 +168,15 @@ std::uint8_t InputStickByte(float deflection);
+ // the camera's own. Returns false if the action or a name is unknown or does not fit the action.
+ bool InputBindKeys(std::string_view action, std::span<const std::string_view> keys);
+ 
++// Mod-owned digital actions use the same key, mouse-button and gamepad-button sources as host
++// bindings, without changing the controls the game reads. Action ids must be namespaced by owner.
++bool InputBindModAction(std::string_view action, std::span<const std::string_view> sources);
++bool InputModActionExists(std::string_view action);
++bool InputModActionHeld(std::string_view action);
++bool InputModActionConsumePress(std::string_view action);
++bool InputUnbindModAction(std::string_view action);
++void InputUnbindModActionsByPrefix(std::string_view prefix);
++
+ // Restores the default bindings and mouse settings.
+ void InputResetBindings();
+ 
+diff --git a/src/cpp/platform/input.cpp b/src/cpp/platform/input.cpp
+index 796e14c..dd7de83 100644
+--- a/src/cpp/platform/input.cpp
++++ b/src/cpp/platform/input.cpp
+@@ -8,6 +8,7 @@
+ #include <charconv>
+ #include <cmath>
+ #include <cstdio>
++#include <map>
+ #include <numbers>
+ #include <optional>
+ #include <string>
+@@ -21,6 +22,11 @@
+ #include "platform/touchpad.hpp"
+ #include "platform/window.hpp"
+ 
++std::uint8_t InputTriggerByte(int raw_value) {
++    const float normalized = std::clamp(static_cast<float>(raw_value) / 32767.0f, 0.0f, 1.0f);
++    return static_cast<std::uint8_t>(std::lround(normalized * 255.0f));
++}
++
+ namespace {
+ 
+ enum class ActionKind {
+@@ -211,6 +217,9 @@ bool             g_touch_tap_shown = false;
+ // buttons, the script's keys) were held at the last poll, for their press edges.
+ std::array<int, kHostActionCount>  g_host_presses{};
+ std::array<bool, kHostActionCount> g_host_polled{};
++std::map<std::string, std::vector<Source>, std::less<>> g_mod_bindings;
++std::map<std::string, bool, std::less<>> g_mod_polled;
++std::map<std::string, unsigned, std::less<>> g_mod_presses;
+ 
+ std::string Lower(std::string_view text) {
+     std::string lower(text);
+@@ -390,10 +399,14 @@ void ReadGamepad(SDL_Gamepad *gamepad, InputPadState &state) {
+             state.buttons |= GamepadButtonPad(type, button);
+         }
+     }
+-    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kTriggerThreshold) {
++    const Sint16 left_trigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
++    const Sint16 right_trigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
++    state.left_trigger = InputTriggerByte(left_trigger);
++    state.right_trigger = InputTriggerByte(right_trigger);
++    if (left_trigger > kTriggerThreshold) {
+         state.buttons |= kInputL2;
+     }
+-    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kTriggerThreshold) {
++    if (right_trigger > kTriggerThreshold) {
+         state.buttons |= kInputR2;
+     }
+     Sint16 axes[4] = {SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX),
+@@ -587,6 +600,41 @@ bool HostPolledHeld(std::size_t host) {
+     return false;
+ }
+ 
++bool ModActionHeldInternal(std::string_view action) {
++    const auto found = g_mod_bindings.find(action);
++    if (found == g_mod_bindings.end()) return false;
++    for (const Source &source : found->second) {
++        switch (source.kind) {
++            case Source::Key:
++                if (g_keys[source.code] ||
++                    std::ranges::find(g_scripted.keys, source.code) != g_scripted.keys.end()) return true;
++                break;
++            case Source::MouseButton:
++                if (((MouseButtons() | g_scripted.mouse_buttons) & (1u << (source.code - 1))) != 0) return true;
++                break;
++            case Source::GamepadButton:
++                if (GamepadButtonHeld(source.code)) return true;
++                break;
++            case Source::MouseAxis:
++                break;
++        }
++    }
++    return false;
++}
++
++void PollModActions() {
++    for (const auto &[action, sources] : g_mod_bindings) {
++        (void)sources;
++        const bool held = ModActionHeldInternal(action);
++        bool &previous = g_mod_polled[action];
++        if (held && !previous) {
++            unsigned &presses = g_mod_presses[action];
++            if (presses < 255) ++presses;
++        }
++        previous = held;
++    }
++}
++
+ bool MouseAxisBound(int code) {
+     return std::ranges::any_of(g_bindings, [&](const std::vector<Source> &sources) {
+         return std::ranges::any_of(sources, [&](const Source &source) {
+@@ -818,6 +866,7 @@ void InputPoll() {
+     }
+     ReadTouchpad(g_slots[0].gamepad);
+     PollHostActions();
++    PollModActions();
+ }
+ 
+ void InputHandleEvent(const SDL_Event &event) {
+@@ -882,6 +931,7 @@ void InputHandleEvent(const SDL_Event &event) {
+         default:
+             break;
+     }
++    PollModActions();
+ }
+ 
+ void InputLatchPad(int pad) {
+@@ -1225,6 +1275,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
+     return false;
+ }
+ 
++bool InputBindModAction(std::string_view action, std::span<const std::string_view> sources) {
++    EnsureBindings();
++    if (action.empty() || action.size() > 192 || action.find(':') == std::string_view::npos ||
++        sources.empty() || sources.size() > 8) return false;
++    std::vector<Source> parsed;
++    if (!ParseSources(sources, ActionKind::Host, parsed)) return false;
++    const std::string key(action);
++    g_mod_bindings[key] = std::move(parsed);
++    g_mod_presses[key] = 0;
++    g_mod_polled[key] = ModActionHeldInternal(key);
++    return true;
++}
++
++bool InputModActionExists(std::string_view action) {
++    return g_mod_bindings.contains(action);
++}
++
++bool InputModActionHeld(std::string_view action) {
++    EnsureBindings();
++    return ModActionHeldInternal(action);
++}
++
++bool InputModActionConsumePress(std::string_view action) {
++    const auto found = g_mod_presses.find(action);
++    if (found == g_mod_presses.end() || found->second == 0) return false;
++    --found->second;
++    return true;
++}
++
++bool InputUnbindModAction(std::string_view action) {
++    const std::string key(action);
++    const bool removed = g_mod_bindings.erase(key) != 0;
++    g_mod_polled.erase(key);
++    g_mod_presses.erase(key);
++    return removed;
++}
++
++void InputUnbindModActionsByPrefix(std::string_view prefix) {
++    auto it = g_mod_bindings.begin();
++    while (it != g_mod_bindings.end()) {
++        if (std::string_view(it->first).starts_with(prefix)) {
++            g_mod_polled.erase(it->first);
++            g_mod_presses.erase(it->first);
++            it = g_mod_bindings.erase(it);
++        } else {
++            ++it;
++        }
++    }
++}
++
+ std::span<const InputActionInfo> InputActions() {
+     static const std::vector<InputActionInfo> actions = [] {
+         std::vector<InputActionInfo> list;
+@@ -1440,6 +1540,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
+     g_scripted = held;
+     g_scripted_wheel = held.mouse_wheel;
+     PollHostActions();
++    PollModActions();
+ }
+ 
+ static bool g_movement_locked = false;
