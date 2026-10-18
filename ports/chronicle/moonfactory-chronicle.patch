@@ -293,10 +293,10 @@ index 00000000..585050e8
 +
 diff --git a/port/include/moonmod/combat_formula.hpp b/port/include/moonmod/combat_formula.hpp
 new file mode 100644
-index 00000000..56dacb86
+index 00000000..da69f15d
 --- /dev/null
 +++ b/port/include/moonmod/combat_formula.hpp
-@@ -0,0 +1,334 @@
+@@ -0,0 +1,336 @@
 +#pragma once
 +
 +#include <random>
@@ -494,8 +494,10 @@ index 00000000..56dacb86
 +                        {{"id", formula.owner + ":" + formula.id}, {"operation", formula.operation},
 +                         {"value", formula.value}, {"priority", formula.priority}, {"idempotent", true}}, {}};
 +            }
++            // a new definition replaces the old one, filed under its own priority
 +            ramp_states_.erase(existing->first);
-+            existing->second = formula;
++            formulas_.erase(existing);
++            formulas_.emplace(std::make_tuple(formula.priority, formula.owner, formula.id), formula);
 +            return {ApiCallStatus::Ok,
 +                    {{"id", formula.owner + ":" + formula.id}, {"operation", formula.operation},
 +                     {"value", formula.value}, {"priority", formula.priority}, {"idempotent", false}}, {}};
@@ -1178,7 +1180,7 @@ index 00000000..6e5acc5a
 +
 +} // namespace moonmod
 diff --git a/port/lang/de_de.json b/port/lang/de_de.json
-index 655661c3..4c8b1417 100644
+index 655661c3..9bb496dc 100644
 --- a/port/lang/de_de.json
 +++ b/port/lang/de_de.json
 @@ -7,6 +7,8 @@
@@ -1190,8 +1192,23 @@ index 655661c3..4c8b1417 100644
      "options.game.save_cursor_position.label": "Cursor merken",
      "options.game.save_cursor_position.choice.0": "An",
      "options.game.save_cursor_position.choice.1": "Aus",
+@@ -16,6 +18,14 @@
+     "options.game.clock.label": "Uhr",
+     "options.game.clock.choice.0": "An",
+     "options.game.clock.choice.1": "Aus",
++    "options.game.dungeon_aerial_map.label": "Dungeon-Luftkarte",
++    "options.game.dungeon_aerial_map.choice.0": "An",
++    "options.game.dungeon_aerial_map.choice.1": "Aus",
++    "options.game.dungeon_aerial_map.help": "Vergrößert die Etagenkarte\nzu einer zentrierten Draufsicht.\nUnerforschte Räume bleiben verborgen.",
++    "options.game.fit_dungeon_map.label": "Dungeon-Karte einpassen",
++    "options.game.fit_dungeon_map.choice.0": "An",
++    "options.game.fit_dungeon_map.choice.1": "Aus",
++    "options.game.fit_dungeon_map.help": "Hält die ganze erzeugte Karte\nim Bild. Deckt keine\nunerforschten Räume auf.",
+     "options.game.time_speed.label": "Zeitgeschwindigkeit",
+     "options.game.time_speed.choice.0": "Normal",
+     "options.game.time_speed.choice.1": "Schnell",
 diff --git a/port/lang/es_es.json b/port/lang/es_es.json
-index a5b32732..fc8f8fd7 100644
+index a5b32732..c3bc45ce 100644
 --- a/port/lang/es_es.json
 +++ b/port/lang/es_es.json
 @@ -7,6 +7,8 @@
@@ -1203,8 +1220,23 @@ index a5b32732..fc8f8fd7 100644
      "options.game.save_cursor_position.label": "Guardar cursor",
      "options.game.save_cursor_position.choice.0": "Sí",
      "options.game.save_cursor_position.choice.1": "No",
+@@ -16,6 +18,14 @@
+     "options.game.clock.label": "Reloj",
+     "options.game.clock.choice.0": "Sí",
+     "options.game.clock.choice.1": "No",
++    "options.game.dungeon_aerial_map.label": "Mapa aéreo de mazmorra",
++    "options.game.dungeon_aerial_map.choice.0": "Sí",
++    "options.game.dungeon_aerial_map.choice.1": "No",
++    "options.game.dungeon_aerial_map.help": "Amplía el mapa del piso\na una vista centrada desde arriba.\nLas salas sin explorar siguen ocultas.",
++    "options.game.fit_dungeon_map.label": "Ajustar mapa a pantalla",
++    "options.game.fit_dungeon_map.choice.0": "Sí",
++    "options.game.fit_dungeon_map.choice.1": "No",
++    "options.game.fit_dungeon_map.help": "Mantiene todo el mapa generado\ndentro de la pantalla. No revela\nlas salas sin explorar.",
+     "options.game.time_speed.label": "Velocidad del tiempo",
+     "options.game.time_speed.choice.0": "Normal",
+     "options.game.time_speed.choice.1": "Rápido",
 diff --git a/port/lang/fr_fr.json b/port/lang/fr_fr.json
-index f06cd5f0..8117802c 100644
+index f06cd5f0..ccf6dbb4 100644
 --- a/port/lang/fr_fr.json
 +++ b/port/lang/fr_fr.json
 @@ -7,6 +7,8 @@
@@ -1216,8 +1248,23 @@ index f06cd5f0..8117802c 100644
      "options.game.save_cursor_position.label": "Mémoriser curseur",
      "options.game.save_cursor_position.choice.0": "Activé",
      "options.game.save_cursor_position.choice.1": "Désactivé",
+@@ -16,6 +18,14 @@
+     "options.game.clock.label": "Horloge",
+     "options.game.clock.choice.0": "Activé",
+     "options.game.clock.choice.1": "Désactivé",
++    "options.game.dungeon_aerial_map.label": "Vue aérienne du donjon",
++    "options.game.dungeon_aerial_map.choice.0": "Activé",
++    "options.game.dungeon_aerial_map.choice.1": "Désactivé",
++    "options.game.dungeon_aerial_map.help": "Agrandit la carte de l'étage\nen une vue centrée, vue d'en haut.\nLes salles inexplorées restent cachées.",
++    "options.game.fit_dungeon_map.label": "Carte du donjon à l'écran",
++    "options.game.fit_dungeon_map.choice.0": "Activé",
++    "options.game.fit_dungeon_map.choice.1": "Désactivé",
++    "options.game.fit_dungeon_map.help": "Garde toute la carte générée\nà l'écran. Ne révèle pas\nles salles inexplorées.",
+     "options.game.time_speed.label": "Vitesse du temps",
+     "options.game.time_speed.choice.0": "Normal",
+     "options.game.time_speed.choice.1": "Rapide",
 diff --git a/port/lang/it_it.json b/port/lang/it_it.json
-index 12b02b34..8aff4fa8 100644
+index 12b02b34..ee32e35a 100644
 --- a/port/lang/it_it.json
 +++ b/port/lang/it_it.json
 @@ -7,6 +7,8 @@
@@ -1229,6 +1276,21 @@ index 12b02b34..8aff4fa8 100644
      "options.game.save_cursor_position.label": "Salva cursore",
      "options.game.save_cursor_position.choice.0": "Sì",
      "options.game.save_cursor_position.choice.1": "No",
+@@ -16,6 +18,14 @@
+     "options.game.clock.label": "Orologio",
+     "options.game.clock.choice.0": "Sì",
+     "options.game.clock.choice.1": "No",
++    "options.game.dungeon_aerial_map.label": "Mappa aerea del dungeon",
++    "options.game.dungeon_aerial_map.choice.0": "Sì",
++    "options.game.dungeon_aerial_map.choice.1": "No",
++    "options.game.dungeon_aerial_map.help": "Ingrandisce la mappa del piano\nin una vista centrata dall'alto.\nLe stanze inesplorate restano nascoste.",
++    "options.game.fit_dungeon_map.label": "Adatta mappa allo schermo",
++    "options.game.fit_dungeon_map.choice.0": "Sì",
++    "options.game.fit_dungeon_map.choice.1": "No",
++    "options.game.fit_dungeon_map.help": "Tiene tutta la mappa generata\nnello schermo. Non rivela\nle stanze inesplorate.",
+     "options.game.time_speed.label": "Velocità del tempo",
+     "options.game.time_speed.choice.0": "Normale",
+     "options.game.time_speed.choice.1": "Veloce",
 diff --git a/port/src/battlemenu/main_ring.cpp b/port/src/battlemenu/main_ring.cpp
 index 8bfa0c19..7ca2d77a 100644
 --- a/port/src/battlemenu/main_ring.cpp
@@ -3567,7 +3629,7 @@ index 1f5d3b35..943abdcd 100644
      AudioOutputStop();
      InputShutdown();
 diff --git a/port/src/memorycardaccess.cpp b/port/src/memorycardaccess.cpp
-index 1a3f812c..7d4d9a8a 100644
+index 1a3f812c..fd075b03 100644
 --- a/port/src/memorycardaccess.cpp
 +++ b/port/src/memorycardaccess.cpp
 @@ -5,6 +5,7 @@
@@ -3638,7 +3700,7 @@ index 1a3f812c..7d4d9a8a 100644
  }
  
  // The card's write test and the copy out of the NTSC 1.0 directory have nothing to work on.
-@@ -277,13 +315,25 @@ PORT_OVERRIDE int CMemoryCardAccess::SaveToMc(int file_no) {
+@@ -277,18 +315,34 @@ PORT_OVERRIDE int CMemoryCardAccess::SaveToMc(int file_no) {
      this->file_no = file_no;
      ConfigWord(kConfigLastFile) = file_no;
      this->card[this->port].dir_exists = 1;
@@ -3656,6 +3718,9 @@ index 1a3f812c..7d4d9a8a 100644
  }
  
  PORT_OVERRIDE int CMemoryCardAccess::LoadFromMc(int file_no) {
++    // Read before the generation write below, which drops what a malformed file held.
++    SaveState session = CurrentState();
++    SaveStateRead(SaveStatePath(), session);
      if (!ReadImage(file_no, this->GetVersion())) {
          return -1;
      }
@@ -3665,7 +3730,14 @@ index 1a3f812c..7d4d9a8a 100644
  
      // Remember only the cursor, retaining title state before the older payload replaces it.
      // Missing or malformed state falls back to the current session's values.
-@@ -321,7 +371,11 @@ PORT_OVERRIDE int CMemoryCardAccess::DeleteFile(int file_no) {
+-    SaveState state = CurrentState();
++    SaveState state = session;
+     SaveStateRead(SaveStatePath(), state);
++    state.game_clear = state.game_clear || session.game_clear;
+     memcpy(SaveData, g_image, sizeof(CSaveData));
+ 
+     // The save screen keeps starting at the last numbered save.
+@@ -321,7 +375,11 @@ PORT_OVERRIDE int CMemoryCardAccess::DeleteFile(int file_no) {
      }
  
      fs::remove(SaveSlotDirectory(file_no), error);
@@ -5113,10 +5185,10 @@ index 5e4e17ed..4f573899 100644
          if (drawn && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..109e3031
+index 00000000..aea90688
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,470 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5362,7 +5434,6 @@ index 00000000..109e3031
 +    {"game.shop.purchased", "shops", "both", "A shop purchase or shop inventory change completed."},
 +    {"game.enemy_spawned", "characters", "both", "A registered mod-owned enemy spawned successfully."},
 +    {"game.enemy_defeated", "combat", "both", "The game accepted an enemy death."},
-+    {"game.enemy_hit", "combat", "chronicle", "A native weapon hit damaged an enemy; includes attacker, weapon, target, model, element, and final damage."},
 +    {"game.enemy_hit", "combat", "chronicle", "A native weapon hit damaged an enemy; includes attacker, weapon, target, model, element, and final damage."},
 +    {"game.weapon.upgraded", "weapons", "both", "A native weapon upgrade changed the weapon."},
 +    {"game.weapon.equipped", "weapons", "both", "The active weapon changed through a supported API."},
@@ -18331,10 +18402,10 @@ index 00000000..286d8dce
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manager_ui.cpp b/port/src/moonmod/manager_ui.cpp
 new file mode 100644
-index 00000000..85386bc8
+index 00000000..95e8a90e
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
-@@ -0,0 +1,896 @@
+@@ -0,0 +1,901 @@
 +#include "moonmod/manager_ui.hpp"
 +
 +#include <algorithm>
@@ -18438,6 +18509,8 @@ index 00000000..85386bc8
 +    if (g_state.detail_tab == 4 && !has_journal) {
 +        g_state.detail_tab = FirstDetailTab(has_settings, has_actions, has_quests, has_skills, false);
 +    }
++    // an emptied tab moves on to the next one that has something, as the input handler does
++    if (g_state.detail_tab == 1 && !has_actions && (has_quests || has_skills)) g_state.detail_tab = has_quests ? 2 : 3;
 +    if ((g_state.detail_tab == 0 && !has_settings) || (g_state.detail_tab == 1 && !has_actions) ||
 +        (g_state.detail_tab == 2 && !has_quests) || (g_state.detail_tab == 3 && !has_skills) ||
 +        (g_state.detail_tab == 4 && !has_journal)) {
@@ -19169,6 +19242,9 @@ index 00000000..85386bc8
 +    if (input.previous_focus || (input.left && g_state.native_trust_focus)) {
 +        if (g_state.native_trust_focus) {
 +            g_state.native_trust_focus = false;
++        } else if (g_state.settings_focus && journal_tab) {
++            // the Journal is two panes: back from its objectives to its quest list
++            g_state.settings_focus = false;
 +        } else if (g_state.settings_focus) {
 +            g_state.detail_tab = AdjacentDetailTab(g_state.detail_tab, -1, has_settings, has_actions, has_quests, has_skills, has_journal);
 +        }
@@ -23067,7 +23143,7 @@ index ee8b9d59..2a720439 100644
 +    PASS_REGULAR_EXPRESSION "MOONFACTORY_PREFLIGHT_OK"
 +    TIMEOUT 120 RUN_SERIAL TRUE LABELS gpu)
 diff --git a/port/src/tests/data_read_test.cpp b/port/src/tests/data_read_test.cpp
-index cb5dea09..65548739 100644
+index cb5dea09..da51d4aa 100644
 --- a/port/src/tests/data_read_test.cpp
 +++ b/port/src/tests/data_read_test.cpp
 @@ -6,11 +6,13 @@
@@ -23309,6 +23385,26 @@ index cb5dea09..65548739 100644
  TEST(DataRead, LanguagesFromTheExtraction) {
      fs::path dir = InstallStandardData("read_languages");
      ASSERT_TRUE((DataLanguages() == std::vector<s32>{2, 3, 4, 5, 6}));
+@@ -266,6 +486,9 @@ TEST(DataRead, PathsFromArguments) {
+ 
+ TEST(DataRead, PathsFromEnvironment) {
+     fs::path dir = TempDir("paths_env");
++    // Earlier tests leave flag roots set; start from what main() configures.
++    PathsReset();
++    PathsConfigure({.app_dir = "chronicle", .env_data = "DC_DATA", .env_save = "DC_SAVE"});
+     dc::test::SetEnv("DC_DATA", (dir / "env_data"), 1);
+     dc::test::SetEnv("DC_SAVE", (dir / "env_save"), 1);
+     ASSERT_TRUE(PathsDataRoot() == dir / "env_data");
+@@ -277,6 +500,9 @@ TEST(DataRead, PathsFromEnvironment) {
+ 
+ TEST(DataRead, PathsDefaultToWorkingDirectory) {
+     fs::path dir = TempDir("paths_cwd");
++    // Earlier tests leave flag roots set; start from what main() configures.
++    PathsReset();
++    PathsConfigure({.app_dir = "chronicle", .env_data = "DC_DATA", .env_save = "DC_SAVE"});
+     dc::test::UnsetEnv("DC_DATA");
+     dc::test::UnsetEnv("DC_SAVE");
+     fs::create_directories(dir / "data");
 diff --git a/port/src/tests/integration_gameloop_test.cpp b/port/src/tests/integration_gameloop_test.cpp
 index f3b3c051..dfc0bcda 100644
 --- a/port/src/tests/integration_gameloop_test.cpp
@@ -23331,10 +23427,10 @@ index f3b3c051..dfc0bcda 100644
          int mode;
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
-index 00000000..38b2aebd
+index 00000000..8b928630
 --- /dev/null
 +++ b/port/src/tests/moonmod_api_test.cpp
-@@ -0,0 +1,1590 @@
+@@ -0,0 +1,1610 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -23479,17 +23575,30 @@ index 00000000..38b2aebd
 +    ASSERT_TRUE(runtime.Start(config, error)) << error;
 +    EXPECT_EQ(std::count(logs.begin(), logs.end(), "MOONMOD_FUNCTION_RELOAD_CALLER_READY"), 1);
 +
++    // A toggle applies at the next launch: the provider is flagged, and nothing unloads now.
 +    ASSERT_TRUE(runtime.SetEnabled("test.reload-provider", false, error)) << error;
-+    const auto disabled_caller = std::ranges::find(runtime.Mods(), "test.reload-caller", &moonmod::ModRecord::id);
-+    ASSERT_NE(disabled_caller, runtime.Mods().end());
-+    EXPECT_EQ(disabled_caller->state, moonmod::ModState::MissingDependency);
-+
-+    ASSERT_TRUE(runtime.SetEnabled("test.reload-provider", true, error)) << error;
-+    EXPECT_EQ(std::count(logs.begin(), logs.end(), "MOONMOD_FUNCTION_RELOAD_CALLER_READY"), 2);
-+    const auto loaded_caller = std::ranges::find(runtime.Mods(), "test.reload-caller", &moonmod::ModRecord::id);
-+    ASSERT_NE(loaded_caller, runtime.Mods().end());
-+    EXPECT_EQ(loaded_caller->state, moonmod::ModState::Loaded) << loaded_caller->status_message;
++    const auto flagged = std::ranges::find(runtime.Mods(), "test.reload-provider", &moonmod::ModRecord::id);
++    ASSERT_NE(flagged, runtime.Mods().end());
++    EXPECT_TRUE(flagged->restart_required);
 +    runtime.Stop();
++
++    // Next launch without the provider: the caller cannot load.
++    moonmod::Runtime without;
++    ASSERT_TRUE(without.Start(config, error)) << error;
++    const auto disabled_caller = std::ranges::find(without.Mods(), "test.reload-caller", &moonmod::ModRecord::id);
++    ASSERT_NE(disabled_caller, without.Mods().end());
++    EXPECT_EQ(disabled_caller->state, moonmod::ModState::MissingDependency);
++    ASSERT_TRUE(without.SetEnabled("test.reload-provider", true, error)) << error;
++    without.Stop();
++
++    // And with it back, the caller loads and reaches the provider's function again.
++    moonmod::Runtime with;
++    ASSERT_TRUE(with.Start(config, error)) << error;
++    EXPECT_EQ(std::count(logs.begin(), logs.end(), "MOONMOD_FUNCTION_RELOAD_CALLER_READY"), 2);
++    const auto loaded_caller = std::ranges::find(with.Mods(), "test.reload-caller", &moonmod::ModRecord::id);
++    ASSERT_NE(loaded_caller, with.Mods().end());
++    EXPECT_EQ(loaded_caller->state, moonmod::ModState::Loaded) << loaded_caller->status_message;
++    with.Stop();
 +}
 +
 +void ExerciseNativeScriptHooks(const std::string &game_id) {
@@ -24444,7 +24553,9 @@ index 00000000..38b2aebd
 +  ["scripts.override"] = true,
 +  ["skills.list"] = true, ["skills.get"] = true, ["skills.register"] = true,
 +  ["skills.unlock"] = true, ["skills.set_rank"] = true,
-+  ["debug.profile"] = true
++  ["debug.profile"] = true,
++  ["ui.navigate"] = true,
++  ["ui.open_skills"] = true
 +}
 +local dispatched = 0
 +for _, operation in ipairs(catalog) do
@@ -24582,7 +24693,12 @@ index 00000000..38b2aebd
 +    std::string error;
 +    ASSERT_TRUE(runtime.Start(config, error)) << error;
 +    const moonmod::Json combat_bonuses = runtime.CombatDamageBonuses();
-+    ASSERT_EQ(combat_bonuses.size(), 1u);
++    // the probe's log says where its Lua stopped when it did not get as far as the skills
++    ASSERT_EQ(combat_bonuses.size(), 1u) << [&logs] {
++        std::string joined;
++        for (const std::string &line : logs) joined += line + "\n";
++        return joined;
++    }();
 +    EXPECT_EQ(combat_bonuses[0].at("owner"), "test.content-probe");
 +    EXPECT_EQ(combat_bonuses[0].at("skill_id"), "test.content-probe:combat.focus");
 +    EXPECT_EQ(combat_bonuses[0].at("rank"), 2);
@@ -25817,10 +25933,10 @@ index 00000000..4afbbf69
 +}
 diff --git a/port/src/tests/moonmod_combat_api_test.cpp b/port/src/tests/moonmod_combat_api_test.cpp
 new file mode 100644
-index 00000000..23677bbf
+index 00000000..16f23769
 --- /dev/null
 +++ b/port/src/tests/moonmod_combat_api_test.cpp
-@@ -0,0 +1,284 @@
+@@ -0,0 +1,289 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -25866,9 +25982,14 @@ index 00000000..23677bbf
 +    const moonmod::ApiCallResult repeated = config.api_handler(owner, *operation, definition);
 +    ASSERT_EQ(repeated.status, moonmod::ApiCallStatus::Ok) << repeated.message;
 +    EXPECT_TRUE(repeated.value.at("idempotent").get<bool>());
-+    EXPECT_EQ(config.api_handler(owner, *operation,
-+                                 moonmod::Json::array({{{"id", "double"}, {"operation", "add"}, {"value", 1}}})).status,
-+              moonmod::ApiCallStatus::Failed);
++    // the same id with a new definition replaces it (a mod updates its own formula), then back
++    const moonmod::ApiCallResult replaced = config.api_handler(
++        owner, *operation, moonmod::Json::array({{{"id", "double"}, {"operation", "add"}, {"value", 1}}}));
++    ASSERT_EQ(replaced.status, moonmod::ApiCallStatus::Ok) << replaced.message;
++    EXPECT_FALSE(replaced.value.at("idempotent").get<bool>());
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f), 11.0f);
++    ASSERT_EQ(config.api_handler(owner, *operation, definition).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f), 20.0f);
 +    EXPECT_EQ(config.api_handler(owner, *operation,
 +                                 moonmod::Json::array({{{"id", "bad"}, {"operation", "multiply"}, {"value", 101}}})).status,
 +              moonmod::ApiCallStatus::InvalidArgument);
@@ -26414,7 +26535,7 @@ index 00000000..af5a0476
 +}
 diff --git a/port/src/tests/moonmod_dungeons_api_test.cpp b/port/src/tests/moonmod_dungeons_api_test.cpp
 new file mode 100644
-index 00000000..75ffb018
+index 00000000..77c738d7
 --- /dev/null
 +++ b/port/src/tests/moonmod_dungeons_api_test.cpp
 @@ -0,0 +1,340 @@
@@ -26701,14 +26822,14 @@ index 00000000..75ffb018
 +    EXPECT_EQ(maze.value.at("room_max").get<int>(), 4);
 +    EXPECT_EQ(DNG_BUILD_AREA, 46);
 +    EXPECT_EQ(DNG_BUILD_ROOM_SPAN, 2);
-+    EXPECT_LT(DNG_MAP_TILE * 46, 16 * 21);
++    // The minimap's tile size is not the layout's: the map fits itself to the floor when it is drawn
++    // (port/src/dungeonmap.cpp, game.fit_dungeon_map).
 +
 +    const moonmod::ApiCallResult native = call(moonmod::Json::object());
 +    ASSERT_EQ(native.status, moonmod::ApiCallStatus::Ok) << native.message;
 +    EXPECT_EQ(native.value.at("rooms").get<std::string>(), "native");
 +    EXPECT_EQ(DNG_BUILD_AREA, 16);
 +    EXPECT_EQ(DNG_BUILD_ROOM_MIN, 3);
-+    EXPECT_EQ(DNG_MAP_TILE, 16);
 +}
 +
 +TEST(MoonModDungeonsApi, SeamlessConcurrentFloorTraversal) {
@@ -29519,10 +29640,10 @@ index 00000000..9c12042d
 +}
 diff --git a/port/src/tests/moonmod_manager_ui_test.cpp b/port/src/tests/moonmod_manager_ui_test.cpp
 new file mode 100644
-index 00000000..0311bebb
+index 00000000..47a8eb15
 --- /dev/null
 +++ b/port/src/tests/moonmod_manager_ui_test.cpp
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,275 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -29753,6 +29874,10 @@ index 00000000..0311bebb
 +    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.up = true}));
 +    EXPECT_EQ(moonmod::ManagerState().first_quest_objective, 1);
 +
++    // cancel steps out of the focused pane first, then closes the manager
++    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.cancel = true}));
++    EXPECT_TRUE(moonmod::ManagerOpen());
++    EXPECT_FALSE(moonmod::ManagerState().settings_focus);
 +    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.cancel = true}));
 +    EXPECT_FALSE(moonmod::ManagerOpen());
 +    std::string toggle_error;
@@ -30202,10 +30327,10 @@ index 00000000..6a18a357
 +}
 diff --git a/port/src/tests/moonmod_player_party_api_test.cpp b/port/src/tests/moonmod_player_party_api_test.cpp
 new file mode 100644
-index 00000000..b441a809
+index 00000000..b1655da2
 --- /dev/null
 +++ b/port/src/tests/moonmod_player_party_api_test.cpp
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,483 @@
 +#include <gtest/gtest.h>
 +
 +#include <memory>
@@ -30588,8 +30713,22 @@ index 00000000..b441a809
 +    EXPECT_EQ(status->hp[CHARA_TOAN], 77);
 +    const moonmod::ApiCallResult unsupported_field = config.api_handler(
 +        "test.moonmod.chronicle-player-set", *set,
-+        moonmod::Json::array({{{"max_hp", 90}}}));
++        moonmod::Json::array({{{"max_water", 90}}}));
 +    EXPECT_EQ(unsupported_field.status, moonmod::ApiCallStatus::InvalidArgument);
++    // max_hp is its own setter: it raises the maximum, and lowering it clamps current HP
++    const int toan_max = status->max_hp[CHARA_TOAN];
++    const moonmod::ApiCallResult raised = config.api_handler(
++        "test.moonmod.chronicle-player-set", *set,
++        moonmod::Json::array({{{"max_hp", 90}, {"character", "toan"}}}));
++    ASSERT_EQ(raised.status, moonmod::ApiCallStatus::Ok) << raised.message;
++    EXPECT_EQ(status->max_hp[CHARA_TOAN], 90);
++    EXPECT_EQ(status->hp[CHARA_TOAN], 77);
++    ASSERT_EQ(config.api_handler("test.moonmod.chronicle-player-set", *set,
++                                 moonmod::Json::array({{{"max_hp", 50}, {"character", "toan"}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(status->hp[CHARA_TOAN], 50);
++    status->max_hp[CHARA_TOAN] = static_cast<s16>(toan_max);
++    status->hp[CHARA_TOAN] = 77;
 +    const moonmod::ApiCallResult fractional = config.api_handler(
 +        "test.moonmod.chronicle-player-set", *set,
 +        moonmod::Json::array({{{"hp", 10.5}}}));
@@ -32024,11 +32163,38 @@ index 00000000..33f10511
 +
 +    moonmod::ResetChronicleDungeonsForTests();
 +}
+diff --git a/port/src/tests/platform_mouse_look_test.cpp b/port/src/tests/platform_mouse_look_test.cpp
+index 9e41e2fa..949e7fcc 100644
+--- a/port/src/tests/platform_mouse_look_test.cpp
++++ b/port/src/tests/platform_mouse_look_test.cpp
+@@ -41,6 +41,11 @@ constexpr float kDegree = std::numbers::pi_v<float> / 180.0f;
+ 
+ // Without capture the window's motion always counts, so no window is needed.
+ void Settings(float sensitivity, bool invert_y) {
++    // Each test starts from no scripted input, no menu mouse and no lock, whatever ran before it.
++    InputSetOverride(0, nullptr);
++    InputSetMenuMouse(false);
++    InputSetScriptedDevices({});
++    InputSetMovementLocked(false);
+     InputResetBindings();
+     InputMouseSettings settings;
+     settings.sensitivity = sensitivity;
 diff --git a/port/src/tests/platform_pad_test.cpp b/port/src/tests/platform_pad_test.cpp
-index ff9efeb9..d58feb3d 100644
+index ff9efeb9..cb2b027e 100644
 --- a/port/src/tests/platform_pad_test.cpp
 +++ b/port/src/tests/platform_pad_test.cpp
-@@ -370,6 +370,14 @@ TEST(PlatformPad, InputBindings) {
+@@ -357,6 +357,10 @@ TEST(PlatformPad, BackButtonActions) {
+ }
+ 
+ TEST(PlatformPad, InputBindings) {
++    // Earlier tests start input, open the controllers they find and script pads; start from none.
++    InputShutdown();
++    InputSetOverride(0, nullptr);
++    InputSetOverride(1, nullptr);
+     std::string_view keys[] = {"Space", "Z"};
+     ASSERT_TRUE(InputBindKeys("cross", keys));
+     std::string_view unknown[] = {"NoSuchKey"};
+@@ -370,6 +374,14 @@ TEST(PlatformPad, InputBindings) {
      ASSERT_TRUE(!InputGetPad(1).connected);
  }
  

@@ -1,0 +1,34 @@
+# Checks that the port patches still apply to the upstream commits they were made against.
+name: patches
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - port: chronicle
+            repo: TheMoonPeople/Chronicle
+            base: 50eaff633e4e02e5dbc6a7a6a84c7e34688cb738
+            patch: moonfactory-chronicle.patch
+          - port: chronicle-two
+            repo: TheMoonPeople/ChronicleTwo
+            base: 9b7794d51dce6ed59fd56c0a343bb2ed8c3a1e55
+            patch: moonfactory-chronicle-two.patch
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch ${{ matrix.repo }} at ${{ matrix.base }}
+        run: |
+          git clone --quiet https://github.com/${{ matrix.repo }}.git upstream
+          git -C upstream checkout --quiet ${{ matrix.base }}
+          git -C upstream submodule update --quiet --init --recursive
+      - name: Apply the game patch
+        run: git -C upstream apply --check --whitespace=nowarn "$GITHUB_WORKSPACE/ports/${{ matrix.port }}/${{ matrix.patch }}"
+      - name: Apply the Kazarov patch
+        run: git -C upstream/tools/kazarov apply --check --whitespace=nowarn "$GITHUB_WORKSPACE/ports/${{ matrix.port }}/moonfactory-kazarov.patch"
