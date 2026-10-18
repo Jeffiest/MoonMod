@@ -50,6 +50,7 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"combat.get", "combat", "get", "any", "game.read", "Read the supported native enemy health and status snapshot."},
     {"combat.damage", "combat", "damage", "simulation", "game.write", "Apply bounded scripted damage through a generation-checked enemy handle."},
     {"combat.heal", "combat", "heal", "simulation", "game.write", "Restore bounded health to a live native enemy."},
+    {"combat.register_player_formula", "combat", "register_player_formula", "simulation", "game.write", "Register an owned modifier for native incoming player damage."},
     {"combat.register_formula", "combat", "register_formula", "content", "content.register", "Register an owned combat formula or modifier."},
     {"locations.list", "locations", "list", "any", "game.read", "List built-in and registered mod locations supported by the active game."},
     {"locations.get", "locations", "get", "any", "game.read", "Read a built-in or registered location and native availability status."},
@@ -57,6 +58,10 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"dungeons.list", "dungeons", "list", "any", "game.read", "List native dungeons and mod-registered additions supported by this game."},
     {"dungeons.get", "dungeons", "get", "any", "game.read", "Read a native dungeon or registered extension and its floors."},
     {"dungeons.register", "dungeons", "register", "content", "content.register", "Register additional floors on a supported native dungeon map."},
+    {"dungeons.selection", "dungeons", "selection", "any", "game.read", "Read the active Chronicle entrance floor selection, or nil."},
+    {"dungeons.set_badges", "dungeons", "set_badges", "simulation", "game.write", "Publish owned native floor-list tier badges 0..5."},
+    {"ui.open_skills", "ui", "open_skills", "simulation", "content.register", "Open the owning package skill tree in the manager."},
+    {"dungeons.set_modifiers", "dungeons", "set_modifiers", "simulation", "game.write", "Set owned additive generation bonuses in percent (0..300): rooms, monsters, chests, chest_value; {} clears this owner."},
     {"dungeons.set_layout", "dungeons", "set_layout", "simulation", "game.write", "Set room count, room area and room sizes for floors built after the call; an empty table restores the native layout."},
     {"dungeons.set_exit_room", "dungeons", "set_exit_room", "simulation", "game.write", "Turn the walk-through exit room on or off for floors built after the call."},
     {"dungeons.floor_rules_get", "dungeons", "floor_rules_get", "any", "game.read", "Read active and per-floor dungeon restriction rules such as Limited Zones or White/Red Seals."},
@@ -202,6 +207,7 @@ constexpr EventSpec kEventCatalog[] = {
     {"game.tick", "game", "both", "A simulation frame was pumped."},
     {"game.scene.will_enter", "scene", "both", "A scene is about to initialize."},
     {"game.scene.entered", "scene", "both", "A scene finished initialization."},
+    {"game.dungeon.generating", "dungeons", "both", "Before a Chronicle procedural floor is generated; dungeon_id, floor_id, back_floor."},
     {"game.world.location_changed", "world", "both", "A world location changed; published at scene initialization when detectable and polled within scenes."},
     {"game.item_used", "items", "both", "A mod API item-use call completed."},
     {"game.player.thirst_changed", "player", "chronicle", "The active character's Chronicle water gauge changed, drained empty, or was restored."},
@@ -236,6 +242,7 @@ constexpr EventSpec kEventCatalog[] = {
     {"quests.started", "quests", "both", "A registered quest became active."},
     {"quests.objective_advanced", "quests", "both", "A quest objective advanced."},
     {"quests.completed", "quests", "both", "All objectives in a quest are complete."},
+    {"skills.train_requested", "skills", "both", "The player requested training a skill in the owning package tree."},
     {"skills.rank_changed", "skills", "both", "A skill rank changed."},
     {"skills.unlocked", "skills", "both", "A skill's rank first became positive."},
 };
@@ -266,7 +273,7 @@ bool IsCoreApiOperation(std::string_view path) {
            path == "localization.register" || path == "localization.get" || path == "resources.load" ||
            path == "resources.resolve" || path == "resources.release" || path == "resources.override" ||
            path == "resources.unoverride" || path == "ui.register" ||
-           path == "ui.remove" || path == "ui.notify" || path == "commands.register" ||
+           path == "ui.open_skills" || path == "ui.remove" || path == "ui.notify" || path == "commands.register" ||
            path == "commands.execute" || path == "commands.unregister" ||
            path == "scripts.register_function" || path == "scripts.list_functions" || path == "scripts.call_function" ||
            path == "scripts.unregister_function" || path == "scripts.list_hooks" || path == "scripts.call" ||

@@ -2,11 +2,13 @@
   "schema_version": 1,
   "id": "moonmod.dungeon-plus",
   "name": "Dungeon+",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "author": "Jeffiest",
-  "description": "Per-floor NG+ difficulty tiers (Tiers 1-5) with scaled procedural layouts, tougher enemies, richer gilda, and floor clear bonuses.",
+  "description": "Per-floor difficulty, mutators, enemy speed variety, bestiary, bounties, feats, rewards, and legacy shop rebalance.",
   "framework_api": 1,
-  "games": ["chronicle"],
+  "games": [
+    "chronicle"
+  ],
   "entry": "main.lua",
   "permissions": [
     "game.read",
@@ -14,5 +16,43 @@
     "content.register",
     "storage.read",
     "storage.write"
+  ],
+  "settings": [
+    {
+      "id": "mutator_chance",
+      "name": "Floor mutator chance (%)",
+      "type": "integer",
+      "default": 35,
+      "min": 0,
+      "max": 100,
+      "step": 5
+    },
+    {
+      "id": "bounty_kills",
+      "name": "Kills needed for a floor bounty",
+      "type": "integer",
+      "default": 6,
+      "min": 1,
+      "max": 20,
+      "step": 1
+    },
+    {
+      "id": "bounty_reward_percent",
+      "name": "Floor bounty reward (%)",
+      "type": "integer",
+      "default": 100,
+      "min": 0,
+      "max": 300,
+      "step": 10
+    },
+    {
+      "id": "enemy_speed_variance",
+      "name": "Enemy speed variance (%)",
+      "type": "integer",
+      "default": 25,
+      "min": 0,
+      "max": 50,
+      "step": 5
+    }
   ]
 }

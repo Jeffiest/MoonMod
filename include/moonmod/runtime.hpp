@@ -34,7 +34,9 @@ struct ModRecord {
     std::string            display_name;
     std::string            status_message;
     ModState               state = ModState::Invalid;
-    bool                   enabled = false;
+    bool                   enabled = false; // Active for this process.
+    bool                   enabled_next_launch = false;
+    bool                   restart_required = false;
     bool                   native_trusted = false;
     bool                   valid_manifest = false;
     std::string            native_status;

@@ -93,7 +93,10 @@ public:
                         {{"id", formula.owner + ":" + formula.id}, {"operation", formula.operation},
                          {"value", formula.value}, {"priority", formula.priority}, {"idempotent", true}}, {}};
             }
-            return {ApiCallStatus::Failed, nullptr, "formula id is already registered with a different definition"};
+            existing->second = formula;
+            return {ApiCallStatus::Ok,
+                    {{"id", formula.owner + ":" + formula.id}, {"operation", formula.operation},
+                     {"value", formula.value}, {"priority", formula.priority}, {"idempotent", false}}, {}};
         }
 
         const std::size_t owner_count = std::ranges::count_if(formulas_, [&formula](const auto &entry) {

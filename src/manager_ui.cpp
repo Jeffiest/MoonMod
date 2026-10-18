@@ -103,7 +103,7 @@ void Reconcile() {
     if ((g_state.detail_tab == 0 && !has_settings) || (g_state.detail_tab == 1 && !has_actions) ||
         (g_state.detail_tab == 2 && !has_quests) || (g_state.detail_tab == 3 && !has_skills) ||
         (g_state.detail_tab == 4 && !has_journal)) {
-        g_state.detail_tab = AdjacentDetailTab(g_state.detail_tab, 1, has_settings, has_actions, has_quests, has_skills, has_journal);
+        g_state.detail_tab = FirstDetailTab(has_settings, has_actions, has_quests, has_skills, false);
     }
     g_state.selected_setting = setting_count == 0 ? 0 : std::clamp(g_state.selected_setting, 0, setting_count - 1);
     g_state.first_setting = setting_count == 0
@@ -187,12 +187,17 @@ void ToggleSelectedMod() {
         return;
     }
     std::string error;
-    if (!SharedRuntime().SetEnabled(record->id, !record->enabled, error)) {
+    if (!SharedRuntime().SetEnabled(record->id, !record->enabled_next_launch, error)) {
         Notice(error);
         return;
     }
+    g_state.settings_focus = false;
+    g_state.native_trust_focus = false;
+    g_state.detail_tab = 0;
     const ModRecord *updated = ManagerSelectedMod();
-    Notice(updated != nullptr && updated->enabled ? "Mod enabled" : "Mod disabled");
+    Notice(updated && updated->restart_required
+               ? (updated->enabled_next_launch ? "Will enable after game restart" : "Will disable after game restart")
+               : "Restart change canceled; current session unchanged");
     Reconcile();
 }
 
@@ -310,8 +315,11 @@ void MoveSkill(int direction) {
     const ApiCallResult result = ManagerSkills(record->id);
     if (result.status != ApiCallStatus::Ok || !result.value.is_object() ||
         !result.value.contains("skills") || !result.value["skills"].is_array() || result.value["skills"].empty()) return;
-    g_state.selected_skill = std::clamp(g_state.selected_skill + direction, 0,
-                                        static_cast<int>(result.value["skills"].size()) - 1);
+    const auto &skills=result.value["skills"];
+    const auto tree=skills[g_state.selected_skill].value("tree_title",std::string{});
+    for(int next=g_state.selected_skill+direction;next>=0 && next<int(skills.size());next+=direction) {
+        if(skills[next].value("tree_title",std::string{})==tree){g_state.selected_skill=next;break;}
+    }
     Reconcile();
 }
 
@@ -552,9 +560,9 @@ bool HandleManagerInput(const ManagerInput &input) {
     const auto journal_quests = ManagerJournalQuests();
     const bool has_journal = !journal_quests.empty();
     const int skill_count = has_skills ? static_cast<int>(skill_list.size()) : 0;
-    if (g_state.detail_tab == 1 && action_count == 0) g_state.detail_tab = has_quests ? 2 : has_skills ? 3 : 4;
-    if (g_state.detail_tab == 2 && !has_quests) g_state.detail_tab = has_skills ? 3 : action_count > 0 ? 1 : 4;
-    if (g_state.detail_tab == 3 && !has_skills) g_state.detail_tab = has_quests ? 2 : action_count > 0 ? 1 : 4;
+    if (g_state.detail_tab == 1 && action_count == 0) g_state.detail_tab = has_quests ? 2 : has_skills ? 3 : 0;
+    if (g_state.detail_tab == 2 && !has_quests) g_state.detail_tab = has_skills ? 3 : action_count > 0 ? 1 : 0;
+    if (g_state.detail_tab == 3 && !has_skills) g_state.detail_tab = has_quests ? 2 : action_count > 0 ? 1 : 0;
     const bool has_settings = setting_count > 0;
     const bool has_actions = action_count > 0;
     if (g_state.detail_tab == 4 && !has_journal) {
@@ -565,15 +573,36 @@ bool HandleManagerInput(const ManagerInput &input) {
     const bool skill_tab = g_state.detail_tab == 3 && has_skills;
     const bool journal_tab = g_state.detail_tab == 4 && has_journal;
     if (input.cancel || input.mouse_right ||
-        (input.mouse_left && input.mouse_x >= 44 && input.mouse_x < 140 && input.mouse_y >= 411 && input.mouse_y < 442) ||
+        (input.mouse_left && input.mouse_x >= 44 && input.mouse_x < 140 && input.mouse_y >= 422 && input.mouse_y < 449) ||
         (input.mouse_left && input.mouse_x >= 558 && input.mouse_x < 596 && input.mouse_y >= 76 && input.mouse_y < 111)) {
-        CloseManager();
+        if (g_state.settings_focus || g_state.native_trust_focus) {
+            g_state.settings_focus = false;
+            g_state.native_trust_focus = false;
+            g_state.detail_tab = 0;
+            Reconcile();
+        } else {
+            CloseManager();
+        }
         return true;
     }
 
+    if (g_state.settings_focus && skill_tab && input.mouse_left) {
+        if(input.mouse_x>=56 && input.mouse_x<592 && input.mouse_y>=155 && input.mouse_y<340) {
+            std::vector<std::string> branches;
+            for(const auto &skill:skill_list) {
+                auto tree=skill.value("tree_title",std::string{});
+                if(std::find(branches.begin(),branches.end(),tree)==branches.end()) branches.push_back(tree);
+            }
+            const int col=std::clamp(int((input.mouse_x-56)/(536/int(branches.size()))),0,int(branches.size())-1);
+            int row=0,target=int((input.mouse_y-155)/55);
+            for(int i=0;i<int(skill_list.size());++i) if(skill_list[i].value("tree_title",std::string{})==branches[col] && row++==target) {g_state.selected_skill=i;break;}
+            Reconcile();
+        }
+        return true;
+    }
     if (input.mouse_left) {
         const int journal_row = journal_tab
-                                    ? RowAt(input.mouse_y, 137.0f, 29.0f, kManagerVisibleMods, g_state.first_journal_quest,
+                                    ? RowAt(input.mouse_y, 141.0f, 29.0f, kManagerVisibleMods, g_state.first_journal_quest,
                                             static_cast<int>(journal_quests.size()))
                                     : -1;
         if (journal_tab && input.mouse_x >= 48 && input.mouse_x < 246 && journal_row >= 0) {
@@ -583,7 +612,7 @@ bool HandleManagerInput(const ManagerInput &input) {
             Reconcile();
             return true;
         }
-        const int mod_row = journal_tab ? -1 : RowAt(input.mouse_y, 137.0f, 29.0f, kManagerVisibleMods, g_state.first_mod,
+        const int mod_row = journal_tab ? -1 : RowAt(input.mouse_y, 141.0f, 29.0f, kManagerVisibleMods, g_state.first_mod,
                                                     static_cast<int>(mods.size()));
         if (!journal_tab && input.mouse_x >= 48 && input.mouse_x < 246 && mod_row >= 0) {
             g_state.selected_mod = mod_row;
@@ -606,7 +635,8 @@ bool HandleManagerInput(const ManagerInput &input) {
             return true;
         }
         if (input.mouse_x >= 258 && input.mouse_x < 592) {
-            if (input.mouse_y >= 232 && input.mouse_y < 258) {
+            const float tab_top = journal_tab ? 139.0f : 230.0f;
+            if (input.mouse_y >= tab_top && input.mouse_y < tab_top + 24.0f) {
                 SelectDetailTab(std::clamp(static_cast<int>((input.mouse_x - 263.0f) / 64.0f), 0, 4));
                 return true;
             }
@@ -615,7 +645,7 @@ bool HandleManagerInput(const ManagerInput &input) {
                 return true;
             }
             if (action_tab) {
-                const int action_row = RowAt(input.mouse_y, 260.0f, 26.0f, kManagerVisibleSettings,
+                const int action_row = RowAt(input.mouse_y, 260.0f, 24.0f, kManagerVisibleSettings,
                                              g_state.first_action, action_count);
                 if (action_row >= 0) {
                     g_state.selected_action = action_row;
@@ -625,7 +655,7 @@ bool HandleManagerInput(const ManagerInput &input) {
                     return true;
                 }
             } else if (skill_tab) {
-                const int skill_row = RowAt(input.mouse_y, 260.0f, 26.0f, kManagerVisibleSkills,
+                const int skill_row = RowAt(input.mouse_y, 278.0f, 24.0f, kManagerVisibleSkills,
                                             g_state.first_skill, skill_count);
                 if (skill_row >= 0) {
                     g_state.selected_skill = skill_row;
@@ -634,12 +664,12 @@ bool HandleManagerInput(const ManagerInput &input) {
                     return true;
                 }
             } else if (!quest_tab) {
-                const int setting_row = RowAt(input.mouse_y, 260.0f, 26.0f, kManagerVisibleSettings,
+                const int setting_row = RowAt(input.mouse_y, 260.0f, 24.0f, kManagerVisibleSettings,
                                               g_state.first_setting, setting_count);
                 if (setting_row >= 0) {
                     g_state.selected_setting = setting_row;
                     g_state.settings_focus = true;
-                    if (input.mouse_x >= 466) StepSelectedSetting(input.mouse_x < 528 ? -1 : 1);
+                    if (input.mouse_x >= 506) StepSelectedSetting(input.mouse_x < 544 ? -1 : 1);
                     Reconcile();
                     return true;
                 }
@@ -688,21 +718,7 @@ bool HandleManagerInput(const ManagerInput &input) {
         if (g_state.native_trust_focus) {
             g_state.native_trust_focus = false;
         } else if (g_state.settings_focus) {
-            if (journal_tab) {
-                g_state.settings_focus = false;
-                return true;
-            }
-            const int previous_tab = AdjacentDetailTab(g_state.detail_tab, -1, has_settings, has_actions, has_quests, has_skills, has_journal);
-            if (previous_tab != g_state.detail_tab) {
-                g_state.detail_tab = previous_tab;
-            } else if (has_native_extension) {
-                g_state.settings_focus = false;
-                g_state.native_trust_focus = true;
-            } else {
-                g_state.settings_focus = false;
-            }
-        } else {
-            g_state.settings_focus = false;
+            g_state.detail_tab = AdjacentDetailTab(g_state.detail_tab, -1, has_settings, has_actions, has_quests, has_skills, has_journal);
         }
         return true;
     }
@@ -728,6 +744,13 @@ bool HandleManagerInput(const ManagerInput &input) {
         else MoveMod(1);
         return true;
     }
+    if (g_state.settings_focus && skill_tab && (input.left || input.right)) {
+        const int step=input.left?-1:1;
+        const auto current=skill_list[g_state.selected_skill].value("tree_title",std::string{});
+        for(int next=g_state.selected_skill+step;next>=0 && next<int(skill_list.size());next+=step)
+            if(skill_list[next].value("tree_title",std::string{})!=current){g_state.selected_skill=next;break;}
+        Reconcile();return true;
+    }
     if (input.left || input.right) {
         if (journal_tab) MoveJournalQuest(input.left ? -1 : 1);
         else if (g_state.settings_focus && quest_tab) MoveQuest(input.left ? -1 : 1);
@@ -737,6 +760,14 @@ bool HandleManagerInput(const ManagerInput &input) {
     if (input.confirm) {
         if (g_state.native_trust_focus) RequestNativeTrustConfirmation();
         else if (g_state.settings_focus && action_tab) ActivateSelectedAction();
+        else if (g_state.settings_focus && skill_tab) {
+            const Json &skill = skill_list[static_cast<std::size_t>(g_state.selected_skill)];
+            const std::string id = skill.value("id", "");
+            if (id.empty() || !SharedRuntime().PublishToMod(record->id, "skills.train_requested", {{"id", id}})) {
+                Notice("This skill tree is not active");
+            }
+            Reconcile();
+        }
         else if (journal_tab) return true;
         else if (g_state.settings_focus && !skill_tab) StepSelectedSetting(1);
         else ToggleSelectedMod();

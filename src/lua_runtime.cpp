@@ -1821,7 +1821,20 @@ struct LuaMod::Impl {
                         {{"id", manifest.id + ":" + tree_id}, {"skills", std::move(node_ids)},
                          {"status", "registered"}, {"idempotent", true}}, {}};
             }
-            return {ApiCallStatus::Failed, nullptr, "skill tree id is already registered with a different definition"};
+            const Json old = prior->value("definition", Json::object());
+            const Json old_nodes = old.value("skills", Json::array());
+            const Json &new_nodes = definition.at("skills");
+            bool compatible = old_nodes.is_array() && old_nodes.size() == new_nodes.size();
+            for (std::size_t i = 0; compatible && i < old_nodes.size(); ++i) {
+                compatible = old_nodes[i].value("id", "") == new_nodes[i].value("id", "") &&
+                             old_nodes[i].value("max_rank", 0) == new_nodes[i].value("max_rank", 0) &&
+                             old_nodes[i].value("prerequisites", Json::array()) == new_nodes[i].value("prerequisites", Json::array());
+            }
+            if (!compatible) return {ApiCallStatus::Failed, nullptr, "skill tree update changes its rank or prerequisite structure"};
+            (*prior)["definition"] = definition;
+            const ApiCallResult committed = CommitSkillStorage(std::move(replacement));
+            if (committed.status != ApiCallStatus::Ok) return committed;
+            return {ApiCallStatus::Ok, {{"id", manifest.id + ":" + tree_id}, {"status", "updated"}}, {}};
         }
         if (trees.size() >= 32) return {ApiCallStatus::InvalidArgument, nullptr, "mod skill tree limit reached"};
         Json ranks = Json::object();
@@ -2152,6 +2165,14 @@ struct LuaMod::Impl {
         }
         if (path == "ui.register") return RegisterUiAction(arguments);
         if (path == "ui.remove") return RemoveUiAction(arguments);
+        if (path == "ui.open_skills") {
+            if (!arguments.is_array() || !arguments.empty()) return {ApiCallStatus::InvalidArgument,nullptr,"open_skills takes no arguments"};
+            OpenManager();
+            const auto mods=SharedRuntime().Mods();
+            for (std::size_t i=0;i<mods.size();++i) if (mods[i].id==manifest.id) ManagerState().selected_mod=static_cast<int>(i);
+            ManagerState().detail_tab=3; ManagerState().settings_focus=true;
+            return {ApiCallStatus::Ok,{{"opened",true}}, {}};
+        }
         if (path == "ui.notify") return NotifyUi(arguments);
         if (path == "commands.execute") return ExecuteCommand(arguments);
         if (path == "commands.unregister") return UnregisterCommand(arguments);
