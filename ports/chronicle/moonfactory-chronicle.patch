@@ -152,11 +152,15 @@ index 00000000..7efb8eb7
 +} // namespace moonmod
 diff --git a/port/include/moonmod/audio_api.hpp b/port/include/moonmod/audio_api.hpp
 new file mode 100644
-index 00000000..2c0ab1b9
+index 00000000..8c2f7839
 --- /dev/null
 +++ b/port/include/moonmod/audio_api.hpp
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,52 @@
 +#pragma once
++
++#include <functional>
++#include <memory>
++#include <string_view>
 +
 +#include <filesystem>
 +#include <memory>
@@ -190,13 +194,26 @@ index 00000000..2c0ab1b9
 +// catalogued operations. It composes owner cleanup with any adapter cleanup.
 +void ConfigureAudioApi(RuntimeConfig &config);
 +
++// The game's own sound, set by the game adapter: a sound effect by its table number, and a music
++// set loaded and one of its tracks played, or the music stopped.
++struct RetailAudio {
++    std::function<void(int se_no, int volume)>      play_se;
++    std::function<bool(int set_no, int track_no)>   play_music;
++    std::function<void()>                           stop_music;
++};
++void SetRetailAudio(RetailAudio retail);
++
++// A mod's recording for a game music sequence (audio.music_set), or null. Asked before the
++// soundtrack option's own mapping, so a mod's music plays whichever soundtrack is chosen.
++std::shared_ptr<const audio::PcmTrack> ModMusicFor(std::string_view sequence);
++
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..585050e8
+index 00000000..d26044f0
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,95 @@
 +#pragma once
 +
 +#include <string>
@@ -227,6 +244,7 @@ index 00000000..585050e8
 +bool ChronicleLoadMonsterModelForMod(::CMonstorUnit *unit, int native_model_no, int *out_slot);
 +void ChronicleMonsterModelLoaded(::CMonstorUnit *unit, int slot, int native_model_no);
 +void ChronicleMonsterActorCreated(::CMonstorUnit *unit, int slot);
++void ChronicleMonsterRun(::CMonstorUnit *unit, int slot, int program);
 +void ChronicleMonsterActorOwned(::CMonstorUnit *unit, int slot, std::string_view owner,
 +                                std::string_view character_id, int native_model_no);
 +bool ChronicleMonsterActorIsModOwned(::CMonstorUnit *unit, int slot);
@@ -1022,10 +1040,10 @@ index 00000000..04071911
 +} // namespace moonmod
 diff --git a/port/include/moonmod/native_resource_overrides.hpp b/port/include/moonmod/native_resource_overrides.hpp
 new file mode 100644
-index 00000000..b33cd414
+index 00000000..56ee5ec6
 --- /dev/null
 +++ b/port/include/moonmod/native_resource_overrides.hpp
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,31 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -1033,6 +1051,7 @@ index 00000000..b33cd414
 +#include <optional>
 +#include <string>
 +#include <string_view>
++#include <vector>
 +
 +#include "moonmod/api.hpp"
 +
@@ -1050,6 +1069,9 @@ index 00000000..b33cd414
 +                                     std::string &error);
 +std::optional<std::string> FindNativeResourcePathAlias(std::string_view game_path);
 +void RemoveNativeResourceOverridesByOwner(std::string_view owner);
++// Hot reload: the game paths whose override file was written since it was registered or last
++// checked. Their size is read again; the game reads the new bytes the next time it loads the path.
++std::vector<std::string> RefreshChangedNativeResourceOverrides();
 +void ResetNativeResourceOverridesForTests();
 +
 +} // namespace moonmod
@@ -1498,7 +1520,7 @@ index 20e41f73..7b15ec3d 100644
  void TownMouseApply(CCamera *shown, CEditGround *ground, int map, int mode);
 +
 diff --git a/port/src/dataread.cpp b/port/src/dataread.cpp
-index edf90fa0..f78a3b09 100644
+index edf90fa0..185ef2cd 100644
 --- a/port/src/dataread.cpp
 +++ b/port/src/dataread.cpp
 @@ -2,6 +2,7 @@
@@ -1509,26 +1531,28 @@ index edf90fa0..f78a3b09 100644
  #include <cstdint>
  #include <cstdio>
  #include <cstdlib>
-@@ -9,6 +10,8 @@
+@@ -9,6 +10,9 @@
  #include <filesystem>
  #include <fstream>
  #include <iterator>
 +#include <limits>
 +#include <optional>
++#include <set>
  #include <string>
  #include <string_view>
  #include <unordered_map>
-@@ -17,7 +20,9 @@
+@@ -17,7 +21,10 @@
  #include "../../tools/dcdata/dcdata.hpp"
  #include "language.h"
  #include "localize.hpp"
 +#include "platform/arena.hpp"
  #include "platform/paths.hpp"
++#include "moonmod/manager_ui.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
  
  namespace fs = std::filesystem;
  
-@@ -27,6 +32,15 @@ std::unordered_map<std::string, fs::path> data_index;
+@@ -27,6 +34,15 @@ std::unordered_map<std::string, fs::path> data_index;
  bool                                      data_indexed;
  BG_READ_INFO                              bg_read_info[32];
  
@@ -1544,7 +1568,7 @@ index edf90fa0..f78a3b09 100644
  // Everything up to the first colon is a device, as retail's LoadFile2 has it; sim: and host:
  // were development devices that reached the same tree, so they are dropped like cdrom0:.
  std::string_view StripDevice(std::string_view path) {
-@@ -73,21 +87,24 @@ const fs::path *Lookup(std::string_view path) {
+@@ -73,21 +89,24 @@ const fs::path *Lookup(std::string_view path) {
  
  // The drive wrote whole sectors, so up to 2047 bytes past the file were overwritten and callers
  // sized their buffers for that; the tail is zeroed rather than left as whatever was there.
@@ -1572,7 +1596,7 @@ index edf90fa0..f78a3b09 100644
      return static_cast<int>(size);
  }
  
-@@ -113,6 +130,113 @@ void Localized(std::string_view path, void *buffer, int *size) {
+@@ -113,6 +132,122 @@ void Localized(std::string_view path, void *buffer, int *size) {
      LocalizeFile(path, buffer, dcdata::SectorsFor(static_cast<std::uint64_t>(*size)) * dcdata::kSector, size);
  }
  
@@ -1602,6 +1626,13 @@ index edf90fa0..f78a3b09 100644
 +// A replacement no larger than the retail file is used as before. A larger one is used when its kind
 +// may grow, it is under that kind's limit and its whole sectors fit the arena block buffer is in;
 +// otherwise the retail file is read and the log names the limit.
++// A refused replacement is also shown on screen, once per file, so a mod author sees it without the log.
++void NoticeRefusedOverride(const std::string &path, const char *why) {
++    static std::set<std::string> told;
++    if (!told.insert(path).second) return;
++    moonmod::ShowManagerNotice("Mod file not used: " + path + " (" + why + ")", 480);
++}
++
 +fs::path NativeAssetSource(std::string_view game_path, const fs::path &base_file, const void *buffer) {
 +    const std::string folded = dcdata::FoldPath(StripDevice(game_path));
 +    const std::optional<fs::path> replacement = moonmod::FindNativeResourceOverride(folded);
@@ -1624,6 +1655,7 @@ index edf90fa0..f78a3b09 100644
 +                     "moonmod: refused override for %s: %ju bytes, retail %ju, limit %ju (%s)\n",
 +                     folded.c_str(), replacement_size, original_size,
 +                     limit.bytes == 0 ? original_size : limit.bytes, limit.why);
++        NoticeRefusedOverride(folded, "too big");
 +        return base_file;
 +    }
 +    if (padded > room) {
@@ -1631,6 +1663,7 @@ index edf90fa0..f78a3b09 100644
 +                     "moonmod: refused override for %s: %ju bytes (%ju with sector padding), retail %ju, "
 +                     "destination buffer has %ju bytes\n",
 +                     folded.c_str(), replacement_size, padded, original_size, room);
++        NoticeRefusedOverride(folded, "does not fit its buffer");
 +        return base_file;
 +    }
 +    std::fprintf(stderr, "moonmod: override for %s grows %ju -> %ju bytes (limit %ju, buffer room %ju)\n",
@@ -1686,7 +1719,7 @@ index edf90fa0..f78a3b09 100644
  } // namespace
  
  PORT_OVERRIDE void InitCDFile() {
-@@ -165,12 +289,31 @@ PORT_OVERRIDE int LoadFile2(char *path, void *buffer, int *out_size, int mode) {
+@@ -165,12 +300,31 @@ PORT_OVERRIDE int LoadFile2(char *path, void *buffer, int *out_size, int mode) {
      if (out_size) {
          *out_size = 0;
      }
@@ -1722,7 +1755,7 @@ index edf90fa0..f78a3b09 100644
      if (out_size) {
          *out_size = size;
      }
-@@ -216,6 +359,17 @@ PORT_OVERRIDE void InitReadBG() {
+@@ -216,6 +370,17 @@ PORT_OVERRIDE void InitReadBG() {
      }
  }
  
@@ -1740,7 +1773,7 @@ index edf90fa0..f78a3b09 100644
  PORT_OVERRIDE void StartReadBG() {
      InitReadBG();
  }
-@@ -246,12 +400,35 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
+@@ -246,12 +411,35 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
      if (reinterpret_cast<std::uintptr_t>(buffer) % 64) {
          printf("/*/*/*/*/not 64byte align at %p %s\n", static_cast<void *>(buffer), name);
      }
@@ -3497,8 +3530,105 @@ index e6a821d6..de9f8955 100644
  PORT_OVERRIDE void AttachDataListToHaveCopy(int attachment_no, ATTACH_LIST *attachment) {
      if (attachment == 0) {
          return;
+diff --git a/port/src/localize.cpp b/port/src/localize.cpp
+index 860e6446..a2f08453 100644
+--- a/port/src/localize.cpp
++++ b/port/src/localize.cpp
+@@ -40,6 +40,8 @@ struct State {
+     std::unordered_map<const void *, std::string> packs;
+     // Packs hand out pointers that callers keep, so what was built is never freed.
+     std::map<std::string, std::unique_ptr<std::vector<s16>>> built;
++    // Text mods set at run time (MoonMod's game.text.set), over the language files: file key > id > text.
++    std::map<std::string, std::map<int, std::string>> mod_text;
+ };
+ 
+ State &Get() {
+@@ -120,6 +122,11 @@ const LocalizeTable &Table() {
+     }
+     state.language = LanguageCode;
+     state.table = LoadLanguage(LanguageCode);
++    for (const auto &[file, texts] : state.mod_text) {
++        for (const auto &[id, text] : texts) {
++            state.table.files[file][id] = text;
++        }
++    }
+     if (LanguageFile(LanguageCode) == nullptr) {
+         return state.table;
+     }
+@@ -728,6 +735,57 @@ void LocalizeSetDirectories(std::vector<fs::path> directories) {
+     state.language = -1;
+ }
+ 
++namespace {
++bool SplitMessageKey(std::string_view key, std::string &file, int &id) {
++    const size_t dot = key.rfind('.');
++    if (dot == std::string_view::npos || dot == 0 || dot + 1 >= key.size() || key.size() > 200) {
++        return false;
++    }
++    bool ok = false;
++    id = ParseId(std::string(key.substr(dot + 1)), ok);
++    file = std::string(key.substr(0, dot));
++    return ok;
++}
++} // namespace
++
++bool LocalizeSetModText(std::string_view key, const std::optional<std::string> &text) {
++    std::string file;
++    int         id = 0;
++    if (!SplitMessageKey(key, file, id)) {
++        return false;
++    }
++    State &state = Get();
++    if (text) {
++        state.mod_text[file][id] = *text;
++    } else {
++        auto found = state.mod_text.find(file);
++        if (found != state.mod_text.end()) {
++            found->second.erase(id);
++            if (found->second.empty()) {
++                state.mod_text.erase(found);
++            }
++        }
++    }
++    // The table is built again, with the mods' text over the language's, when a message file next loads.
++    state.language = -1;
++    return true;
++}
++
++std::optional<std::string> LocalizeGetText(std::string_view key) {
++    std::string file;
++    int         id = 0;
++    if (!SplitMessageKey(key, file, id)) {
++        return std::nullopt;
++    }
++    const LocalizeTable &table = Table();
++    const auto           texts = table.files.find(file);
++    if (texts == table.files.end()) {
++        return std::nullopt;
++    }
++    const auto text = texts->second.find(id);
++    return text == texts->second.end() ? std::nullopt : std::optional<std::string>(text->second);
++}
++
+ void LocalizeReset() {
+     State &state = Get();
+     state.language = -1;
+diff --git a/port/src/localize.hpp b/port/src/localize.hpp
+index 8c7f92ca..a046a817 100644
+--- a/port/src/localize.hpp
++++ b/port/src/localize.hpp
+@@ -128,3 +128,9 @@ void LocalizeApplyPendingLanguage();
+ // For tests: where the language files are, and forgetting what was read.
+ void LocalizeSetDirectories(std::vector<std::filesystem::path> directories);
+ void LocalizeReset();
++
++// Text a mod sets for a message ("<file key>.<id>", as the language files key it), or with no text
++// takes back; false for a key that is not a message key. It applies when the message file next loads.
++bool LocalizeSetModText(std::string_view key, const std::optional<std::string> &text);
++// The text the language file or a mod gives a message, or nothing when it stays as the disc has it.
++std::optional<std::string> LocalizeGetText(std::string_view key);
 diff --git a/port/src/main.cpp b/port/src/main.cpp
-index 1f5d3b35..943abdcd 100644
+index 1f5d3b35..23d512c5 100644
 --- a/port/src/main.cpp
 +++ b/port/src/main.cpp
 @@ -5,6 +5,7 @@
@@ -3509,16 +3639,18 @@ index 1f5d3b35..943abdcd 100644
  #include <vector>
  
  #include "audio/mixer.hpp"
-@@ -22,6 +23,8 @@
+@@ -22,6 +23,10 @@
  #include "menu_option.hpp"
  #include "menu_save.hpp"
  #include "mglib.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/manager_ui.hpp"
++#include "moonmod/native_resource_overrides.hpp"
 +#include "moonmod/runtime.hpp"
  #include "nowload.hpp"
  #include "platform/audio.hpp"
  #include "platform/clock.hpp"
-@@ -59,6 +62,7 @@ struct Options {
+@@ -59,6 +64,7 @@ struct Options {
      int          display_per_tick = 0;
      const char  *jump = nullptr;
      const char  *give = nullptr;
@@ -3526,7 +3658,7 @@ index 1f5d3b35..943abdcd 100644
      bool         fast_load = false;
      bool         show_fps = false;
      bool         screenshot_fps = false;
-@@ -73,6 +77,7 @@ Options g_options;
+@@ -73,6 +79,7 @@ Options g_options;
                   "usage: %s [--data DIR] [--save DIR] [--headless] [--frames N] [--screenshot PATH]\n"
                   "          [--input FILE] [--width W] [--height H] [--offscreen]\n"
                   "          [--display-per-tick N] [--show-fps] [--jump MODE[:MAP]] [--fast-load]\n"
@@ -3534,7 +3666,7 @@ index 1f5d3b35..943abdcd 100644
                   "          [--give ITEM,...]\n"
                   "  --data DIR         the extracted game data (default: DC_DATA, then ./data, then data/\n"
                   "                     beside the executable)\n"
-@@ -97,7 +102,8 @@ Options g_options;
+@@ -97,7 +104,8 @@ Options g_options;
                   "                     skipping the warm-up (DC_JUMP); see docs/PC.md\n"
                   "  --fast-load        loading-screen holds and fades of a few ticks (DC_FAST_LOAD=1)\n"
                   "  --give ITEM,...    give the party these item and weapon numbers when a town or dungeon\n"
@@ -3544,7 +3676,7 @@ index 1f5d3b35..943abdcd 100644
                   program);
      std::exit(kExitUsage);
  }
-@@ -139,6 +145,8 @@ Options ParseOptions(int argc, const char **argv) {
+@@ -139,6 +147,8 @@ Options ParseOptions(int argc, const char **argv) {
              options.jump = value();
          } else if (arg == "--give") {
              options.give = value();
@@ -3553,19 +3685,32 @@ index 1f5d3b35..943abdcd 100644
          } else if (arg == "--fast-load") {
              options.fast_load = true;
          } else if (arg == "--export-text") {
-@@ -237,6 +245,11 @@ void PumpHost() {
+@@ -237,6 +247,24 @@ void PumpHost() {
      InputScriptApply(GameFrameCount());
  }
  
 +void PumpMoonMod() {
 +    moonmod::ChronicleTick();
 +    moonmod::SharedRuntime().Pump();
++    // Hot reload: about once a second, mod files rewritten on disk (a dc1tk build, an edit) are
++    // picked up; they apply when the game next loads them, which the notice says.
++    static int countdown = 0;
++    if (--countdown > 0) return;
++    countdown = 60;
++    const std::vector<std::string> changed = moonmod::RefreshChangedNativeResourceOverrides();
++    if (changed.empty()) return;
++    LocalizeReset();
++    for (const std::string &path : changed) std::fprintf(stderr, "moonmod: reloaded override %s\n", path.c_str());
++    moonmod::ShowManagerNotice(changed.size() == 1 ? "Mod file reloaded: " + changed[0] + " (applies when the game next loads it)"
++                                                   : "Mod files reloaded: " + std::to_string(changed.size()) +
++                                                         " (they apply when the game next loads them)",
++                               300);
 +}
 +
  void LoadInputScript(const char *path) {
  #ifdef _WIN32
      std::string environment;
-@@ -380,11 +393,18 @@ int Run(int argc, const char **argv) {
+@@ -380,11 +408,18 @@ int Run(int argc, const char **argv) {
          std::fprintf(stderr, "bad --give: %s\n", options.give);
          std::exit(kExitUsage);
      }
@@ -3585,7 +3730,7 @@ index 1f5d3b35..943abdcd 100644
      const char *fast_load = std::getenv("DC_FAST_LOAD");
      GameSetFastLoad(options.fast_load || (fast_load != nullptr && *fast_load != '\0' && *fast_load != '0'));
      RequireData();
-@@ -434,6 +454,7 @@ int Run(int argc, const char **argv) {
+@@ -434,6 +469,7 @@ int Run(int argc, const char **argv) {
      renderer.layout = Layout(config);
      renderer.validation = renderer.validation || SettingsEnv("VULKAN_VALIDATION") != nullptr;
      gfx::RendererInit(WindowHandle(), renderer);
@@ -3593,7 +3738,7 @@ index 1f5d3b35..943abdcd 100644
      gfx::SetAnisotropy(config.anisotropy);
  
      audio::DefaultMixer().SetMasterGain(config.master_volume);
-@@ -443,6 +464,24 @@ int Run(int argc, const char **argv) {
+@@ -443,6 +479,24 @@ int Run(int argc, const char **argv) {
      ClockSetTickRate(config.tick_rate);
      ClockSetUnbounded(options.headless);
      ClockAddPumpHook(PumpHost);
@@ -3618,7 +3763,7 @@ index 1f5d3b35..943abdcd 100644
      GameSetFrameBudget(options.frames);
      ApplyDiscord(config);
      GameSetPresentSettings(PresentSettings(config));
-@@ -461,7 +500,9 @@ int Run(int argc, const char **argv) {
+@@ -461,7 +515,9 @@ int Run(int argc, const char **argv) {
      ConfigRemoveChangeHook(GameOptionsChanged);
      ConfigRemoveChangeHook(ConfigDisplayChanged);
      ConfigRemoveChangeHook(ApplyConfigChange);
@@ -5185,10 +5330,10 @@ index 5e4e17ed..4f573899 100644
          if (drawn && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..aea90688
+index 00000000..82eabda9
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,482 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5374,12 +5519,24 @@ index 00000000..aea90688
 +    {"audio.play", "audio", "play", "simulation", "game.write", "Play a registered sound or music cue."},
 +    {"audio.stop", "audio", "stop", "simulation", "game.write", "Stop playback owned by this mod."},
 +    {"audio.register", "audio", "register", "content", "content.register", "Register a supported audio resource."},
++    {"audio.se_play", "audio", "se_play", "simulation", "game.write", "Play one of the game's own sound effects by its table number."},
++    {"audio.bgm_play", "audio", "bgm_play", "simulation", "game.write", "Load one of the game's music sets and play a track of it."},
++    {"audio.bgm_stop", "audio", "bgm_stop", "simulation", "game.write", "Stop the game's music."},
++    {"audio.music_set", "audio", "music_set", "content", "content.register", "Play a package recording in place of a game music sequence."},
++    {"audio.music_clear", "audio", "music_clear", "content", "content.register", "Stop replacing a game music sequence."},
 +    {"render.layer_register", "render", "layer_register", "render", "content.register", "Register a bounded owner-scoped HUD text layer."},
 +    {"render.layer_remove", "render", "layer_remove", "render", "content.register", "Remove a HUD text layer owned by this mod."},
 +    {"render.bar_register", "render", "bar_register", "render", "content.register", "Register or update a bounded owner-scoped HUD progress bar."},
 +    {"render.bar_remove", "render", "bar_remove", "render", "content.register", "Remove a HUD progress bar owned by this mod."},
 +    {"render.camera_get", "render", "camera_get", "any", "game.read", "Read the active dungeon camera pose."},
 +    {"render.camera_set", "render", "camera_set", "render", "game.write", "Set bounded distance, height, or angle on the active dungeon follow camera."},
++    {"text.get", "text", "get", "any", "game.read", "Read a game message by its language-file key, and whether a mod, the language file or the disc gives it."},
++    {"text.set", "text", "set", "content", "content.register", "Set a game message by its language-file key; applies when its file next loads."},
++    {"text.clear", "text", "clear", "content", "content.register", "Take back a game message this mod set."},
++    {"events.natives", "events", "natives", "any", "game.read", "List the retail event-script natives events.call can run in town or dungeon."},
++    {"events.call", "events", "call", "simulation", "game.write", "Run one retail event-script getter, check or flag native outside a running event."},
++    {"monsters.natives", "monsters", "natives", "any", "game.read", "List the retail monster AI natives monsters.call can run."},
++    {"monsters.call", "monsters", "call", "simulation", "game.write", "Run one retail monster AI native on a live monster, as its own script would."},
 +    {"dungeons.lighting_get", "dungeons", "lighting_get", "any", "game.read", "Read the active floor's fog, background and ambient light, front and back side."},
 +    {"dungeons.lighting_set", "dungeons", "lighting_set", "simulation", "game.write", "Set the active floor's fog, background or ambient light until the next floor loads."},
 +    {"render.town_camera_set", "render", "town_camera_set", "simulation", "game.write", "Enable or disable an owner-scoped overhead camera during safe town walking."},
@@ -5661,10 +5818,10 @@ index 00000000..aea90688
 +} // namespace moonmod
 diff --git a/port/src/moonmod/audio_api.cpp b/port/src/moonmod/audio_api.cpp
 new file mode 100644
-index 00000000..f11b202d
+index 00000000..f92408e6
 --- /dev/null
 +++ b/port/src/moonmod/audio_api.cpp
-@@ -0,0 +1,397 @@
+@@ -0,0 +1,528 @@
 +#include "moonmod/audio_api.hpp"
 +
 +#include <algorithm>
@@ -5690,6 +5847,16 @@ index 00000000..f11b202d
 +
 +namespace moonmod {
 +namespace {
++
++RetailAudio g_retail_audio;
++
++// audio.music_set: game sequence name -> the owning mod and its recording.
++struct ModMusic {
++    std::string                            owner;
++    std::shared_ptr<const audio::PcmTrack> track;
++};
++std::mutex                                 g_music_mutex;
++std::map<std::string, ModMusic, std::less<>> g_mod_music;
 +
 +constexpr std::size_t kAudioTrackFileLimit = 16 * 1024 * 1024;
 +constexpr std::size_t kAudioTrackDecodedLimit = 32 * 1024 * 1024;
@@ -5999,6 +6166,116 @@ index 00000000..f11b202d
 +        return {ApiCallStatus::Ok, {{"handle", handle}, {"id", id_field->get<std::string>()}}, {}};
 +    }
 +
++    if (operation.path == "audio.se_play") {
++        Json request;
++        std::string error;
++        if (!ReadObjectArgument(arguments, request, error)) return Invalid(std::move(error));
++        if (!HasOnlyFields(request, {"se", "volume"}, error)) return Invalid(std::move(error));
++        const auto se = request.find("se");
++        const auto volume = request.find("volume");
++        if (se == request.end() || !se->is_number_integer() || se->get<int>() < 0 || se->get<int>() > 4095 ||
++            (volume != request.end() && (!volume->is_number_integer() || volume->get<int>() < 0 || volume->get<int>() > 127))) {
++            return Invalid("audio.se_play requires {se = 0..4095, volume = 0..127?}");
++        }
++        if (!g_retail_audio.play_se) return {ApiCallStatus::Unsupported, nullptr, "this game has no retail sound effects"};
++        g_retail_audio.play_se(se->get<int>(), volume == request.end() ? -1 : volume->get<int>());
++        return {ApiCallStatus::Ok, {{"se", se->get<int>()}}, {}};
++    }
++
++    if (operation.path == "audio.bgm_play" || operation.path == "audio.bgm_stop") {
++        Json request = Json::object();
++        std::string error;
++        if (operation.path == "audio.bgm_stop") {
++            if (!arguments.is_array() || !arguments.empty()) return Invalid("audio.bgm_stop takes no arguments");
++            if (!g_retail_audio.stop_music) return {ApiCallStatus::Unsupported, nullptr, "this game has no retail music"};
++            g_retail_audio.stop_music();
++            return {ApiCallStatus::Ok, {{"stopped", true}}, {}};
++        }
++        if (!ReadObjectArgument(arguments, request, error)) return Invalid(std::move(error));
++        if (!HasOnlyFields(request, {"set", "track"}, error)) return Invalid(std::move(error));
++        const auto set = request.find("set");
++        const auto track = request.find("track");
++        if (set == request.end() || !set->is_number_integer() || set->get<int>() < 0 || set->get<int>() > 255 ||
++            (track != request.end() && (!track->is_number_integer() || track->get<int>() < 0 || track->get<int>() > 63))) {
++            return Invalid("audio.bgm_play requires {set = 0..255, track = 0..63?}");
++        }
++        if (!g_retail_audio.play_music) return {ApiCallStatus::Unsupported, nullptr, "this game has no retail music"};
++        const int track_no = track == request.end() ? 0 : track->get<int>();
++        if (!g_retail_audio.play_music(set->get<int>(), track_no)) return Failed("the music set did not load");
++        return {ApiCallStatus::Ok, {{"set", set->get<int>()}, {"track", track_no}}, {}};
++    }
++
++    if (operation.path == "audio.music_set") {
++        Json request;
++        std::string error;
++        if (!ReadObjectArgument(arguments, request, error)) return Invalid(std::move(error));
++        if (!HasOnlyFields(request, {"sequence", "path", "gain", "loop", "loop_start", "loop_end"}, error)) {
++            return Invalid(std::move(error));
++        }
++        const auto sequence = request.find("sequence");
++        const auto path = request.find("path");
++        if (sequence == request.end() || !sequence->is_string() || sequence->get_ref<const std::string &>().empty() ||
++            sequence->get_ref<const std::string &>().size() > 32 || path == request.end() || !path->is_string()) {
++            return Invalid("audio.music_set requires {sequence = game sequence name, path = resources/audio/...}");
++        }
++        double gain = 1.0;
++        double loop_start = 0.0;
++        double loop_end = 0.0;
++        bool loop = true;
++        if (request.contains("gain") && (!request["gain"].is_number() || (gain = request["gain"].get<double>()) < 0.0 || gain > 4.0)) {
++            return Invalid("gain must be 0..4");
++        }
++        if (request.contains("loop") && !request["loop"].is_boolean()) return Invalid("loop must be a boolean");
++        if (request.contains("loop")) loop = request["loop"].get<bool>();
++        for (const char *key : {"loop_start", "loop_end"}) {
++            if (request.contains(key) && (!request[key].is_number() || request[key].get<double>() < 0.0 ||
++                                          request[key].get<double>() > 3600.0)) {
++                return Invalid(std::string(key) + " must be 0..3600 seconds");
++            }
++        }
++        if (request.contains("loop_start")) loop_start = request["loop_start"].get<double>();
++        if (request.contains("loop_end")) loop_end = request["loop_end"].get<double>();
++        std::filesystem::path resolved;
++        std::size_t file_size = 0;
++        if (!ResolveAudioPath(package_root, path->get_ref<const std::string &>(), resolved, file_size, error)) {
++            return Invalid(std::move(error));
++        }
++        std::string decode_error;
++        std::shared_ptr<audio::PcmTrack> track = audio::LoadPcmTrack(resolved, decode_error);
++        if (!track) return Invalid("music could not be decoded: " + decode_error);
++        if (track->samples.size() * sizeof(std::int16_t) > kAudioTrackDecodedLimit * 4) {
++            return Invalid("decoded music must be no larger than 128 MiB");
++        }
++        track->gain = static_cast<float>(gain);
++        track->loop = loop;
++        track->loop_start = static_cast<std::int64_t>(loop_start * track->rate);
++        track->loop_end = static_cast<std::int64_t>(loop_end * track->rate);
++        std::lock_guard lock(g_music_mutex);
++        const auto existing = g_mod_music.find(sequence->get_ref<const std::string &>());
++        if (existing != g_mod_music.end() && existing->second.owner != mod_id) {
++            return {ApiCallStatus::Failed, nullptr, "another mod already replaces this sequence (" + existing->second.owner + ")"};
++        }
++        g_mod_music[sequence->get<std::string>()] = {std::string(mod_id), std::move(track)};
++        return {ApiCallStatus::Ok, {{"sequence", sequence->get<std::string>()}, {"applies", "the next time the sequence starts"}}, {}};
++    }
++
++    if (operation.path == "audio.music_clear") {
++        Json request;
++        std::string error;
++        if (!ReadObjectArgument(arguments, request, error)) return Invalid(std::move(error));
++        if (!HasOnlyFields(request, {"sequence"}, error)) return Invalid(std::move(error));
++        if (!request.contains("sequence") || !request["sequence"].is_string()) {
++            return Invalid("audio.music_clear requires {sequence}");
++        }
++        std::lock_guard lock(g_music_mutex);
++        const auto existing = g_mod_music.find(request["sequence"].get_ref<const std::string &>());
++        if (existing == g_mod_music.end() || existing->second.owner != mod_id) {
++            return Invalid("this mod does not replace that sequence");
++        }
++        g_mod_music.erase(existing);
++        return {ApiCallStatus::Ok, {{"cleared", true}}, {}};
++    }
++
 +    if (operation.path == "audio.stop") {
 +        Json request;
 +        std::string error;
@@ -6037,6 +6314,17 @@ index 00000000..f11b202d
 +        else ++sound;
 +    }
 +    impl_->owner_bytes.erase(std::string(mod_id));
++    std::lock_guard music_lock(g_music_mutex);
++    std::erase_if(g_mod_music, [mod_id](const auto &entry) { return entry.second.owner == mod_id; });
++}
++
++void SetRetailAudio(RetailAudio retail) { g_retail_audio = std::move(retail); }
++
++std::shared_ptr<const audio::PcmTrack> ModMusicFor(std::string_view sequence) {
++    std::lock_guard lock(g_music_mutex);
++    auto found = g_mod_music.find(sequence);
++    if (found == g_mod_music.end()) found = g_mod_music.find(std::string(sequence) + ".sq");
++    return found == g_mod_music.end() ? nullptr : found->second.track;
 +}
 +
 +void ConfigureAudioApi(RuntimeConfig &config) {
@@ -6046,7 +6334,7 @@ index 00000000..f11b202d
 +                                           const ApiOperationSpec &operation, const Json &arguments) {
 +        return manager->Call(mod_id, package_root, operation, arguments);
 +    };
-+    for (const char *path : {"audio.register", "audio.play", "audio.stop"}) {
++    for (const char *path : {"audio.register", "audio.play", "audio.stop", "audio.music_set", "audio.music_clear"}) {
 +        auto capability = std::ranges::find(config.api_capabilities, path, &ApiCapability::path);
 +        if (capability == config.api_capabilities.end()) config.api_capabilities.push_back({path, true, {}});
 +        else {
@@ -6064,10 +6352,10 @@ index 00000000..f11b202d
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..e7edcd40
+index 00000000..ed96c6a8
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,8776 @@
+@@ -0,0 +1,9291 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
@@ -6119,6 +6407,9 @@ index 00000000..e7edcd40
 +#include "dungeon.h"
 +#include "language.h"
 +#include "monstorunit.hpp"
++#include "runscript.hpp"
++#include "snd.hpp"
++#include "localize.hpp"
 +#include "weaponelement.hpp"
 +#include "camerafollow.hpp"
 +#include "collisiondata.hpp"
@@ -6143,6 +6434,10 @@ index 00000000..e7edcd40
 +
 +// Which side of the floor the dungeon draws (0 front, 1 the back side), set by dun/movechara.cpp.
 +extern s32 lightingMode;
++// The monster scripts' external functions, filled by BtSetEventExtendTable (runscript_opcodes.cpp).
++extern int (*ext_func[256])(RS_STACKDATA *, int);
++// The event scripts' external functions (editloop3.cpp in towns, btsysscript.cpp in dungeons).
++extern int (*ext_func__2[1500])(RS_STACKDATA *, int);
 +
 +namespace moonmod {
 +int ChronicleNativeMonsterModelId(::CMonstorUnit *unit, int slot);
@@ -12614,6 +12909,17 @@ index 00000000..e7edcd40
 +// The active floor's fog, background and ambient light: what the floor script's FOG, BG_COL and
 +// AMBIENT lines set (and URA_ for the back side), which the dungeon draw reapplies every frame
 +// (port/src/dun/gameloop.cpp). Values hold until the next floor reads its own script.
++// The floor's three directional lights (LIGHT_C n): direction in the columns of light, colour in
++// the rows of color.
++Json DungeonLights(const sceVu0FMATRIX light, const sceVu0FMATRIX color) {
++    Json lights = Json::array();
++    for (int n = 0; n < 3; ++n) {
++        lights.push_back({{"x", light[0][n]}, {"y", light[1][n]}, {"z", light[2][n]},
++                          {"r", color[n][0]}, {"g", color[n][1]}, {"b", color[n][2]}});
++    }
++    return lights;
++}
++
 +Json DungeonLightingSide(const float *fog_rate, const u8 *fog_color, const u8 *background, const float *ambient) {
 +    return {{"fog",
 +             {{"near", fog_rate[0]}, {"far", fog_rate[1]}, {"min", fog_rate[2]}, {"max", fog_rate[3]},
@@ -12628,7 +12934,10 @@ index 00000000..e7edcd40
 +    return {ApiCallStatus::Ok,
 +            {{"side", lightingMode == 0 ? "front" : "back"},
 +             {"front", DungeonLightingSide(main_fogRate, main_fogColor, main_bgColor, main_ambientlight)},
-+             {"back", DungeonLightingSide(sub_fogRate, sub_fogColor, sub_bgColor, sub_ambientlight)}},
++             {"back", DungeonLightingSide(sub_fogRate, sub_fogColor, sub_bgColor, sub_ambientlight)},
++             {"front_lights", DungeonLights(main_light, main_lightcolor)},
++             {"back_lights", DungeonLights(sub_light, sub_lightcolor)},
++             {"view_scale", NowDngMap != nullptr ? Json(NowDngMap->draw_dist_scale) : Json(nullptr)}},
 +            {}};
 +}
 +
@@ -12638,8 +12947,9 @@ index 00000000..e7edcd40
 +    }
 +    const Json &definition = args[0];
 +    for (auto field = definition.begin(); field != definition.end(); ++field) {
-+        if (field.key() != "side" && field.key() != "fog" && field.key() != "background" && field.key() != "ambient") {
-+            return Invalid("dungeons.lighting_set only accepts side, fog, background and ambient");
++        if (field.key() != "side" && field.key() != "fog" && field.key() != "background" && field.key() != "ambient" &&
++            field.key() != "lights" && field.key() != "view_scale") {
++            return Invalid("dungeons.lighting_set only accepts side, fog, background, ambient, lights and view_scale");
 +        }
 +    }
 +    if (mode != GAME_MODE_DUNGEON) return Failed("there is no active Chronicle dungeon floor");
@@ -12682,6 +12992,56 @@ index 00000000..e7edcd40
 +            }
 +        }
 +    }
++    // lights: up to three of {light = 1..3, x, y, z (a direction), r, g, b (0..255)}
++    if (definition.contains("lights")) {
++        const Json &lights = definition["lights"];
++        if (!lights.is_array() || lights.size() > 3) return Invalid("lights must be a list of at most 3 lights");
++        for (const Json &light : lights) {
++            if (!light.is_object() || !light.contains("light") || !light["light"].is_number_integer() ||
++                light["light"].get<int>() < 1 || light["light"].get<int>() > 3) {
++                return Invalid("each light needs light = 1, 2 or 3");
++            }
++            for (auto value = light.begin(); value != light.end(); ++value) {
++                const std::string &key = value.key();
++                if (key == "light") continue;
++                const bool direction = key == "x" || key == "y" || key == "z";
++                if (!direction && key != "r" && key != "g" && key != "b") return Invalid("light." + key + " is not a light field");
++                if (!value->is_number() || !std::isfinite(value->get<float>()) ||
++                    (direction ? std::fabs(value->get<float>()) > 1.0e6f : (value->get<float>() < 0.0f || value->get<float>() > 255.0f))) {
++                    return Invalid("light." + key + " is outside its range");
++                }
++            }
++        }
++    }
++    if (definition.contains("view_scale") &&
++        (!definition["view_scale"].is_number() || !(definition["view_scale"].get<float>() >= 0.1f) ||
++         definition["view_scale"].get<float>() > 10.0f)) {
++        return Invalid("view_scale must be 0.1..10 (the floor script's VIEWLEVEL)");
++    }
++    const auto apply_lights = [&definition](sceVu0FMATRIX light, sceVu0FMATRIX color) {
++        if (!definition.contains("lights")) return;
++        for (const Json &entry : definition["lights"]) {
++            const int n = entry["light"].get<int>() - 1;
++            if (entry.contains("x") || entry.contains("y") || entry.contains("z")) {
++                float direction[4] = {entry.value("x", light[0][n]), entry.value("y", light[1][n]),
++                                      entry.value("z", light[2][n]), 0.0f};
++                const float length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] +
++                                               direction[2] * direction[2]);
++                if (length > 1.0e-6f) {
++                    for (int axis = 0; axis < 3; ++axis) light[axis][n] = direction[axis] / length;
++                }
++            }
++            const char *channels[3] = {"r", "g", "b"};
++            for (int c = 0; c < 3; ++c) {
++                if (entry.contains(channels[c])) color[n][c] = entry[channels[c]].get<float>();
++            }
++        }
++    };
++    if (side != "back") apply_lights(main_light, main_lightcolor);
++    if (side != "front") apply_lights(sub_light, sub_lightcolor);
++    if (definition.contains("view_scale") && NowDngMap != nullptr) {
++        NowDngMap->draw_dist_scale = definition["view_scale"].get<float>();
++    }
 +    const auto apply = [&definition](float *fog_rate, u8 *fog_color, u8 *background, float *ambient) {
 +        const auto number = [&definition](const char *group, const char *key) -> std::optional<float> {
 +            if (!definition.contains(group) || !definition[group].contains(key)) return std::nullopt;
@@ -12701,6 +13061,401 @@ index 00000000..e7edcd40
 +    if (side != "back") apply(main_fogRate, main_fogColor, main_bgColor, main_ambientlight);
 +    if (side != "front") apply(sub_fogRate, sub_fogColor, sub_bgColor, sub_ambientlight);
 +    return ReadDungeonLighting(Json::array());
++}
++
++// Script-VM arguments built from Lua: numbers (whole numbers as ints, others as floats), booleans,
++// or {out = "int"|"float"} for a value the native writes back, returned in order by Out().
++struct NativeArgs {
++    std::array<RS_STACKDATA, 17> stack{};
++    std::array<RS_STACKDATA, 16> outs{};
++    std::array<int, 16>          out_kind{}; // 0 none, 1 int, 2 float
++    int                          count = 0;
++
++    std::string Read(const Json &request) {
++        if (!request.contains("args")) return {};
++        const Json &values = request["args"];
++        if (!values.is_array() || values.size() > 16) return "args must be a list of at most 16 values";
++        for (std::size_t i = 0; i < values.size(); ++i) {
++            const Json &value = values[i];
++            if (value.is_number_integer()) {
++                stack[i].type = RS_INT;
++                stack[i].i = value.get<int>();
++            } else if (value.is_number()) {
++                const float number = value.get<float>();
++                if (!std::isfinite(number)) return "args must be finite numbers";
++                stack[i].type = RS_FLOAT;
++                stack[i].f = number;
++            } else if (value.is_boolean()) {
++                stack[i].type = RS_INT;
++                stack[i].i = value.get<bool>() ? 1 : 0;
++            } else if (value.is_object() && value.size() == 1 && value.contains("out") && value["out"].is_string() &&
++                       (value["out"] == "int" || value["out"] == "float")) {
++                out_kind[i] = value["out"] == "int" ? 1 : 2;
++                outs[i].type = out_kind[i] == 1 ? RS_INT : RS_FLOAT;
++                stack[i].type = RS_PTR;
++                stack[i].p = &outs[i];
++            } else {
++                return "each arg must be a number, a boolean or {out = \"int\"|\"float\"}";
++            }
++        }
++        count = static_cast<int>(values.size());
++        return {};
++    }
++
++    Json Out() const {
++        Json out = Json::array();
++        for (int i = 0; i < count; ++i) {
++            if (out_kind[i] == 1) out.push_back(outs[i].i);
++            if (out_kind[i] == 2) out.push_back(outs[i].f);
++        }
++        return out;
++    }
++};
++
++// The event-script natives safe to run outside a running event: the getters and checks and the
++// game, map and event flag setters. Town natives live in editloop3.cpp, dungeon ones in
++// btsysscript.cpp; both fill ext_func__2 for the mode they run in.
++struct EventNative {
++    const char *name;
++    int         op;
++    bool        dungeon;
++};
++constexpr EventNative kEventNatives[] = {
++    {"GET_PADON", 0, false},
++    {"GET_PADDOWN", 1, false},
++    {"GET_PADUP", 2, false},
++    {"GET_APAD", 903, false},
++    {"GET_RANDOM", 4, false},
++    {"GET_OLD_MAPNO", 16, false},
++    {"GET_DUNGEON_FLOOR", 22, false},
++    {"CHECK_IN_VILLAGER", 58, false},
++    {"GET_CHARA_POS", 64, false},
++    {"GET_CHARA_TALK_POS", 65, false},
++    {"GET_CHARA_ROT", 69, false},
++    {"GET_NPC_TALK_POS", 130, false},
++    {"GET_NPC_POS", 131, false},
++    {"GET_NPC_PARTS_NO", 132, false},
++    {"GET_NPC_ROT", 139, false},
++    {"GET_NPC_SCALE", 148, false},
++    {"GET_NPC_BODY_SIZE", 155, false},
++    {"CHECK_MES_COMPLETE", 200, false},
++    {"CHECK_MES_WAIT", 201, false},
++    {"CHECK_MES", 202, false},
++    {"SET_MES_WIN_FLAG", 205, false},
++    {"CHECK_COMPLETE_PARTS", 256, false},
++    {"GET_EDIT_PARTS_POS", 257, false},
++    {"GET_NOW_TIME", 258, false},
++    {"GET_CLOCK", 262, false},
++    {"CHECK_PLACE", 263, false},
++    {"CHECK_VILLAGER", 267, false},
++    {"GET_OBJ_POS", 325, false},
++    {"GET_OBJ_ROT", 327, false},
++    {"GET_OBJ_SCALE", 329, false},
++    {"GET_TALKNPC_INFO_ID", 384, false},
++    {"GET_TALKNPC_ID", 385, false},
++    {"GET_TALKNPC_STATUS", 389, false},
++    {"GET_CAMERA_POS", 423, false},
++    {"GET_CAMERA_REF", 425, false},
++    {"GET_CAMERA_ANGLE", 430, false},
++    {"GET_CAMERA_ROTATE", 432, false},
++    {"GET_CAMERA_ROLL", 442, false},
++    {"CHECK_FADE", 502, false},
++    {"SSET_GAME_FLAG", 700, false},
++    {"SGET_GAME_FLAG", 701, false},
++    {"SSET_GAME_INT_FLAG", 711, false},
++    {"SGET_GAME_INT_FLAG", 712, false},
++    {"SSET_MAP_FLAG", 703, false},
++    {"SGET_MAP_FLAG", 704, false},
++    {"SET_WORK_FLAG", 705, false},
++    {"GET_WORK_FLAG", 706, false},
++    {"SSET_REQUEST_EVENT_FLAG", 713, false},
++    {"GET_BGM_VOL", 805, false},
++    {"GET_BGM_NO", 806, false},
++    {"GET_OUT_BGM_NO", 814, false},
++    {"CHECK_BGM_FADE", 819, false},
++    {"GET_TV_MODE", 1001, false},
++    {"GET_LANG_CODE", 1002, false},
++    {"GET_FLOOR_LEVEL", 1010, true},
++    {"GET_OLD_FLOOR_LEVEL", 1012, true},
++    {"GET_ACTION_MODE", 1020, true},
++    {"CHECK_EVENT_FLG", 1023, true},
++    {"SET_EVENT_FLG", 1024, true},
++    {"GET_OBJHDL", 1030, true},
++    {"SET_OBJHDL_DRAW_FLAG", 1033, true},
++    {"GET_OBJHDL_POS", 1034, true},
++    {"GET_OBJHDL_ROT", 1035, true},
++    {"GET_EVENT_POS", 1040, true},
++    {"GET_EVENT_ROT", 1041, true},
++    {"CHK_ATRA_HAVE", 1057, true},
++    {"GET_NOW_USER_ID", 1060, true},
++    {"GET_NPC_OBJHDL", 1062, true},
++    {"GET_GATEKEY_NO", 1064, true},
++    {"SET_DEAD_FLAG", 1069, true},
++    {"ALL_DRAW_FLAG", 1072, true},
++    {"GET_RUBY_ELEMENT", 1074, true},
++    {"GET_ITEM_TRAPID", 1081, true},
++    {"CHECK_MARDAN", 1086, true},
++    {"CHECK_CHR_HELP", 1089, true},
++    {"GET_MAP_CODE", 1095, true},
++    {"GET_ITEM_UNIT_NO", 1097, true},
++    {"GET_PIERO_ITEM", 1100, true},
++};
++
++ApiCallResult ListEventNatives(const Json &args) {
++    if (!args.is_array() || !args.empty()) return Invalid("events.natives takes no arguments");
++    Json natives = Json::array();
++    for (const EventNative &native : kEventNatives) {
++        natives.push_back({{"name", native.name}, {"op", native.op}, {"mode", native.dungeon ? "dungeon" : "town"}});
++    }
++    return {ApiCallStatus::Ok, {{"natives", std::move(natives)}}, {}};
++}
++
++ApiCallResult CallEventNative(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("native")) {
++        return Invalid("expected {native = name or op, args = {...}?}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "native" && field.key() != "args") return Invalid("events.call only accepts native and args");
++    }
++    const bool dungeon = mode == GAME_MODE_DUNGEON;
++    const EventNative *native = nullptr;
++    for (const EventNative &candidate : kEventNatives) {
++        const Json &which = request["native"];
++        const bool match = (which.is_string() && which.get_ref<const std::string &>() == candidate.name) ||
++                           (which.is_number_integer() && which.get<int>() == candidate.op);
++        if (match && candidate.dungeon == dungeon) native = &candidate;
++    }
++    if (native == nullptr) {
++        return Invalid(std::string("native is not an event native of the current mode (") +
++                       (dungeon ? "dungeon" : "town") + "); see game.events.natives()");
++    }
++    NativeArgs native_args;
++    if (std::string error = native_args.Read(request); !error.empty()) return Invalid(error);
++    if (mode != GAME_MODE_DUNGEON && mode != GAME_MODE_EDIT) return Failed("events.call needs a town or a dungeon");
++    if (ext_func__2[native->op] == nullptr) return Failed("this native is not set up in the current scene");
++    const int ok = ext_func__2[native->op](native_args.stack.data(), native_args.count);
++    return {ApiCallStatus::Ok, {{"native", native->name}, {"ok", ok != 0}, {"out", native_args.Out()}}, {}};
++}
++
++// game.text: message text by the language files' key ("dun.script.d01.d01.12"), set per mod.
++std::map<std::string, std::string> g_mod_text_owner; // message key > owning mod
++
++bool ReadTextKey(const Json &args, Json &request, std::initializer_list<std::string_view> allowed, std::string &error) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("key") ||
++        !args[0]["key"].is_string()) {
++        error = "expected {key = \"<message file key>.<id>\", ...}";
++        return false;
++    }
++    request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (std::ranges::find(allowed, std::string_view(field.key())) == allowed.end()) {
++            error = "unsupported field " + field.key();
++            return false;
++        }
++    }
++    return true;
++}
++
++ApiCallResult GetText(const Json &args) {
++    Json request;
++    std::string error;
++    if (!ReadTextKey(args, request, {"key"}, error)) return Invalid(error);
++    const std::string &key = request["key"].get_ref<const std::string &>();
++    const std::optional<std::string> text = LocalizeGetText(key);
++    const auto owner = g_mod_text_owner.find(key);
++    return {ApiCallStatus::Ok,
++            {{"key", key},
++             {"text", text ? Json(*text) : Json(nullptr)},
++             {"source", owner != g_mod_text_owner.end() ? "mod:" + owner->second : (text ? "language file" : "disc")}},
++            {}};
++}
++
++ApiCallResult SetText(std::string_view mod_id, const Json &args, bool clear) {
++    Json request;
++    std::string error;
++    if (!ReadTextKey(args, request, clear ? std::initializer_list<std::string_view>{"key"}
++                                          : std::initializer_list<std::string_view>{"key", "text"}, error)) {
++        return Invalid(error);
++    }
++    const std::string key = request["key"].get<std::string>();
++    if (!clear && (!request.contains("text") || !request["text"].is_string() ||
++                   request["text"].get_ref<const std::string &>().size() > 4096)) {
++        return Invalid("text.set requires text of at most 4096 bytes");
++    }
++    const auto owner = g_mod_text_owner.find(key);
++    if (owner != g_mod_text_owner.end() && owner->second != mod_id) {
++        return Failed("another mod (" + owner->second + ") already sets this message");
++    }
++    if (clear && owner == g_mod_text_owner.end()) return Invalid("this mod does not set that message");
++    if (!LocalizeSetModText(key, clear ? std::nullopt : std::optional<std::string>(request["text"].get<std::string>()))) {
++        return Invalid("key must be a message file key, a dot and a message id (see lang-export)");
++    }
++    if (clear) g_mod_text_owner.erase(key);
++    else g_mod_text_owner[key] = std::string(mod_id);
++    return {ApiCallStatus::Ok, {{"key", key}, {"applies", "when the message file next loads"}}, {}};
++}
++
++void UnloadModText(std::string_view mod_id) {
++    for (auto entry = g_mod_text_owner.begin(); entry != g_mod_text_owner.end();) {
++        if (entry->second == mod_id) {
++            LocalizeSetModText(entry->first, std::nullopt);
++            entry = g_mod_text_owner.erase(entry);
++        } else {
++            ++entry;
++        }
++    }
++}
++
++// The retail monster AI natives by the name the .stb scripts call them (leading underscore dropped).
++// _RUN_SCRIPT, the global push/pop pair and the reference pair need a running script, so they are left out.
++struct MonsterNative {
++    const char *name;
++    int         op;
++};
++constexpr MonsterNative kMonsterNatives[] = {
++    {"GET_DISTANCE", 10},
++    {"GET_POSITION", 11},
++    {"SET_ROTATION", 12},
++    {"CHK_ROTATION", 13},
++    {"CHK_MOVE", 14},
++    {"CHK_USER_INNER_PRODUCT", 15},
++    {"GET_VECTOR", 30},
++    {"GET_DIRECTION", 31},
++    {"SET_MOVE", 32},
++    {"CHK_MOVE_INFO", 33},
++    {"SET_MOVE_CANSEL", 34},
++    {"SET_ROT_CANSEL", 35},
++    {"SET_POSITION", 36},
++    {"STATUS_SET_FALL", 100},
++    {"STATUS_SET_MUTEKI", 101},
++    {"STATUS_SET_ALPHA", 102},
++    {"STATUS_CHK_ALPHA", 103},
++    {"STATUS_SET_DEAD", 104},
++    {"STATUS_SET_PALLET", 105},
++    {"GET_RAND", 180},
++    {"GET_RANDF", 181},
++    {"SIN_DEG", 182},
++    {"COS_DEG", 183},
++    {"STATUS_SET_CLIPLEVEL", 106},
++    {"STATUS_SET_EVENT", 107},
++    {"STATUS_SET_COL_OFF", 108},
++    {"STATUS_GET_LIFE_RATE", 109},
++    {"STATUS_GET_HEIGHT", 112},
++    {"STATUS_GET_HITDMG_VOL", 113},
++    {"STATUS_GET_MOTION_ID", 114},
++    {"STATUS_GET_DMG_ID", 115},
++    {"STATUS_SET_LOCKON_DIST", 116},
++    {"STATUS_SET_SHADOW_LEN", 117},
++    {"STATUS_SET_LOCKON_TRG", 118},
++    {"STATUS_GET_USER_VECTOR", 110},
++    {"SET_MOV_COL", 136},
++    {"SET_BODY_COL", 130},
++    {"SET_BODY_COL_PARA", 134},
++    {"SET_DMG_COL", 131},
++    {"SET_DMG_PARA", 132},
++    {"SET_SHOT", 133},
++    {"SET_SHOT2", 229},
++    {"SET_SND_FRM", 140},
++    {"SET_LOOP_SND", 230},
++    {"STOP_LOOP_SND", 231},
++    {"DEL_LOOP_SND", 232},
++    {"SET_SND_NOW", 141},
++    {"SET_MOTION", 200},
++    {"CHK_MOTION_FRM", 201},
++    {"GET_MOTION_FRM", 202},
++    {"SET_MOTION_FRM", 203},
++    {"GET_CHR_ID", 210},
++    {"GET_COL_HIT_ID", 211},
++    {"GET_SCRIPT_ID", 212},
++    {"GET_MONSTOR_POS", 213},
++    {"GET_MONSTOR_FRM", 214},
++    {"SET_MONSTOR_POS", 215},
++    {"SET_MONSTOR_MOVE", 216},
++    {"SET_MONSTOR_LINK_MOVE", 217},
++    {"SET_MONSTOR_MOVE_CANSEL", 218},
++    {"SET_MONSTOR_MOTION", 219},
++    {"SET_GLOBAL_INT", 220},
++    {"GET_GLOBAL_INT", 221},
++    {"GET_OBJ_POS", 222},
++    {"SET_ROTATION_X", 223},
++    {"SET_MOTION_CHANGE_STEP", 224},
++    {"GET_MONSTOR_VECTOR", 225},
++    {"SET_LOCKON_DIST", 226},
++    {"SET_LOCKON_SW", 227},
++    {"STOP_SND_NOW", 142},
++    {"STATUS_SET_LIFE", 228},
++    {"SET_BIN2", 209},
++    {"SET_STATUS_CHANGE", 204},
++    {"SET_TEX_ANIME_SW", 205},
++    {"GET_STATUS_BIN2", 208},
++    {"SET_COLLISION_WIDTH", 206},
++    {"GET_NEAR_MONSTER", 207},
++    {"BOSS_FADE_OUT", 240},
++    {"CHEKC_FADE_OUT", 241},
++    {"SET_GRAVITY", 242},
++    {"SET_GUARD_FRAME", 244},
++    {"GUARD_SEARCH", 245},
++    {"GET_MOVE_VEC", 246},
++    {"GET_USER_STATUS", 249},
++    {"LOOKAT", 252},
++    {"SET_SHADOW_FLAG", 253},
++};
++
++const MonsterNative *FindMonsterNative(const Json &which) {
++    for (const MonsterNative &native : kMonsterNatives) {
++        if (which.is_string() && which.get_ref<const std::string &>() == native.name) return &native;
++        if (which.is_number_integer() && which.get<int>() == native.op) return &native;
++    }
++    return nullptr;
++}
++
++ApiCallResult ListMonsterNatives(const Json &args) {
++    if (!args.is_array() || !args.empty()) return Invalid("monsters.natives takes no arguments");
++    Json natives = Json::array();
++    for (const MonsterNative &native : kMonsterNatives) natives.push_back({{"name", native.name}, {"op", native.op}});
++    return {ApiCallStatus::Ok, {{"natives", std::move(natives)}}, {}};
++}
++
++// Runs one native as if the monster's own script had called it. Arguments are numbers (whole
++// numbers go in as ints, others as floats), booleans, or {out = "int"|"float"} for a value the
++// native writes back; those come back in order in "out".
++ApiCallResult CallMonsterNative(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("entity") ||
++        !args[0].contains("native")) {
++        return Invalid("expected {entity = monster handle, native = name or op, args = {...}?}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "entity" && field.key() != "native" && field.key() != "args") {
++            return Invalid("monsters.call only accepts entity, native and args");
++        }
++    }
++    const MonsterNative *native = FindMonsterNative(request["native"]);
++    if (native == nullptr) return Invalid("native is not a known monster native; see game.monsters.natives()");
++    std::string handle;
++    int slot = -1;
++    std::uint32_t generation = 0;
++    if (!ReadId(request["entity"], handle) || !ReadMonsterHandle(handle, slot, generation)) {
++        return Invalid("entity must be a generation-checked Chronicle monster handle");
++    }
++    NativeArgs native_args;
++    if (std::string error = native_args.Read(request); !error.empty()) return Invalid(error);
++    CMonstorUnit *unit = NowMonstorUnit;
++    if (mode != GAME_MODE_DUNGEON || unit == nullptr) return Failed("monsters.call requires an active Chronicle dungeon");
++    PrepareMonsterHandleUnit(unit);
++    if (EnsureMonsterHandleGeneration(unit, slot) != generation) {
++        return Failed("the entity handle is stale because its monster slot was reused");
++    }
++    if ((unit->monster[slot].state != 1 && unit->monster[slot].state != 2) || unit->monster[slot].hp <= 0) {
++        return Failed("monsters.call requires a living monster");
++    }
++    if (ext_func[native->op] == nullptr) return Failed("the monster natives are not set up yet");
++    const int saved = unit->current_monster;
++    unit->current_monster = slot;
++    const int ok = ext_func[native->op](native_args.stack.data(), native_args.count);
++    unit->current_monster = saved;
++    return {ApiCallStatus::Ok, {{"native", native->name}, {"ok", ok != 0}, {"out", native_args.Out()}}, {}};
 +}
 +
 +ApiCallResult SetDungeonCamera(const Json &args) {
@@ -14188,6 +14943,13 @@ index 00000000..e7edcd40
 +    if (operation.path == "render.camera_get") return ReadDungeonCamera(args);
 +    if (operation.path == "render.camera_set") return SetDungeonCamera(args);
 +    if (operation.path == "dungeons.lighting_get") return ReadDungeonLighting(args);
++    if (operation.path == "monsters.natives") return ListMonsterNatives(args);
++    if (operation.path == "events.natives") return ListEventNatives(args);
++    if (operation.path == "text.get") return GetText(args);
++    if (operation.path == "text.set") return SetText(mod_id, args, false);
++    if (operation.path == "text.clear") return SetText(mod_id, args, true);
++    if (operation.path == "events.call") return CallEventNative(args);
++    if (operation.path == "monsters.call") return CallMonsterNative(args);
 +    if (operation.path == "dungeons.lighting_set") return SetDungeonLighting(args);
 +    if (operation.path == "render.town_camera_set") return SetTownCamera(mod_id, args);
 +    if (operation.path == "render.layer_register") return RegisterRenderLayer(mod_id, args);
@@ -14417,6 +15179,28 @@ index 00000000..e7edcd40
 +    if (unit == nullptr || slot < 0 || slot >= static_cast<int>(g_loaded_monster_model_ids.size())) return;
 +    PrepareMonsterHandleUnit(unit);
 +    g_loaded_monster_model_ids[slot] = native_model_no;
++}
++
++// The monster's script program (1 spawn, 50 revealed, 100 idle loop, 110 hit, 120 killed) through
++// the native.monster.run hook. A mod that does not call the original takes the monster over for
++// that program; the script then counts as ended so the next frame asks again.
++void ChronicleMonsterRun(::CMonstorUnit *unit, int slot, int program) {
++    if (unit == nullptr || slot < 0 || slot >= 16) return;
++    PrepareMonsterHandleUnit(unit);
++    const std::uint32_t generation = EnsureMonsterHandleGeneration(unit, slot);
++    const Json payload = {{"game", "chronicle"},
++                          {"entity", MonsterHandleId(slot, generation)},
++                          {"slot", slot},
++                          {"program_no", program},
++                          {"model", unit->monster[slot].base_model},
++                          {"frame", SharedRuntime().Frame()}};
++    bool ran = false;
++    SharedRuntime().DispatchNativeScriptHook("native.monster.run", payload, [unit, slot, program, &ran]() {
++        ran = true;
++        unit->interpreter[slot].run(program);
++        return ApiCallResult{ApiCallStatus::Ok, {{"ran", true}}, {}};
++    });
++    if (!ran) unit->interpreter[slot].end = 1;
 +}
 +
 +void ChronicleMonsterActorCreated(::CMonstorUnit *unit, int slot) {
@@ -14680,6 +15464,13 @@ index 00000000..e7edcd40
 +    config.api_capabilities.push_back({"render.camera_get", true, {}});
 +    config.api_capabilities.push_back({"render.camera_set", true, {}});
 +    config.api_capabilities.push_back({"dungeons.lighting_get", true, {}});
++    config.api_capabilities.push_back({"monsters.natives", true, {}});
++    config.api_capabilities.push_back({"events.natives", true, {}});
++    config.api_capabilities.push_back({"text.get", true, {}});
++    config.api_capabilities.push_back({"text.set", true, {}});
++    config.api_capabilities.push_back({"text.clear", true, {}});
++    config.api_capabilities.push_back({"events.call", true, {}});
++    config.api_capabilities.push_back({"monsters.call", true, {}});
 +    config.api_capabilities.push_back({"dungeons.lighting_set", true, {}});
 +    config.api_capabilities.push_back({"render.town_camera_set", true, {}});
 +    config.api_capabilities.push_back({"render.first_person_toggle", true, {}});
@@ -14703,6 +15494,17 @@ index 00000000..e7edcd40
 +    config.api_capabilities.push_back({"dungeons.set_modifiers", true, {}});
 +    config.api_capabilities.push_back({"combat.register_player_formula", true, {}});
 +    config.api_resource_override_removal_guard = ChronicleModelOverrideRemovalGuard;
++    SetRetailAudio({[](int se_no, int volume) { SndSePlay(se_no, volume, 0); },
++                    [](int set_no, int track_no) {
++                        SndBgmStop();
++                        SndBgmLoad(set_no); // 0 also when the set is already loaded
++                        SndBgmPlay(track_no);
++                        return true;
++                    },
++                    [] { SndBgmStop(); }});
++    for (const char *path : {"audio.se_play", "audio.bgm_play", "audio.bgm_stop"}) {
++        config.api_capabilities.push_back({path, true, {}});
++    }
 +    config.api_owner_unloaded = [](std::string_view mod_id) {
 +        const std::string prefix = std::string(mod_id) + ":";
 +        InputUnbindModActionsByPrefix(prefix);
@@ -14710,6 +15512,7 @@ index 00000000..e7edcd40
 +        std::erase_if(g_wheel_mode_requests, [mod_id](const auto &entry) { return entry.first == mod_id; });
 +        RefreshChronicleWheelMode();
 +        UnloadChronicleAnimations(mod_id);
++        UnloadModText(mod_id);
 +        g_combat_damage_formulas.RemoveOwner(mod_id);
 +        g_player_damage_formulas.RemoveOwner(mod_id);
 +        RestoreWeaponDefinitionsByOwner(mod_id);
@@ -14846,10 +15649,10 @@ index 00000000..e7edcd40
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..716a4250
+index 00000000..1a846e0e
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3506 @@
+@@ -0,0 +1,3512 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
@@ -17092,6 +17895,11 @@ index 00000000..716a4250
 +                 {"summary", "Runs before a native map, town, or dungeon floor transition begins."},
 +                 {"context", {"target", "floor_id"}},
 +                 {"original_call", "game.scripts.call({id = hook.id})"}},
++                {{"id", "native.monster.run"},
++                 {"kind", "monster_program"},
++                 {"summary", "Runs before a monster's AI script program (1 spawn, 50 revealed, 100 idle, 110 hit, 120 killed)."},
++                 {"context", {"entity", "slot", "program_no", "model"}},
++                 {"original_call", "game.scripts.call({id = hook.id})"}},
 +            });
 +            return {ApiCallStatus::Ok, {{"game", config.game_id}, {"hooks", std::move(hooks)}}, {}};
 +        }
@@ -17105,7 +17913,7 @@ index 00000000..716a4250
 +            const std::string &hook_id = arguments[0]["id"].get_ref<const std::string &>();
 +            if (hook_id != "native.event.run" && hook_id != "native.dialogue.show" &&
 +                hook_id != "native.combat.before_hit" && hook_id != "native.loot.roll" &&
-+                hook_id != "native.transition.before_enter") {
++                hook_id != "native.transition.before_enter" && hook_id != "native.monster.run") {
 +                return {ApiCallStatus::InvalidArgument, nullptr, "scripts.call does not recognize this native hook id"};
 +            }
 +            if (!config.script_hook_original_call_handler) {
@@ -17440,7 +18248,8 @@ index 00000000..716a4250
 +            return PushApiResult(lua, {ApiCallStatus::InvalidArgument, nullptr, "API arguments are not valid JSON"});
 +        }
 +        ApiCallResult result = self->InvokeApi(path, arguments);
-+        bool resource_payload = path == "resources.resolve";
++        // The whole catalogue (api.list) and resource payloads may be larger than an ordinary value.
++        bool resource_payload = path == "resources.resolve" || path == "api.list" || path == "compat.list";
 +        if (path == "api.call" && arguments.size() >= 1 && arguments[0].is_string()) {
 +            resource_payload = arguments[0].get_ref<const std::string &>() == "resources.resolve";
 +        }
@@ -17766,7 +18575,7 @@ index 00000000..716a4250
 +        const std::string hook_id = id_field->get<std::string>();
 +        if (hook_id != "native.event.run" && hook_id != "native.dialogue.show" &&
 +            hook_id != "native.combat.before_hit" && hook_id != "native.loot.roll" &&
-+            hook_id != "native.transition.before_enter") {
++            hook_id != "native.transition.before_enter" && hook_id != "native.monster.run") {
 +            return PushApiResult(lua, {ApiCallStatus::InvalidArgument, nullptr,
 +                                       "unknown hook id; inspect game.scripts.list_hooks()"});
 +        }
@@ -20354,10 +21163,10 @@ index 00000000..82cdf697
 +} // namespace moonmod
 diff --git a/port/src/moonmod/native_resource_overrides.cpp b/port/src/moonmod/native_resource_overrides.cpp
 new file mode 100644
-index 00000000..b6293361
+index 00000000..7623d8cb
 --- /dev/null
 +++ b/port/src/moonmod/native_resource_overrides.cpp
-@@ -0,0 +1,339 @@
+@@ -0,0 +1,358 @@
 +#include "moonmod/native_resource_overrides.hpp"
 +
 +#include <algorithm>
@@ -20385,6 +21194,7 @@ index 00000000..b6293361
 +    std::uintmax_t size = 0;
 +    bool persistent = false;
 +    bool pinned_by_alias = false;
++    std::filesystem::file_time_type written{};
 +};
 +
 +struct ResourcePathAlias {
@@ -20557,9 +21367,11 @@ index 00000000..b6293361
 +    const bool pinned_by_alias = path_alias != g_path_aliases.end() ||
 +                                 (existing != g_overrides.end() && existing->second.pinned_by_alias);
 +    const bool persistent = existing != g_overrides.end() && existing->second.persistent;
++    std::error_code time_error;
++    const std::filesystem::file_time_type written = std::filesystem::last_write_time(resolved, time_error);
 +    g_overrides.insert_or_assign(
 +        game_path, OverrideRecord{std::string(owner), within_package.generic_string(), resolved, size,
-+                                  persistent, pinned_by_alias});
++                                  persistent, pinned_by_alias, written});
 +    return {ApiCallStatus::Ok,
 +            {{"game_path", game_path}, {"path", within_package.generic_string()}, {"size", size},
 +             {"status", "registered"}},
@@ -20611,6 +21423,22 @@ index 00000000..b6293361
 +    std::lock_guard lock(g_override_mutex);
 +    const auto found = g_overrides.find(normalized);
 +    return found != g_overrides.end() && found->second.owner == owner;
++}
++
++std::vector<std::string> RefreshChangedNativeResourceOverrides() {
++    std::vector<std::string> changed;
++    std::lock_guard lock(g_override_mutex);
++    for (auto &[game_path, record] : g_overrides) {
++        std::error_code error;
++        const auto written = std::filesystem::last_write_time(record.file, error);
++        if (error || written == record.written) continue;
++        const std::uintmax_t size = std::filesystem::file_size(record.file, error);
++        if (error || size == 0 || size > kOverrideFileSizeLimit) continue;
++        record.written = written;
++        record.size = size;
++        changed.push_back(game_path);
++    }
++    return changed;
 +}
 +
 +std::optional<std::uintmax_t> NativeResourceOverrideSize(std::string_view game_path) {
@@ -20699,7 +21527,7 @@ index 00000000..b6293361
 +} // namespace moonmod
 diff --git a/port/src/moonmod/runtime.cpp b/port/src/moonmod/runtime.cpp
 new file mode 100644
-index 00000000..d5ecd39d
+index 00000000..cd009b3d
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
 @@ -0,0 +1,1395 @@
@@ -21233,7 +22061,7 @@ index 00000000..d5ecd39d
 +        if (!original) return {ApiCallStatus::InvalidArgument, nullptr, "native script hook has no implementation"};
 +        if (!running || (hook_id != "native.event.run" && hook_id != "native.dialogue.show" &&
 +                         hook_id != "native.combat.before_hit" && hook_id != "native.loot.roll" &&
-+                         hook_id != "native.transition.before_enter")) {
++                         hook_id != "native.transition.before_enter" && hook_id != "native.monster.run")) {
 +            return original();
 +        }
 +
@@ -23092,6 +23920,32 @@ index 5c9a259c..d80e6e5b 100644
      static float popupYRate = -PI;
      popupYRate += 0.20943952f;
  
+diff --git a/port/src/sound.cpp b/port/src/sound.cpp
+index 3e79f87f..570a8b16 100644
+--- a/port/src/sound.cpp
++++ b/port/src/sound.cpp
+@@ -13,6 +13,7 @@
+ #include "audio/mixer.hpp"
+ #include "audio/soundtrack.hpp"
+ #include "audio/trace.hpp"
++#include "moonmod/audio_api.hpp"
+ #include "dataread.hpp"
+ #include "platform/audio.hpp"
+ #include "platform/config.hpp"
+@@ -297,8 +298,11 @@ void StartSequence(int port, int seq_no, const int *volume) {
+         Player().Stop(port);
+     }
+     Player().SetSequence(port, g_slot_sequences[slot][seq_no]);
+-    // The soundtrack option: a recording named for this sequence plays in its place.
+-    Player().SetStream(port, audio::SoundtrackFor(std::string_view(state.sequence[seq_no]->name, strnlen(state.sequence[seq_no]->name, 9))));
++    // A mod's music (audio.music_set), else the soundtrack option: a recording named for this
++    // sequence plays in its place.
++    const std::string_view sequence_name(state.sequence[seq_no]->name, strnlen(state.sequence[seq_no]->name, 9));
++    std::shared_ptr<const audio::PcmTrack> stream = moonmod::ModMusicFor(sequence_name);
++    Player().SetStream(port, stream != nullptr ? std::move(stream) : audio::SoundtrackFor(sequence_name));
+     Player().SetVolume(port, volume != nullptr ? *volume : state.sequence[seq_no]->volume);
+     Player().Rewind(port, 0);
+     Player().Play(port);
 diff --git a/port/src/tests/CMakeLists.txt b/port/src/tests/CMakeLists.txt
 index ee8b9d59..2a720439 100644
 --- a/port/src/tests/CMakeLists.txt
@@ -23427,7 +24281,7 @@ index f3b3c051..dfc0bcda 100644
          int mode;
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
-index 00000000..8b928630
+index 00000000..c03cdc38
 --- /dev/null
 +++ b/port/src/tests/moonmod_api_test.cpp
 @@ -0,0 +1,1610 @@
@@ -23611,7 +24465,7 @@ index 00000000..8b928630
 +    Write(package / "main.lua", R"lua(
 +local info = assert(game.info.get())
 +local listed = assert(game.scripts.list_hooks())
-+assert(listed.game == info.id and #listed.hooks == 5)
++assert(listed.game == info.id and #listed.hooks == 6)
 +assert(listed.hooks[1].id == "native.event.run")
 +for _, path in ipairs({"scripts.list_hooks", "scripts.call", "scripts.override"}) do
 +  local supported, reason = moonmod.api.supports(path)
@@ -68949,10 +69803,10 @@ index 2780ef74..c6cd9519 100644
          }
  
 diff --git a/ps2/src/monstorunit.cpp b/ps2/src/monstorunit.cpp
-index e4e446cc..3c0fd9ee 100644
+index e4e446cc..b06e622e 100644
 --- a/ps2/src/monstorunit.cpp
 +++ b/ps2/src/monstorunit.cpp
-@@ -4,11 +4,41 @@
+@@ -4,11 +4,42 @@
  
  #include "monstorunit.hpp"
  
@@ -68960,6 +69814,7 @@ index e4e446cc..3c0fd9ee 100644
 +namespace moonmod {
 +void ChronicleMonsterModelLoaded(CMonstorUnit *unit, int slot, int native_model_no);
 +void ChronicleMonsterActorCreated(CMonstorUnit *unit, int slot);
++void ChronicleMonsterRun(CMonstorUnit *unit, int slot, int program);
 +bool ChronicleMonsterActorIsModOwned(CMonstorUnit *unit, int slot);
 +void ChronicleMonstersCleared(CMonstorUnit *unit);
 +void QueueChronicleMonsterDamageResult(CMonstorUnit *unit, int slot, int result);
@@ -68994,7 +69849,7 @@ index e4e446cc..3c0fd9ee 100644
  #include "btactstatus.hpp"
  #include "collisiondata.hpp"
  #include "dataalloc.hpp"
-@@ -398,13 +428,84 @@ MONSTOR_MODEL MonstorTable[167] = {
+@@ -398,13 +429,84 @@ MONSTOR_MODEL MonstorTable[167] = {
      // 166: Black Knight Mount
      {{"c22a", "", "", ""}, "c22a", 50000, MONSTER_FAMILY_METAL, {100, 100, 100, 100, 100}, 14.0f, 8, 100, {31, 32}, 5, {0, 0}, 0, 0, MONSTER_KIND_NO_LOCK_ON, {0, 0}, 221, {0, 0}, -1, 0, 50, 0, -1, {100, 100, 100, 100, 100, 50}, {0, 0}, 0.0f},
  };
@@ -69080,7 +69935,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state != -1) {
              count++;
          }
-@@ -420,7 +521,7 @@ void CMonstorUnit::DrawMapSymbol(float *offset) {
+@@ -420,7 +522,7 @@ void CMonstorUnit::DrawMapSymbol(float *offset) {
      int           i;
      CTexture     *texture = TexManager.GetTexture("itempack", -1);
  
@@ -69089,7 +69944,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state != -1 && monster[i].revealed != 0) {
              int draw;
  
-@@ -435,16 +536,16 @@ void CMonstorUnit::DrawMapSymbol(float *offset) {
+@@ -435,16 +537,16 @@ void CMonstorUnit::DrawMapSymbol(float *offset) {
              if (draw == 1) {
                  CCharacter *character = &chara[i][0];
                  character->GetPosition(position);
@@ -69112,7 +69967,7 @@ index e4e446cc..3c0fd9ee 100644
                  set2DSprite(Vif1Packet, texture, screen, clip);
              }
          }
-@@ -537,7 +638,7 @@ void CMonstorUnit::SetKey() {
+@@ -537,7 +639,7 @@ void CMonstorUnit::SetKey() {
  }
  
  int CMonstorUnit::CheckEventFlag2() {
@@ -69121,7 +69976,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == 2 && monster[i].event_flag2_pending != 0) {
              monster[i].event_flag2_pending = 0;
              return monster[i].event_flag2;
-@@ -548,6 +649,26 @@ int CMonstorUnit::CheckEventFlag2() {
+@@ -548,6 +650,26 @@ int CMonstorUnit::CheckEventFlag2() {
  }
  
  void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int unused) {
@@ -69148,7 +70003,7 @@ index e4e446cc..3c0fd9ee 100644
      sceVu0FVECTOR position;
      sceVu0FVECTOR existing;
      int           used[10];
-@@ -571,12 +692,12 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -571,12 +693,12 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                  placed = true;
              }
  
@@ -69163,7 +70018,7 @@ index e4e446cc..3c0fd9ee 100644
                      if (monster[i].state != -1) {
                          CCharacter *character = &chara[i][0];
                          character->GetPosition(existing);
-@@ -590,7 +711,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -590,7 +712,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                  if (close == 0) {
                      int nearby = 0;
  
@@ -69172,7 +70027,7 @@ index e4e446cc..3c0fd9ee 100644
                          if (monster[i].state != -1) {
                              CCharacter *character = &chara[i][0];
                              character->GetPosition(existing);
-@@ -628,7 +749,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -628,7 +750,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
  }
  
  void CMonstorUnit::AllBin2() {
@@ -69181,7 +70036,7 @@ index e4e446cc..3c0fd9ee 100644
          monster[i].anger_timer = 300;
      }
  }
-@@ -743,7 +864,7 @@ void CMonstorUnit::DrawMonstor() {
+@@ -743,7 +865,7 @@ void CMonstorUnit::DrawMonstor() {
      MGGetAmbient(ambient);
      TexManager.ReloadTexture(Vif1Packet, 42);
  
@@ -69190,7 +70045,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              current_monster = i;
              character = &chara[i][0];
-@@ -815,7 +936,7 @@ void CMonstorUnit::DrawMonstor() {
+@@ -815,7 +937,7 @@ void CMonstorUnit::DrawMonstor() {
  void CMonstorUnit::DrawMonstorCursor() {
      sceVu0FVECTOR position;
  
@@ -69199,7 +70054,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].view_held != 0) {
              CCharacter *character = &chara[i][0];
              character->GetPosition(position);
-@@ -921,7 +1042,7 @@ void CMonstorUnit::DrawShadowMonstor() {
+@@ -921,7 +1043,7 @@ void CMonstorUnit::DrawShadowMonstor() {
      sceVu0FVECTOR rotation;
      sceVu0FVECTOR light = {0.0f, 1.0f, 0.0f, 0.0f};
  
@@ -69208,7 +70063,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == 2 && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
              if (chara[i][0].shadow_frame != NULL) {
                  CCharacter *character = &chara[i][0];
-@@ -937,19 +1058,27 @@ void CMonstorUnit::DrawShadowMonstor() {
+@@ -937,19 +1059,27 @@ void CMonstorUnit::DrawShadowMonstor() {
      }
  }
  
@@ -69240,7 +70095,7 @@ index e4e446cc..3c0fd9ee 100644
          sorted[i] = -1;
          monster[i].view_held = false;
  
-@@ -984,7 +1113,7 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -984,7 +1114,7 @@ void CMonstorUnit::CheckViewLevel() {
  
      int sorted_count = 0;
  
@@ -69249,7 +70104,7 @@ index e4e446cc..3c0fd9ee 100644
          int floor = UserStatus->cur_floor;
          int max_floor = maxFloorTbl__3[selectMapNo];
  
-@@ -997,8 +1126,16 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -997,8 +1127,16 @@ void CMonstorUnit::CheckViewLevel() {
              float distance = 3200.0f;
  
              for (int j = 0; j < active_count; j++) {
@@ -69268,7 +70123,7 @@ index e4e446cc..3c0fd9ee 100644
                      closest = j;
                  }
              }
-@@ -1010,7 +1147,7 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -1010,7 +1148,7 @@ void CMonstorUnit::CheckViewLevel() {
              }
          }
  
@@ -69277,7 +70132,7 @@ index e4e446cc..3c0fd9ee 100644
              if (sorted[i] != -1 && monster[sorted[i]].state == 2 && monster[sorted[i]].hp > 0 && monster[sorted[i]].kind != MONSTER_KIND_NO_LOCK_ON) {
                  monster[sorted[i]].state = 1;
                  monster[sorted[i]].view_held = true;
-@@ -1063,6 +1200,26 @@ int CMonstorUnit::CheckDmg() {
+@@ -1063,6 +1201,26 @@ int CMonstorUnit::CheckDmg() {
      int            immune = 0;
      sceVu0FVECTOR  direction, position;
  
@@ -69304,7 +70159,7 @@ index e4e446cc..3c0fd9ee 100644
      if (monster[current_monster].stop_timer <= 0) {
          for (int i = 0; i < 16; i++) {
              if (effect2[current_monster].active[i] != 0) {
-@@ -1175,9 +1332,13 @@ int CMonstorUnit::CheckDmg() {
+@@ -1175,9 +1333,13 @@ int CMonstorUnit::CheckDmg() {
  
              if (monster[current_monster].hp <= 0) {
                  monster[current_monster].hp = 0;
@@ -69318,7 +70173,7 @@ index e4e446cc..3c0fd9ee 100644
              }
  
              chara[current_monster][0].GetPosition(poison_position);
-@@ -1552,6 +1713,19 @@ int CMonstorUnit::CheckDmg() {
+@@ -1552,6 +1714,19 @@ int CMonstorUnit::CheckDmg() {
                          damage = 0;
                      }
  
@@ -69338,7 +70193,7 @@ index e4e446cc..3c0fd9ee 100644
                      int amount = (int) damage;
  
                      if (!(damage - (float) amount <= 0.0f)) {
-@@ -1572,12 +1746,24 @@ int CMonstorUnit::CheckDmg() {
+@@ -1572,12 +1747,24 @@ int CMonstorUnit::CheckDmg() {
                          amount = monster[current_monster].hp;
                      }
  
@@ -69363,7 +70218,7 @@ index e4e446cc..3c0fd9ee 100644
  
                      if (monster[current_monster].hp <= 0) {
                          monster[current_monster].last_attacker = owner;
-@@ -1616,6 +1802,7 @@ int CMonstorUnit::CheckDmg() {
+@@ -1616,6 +1803,7 @@ int CMonstorUnit::CheckDmg() {
                      }
  
                      if (result == MONSTER_DMG_KILLED) {
@@ -69371,7 +70226,7 @@ index e4e446cc..3c0fd9ee 100644
                          return MONSTER_DMG_KILLED;
                      }
  
-@@ -1652,7 +1839,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
+@@ -1652,7 +1840,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
      float upper = top[1];
      float lower = end[1];
  
@@ -69380,7 +70235,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              if (effect3[i].count == 0) {
                  CCharacter *character = &chara[i][0];
-@@ -1822,7 +2009,7 @@ void CMonstorUnit::MoveChecMonster() {
+@@ -1822,7 +2010,7 @@ void CMonstorUnit::MoveChecMonster() {
      sceVu0CopyVector(flat_next, next_position);
      flat_next[1] = 1;
  
@@ -69389,7 +70244,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == 2 && i != current_monster) {
              CCharacter *other = &chara[i][0];
              other->GetPosition(other_position);
-@@ -1865,7 +2052,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1865,7 +2053,7 @@ void CMonstorUnit::Step(int pause) {
      }
  
      if (paused != 0) {
@@ -69398,7 +70253,7 @@ index e4e446cc..3c0fd9ee 100644
              if (monster[i].state == 2) {
                  monster[i].requested_motion_flags &= ~4;
  
-@@ -1906,7 +2093,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1906,7 +2094,7 @@ void CMonstorUnit::Step(int pause) {
  
      BtActStatus.monstor_target = -1;
  
@@ -69407,7 +70262,46 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == 2) {
              current_monster = i;
  
-@@ -2277,8 +2464,9 @@ void CMonstorUnit::Step(int pause) {
+@@ -1977,11 +2165,19 @@ void CMonstorUnit::Step(int pause) {
+                     case MONSTER_DMG_NONE:
+                         break;
+                     case MONSTER_DMG_HIT:
++#ifdef PORT
++                        moonmod::ChronicleMonsterRun(this, current_monster, 110);
++#else
+                         interpreter[current_monster].run(110);
++#endif
+                         script_state[current_monster] = 1;
+                         break;
+                     case MONSTER_DMG_KILLED:
++#ifdef PORT
++                        moonmod::ChronicleMonsterRun(this, current_monster, 120);
++#else
+                         interpreter[current_monster].run(120);
++#endif
+                         script_state[current_monster] = 1;
+                         break;
+                 }
+@@ -1995,10 +2191,18 @@ void CMonstorUnit::Step(int pause) {
+                 } else {
+                     if (script_state[current_monster] == 0) {
+                         if (monster[current_monster].revealed == 1) {
++#ifdef PORT
++                            moonmod::ChronicleMonsterRun(this, current_monster, 50);
++#else
+                             interpreter[current_monster].run(50);
++#endif
+                             monster[current_monster].revealed = -1;
+                         } else {
++#ifdef PORT
++                            moonmod::ChronicleMonsterRun(this, current_monster, 100);
++#else
+                             interpreter[current_monster].run(100);
++#endif
+                         }
+ 
+                         script_state[current_monster] = 1;
+@@ -2277,8 +2481,9 @@ void CMonstorUnit::Step(int pause) {
  }
  
  void CMonstorUnit::CleanViewMonstor(int back_floor) {
@@ -69418,7 +70312,7 @@ index e4e446cc..3c0fd9ee 100644
          monster[i].stop_timer = 0;
          monster[i].poison_timer = 0;
          monster[i].anger_timer = 0;
-@@ -2367,13 +2555,19 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
+@@ -2367,13 +2572,19 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
  
      back_dungeon = back_floor;
      alive_count = 0;
@@ -69439,7 +70333,7 @@ index e4e446cc..3c0fd9ee 100644
      attr.fog_enable = true;
      sprintf(filename, "dun/monstor/%s.chr", description->model_name[0]);
      LoadFile(filename, read_buffer, NULL);
-@@ -2429,13 +2623,16 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2429,13 +2640,16 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
      }
  
      model_count++;
@@ -69457,7 +70351,7 @@ index e4e446cc..3c0fd9ee 100644
          if (monster[i].state == -1) {
              current_monster = i;
              break;
-@@ -2469,6 +2666,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2469,6 +2683,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      monster[current_monster].state = 1;
@@ -69465,7 +70359,16 @@ index e4e446cc..3c0fd9ee 100644
      monster[current_monster].base_model = model_no;
      monster[current_monster].max_hp = model[model_no].max_hp;
      monster[current_monster].hp = model[model_no].max_hp;
-@@ -2528,5 +2726,8 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2523,10 +2738,17 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+     }
+ 
+     if (interpreter[current_monster].check_program(1) != 0) {
++#ifdef PORT
++        moonmod::ChronicleMonsterRun(this, current_monster, 1);
++#else
+         interpreter[current_monster].run(1);
++#endif
+     }
  
      script_state[current_monster] = 0;
      alive_count++;
