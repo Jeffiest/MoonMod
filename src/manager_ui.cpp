@@ -1,6 +1,7 @@
 #include "moonmod/manager_ui.hpp"
 
 #include <algorithm>
+#include <array>
 #include <map>
 #include <ranges>
 #include <string>
@@ -11,6 +12,63 @@ namespace {
 
 ManagerUiState g_state;
 std::map<std::string, ManagerUiAction, std::less<>> g_actions;
+
+struct PresetSetting {
+    std::string_view mod_id;
+    std::string_view setting_id;
+    Json relaxed;
+    Json hardcore;
+};
+
+const PresetSetting kGameplayPresetSettings[] = {
+    {"moonmod.ascension", "champion_chance_percent", 4, 15},
+    {"moonmod.ascension", "champion_hp_multiplier_percent", 250, 400},
+    {"moonmod.ascension", "enemy_hp_per_floor_half_percent", 4, 10},
+    {"moonmod.ascension", "enemy_hp_per_dungeon_percent", 6, 16},
+    {"moonmod.ascension", "damage_taken_per_floor_percent", 1.0, 3.5},
+    {"moonmod.ascension", "damage_taken_per_dungeon_percent", 4, 12},
+    {"moonmod.ascension", "damage_per_level_tenths_percent", 35, 20},
+    {"moonmod.ascension", "crit_chance_percent", 12, 5},
+    {"moonmod.ascension", "sturdy_durability_refund", 80, 0},
+    {"moonmod.ascension", "sturdy_water_refund", 60, 0},
+    {"moonmod.dungeon-plus", "mutator_chance", 20, 55},
+    {"moonmod.dungeon-plus", "tier_hp_percent", 25, 50},
+    {"moonmod.dungeon-plus", "tier_gilda_percent", 60, 30},
+    {"moonmod.dungeon-plus", "feats_reward_scale", 150, 75},
+    {"moonmod.dungeon-plus", "enemy_base_speed_percent", 95, 115},
+    {"moonmod.dungeon-plus", "enemy_speed_variance", 15, 35},
+    {"moonmod.dungeon-plus", "enemy_revive_chance", 10, 40},
+};
+
+std::string_view PresetName(std::string_view id) {
+    if (id == "moonmod.presets:relaxed") return "Relaxed";
+    if (id == "moonmod.presets:normal") return "Normal";
+    if (id == "moonmod.presets:hardcore") return "Hardcore";
+    return {};
+}
+
+void ApplyGameplayPreset(std::string_view id) {
+    const std::string_view name = PresetName(id);
+    if (name.empty()) return;
+    std::vector<SettingUpdate> updates;
+    const auto mods = SharedRuntime().Mods();
+    for (const PresetSetting &entry : kGameplayPresetSettings) {
+        const auto mod = std::ranges::find(mods, entry.mod_id, &ModRecord::id);
+        if (mod == mods.end() || !mod->valid_manifest) continue;
+        const auto setting = std::ranges::find(mod->manifest.settings, entry.setting_id, &SettingDefinition::id);
+        if (setting == mod->manifest.settings.end()) continue;
+        Json value = setting->default_value;
+        if (id == "moonmod.presets:relaxed") value = entry.relaxed;
+        else if (id == "moonmod.presets:hardcore") value = entry.hardcore;
+        updates.push_back({mod->id, setting->id, std::move(value)});
+    }
+    std::string error;
+    if (!SharedRuntime().SetSettings(updates, error)) {
+        ShowManagerNotice("Preset was not applied: " + error, 300);
+        return;
+    }
+    ShowManagerNotice(std::string("Gameplay preset applied: ") + std::string(name), 240);
+}
 
 bool ValidActionId(std::string_view value) {
     return !value.empty() && value.size() <= 64 &&
@@ -75,7 +133,7 @@ void Reconcile() {
                                    std::max(0, g_state.selected_mod - kManagerVisibleMods + 1),
                                    g_state.selected_mod);
     const int setting_count = static_cast<int>(mods[g_state.selected_mod].manifest.settings.size());
-    const auto actions = ManagerActions(mods[g_state.selected_mod].id);
+    const auto actions = ManagerDisplayActions(mods[g_state.selected_mod].id);
     const ApiCallResult quests = ManagerQuests(mods[g_state.selected_mod].id);
     const ApiCallResult skills = ManagerSkills(mods[g_state.selected_mod].id);
     const auto journal_quests = ManagerJournalQuests();
@@ -174,7 +232,7 @@ void MoveSetting(int direction) {
 void MoveAction(int direction) {
     const ModRecord *record = ManagerSelectedMod();
     if (record == nullptr) return;
-    const auto actions = ManagerActions(record->id);
+    const auto actions = ManagerDisplayActions(record->id);
     if (actions.empty()) return;
     g_state.selected_action = std::clamp(g_state.selected_action + direction, 0, static_cast<int>(actions.size()) - 1);
     Reconcile();
@@ -234,7 +292,7 @@ void SelectDetailTab(int tab) {
     const ModRecord *record = ManagerSelectedMod();
     if (record == nullptr) return;
     const bool settings_available = !record->manifest.settings.empty();
-    const bool actions_available = !ManagerActions(record->id).empty();
+    const bool actions_available = !ManagerDisplayActions(record->id).empty();
     const ApiCallResult quests = ManagerQuests(record->id);
     const bool quests_available = quests.status == ApiCallStatus::Ok && quests.value.is_object() &&
                                   quests.value.contains("quests") && quests.value["quests"].is_array() &&
@@ -341,9 +399,13 @@ void StepSelectedSetting(int direction) {
 void ActivateSelectedAction() {
     const ModRecord *record = ManagerSelectedMod();
     if (record == nullptr) return;
-    const auto actions = ManagerActions(record->id);
+    const auto actions = ManagerDisplayActions(record->id);
     if (g_state.selected_action < 0 || g_state.selected_action >= static_cast<int>(actions.size())) return;
     const ManagerUiAction &action = actions[static_cast<std::size_t>(g_state.selected_action)];
+    if (!PresetName(action.id).empty()) {
+        ApplyGameplayPreset(action.id);
+        return;
+    }
     if (action.id.size() <= record->id.size() + 1 ||
         !ActivateManagerAction(record->id, std::string_view(action.id).substr(record->id.size() + 1))) {
         Notice("This mod action is no longer available");
@@ -452,6 +514,18 @@ std::vector<ManagerUiAction> ManagerActions(std::string_view owner_id) {
     return actions;
 }
 
+std::vector<ManagerUiAction> ManagerDisplayActions(std::string_view owner_id) {
+    std::vector<ManagerUiAction> actions = ManagerActions(owner_id);
+    if (owner_id != "moonmod.dungeon-plus") return actions;
+    const std::array<ManagerUiAction, 3> presets = {{
+        {"moonmod.presets:relaxed", "moonmod.dungeon-plus", "Preset: Relaxed", "Apply the legacy Relaxed gameplay preset across Ascension and Dungeon+"},
+        {"moonmod.presets:normal", "moonmod.dungeon-plus", "Preset: Normal", "Restore preset-controlled settings to their package defaults"},
+        {"moonmod.presets:hardcore", "moonmod.dungeon-plus", "Preset: Hardcore", "Apply the legacy Hardcore gameplay preset across Ascension and Dungeon+"},
+    }};
+    actions.insert(actions.begin(), presets.begin(), presets.end());
+    return actions;
+}
+
 ApiCallResult ManagerQuests(std::string_view owner_id) {
     return SharedRuntime().Quests(owner_id);
 }
@@ -545,7 +619,7 @@ bool HandleManagerInput(const ManagerInput &input) {
     const auto mods = SharedRuntime().Mods();
     const ModRecord *record = ManagerSelectedMod();
     const int setting_count = record == nullptr ? 0 : static_cast<int>(record->manifest.settings.size());
-    const auto actions = record == nullptr ? std::vector<ManagerUiAction>{} : ManagerActions(record->id);
+    const auto actions = record == nullptr ? std::vector<ManagerUiAction>{} : ManagerDisplayActions(record->id);
     const int action_count = static_cast<int>(actions.size());
     const ApiCallResult quest_result = record == nullptr ? ApiCallResult{} : ManagerQuests(record->id);
     const Json quest_list = quest_result.status == ApiCallStatus::Ok && quest_result.value.is_object()

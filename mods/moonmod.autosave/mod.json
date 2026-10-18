@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.autosave",
+  "name": "Autosave",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Controls Chronicle's guarded native town autosave slot.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.write"],
+  "settings": [
+    {"id":"enabled","name":"Enable native town autosave","type":"boolean","default":true}
+  ]
+}

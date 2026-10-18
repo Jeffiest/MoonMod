@@ -49,6 +49,7 @@ struct ModManifest {
     int         framework_api = 1;
     std::vector<std::string> games;
     std::vector<std::string> dependencies;
+    std::vector<std::string> optional_dependencies;
     std::vector<std::string> load_after;
     std::vector<std::string> load_before;
     std::vector<std::string> permissions;

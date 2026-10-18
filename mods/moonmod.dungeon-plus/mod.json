@@ -2,9 +2,9 @@
   "schema_version": 1,
   "id": "moonmod.dungeon-plus",
   "name": "Dungeon+",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "author": "Jeffiest",
-  "description": "Per-floor difficulty, mutators, enemy speed variety, bestiary, bounties, feats, rewards, and legacy shop rebalance.",
+  "description": "Per-floor difficulty, room-scaled encounters, legacy weapon rebalance and rotating stock, mutators, enemy variety, bestiary, bounties, feats, and rewards.",
   "framework_api": 1,
   "games": [
     "chronicle"
@@ -28,6 +28,51 @@
       "step": 5
     },
     {
+      "id": "tier_hp_percent",
+      "name": "Enemy HP per tier (%)",
+      "type": "integer",
+      "default": 35,
+      "min": 0,
+      "max": 200,
+      "step": 5
+    },
+    {
+      "id": "tier_defense",
+      "name": "Enemy defense per tier",
+      "type": "integer",
+      "default": 2,
+      "min": 0,
+      "max": 100,
+      "step": 1
+    },
+    {
+      "id": "tier_gilda_percent",
+      "name": "Enemy Gilda per tier (%)",
+      "type": "integer",
+      "default": 40,
+      "min": 0,
+      "max": 300,
+      "step": 10
+    },
+    {
+      "id": "tier_xp_percent",
+      "name": "Ascension XP per tier (%)",
+      "type": "integer",
+      "default": 25,
+      "min": 0,
+      "max": 200,
+      "step": 5
+    },
+    {
+      "id": "tier_champion_chance",
+      "name": "Champion chance per tier (%)",
+      "type": "integer",
+      "default": 4,
+      "min": 0,
+      "max": 20,
+      "step": 1
+    },
+    {
       "id": "bounty_kills",
       "name": "Kills needed for a floor bounty",
       "type": "integer",
@@ -46,12 +91,75 @@
       "step": 10
     },
     {
+      "id": "feats_reward_scale",
+      "name": "Dungeon Feats reward scale (%)",
+      "type": "integer",
+      "default": 100,
+      "min": 0,
+      "max": 300,
+      "step": 25
+    },
+    {
+      "id": "enemy_base_speed_percent",
+      "name": "Enemy base speed (%)",
+      "type": "integer",
+      "default": 100,
+      "min": 60,
+      "max": 200,
+      "step": 5
+    },
+    {
       "id": "enemy_speed_variance",
       "name": "Enemy speed variance (%)",
       "type": "integer",
       "default": 25,
       "min": 0,
       "max": 50,
+      "step": 5
+    },
+    {
+      "id": "monsters_per_room_min",
+      "name": "Min monsters / room (%)",
+      "type": "integer",
+      "default": 150,
+      "min": 0,
+      "max": 300,
+      "step": 25
+    },
+    {
+      "id": "monsters_per_room_max",
+      "name": "Max monsters / room (%)",
+      "type": "integer",
+      "default": 300,
+      "min": 0,
+      "max": 300,
+      "step": 25
+    },
+    {
+      "id": "chests_per_room_min",
+      "name": "Min chests / room (%)",
+      "type": "integer",
+      "default": 75,
+      "min": 0,
+      "max": 150,
+      "step": 25
+    },
+    {
+      "id": "chests_per_room_max",
+      "name": "Max chests / room (%)",
+      "type": "integer",
+      "default": 150,
+      "min": 0,
+      "max": 150,
+      "step": 25
+    },
+    {
+      "id": "enemy_revive_chance",
+      "name": "Enemy get-back-up chance (%)",
+      "type": "integer",
+      "default": 25,
+      "min": 0,
+      "max": 100,
       "step": 5
     }
   ]

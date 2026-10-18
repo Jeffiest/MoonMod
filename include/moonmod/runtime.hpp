@@ -42,6 +42,12 @@ struct ModRecord {
     std::string            native_status;
 };
 
+struct SettingUpdate {
+    std::string mod_id;
+    std::string setting_id;
+    Json value;
+};
+
 using PackageApiCallHandler = std::function<ApiCallResult(std::string_view mod_id,
                                                            const std::filesystem::path &package_root,
                                                            const ApiOperationSpec &operation,
@@ -107,6 +113,7 @@ public:
     Json                        CombatDamageBonuses() const;
     bool                      StepSetting(std::string_view mod_id, std::string_view setting_id, int direction,
                                            std::string &error);
+    bool                      SetSettings(std::span<const SettingUpdate> updates, std::string &error);
 
 private:
     struct Impl;
