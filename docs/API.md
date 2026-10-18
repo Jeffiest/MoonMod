@@ -836,6 +836,105 @@ moonmod.on("game.tick", function()
 end)
 ```
 
+**Lights and view distance.** `lighting_set` also takes `lights`, a list of up to three
+`{light = 1..3, x?, y?, z?, r?, g?, b?}`: the floor script's `LIGHT_C` directional lights (`URA_LIGHT_C` for the back
+side). `x, y, z` is a direction (normalised for you), and `r, g, b` is its colour from 0 to 255. `view_scale` (0.1-10)
+is the floor script's `VIEWLEVEL`, which scales how far the floor is drawn. `lighting_get` reports `front_lights`,
+`back_lights` and `view_scale`. Water surfaces are floor geometry (`PT_WATER` in the floor script). Edit them with dc1tk
+`maps-export` / `floor-build`.
+
+```lua
+game.dungeons.lighting_set({lights = {{light = 1, x = 0, y = -1, z = 0, r = 255, g = 40, b = 40}}, view_scale = 2.0})
+```
+
+### Chronicle monster AI from Lua (`monsters.natives` / `monsters.call`, hook `native.monster.run`)
+
+Every monster runs a compiled script (`dun/monstor/<name>.stb`), and that script calls natives such as `SET_MOTION`,
+`GET_POSITION` and `SET_MOVE`. `game.monsters.natives()` lists the 86 natives a mod can run, each with its `name` and
+`op`, under the names dc1tk's decompiler uses without the leading `_`. `game.monsters.call{entity, native, args?}` runs
+one of them on a living monster, as that monster's own script would. `entity` is the generation-checked `entity_id`
+from `game.entities.query`. `native` is a name or an op number. `args` is a list:
+- a number (whole numbers go in as integers, the rest as floats) or a boolean;
+- `{out = "int"}` or `{out = "float"}` for a value the native writes back. These come back in order in `out`.
+
+`_RUN_SCRIPT`, `_PUSH_IGLOBAL`/`_POP_IGLOBAL` and `_SET_REFERENCE`/`_DEL_REFERENCE` need a running script, so they are
+not offered. Requires `game.write`.
+
+```lua
+local m = game.entities.query({type = "monster"}).entities[1]
+local pos = game.monsters.call({entity = m.entity_id, native = "GET_POSITION",
+                                args = {-1, {out = "float"}, {out = "float"}, {out = "float"}}})
+print(pos.out[1], pos.out[2], pos.out[3])
+game.monsters.call({entity = m.entity_id, native = "SET_MOTION", args = {3}})
+```
+
+The `native.monster.run` script hook (`game.scripts.override`) runs before a monster's script program. The context is
+`entity`, `slot`, `program_no` and `model`; the programs are 1 (spawn), 50 (revealed), 100 (its idle loop), 110 (hit)
+and 120 (killed). Calling `game.scripts.call({id = "native.monster.run"})` runs the retail program. A callback that
+does not call it takes the monster over for that program. The program then counts as finished, so the hook runs again
+on the next frame, and a mod can drive the monster each frame with `monsters.call`.
+
+```lua
+game.scripts.override({id = "native.monster.run"}, function(ctx)
+  if ctx.program_no == 100 and ctx.model == 3 then
+    game.monsters.call({entity = ctx.entity, native = "SET_ROTATION", args = {(ctx.frame * 4) % 360}})
+    return {handled = true}                       -- this model now only spins
+  end
+  return game.scripts.call({id = "native.monster.run"})
+end)
+```
+
+### Chronicle event natives (`events.natives` / `events.call`)
+
+`game.events.natives()` lists the town (`editloop3.cpp`) and dungeon (`btsysscript.cpp`) event-script natives that are
+safe outside a running event: the getters and checks, and the game, map, work and event flag setters (78). Each entry
+has a `mode` of `"town"` or `"dungeon"`. `game.events.call{native, args?}` runs one in its own mode, with arguments as for
+`monsters.call`. Examples: `GET_FLOOR_LEVEL`, `CHECK_EVENT_FLG`, `SSET_GAME_FLAG`, `GET_CHARA_POS`, `GET_BGM_NO`.
+Requires `game.write`.
+
+```lua
+local floor = game.events.call({native = "GET_FLOOR_LEVEL", args = {{out = "int"}}}).out[1]
+```
+
+### Chronicle game text (`text.get` / `text.set` / `text.clear`)
+
+Messages are keyed as in the language files (dc1tk `lang-export`, upstream `docs/LOCALIZATION.md`): the message file
+key, a dot and the message id, for example `dun.message.old_data.dungeon.0`. `game.text.set{key, text}` replaces a
+message (up to 4096 bytes, in the language files' notation, `{insert1}`, `{cyan}` ...), over the language file's text,
+for as long as the mod is loaded. It applies when the message file next loads, which for most messages is the next
+scene. `game.text.clear{key}` takes it back. `game.text.get{key}` gives the text and its `source`: `mod:<id>`,
+`language file`, or `disc` (then `text` is null). Two mods cannot set the same message. Requires `content.register`.
+
+```lua
+game.text.set({key = "dun.message.old_data.dungeon.0", text = "{icon-jar}\"{insert1}\" found!"})
+```
+
+### Chronicle retail sound and music (`audio.se_play`, `audio.bgm_play`, `audio.bgm_stop`, `audio.music_set`)
+
+- `game.audio.se_play{se, volume?}` plays one of the game's own sound effects by its table number (0-4095; `volume` 0-127,
+  default the table's).
+- `game.audio.bgm_play{set, track?}` loads music set `set` (0-255) and plays track `track` (default 0).
+- `game.audio.bgm_stop()` stops the music.
+- `game.audio.music_set{sequence, path, gain?, loop?, loop_start?, loop_end?}` plays a package recording (WAV, FLAC or OGG
+  under `resources/audio/`) in place of a game music sequence. `sequence` is the sequence name the soundtrack option uses
+  (`DC_AUDIO_TRACE=1` prints them). It works whichever soundtrack is chosen and takes effect the next time that sequence
+  starts. `audio.music_clear{sequence}` takes it back, and unloading the mod takes back all of its music. Two mods
+  cannot replace the same sequence.
+
+```lua
+game.audio.music_set({sequence = "e01a_a", path = "resources/audio/norune.ogg", loop_start = 4.0})
+```
+
+### Chronicle override reload and notices
+
+About once a second, the game checks every override file it was given. When one has been rewritten on disk (a new
+dc1tk build, an edit), the game picks it up: it logs `moonmod: reloaded override <path>`, shows "Mod file reloaded"
+on screen, and reads the new bytes the next time it loads that path (for a floor, the next floor). A replacement the game
+refuses when it loads (too big for its kind or its buffer) is shown on screen once, as "Mod file not used: <path>", as
+well as logged. dc1tk `mod-pack --install <save>` writes the package into `<save>/mods` and turns it on in
+`<save>/moonmod/profile.json` (backup `profile.json.before-<id>`). A new override file, or a changed `main.lua`, needs
+the game restarted.
+
 ### Procedural floor layout (`dungeons.set_layout`)
 
 Retail Chronicle builds every floor on a 20 x 20 grid and places at most 6 rooms (3-4 cells wide) in its top-left 16 x 16 corner. The Chronicle PC port enlarges the grid to 48 x 48 (`DNG_GRID`) and the room table to 64 (`DNG_ROOM_MAX`). Chronicle Two builds procedural floors on a 30 x 30 grid (`DNG_GRID = 30`) and enlarges its room table from 8 to 64 (`DNG_ROOM_MAX = 64`). Without a mod setting, floors still use the retail room count, area, and sizes.
