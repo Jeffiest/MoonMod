@@ -70333,7 +70333,7 @@ index 0bddbbfa..f3cd5baf 100644
      EPARTS_INFO_HEADER *source;
      EPARTS_ARCHIVE     *record = (EPARTS_ARCHIVE *) archive;
 diff --git a/ps2/src/editloop3.cpp b/ps2/src/editloop3.cpp
-index 61762201..c7815863 100644
+index 61762201..5bed1629 100644
 --- a/ps2/src/editloop3.cpp
 +++ b/ps2/src/editloop3.cpp
 @@ -714,6 +714,129 @@ void EdInitVillagerTable(float clock, EDIT_MAP_INFO *info) {
@@ -70497,11 +70497,54 @@ index 61762201..c7815863 100644
  }
  
  static void GetNearVill(CCamera *camera, CCharacter *player, CNPCharacter *villagers, int *indices, float *distances) {
+@@ -1420,6 +1553,12 @@ void EdMoveVillager(VILLAGER_INFO *villagers) {
+         }
+ 
+         if (info->initial_motion == 0) {
++#ifdef PORT
++            // A mod's villager stands on the ground under it, which a placed piece can raise.
++            if (ChronicleModVillagerInSlot(i) >= 0 && ground != NULL) {
++                position[1] = ground->GetAlt(position[0], position[1] + 50.0f, position[2]);
++            }
++#endif
+             ((CCharacter *) ((char *) EdVillager + offset))->CCharacter::SetPosition(position);
+             ((CCharacter *) ((char *) EdVillager + offset))->CCharacter::SetRotation(rotation[0], rotation[1], rotation[2]);
+         } else {
+@@ -9134,9 +9273,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+     character->GetRotation(character_rotation);
+ 
+     for (i = 0; i < count; i++) {
++#ifdef PORT
++        // A mod's villager has no native villager id; it can be talked to from any side.
++        const bool mod_villager = npcs == EdVillager && ChronicleModVillagerInSlot(i) >= 0;
++        if (npcs[i].villager_id < 0 && !mod_villager) {
++            continue;
++        }
++#else
+         if (npcs[i].villager_id < 0) {
+             continue;
+         }
++#endif
+ 
+         int available = npcs[i].initialized != 0 && npcs[i].draw_enabled != 0;
+ 
+@@ -9172,7 +9319,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+         npcs[i].GetDir(*character, direction);
+         float npc_angle = atan2f(direction[0], direction[2]);
+         npcs[i].GetRotation(npc_rotation);
++#ifdef PORT
++        int talk_direction = mod_villager ? 1 : EdEventInfo.villagers[npcs[i].villager_id].talk_direction;
++#else
+         int talk_direction = EdEventInfo.villagers[npcs[i].villager_id].talk_direction;
++#endif
+ 
+         if (AngleCmp(npc_angle, npc_rotation[1], HALF_PI_SHORT) != 0 && talk_direction == 0 && npcs[i].event_status == 0) {
+             continue;
 diff --git a/ps2/src/editpartsinfo.cpp b/ps2/src/editpartsinfo.cpp
-index 4517bb72..1c991d37 100644
+index 4517bb72..0431cabc 100644
 --- a/ps2/src/editpartsinfo.cpp
 +++ b/ps2/src/editpartsinfo.cpp
-@@ -3,11 +3,38 @@
+@@ -3,11 +3,42 @@
  
  #include "editpartsinfo.hpp"
  
@@ -70518,6 +70561,10 @@ index 4517bb72..1c991d37 100644
 +CHRONICLE_MOD_GEORAMA_PIECE g_chronicle_mod_georama_pieces[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
 +EDITPARTS_INFO g_chronicle_mod_georama_info[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
 +EDIT_PARTS_ATRA g_chronicle_mod_georama_atra[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
++// The town and parts the variants were last materialized for: Load re-initializes the table after the town has
++// materialized them, so it puts them back.
++int        g_materialized_town = -1;
++CMapParts *g_materialized_parts = NULL;
 +char g_chronicle_mod_georama_scene[CHRONICLE_GEORAMA_MOD_PART_COUNT][64] = {};
 +char g_chronicle_mod_georama_model[CHRONICLE_GEORAMA_MOD_PART_COUNT][32] = {};
 +constexpr int kModFootprintSide = 32;
@@ -70540,7 +70587,7 @@ index 4517bb72..1c991d37 100644
  /**
   * Reports whether an editable part is placed and still has work available.
   *
-@@ -17,11 +44,193 @@
+@@ -17,11 +48,197 @@
   */
  int CheckPartsInfo(EDITPARTS_INFO *info);
  
@@ -70644,6 +70691,8 @@ index 4517bb72..1c991d37 100644
 +}
 +
 +void MaterializeChronicleModGeoramaPieces(int town_id, CMapParts *parts) {
++    g_materialized_town = parts != NULL ? town_id : -1;
++    g_materialized_parts = parts;
 +    for (int index = 0; index < CHRONICLE_GEORAMA_MOD_PART_COUNT; ++index) {
 +        CHRONICLE_MOD_GEORAMA_PIECE &piece = g_chronicle_mod_georama_pieces[index];
 +        piece.materialized = 0;
@@ -70716,6 +70765,8 @@ index 4517bb72..1c991d37 100644
 +    std::memset(g_chronicle_mod_georama_scene, 0, sizeof(g_chronicle_mod_georama_scene));
 +    std::memset(g_chronicle_mod_georama_model, 0, sizeof(g_chronicle_mod_georama_model));
 +    std::memset(g_chronicle_mod_georama_footprint, 0, sizeof(g_chronicle_mod_georama_footprint));
++    g_materialized_town = -1;
++    g_materialized_parts = NULL;
 +}
 +
  EDITPARTS_INFO *CEditPartsInfo::GetPartsInfo(int index) {
@@ -70735,7 +70786,7 @@ index 4517bb72..1c991d37 100644
      return &parts[index];
  }
  
-@@ -76,11 +285,11 @@ int CEditPartsInfo::GetRequest(int index) {
+@@ -76,11 +293,11 @@ int CEditPartsInfo::GetRequest(int index) {
  int CEditPartsInfo::GetNextPartsNum(int index) {
      int remaining = 0;
  
@@ -70749,7 +70800,7 @@ index 4517bb72..1c991d37 100644
          }
  
          if (CheckPartsInfo(info) != 0) {
-@@ -100,9 +309,8 @@ int CEditPartsInfo::GetNextParts(int index) {
+@@ -100,9 +317,8 @@ int CEditPartsInfo::GetNextParts(int index) {
              if (CheckPartsInfo(info) != 0) {
                  return index;
              }
@@ -70760,7 +70811,7 @@ index 4517bb72..1c991d37 100644
      }
  }
  
-@@ -110,6 +318,10 @@ void CEditPartsInfo::Clear() {
+@@ -110,6 +326,10 @@ void CEditPartsInfo::Clear() {
      for (int plot = 0; plot < 24; plot++) {
          parts[plot].placed = false;
      }
@@ -70771,7 +70822,18 @@ index 4517bb72..1c991d37 100644
  }
  
  void CEditPartsInfo::Save(int georama_no, CSaveData *save_data) {
-@@ -200,6 +412,14 @@ void CEditPartsInfo::Initialize(int georama_no) {
+@@ -151,6 +371,10 @@ void CEditPartsInfo::Load(int georama_no, CSaveData *save_data, int load_request
+     Initialize(georama_no);
+     SV_GEORAMA_DATA *georama = save_data->GetGrdData(georama_no);
+ 
++    if (this == &EditPartsInfo && g_materialized_parts != NULL && g_materialized_town == georama_no) {
++        MaterializeChronicleModGeoramaPieces(georama_no, g_materialized_parts);
++    }
++
+     if (georama == NULL) {
+         return;
+     }
+@@ -200,6 +424,14 @@ void CEditPartsInfo::Initialize(int georama_no) {
  
      unk_1624 = 0;
  
