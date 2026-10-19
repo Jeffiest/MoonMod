@@ -498,7 +498,61 @@ local house = assert(game.georama.register({
 ```
 
 This replaces the earlier rule that variants "cannot declare geometry or asset overrides": they can now declare a model.
-They still cannot declare their own footprint, cell data or menu assets.
+They can also declare their own footprint and cells (below); menu text and icons still come from the template.
+
+Chronicle: registered content can bring its own files. Every file is a `game.resources.override` the mod owns (1 byte to 2 MiB),
+registered before the content that names it.
+
+### Chronicle weapons with their own model and icon
+
+```lua
+game.resources.override({path = "resources/annexmdl.chr", game_path = "commenu/weapon/annexmdl.chr"})
+game.resources.override({path = "resources/annexicon.png", game_path = "icons/annexicon.png"})
+local blade = assert(game.weapons.register({
+  id = "annex", name = "Annex Blade", template_weapon = 262, owner = "toan",
+  model = "annexmdl",   -- commenu/weapon/annexmdl.chr
+  icon = "annexicon",   -- icons/annexicon.png
+}))
+```
+
+- `model` names `commenu/weapon/<stem>.chr`. The game reads the template weapon's `.cfg` from inside it, so the file
+  must hold a `.cfg` with the template's name (for template 262, Toan's sixth weapon, `c01w05.cfg`). Without `model`
+  the weapon draws its template's model. Native names (`cNNwNN`) are refused.
+- `icon` names `icons/<stem>.png`, any size, drawn into the 32x32 menu cell. `items.register` takes `icon` too.
+- `weapons.get().assets` reports `model` and `icon` game paths.
+- The model shows once the weapon is equipped (town `weapons.equip`, or the game's menus) and the dungeon loads.
+
+### Chronicle Georama variants with their own footprint
+
+```lua
+game.georama.register({id = "long_fence", name = "Long Fence", template_part_id = 0, town_id = 0, stock = 5,
+  footprint = {width = 4, height = 1}})                          -- every cell filled
+game.georama.register({id = "corner", name = "Corner", template_part_id = 0, town_id = 0,
+  footprint = {width = 2, height = 3, cells = {5, 0, 5, 0, 5, 5}}}) -- row by row, 0 = empty
+```
+
+`width`/`height` are 1-32 cells. `cells` holds width x height values 0-255 as the part definition file has them
+(0 empty, other values as the template uses them); left out, every cell takes the template's most used non-empty
+value. The model and collision still come from the template (or `model = {scene, part}`). `georama.get().mod_pieces`
+reports `width_cells`/`height_cells`.
+
+### Chronicle town villagers (`characters.register` kind = "npc")
+
+```lua
+game.characters.register({id = "moon_trader", kind = "npc", name = "Moon Trader", town_id = 0,
+  model = "e04", position = {x = 120, y = 0, z = -340}, facing = 90, talk_event = nil})
+game.events.subscribe("game.npc.talk", function(event) ... end)  -- event.id, name, town_id
+```
+
+- Up to 4 villagers; they take the free villager slots (retail fills at most 6 of 10) each time the town picks its
+  villagers, stand still at `position`, facing `facing` degrees.
+- `model` is a villager in the town's `gedit/e0N/chara/` folder, or a mod's own override of
+  `gedit/e0N/chara/<model>.chr`.
+- The talk button runs native event `talk_event` when given, else publishes `game.npc.talk` to the mods.
+- `content.list()` shows them (`content_type = "npc"`, `in_town`, `villager_slot`).
+
+Not yet: Whole new dungeons (an 8th dungeon and beyond): see the plan in HITLIST 0bb. `dungeons.register` adds floors to
+dungeons 0-4 only.
 
 ### Native dungeon entity query
 

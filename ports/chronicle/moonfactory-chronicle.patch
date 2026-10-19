@@ -1520,7 +1520,7 @@ index 20e41f73..7b15ec3d 100644
  void TownMouseApply(CCamera *shown, CEditGround *ground, int map, int mode);
 +
 diff --git a/port/src/dataread.cpp b/port/src/dataread.cpp
-index edf90fa0..185ef2cd 100644
+index edf90fa0..fc5022fb 100644
 --- a/port/src/dataread.cpp
 +++ b/port/src/dataread.cpp
 @@ -2,6 +2,7 @@
@@ -1596,7 +1596,7 @@ index edf90fa0..185ef2cd 100644
      return static_cast<int>(size);
  }
  
-@@ -113,6 +132,122 @@ void Localized(std::string_view path, void *buffer, int *size) {
+@@ -113,6 +132,143 @@ void Localized(std::string_view path, void *buffer, int *size) {
      LocalizeFile(path, buffer, dcdata::SectorsFor(static_cast<std::uint64_t>(*size)) * dcdata::kSector, size);
  }
  
@@ -1671,6 +1671,27 @@ index edf90fa0..185ef2cd 100644
 +    return *replacement;
 +}
 +
++// A registered weapon's own model (weapons.register model = "<stem>"): commenu/weapon/<stem>.chr.
++bool IsVirtualWeaponModelPath(std::string_view path) {
++    constexpr std::string_view prefix = "commenu/weapon/";
++    if (!path.starts_with(prefix)) return false;
++    path.remove_prefix(prefix.size());
++    return path.size() > 4 && path.size() <= 19 && path.find('/') == std::string_view::npos && path.ends_with(".chr");
++}
++
++// A mod villager's own model (characters.register kind = "npc"): gedit/<town>/chara/<stem>.chr.
++bool IsVirtualVillagerModelPath(std::string_view path) {
++    constexpr std::string_view prefix = "gedit/";
++    if (!path.starts_with(prefix)) return false;
++    path.remove_prefix(prefix.size());
++    const std::size_t town_end = path.find('/');
++    if (town_end == std::string_view::npos || town_end == 0 || town_end > 8) return false;
++    path.remove_prefix(town_end + 1);
++    if (!path.starts_with("chara/")) return false;
++    path.remove_prefix(6);
++    return path.size() > 4 && path.size() <= 35 && path.find('/') == std::string_view::npos && path.ends_with(".chr");
++}
++
 +bool IsVirtualMonsterAssetPath(std::string_view path) {
 +    constexpr std::string_view prefix = "dun/monstor/";
 +    if (!path.starts_with(prefix)) return false;
@@ -1719,7 +1740,7 @@ index edf90fa0..185ef2cd 100644
  } // namespace
  
  PORT_OVERRIDE void InitCDFile() {
-@@ -165,12 +300,31 @@ PORT_OVERRIDE int LoadFile2(char *path, void *buffer, int *out_size, int mode) {
+@@ -165,12 +321,33 @@ PORT_OVERRIDE int LoadFile2(char *path, void *buffer, int *out_size, int mode) {
      if (out_size) {
          *out_size = 0;
      }
@@ -1737,6 +1758,8 @@ index edf90fa0..185ef2cd 100644
 +        const std::optional<fs::path> virtual_asset = moonmod::FindNativeResourceOverride(game_path);
 +        if (!buffer || !virtual_asset) return 0;
 +        const std::uintmax_t limit = IsVirtualMonsterAssetPath(game_path) ? kVirtualMonsterAssetLimit
++                                     : IsVirtualWeaponModelPath(game_path) ? kVirtualMonsterAssetLimit
++                                     : IsVirtualVillagerModelPath(game_path) ? kVirtualMonsterAssetLimit
 +                                     : IsVirtualFloorPackPath(game_path)  ? kVirtualFloorPackLimit
 +                                     : IsVirtualGeoramaScenePath(game_path) ? kVirtualMapAssetLimit
 +                                                                           : (alias ? kVirtualMapAssetLimit : 0);
@@ -1755,10 +1778,14 @@ index edf90fa0..185ef2cd 100644
      if (out_size) {
          *out_size = size;
      }
-@@ -216,6 +370,17 @@ PORT_OVERRIDE void InitReadBG() {
+@@ -216,6 +393,21 @@ PORT_OVERRIDE void InitReadBG() {
      }
  }
  
++bool NativeDataFileExists(std::string_view path) {
++    return Lookup(path) != nullptr;
++}
++
 +bool NativeResourceDirectoryIndexed(std::string_view directory) {
 +    if (!data_indexed || directory.empty()) return false;
 +    std::string normalized = dcdata::FoldPath(directory);
@@ -1773,7 +1800,7 @@ index edf90fa0..185ef2cd 100644
  PORT_OVERRIDE void StartReadBG() {
      InitReadBG();
  }
-@@ -246,12 +411,35 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
+@@ -246,12 +438,36 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
      if (reinterpret_cast<std::uintptr_t>(buffer) % 64) {
          printf("/*/*/*/*/not 64byte align at %p %s\n", static_cast<void *>(buffer), name);
      }
@@ -1789,8 +1816,9 @@ index edf90fa0..185ef2cd 100644
 -    int size = ReadWhole(*file, buffer);
 -    Localized(name, buffer, &size);
 +        const std::optional<fs::path> virtual_asset = moonmod::FindNativeResourceOverride(game_path);
-+        if (!alias || !virtual_asset) return 0;
-+        const int size = ReadWhole(*virtual_asset, buffer, kVirtualMapAssetLimit);
++        const bool weapon_model = IsVirtualWeaponModelPath(game_path) || IsVirtualVillagerModelPath(game_path);
++        if ((!alias && !weapon_model) || !virtual_asset) return 0;
++        const int size = ReadWhole(*virtual_asset, buffer, weapon_model ? kVirtualMonsterAssetLimit : kVirtualMapAssetLimit);
 +        if (size < 0) return 0;
 +        int localized_size = size;
 +        Localized(name, buffer, &localized_size);
@@ -1814,7 +1842,7 @@ index edf90fa0..185ef2cd 100644
      info->busy = true;
      info->id = 1;
 diff --git a/port/src/dataread_port.hpp b/port/src/dataread_port.hpp
-index bce9ac5f..7c4e2f6b 100644
+index bce9ac5f..badf623d 100644
 --- a/port/src/dataread_port.hpp
 +++ b/port/src/dataread_port.hpp
 @@ -1,5 +1,6 @@
@@ -1824,13 +1852,16 @@ index bce9ac5f..7c4e2f6b 100644
  #include <vector>
  
  #include "common.h"
-@@ -11,3 +12,6 @@ std::vector<s32> DataLanguages();
+@@ -11,3 +12,9 @@ std::vector<s32> DataLanguages();
  // The languages the game can offer: the disc's own. A localization pack, once the port has them,
  // adds the languages it carries here.
  std::vector<s32> SupportedLanguages();
 +
 +// Returns whether the extracted disc already contains files below a normalized game-data folder.
 +bool NativeResourceDirectoryIndexed(std::string_view directory);
++
++// Whether the game's data holds this file (a retail path, not a mod override).
++bool NativeDataFileExists(std::string_view path);
 diff --git a/port/src/draw3d.hpp b/port/src/draw3d.hpp
 index 33b3d2d5..971ff6e2 100644
 --- a/port/src/draw3d.hpp
@@ -3427,8 +3458,154 @@ index 733e1f0a..659e68ac 100644
      }
  
      return list->next;
+diff --git a/port/src/item_icon_override.cpp b/port/src/item_icon_override.cpp
+new file mode 100644
+index 00000000..a7ddb9ac
+--- /dev/null
++++ b/port/src/item_icon_override.cpp
+@@ -0,0 +1,124 @@
++#include "item_icon_override.hpp"
++
++#include <cstdio>
++#include <map>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "itemdata.hpp"
++#include "localize_texture.hpp"
++#include "memcard.hpp"
++#include "menu_draw.hpp"
++#include "moonmod/native_resource_overrides.hpp"
++#include "platform/imagefile.hpp"
++#include "texture.hpp"
++#include "texture_port.hpp"
++
++namespace {
++
++constexpr int kIconSize = 32;
++
++struct ModIcon {
++    std::string               game_path;
++    std::unique_ptr<CTexture> texture;
++    unsigned                  key = 0;
++    bool                      failed = false;
++};
++
++std::map<int, ModIcon> g_mod_icons;
++
++u_long Tex0(unsigned tbp, int tbw, int psm, int tw, int th) {
++    return (u_long) tbp | ((u_long) tbw << 14) | ((u_long) psm << 20) | ((u_long) tw << 26) | ((u_long) th << 30) |
++           ((u_long) 1 << 34);
++}
++
++} // namespace
++
++void SetItemIconOverride(int item_no, const char *game_path) {
++    auto found = g_mod_icons.find(item_no);
++    if (found != g_mod_icons.end()) {
++        if (found->second.key != 0) {
++            PortReleaseKey(found->second.key);
++        }
++        g_mod_icons.erase(found);
++    }
++    if (game_path != nullptr && game_path[0] != 0) {
++        g_mod_icons[item_no].game_path = game_path;
++    }
++}
++
++CTexture *ItemIconOverrideTexture(int item_no) {
++    auto found = g_mod_icons.find(item_no);
++    if (found == g_mod_icons.end() || found->second.failed) {
++        return nullptr;
++    }
++    ModIcon &icon = found->second;
++    if (icon.texture && PortKeyLive(icon.key)) {
++        return icon.texture.get();
++    }
++    const auto file = moonmod::FindNativeResourceOverride(icon.game_path);
++    int                  width = 0;
++    int                  height = 0;
++    std::vector<uint8_t> rgba;
++    if (!file || !imagefile::LoadPng(*file, width, height, rgba) || width <= 0 || height <= 0) {
++        std::fprintf(stderr, "item icon: item %d: cannot read %s\n", item_no, icon.game_path.c_str());
++        icon.failed = true;
++        return nullptr;
++    }
++    PortDecodedTexture decoded;
++    decoded.width = kIconSize;
++    decoded.height = kIconSize;
++    decoded.format = gfx::TextureFormat::Rgba8;
++    decoded.has_alpha = true;
++    decoded.levels.push_back(width == kIconSize && height == kIconSize
++                                 ? std::move(rgba)
++                                 : LocalizeResample(rgba.data(), width, height, kIconSize, kIconSize));
++    icon.key = PortCreateTexture(decoded, PortTextureOwner::Other, nullptr);
++    if (icon.key == 0) {
++        return nullptr; // no renderer yet; asked again next time
++    }
++    auto texture = std::make_unique<CTexture>();
++    texture->block = -1;
++    texture->width = kIconSize;
++    texture->height = kIconSize;
++    texture->bpp = 4;
++    std::snprintf(texture->name, sizeof texture->name, "mod icon %d", item_no);
++    texture->tex0 = Tex0(icon.key, kIconSize / 64 + 1, SCE_GS_PSMCT32, 5, 5);
++    icon.texture = std::move(texture);
++    return icon.texture.get();
++}
++
++// Retail's RetCTex, asking for a mod's own icon first: its whole 32x32 texture is the cell.
++PORT_OVERRIDE CTexture *RetCTex(short item_no, int &u, int &v) {
++    COM_ITEM_INFO *info = GetCommonItemInfo(item_no);
++
++    if (info == nullptr) {
++        return nullptr;
++    }
++
++    if (CTexture *own = ItemIconOverrideTexture(item_no)) {
++        u = 0;
++        v = 0;
++        return own;
++    }
++
++    int icon = info->icon_index;
++
++    if (icon < 0) {
++        return nullptr;
++    }
++
++    u = ((icon + 8) % 8) << 5;
++    v = (icon >> 3) << 5;
++
++    switch (info->kind) {
++        case ITEMKIND_ITEM:
++            return ItemIcon;
++        case ITEMKIND_ATTACH:
++        case ITEMKIND_WEAPON:
++            return WepIcon;
++    }
++
++    return nullptr;
++}
+diff --git a/port/src/item_icon_override.hpp b/port/src/item_icon_override.hpp
+new file mode 100644
+index 00000000..dc60c1ff
+--- /dev/null
++++ b/port/src/item_icon_override.hpp
+@@ -0,0 +1,10 @@
++#pragma once
++
++class CTexture;
++
++// A mod's own menu icon for an item (a registered item or weapon): the PNG behind the native resource override at
++// `game_path` (e.g. "icons/<stem>.png"), drawn whole into the 32x32 cell RetCTex hands out. "" removes it.
++void SetItemIconOverride(int item_no, const char *game_path);
++
++/// The texture of an item's mod icon, read on first use; null where it has none or the file is unusable.
++CTexture *ItemIconOverrideTexture(int item_no);
 diff --git a/port/src/itemdata.cpp b/port/src/itemdata.cpp
-index e6a821d6..de9f8955 100644
+index e6a821d6..296a55af 100644
 --- a/port/src/itemdata.cpp
 +++ b/port/src/itemdata.cpp
 @@ -1,17 +1,18 @@
@@ -3464,7 +3641,7 @@ index e6a821d6..de9f8955 100644
          return 0;
      }
  
-@@ -69,13 +70,64 @@ PORT_OVERRIDE ITEM_DATA *GetItemData(int item_no) {
+@@ -69,13 +70,89 @@ PORT_OVERRIDE ITEM_DATA *GetItemData(int item_no) {
  
  PORT_OVERRIDE WEAPON_DATA *GetWeaponData(int item_no) {
      COM_ITEM_INFO *info = GetCommonItemInfo(item_no);
@@ -3476,6 +3653,27 @@ index e6a821d6..de9f8955 100644
      return &WeaponList[info->index];
  }
  
++namespace {
++// What each appended weapon slot (377-408) was registered from and the model it draws.
++s16  moonmod_weapon_template[32] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
++                                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
++char moonmod_weapon_model[32][16];
++} // namespace
++
++int MoonModWeaponTemplate(int item_no) {
++    return item_no >= 377 && item_no < 409 ? moonmod_weapon_template[item_no - 377] : -1;
++}
++
++const char *MoonModWeaponModel(int item_no) {
++    return item_no >= 377 && item_no < 409 ? moonmod_weapon_model[item_no - 377] : "";
++}
++
++bool SetMoonModWeaponModel(int item_no, const char *stem) {
++    if (item_no < 377 || item_no >= 409 || stem == nullptr || std::strlen(stem) >= 16) return false;
++    std::snprintf(moonmod_weapon_model[item_no - 377], 16, "%s", stem);
++    return true;
++}
++
 +bool RegisterMoonModWeapon(int item_no, int template_item_no, int attack, int durability,
 +                           int attack_max, int magic_max, int owner, char *error, std::size_t error_size) {
 +    auto fail = [error, error_size](const char *message) {
@@ -3516,6 +3714,8 @@ index e6a821d6..de9f8955 100644
 +    target_weapon->buildup_mask0 = 0;
 +    target_weapon->buildup_mask1 = 0;
 +    target_weapon->chain_pos = 0;
++    moonmod_weapon_template[item_no - 377] = static_cast<s16>(template_item_no);
++    moonmod_weapon_model[item_no - 377][0] = '\0';
 +    if (error != nullptr && error_size > 0) error[0] = '\0';
 +    return true;
 +}
@@ -3524,6 +3724,8 @@ index e6a821d6..de9f8955 100644
 +    for (int item_no = 377; item_no < 409; ++item_no) {
 +        if (COM_ITEM_INFO *common = GetCommonItemInfo(item_no)) *common = {};
 +        WeaponList[item_no - ITEM_WEAPON_START] = {};
++        moonmod_weapon_template[item_no - 377] = -1;
++        moonmod_weapon_model[item_no - 377][0] = '\0';
 +    }
 +}
 +
@@ -3931,6 +4133,102 @@ index cc341f43..ca9f1013 100644
 +    labels[5].Set("DUNGEON+ TIER "+std::to_string(tier)+"   {square}/{triangle} TIER"); labels[5].Draw(110,52);
 +}
 +}
+diff --git a/port/src/menu_misc.cpp b/port/src/menu_misc.cpp
+index f5e2c440..d7431577 100644
+--- a/port/src/menu_misc.cpp
++++ b/port/src/menu_misc.cpp
+@@ -34,6 +34,12 @@
+ #include "weaponeffect.hpp"
+ #include "weaponlevelup.hpp"
+ 
++#include <map>
++#include <string>
++#include <vector>
++
++#include "moonmod/native_resource_overrides.hpp"
++
+ // Retail's EnterWeaponModel keeps the address of each weapon's .chr in MenuWeaponModelData, an int
+ // table, and WeaponModelBuildFunc and DngWeaponEquipModelBuild read its entries back as u_int *,
+ // eight bytes at a four-byte stride. The three keep the addresses in a table of pointers instead.
+@@ -44,12 +50,68 @@
+ 
+ namespace {
+ 
+-u_int *weapon_model_files[42];
++// Retail has 42 weapons a character; the port's registered weapons (items 377-408) count on from the character's
++// first weapon too, so a kind reaches 408 - the lowest first weapon. Any other index reads an empty entry.
++constexpr int kWeaponModelKinds = 160;
++u_int *weapon_model_files[kWeaponModelKinds];
++u_int *no_weapon_model;
+ 
+ u_int **GetMenuWeaponModelData(int index) {
++    if (index < 0 || index >= kWeaponModelKinds) {
++        no_weapon_model = NULL;
++        return &no_weapon_model;
++    }
+     return &weapon_model_files[index];
+ }
+ 
++// A registered weapon's own model is not in the menu's weapon pack: it is read from the mod's
++// commenu/weapon/<stem>.chr override and kept here until the menu asks again.
++std::map<int, std::vector<u_long128>> mod_weapon_models;
++
++u_int *LoadModWeaponModel(int item_no, const char *chr) {
++    std::string path = std::string("commenu/weapon/") + chr;
++    const auto size = moonmod::NativeResourceOverrideSize(path);
++    if (!size || *size == 0 || *size > (2u << 20)) {
++        return NULL;
++    }
++    std::vector<u_long128> &buffer = mod_weapon_models[item_no];
++    buffer.assign((*size + 2048) / sizeof(u_long128) + 1, u_long128{});
++    int read = 0;
++    if (!LoadFile2(path.data(), buffer.data(), &read, 0) || read <= 0) {
++        mod_weapon_models.erase(item_no);
++        return NULL;
++    }
++    return (u_int *) buffer.data();
++}
++
++// The models of the registered weapons the character carries: its own, or its template's from the pack.
++void EnterModWeaponModels(int chara, u_int *pack) {
++    if (BtlMenuStatusPt == NULL) {
++        return;
++    }
++    const int default_no = GetDefaultWeaponNo(chara);
++    char      name[32];
++    char      cfg[32];
++    for (int slot = 0; slot < 11; slot++) {
++        const int item_no = ((CUserStatus *) BtlMenuStatusPt)->chara_weapons[chara][slot].item_no;
++        if (MoonModWeaponTemplate(item_no) < 0) {
++            continue;
++        }
++        u_int **entry = GetMenuWeaponModelData(item_no - default_no);
++        if (*entry != NULL || entry == &no_weapon_model) {
++            continue;
++        }
++        BtGetWeaponNamePath2(name, cfg, chara, item_no - default_no);
++        u_int *file = MoonModWeaponModel(item_no)[0] != '\0' ? LoadModWeaponModel(item_no, name)
++                                                               : GetPackFile(pack, name, NULL);
++        if (file == NULL) {
++            printf("weapon %d: model %s not found\n", item_no, name);
++            continue;
++        }
++        *entry = file;
++    }
++}
++
+ void InitMenuWeaponModelData() {
+     memset(MenuWeaponModelData, 0, sizeof(MenuWeaponModelData));
+     memset(weapon_model_files, 0, sizeof(weapon_model_files));
+@@ -139,6 +201,8 @@ PORT_OVERRIDE int EnterWeaponModel(int chara, int texture_block, int weapon_slot
+                 }
+             }
+ 
++            EnterModWeaponModels(chara, (u_int *) pack->buffer);
++
+             u_long128 *build;
+ 
+             if (effect != NULL) {
 diff --git a/port/src/modmodel_port.cpp b/port/src/modmodel_port.cpp
 new file mode 100644
 index 00000000..e5ab00b2
@@ -5330,10 +5628,10 @@ index 5e4e17ed..4f573899 100644
          if (drawn && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..82eabda9
+index 00000000..d9fb1a59
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,482 @@
+@@ -0,0 +1,483 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5420,7 +5718,7 @@ index 00000000..82eabda9
 +    {"georama.request_set", "georama", "request_set", "simulation", "game.write", "Set a saved native Georama request's completion state."},
 +    {"georama.request_known_set", "georama", "request_known_set", "simulation", "game.write", "Set whether a saved native Georama request is known to the player."},
 +    {"georama.condition_set", "georama", "condition_set", "simulation", "game.write", "Set whether a saved native Georama analysis condition is met."},
-+    {"georama.register", "georama", "register", "content", "content.register", "Register a data-only Georama piece variant inheriting native model and placement rules."},
++    {"georama.register", "georama", "register", "content", "content.register", "Register a Georama piece variant from a native template, optionally with its own model and footprint cells."},
 +    {"georama.place", "georama", "place", "simulation", "game.write", "Place a registered georama piece through native placement rules."},
 +    {"georama.remove", "georama", "remove", "simulation", "game.write", "Remove a placed georama piece through native rules."},
 +    {"georama.river_set", "georama", "river_set", "simulation", "game.write", "Set or clear one cell in a saved town's native river grid."},
@@ -5450,7 +5748,7 @@ index 00000000..82eabda9
 +    {"scripts.unregister_function", "scripts", "unregister_function", "content", "content.register", "Remove a callable function owned by this mod."},
 +    {"items.list", "items", "list", "any", "game.read", "List built-in and registered mod item definitions."},
 +    {"items.get", "items", "get", "any", "game.read", "Read one item definition by stable id."},
-+    {"items.register", "items", "register", "content", "content.register", "Register a data-defined item without replacing a game asset."},
++    {"items.register", "items", "register", "content", "content.register", "Register a data-defined item, optionally with its own menu icon."},
 +    {"items.give", "items", "give", "simulation", "game.write", "Give a built-in or registered item to an inventory."},
 +    {"items.remove", "items", "remove", "simulation", "game.write", "Remove a quantity of an item from an inventory."},
 +    {"items.use", "items", "use", "simulation", "game.write", "Use an owned item through validated native item rules."},
@@ -5466,7 +5764,7 @@ index 00000000..82eabda9
 +    {"weapons.list", "weapons", "list", "any", "game.read", "List built-in and registered weapon definitions."},
 +    {"weapons.get", "weapons", "get", "any", "game.read", "Read a weapon definition and current state."},
 +    {"weapons.definition_set", "weapons", "definition_set", "content", "content.register", "Apply an owner-scoped override to a built-in Chronicle weapon definition; Chronicle restores the original data when that owner unloads."},
-+    {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon and supported behavior."},
++    {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon, optionally with its own model and menu icon."},
 +    {"weapons.give", "weapons", "give", "simulation", "game.write", "Give a native or registered weapon to a compatible character."},
 +    {"weapons.equip", "weapons", "equip", "simulation", "game.write", "Equip a weapon through the game's equipment rules."},
 +    {"weapons.upgrade", "weapons", "upgrade", "simulation", "game.write", "Upgrade a weapon through supported progression rules."},
@@ -5489,7 +5787,7 @@ index 00000000..82eabda9
 +    {"inventions.craft", "inventions", "craft", "simulation", "game.write", "Craft an unlocked native or mod-registered invention through native inventory and material rules."},
 +    {"characters.list", "characters", "list", "any", "game.read", "List character definitions and visible instances."},
 +    {"characters.get", "characters", "get", "any", "game.read", "Read character stats, state, and stable handle."},
-+    {"characters.register", "characters", "register", "content", "content.register", "Register a data-defined character or enemy."},
++    {"characters.register", "characters", "register", "content", "content.register", "Register a data-defined enemy or town villager (kind = 'npc')."},
 +    {"characters.spawn", "characters", "spawn", "simulation", "game.write", "Spawn a registered character or enemy."},
 +    {"quests.get", "quests", "get", "any", "game.read", "Read this mod's quest definitions and objective progress."},
 +    {"quests.register", "quests", "register", "content", "content.register", "Register namespaced quest objectives and optional currency, item, or weapon rewards."},
@@ -5611,6 +5909,7 @@ index 00000000..82eabda9
 +    {"game.georama.river_changed", "georama", "chronicle-two", "A Chronicle Two river cell changed."},
 +    {"game.georama.piece_placed", "georama", "both", "A Georama piece was placed."},
 +    {"game.georama.piece_removed", "georama", "both", "A Georama piece was removed."},
++    {"game.npc.talk", "characters", "chronicle", "The player pressed talk at a town villager the mod registered (characters.register kind = 'npc') that has no native talk event."},
 +    {"quests.started", "quests", "both", "A registered quest became active."},
 +    {"quests.objective_advanced", "quests", "both", "A quest objective advanced."},
 +    {"quests.completed", "quests", "both", "All objectives in a quest are complete."},
@@ -6352,10 +6651,10 @@ index 00000000..f92408e6
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..ed96c6a8
+index 00000000..665b9d2f
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9291 @@
+@@ -0,0 +1,9500 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
@@ -6382,6 +6681,7 @@ index 00000000..ed96c6a8
 +#include <vector>
 +
 +#include "itemdata.hpp"
++#include "item_icon_override.hpp"
 +#include "dataread_port.hpp"
 +#include "userstatus.hpp"
 +#include "menu_inventory.hpp"
@@ -6714,6 +7014,7 @@ index 00000000..ed96c6a8
 +    int effect_amount = 0;
 +    std::string effect_status;
 +    int native_item_no = -1;
++    std::string icon;
 +};
 +
 +struct ModWeapon {
@@ -6727,6 +7028,8 @@ index 00000000..ed96c6a8
 +    int attack_max = -1;
 +    int magic_max = -1;
 +    int native_item_no = -1;
++    std::string model;
++    std::string icon;
 +};
 +
 +struct ModCharacter {
@@ -6800,6 +7103,21 @@ index 00000000..ed96c6a8
 +    std::vector<ModDungeonFloor> floors;
 +};
 +
++// A town villager a mod added (characters.register kind = "npc"); native entry `index` of editloop.hpp's table.
++struct ModNpc {
++    std::string id;
++    std::string owner;
++    std::string name;
++    int town_id = 0;
++    std::string model;
++    std::array<float, 4> position{};
++    float facing_degrees = 0.0f;
++    int talk_event = 0;
++    int index = -1;
++};
++
++std::map<std::string, ModNpc, std::less<>> g_mod_npcs;
++
 +struct ModGeoramaPiece {
 +    std::string id;
 +    std::string owner;
@@ -6810,6 +7128,9 @@ index 00000000..ed96c6a8
 +    int native_part_id = -1;
 +    std::string model_scene;
 +    std::string model_part;
++    int footprint_width = 0;
++    int footprint_height = 0;
++    std::vector<int> footprint_cells;
 +};
 +
 +struct ModLocation {
@@ -6994,6 +7315,26 @@ index 00000000..ed96c6a8
 +        if (character.model == stem) return true;
 +    }
 +    return std::ranges::any_of(g_mod_models, [stem](const auto &entry) { return entry.second.model == stem; });
++}
++
++// An optional asset stem a registered item or weapon names (`model`, `icon`): the mod must own the native resource
++// override at <folder>/<stem>.<extension>. Empty stem when the field is absent.
++bool ReadOwnedAssetStem(const Json &definition, const char *key, std::string_view mod_id, std::string_view folder,
++                        std::string_view extension, std::string &stem, std::string &error) {
++    stem.clear();
++    const auto field = definition.find(key);
++    if (field == definition.end()) return true;
++    if (!field->is_string() || !NativeMonsterAssetStem(field->get_ref<const std::string &>())) {
++        error = std::string(key) + " must be a lowercase asset stem of 1-15 letters, digits, '_' or '-'";
++        return false;
++    }
++    stem = field->get<std::string>();
++    const std::string game_path = std::string(folder) + "/" + stem + "." + std::string(extension);
++    if (!NativeMonsterAssetReady(mod_id, game_path)) {
++        error = std::string(key) + " requires this mod to own a 1 byte through 2 MiB resources.override for " + game_path;
++        return false;
++    }
++    return true;
 +}
 +
 +bool QualifyModContentId(std::string_view mod_id, std::string_view local_id, std::string &qualified_id,
@@ -7396,11 +7737,104 @@ index 00000000..ed96c6a8
 +    return {ApiCallStatus::Ok, CharacterDefinitionJson(*status, character_id, party_size), {}};
 +}
 +
++Json ModNpcJson(const ModNpc &npc) {
++    const int slot = ChronicleModVillagerSlot(npc.index);
++    return {{"id", npc.id}, {"kind", "npc"}, {"name", npc.name}, {"owner", npc.owner}, {"town_id", npc.town_id},
++            {"model", npc.model}, {"game_path", "gedit/e0" + std::to_string(npc.town_id + 1) + "/chara/" + npc.model + ".chr"},
++            {"position", {{"x", npc.position[0]}, {"y", npc.position[1]}, {"z", npc.position[2]}}},
++            {"facing", npc.facing_degrees}, {"talk_event", npc.talk_event == 0 ? Json(nullptr) : Json(npc.talk_event)},
++            {"in_town", slot >= 0}, {"villager_slot", slot < 0 ? Json(nullptr) : Json(slot)}, {"status", "registered"}};
++}
++
++ApiCallResult RegisterNpc(std::string_view mod_id, const Json &definition) {
++    for (auto field = definition.begin(); field != definition.end(); ++field) {
++        if (field.key() != "id" && field.key() != "kind" && field.key() != "name" && field.key() != "town_id" &&
++            field.key() != "model" && field.key() != "position" && field.key() != "facing" &&
++            field.key() != "talk_event") {
++            return Invalid("npc definitions accept only id, kind, name, town_id, model, position, facing, and talk_event");
++        }
++    }
++    const auto id_it = definition.find("id");
++    const auto name_it = definition.find("name");
++    const auto model_it = definition.find("model");
++    const auto position_it = definition.find("position");
++    if (id_it == definition.end() || !id_it->is_string() || name_it == definition.end() || !name_it->is_string() ||
++        model_it == definition.end() || !model_it->is_string() || position_it == definition.end()) {
++        return Invalid("npc definition requires string id, name and model fields and a position");
++    }
++    std::string qualified_id;
++    if (!QualifyModContentId(mod_id, id_it->get_ref<const std::string &>(), qualified_id, "npc")) {
++        return Invalid("npc id must be local or use this mod's namespace and safe identifier characters");
++    }
++    const std::string &name = name_it->get_ref<const std::string &>();
++    if (name.empty() || name.size() > 63 || name.find('\0') != std::string::npos) {
++        return Invalid("npc name must contain 1-63 bytes");
++    }
++    int town_id = -1;
++    if (!ReadBoundedInt(definition, "town_id", 0, TOWN_COUNT - 1, town_id)) {
++        return Invalid("town_id must be a Georama town from 0 through 4");
++    }
++    const std::string &model = model_it->get_ref<const std::string &>();
++    if (model.empty() || model.size() > 31 ||
++        !std::ranges::all_of(model, [](unsigned char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; })) {
++        return Invalid("model must be a villager model stem of 1-31 lowercase letters, digits or '_'");
++    }
++    const std::string game_path = "gedit/e0" + std::to_string(town_id + 1) + "/chara/" + model + ".chr";
++    if (!NativeMonsterAssetReady(mod_id, game_path) && !NativeDataFileExists(game_path)) {
++        return Failed("model must be a villager model in that town (" + game_path +
++                      ") or this mod's own 1 byte through 2 MiB resources.override for it");
++    }
++    std::array<float, 4> position{};
++    if (!ReadVector3(*position_it, position, 100000.0f)) return Invalid("position must be {x, y, z} within 100000");
++    double facing = 0.0;
++    if (const auto facing_it = definition.find("facing"); facing_it != definition.end()) {
++        if (!facing_it->is_number() || !std::isfinite(facing_it->get<double>())) return Invalid("facing must be degrees");
++        facing = facing_it->get<double>();
++    }
++    int talk_event = 0;
++    if (definition.contains("talk_event") && !ReadBoundedInt(definition, "talk_event", 1, 0xFFFF, talk_event)) {
++        return Invalid("talk_event must be a native event number from 1 through 65535");
++    }
++    if (const auto existing = g_mod_npcs.find(qualified_id); existing != g_mod_npcs.end()) {
++        return Invalid("an npc with this stable id is already registered");
++    }
++    int index = -1;
++    for (int candidate = 0; candidate < CHRONICLE_MOD_VILLAGER_COUNT && index < 0; ++candidate) {
++        if (std::ranges::none_of(g_mod_npcs, [candidate](const auto &entry) { return entry.second.index == candidate; })) {
++            index = candidate;
++        }
++    }
++    if (index < 0) return Failed("Chronicle supports up to 4 mod villagers (the free villager slots)");
++    const float facing_radians = static_cast<float>(facing * 3.14159265358979323846 / 180.0);
++    if (!SetChronicleModVillager(index, town_id, model.c_str(), position.data(), facing_radians, talk_event)) {
++        return Failed("the native villager table rejected this npc");
++    }
++    ModNpc npc{qualified_id, std::string(mod_id), name, town_id, model, position, static_cast<float>(facing), talk_event, index};
++    auto [entry, inserted] = g_mod_npcs.emplace(qualified_id, std::move(npc));
++    (void)inserted;
++    return {ApiCallStatus::Ok, ModNpcJson(entry->second), {}};
++}
++
++void UnloadModNpcs(std::string_view mod_id) {
++    for (auto it = g_mod_npcs.begin(); it != g_mod_npcs.end();) {
++        if (mod_id.empty() || it->second.owner == mod_id) {
++            SetChronicleModVillager(it->second.index, 0, "", nullptr, 0.0f, 0);
++            it = g_mod_npcs.erase(it);
++        } else {
++            ++it;
++        }
++    }
++}
++
 +ApiCallResult RegisterCharacter(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected one data-defined enemy definition object");
 +    }
 +    const Json &definition = args[0];
++    if (const auto kind = definition.find("kind"); kind != definition.end() && kind->is_string() &&
++                                                   kind->get_ref<const std::string &>() == "npc") {
++        return RegisterNpc(mod_id, definition);
++    }
 +    for (auto field = definition.begin(); field != definition.end(); ++field) {
 +        if (field.key() != "id" && field.key() != "kind" && field.key() != "name" &&
 +            field.key() != "template_monster_id" && field.key() != "stats" && field.key() != "assets" &&
@@ -7432,7 +7866,7 @@ index 00000000..ed96c6a8
 +    }
 +    const auto kind = definition.find("kind");
 +    if (kind != definition.end() && (!kind->is_string() || kind->get<std::string>() != "enemy")) {
-+        return Invalid("Chronicle data-defined characters currently support kind = 'enemy'");
++        return Invalid("Chronicle data-defined characters support kind = 'enemy' or 'npc'");
 +    }
 +    const auto assets = definition.find("assets");
 +    if (assets != definition.end() &&
@@ -8879,7 +9313,9 @@ index 00000000..ed96c6a8
 +            mod_pieces.push_back({{"id", id}, {"name", piece.name},
 +                                  {"template_part_id", piece.template_part_id},
 +                                  {"part_id", piece.native_part_id}, {"stock", piece.stock},
-+                                  {"loaded", loaded}, {"available_built", loaded ? std::max(0, plot->stock - plot->placed) : 0}});
++                                  {"loaded", loaded}, {"available_built", loaded ? std::max(0, plot->stock - plot->placed) : 0},
++                                  {"width_cells", loaded ? Json(pEditGround->plot_parts[piece.native_part_id].GetWidth()) : Json(nullptr)},
++                                  {"height_cells", loaded ? Json(pEditGround->plot_parts[piece.native_part_id].GetHeight()) : Json(nullptr)}});
 +        }
 +        result["placement_areas"] = std::move(placement_areas);
 +        result["native_pieces"] = std::move(native_pieces);
@@ -9100,7 +9536,11 @@ index 00000000..ed96c6a8
 +    return {{"id", piece.id}, {"name", piece.name}, {"template_part_id", piece.template_part_id},
 +            {"native_part_id", piece.native_part_id}, {"town_id", piece.town_id < 0 ? Json(nullptr) : Json(piece.town_id)},
 +            {"stock", piece.stock}, {"mod_owned", true}, {"status", registered ? "registered" : "unavailable"},
-+            {"materialized", registered && native_piece.materialized != 0}, {"assets", Json::array()}};
++            {"materialized", registered && native_piece.materialized != 0}, {"assets", Json::array()},
++            {"footprint", piece.footprint_width == 0
++                              ? Json(nullptr)
++                              : Json{{"width", piece.footprint_width}, {"height", piece.footprint_height},
++                                     {"cells", piece.footprint_cells.empty() ? Json(nullptr) : Json(piece.footprint_cells)}}}};
 +}
 +
 +ApiCallResult RegisterGeoramaPiece(std::string_view mod_id, const std::filesystem::path &save_root,
@@ -9111,8 +9551,9 @@ index 00000000..ed96c6a8
 +    const Json &definition = args[0];
 +    for (auto field = definition.begin(); field != definition.end(); ++field) {
 +        if (field.key() != "id" && field.key() != "name" && field.key() != "template_part_id" &&
-+            field.key() != "town_id" && field.key() != "stock" && field.key() != "assets" && field.key() != "model") {
-+            return Invalid("Georama piece definitions accept only id, name, template_part_id, town_id, stock, model, and empty assets");
++            field.key() != "town_id" && field.key() != "stock" && field.key() != "assets" && field.key() != "model" &&
++            field.key() != "footprint") {
++            return Invalid("Georama piece definitions accept only id, name, template_part_id, town_id, stock, model, footprint, and empty assets");
 +        }
 +    }
 +    const auto id_it = definition.find("id");
@@ -9144,6 +9585,32 @@ index 00000000..ed96c6a8
 +        }
 +        if (mod_scene && !NativeResourceOverrideOwnedBy(mod_id, model_scene)) {
 +            return Failed("a gedit/mod/ scene must be this mod's own resource override");
++        }
++    }
++    int footprint_width = 0;
++    int footprint_height = 0;
++    std::vector<int> footprint_cells;
++    if (const auto footprint_it = definition.find("footprint"); footprint_it != definition.end()) {
++        if (!footprint_it->is_object() || !ReadBoundedInt(*footprint_it, "width", 1, 32, footprint_width) ||
++            !ReadBoundedInt(*footprint_it, "height", 1, 32, footprint_height) ||
++            std::ranges::any_of(footprint_it->items(), [](const auto &field) {
++                return field.key() != "width" && field.key() != "height" && field.key() != "cells";
++            })) {
++            return Invalid("footprint must be {width = 1-32, height = 1-32, cells = optional width*height values 0-255}");
++        }
++        if (const auto cells_it = footprint_it->find("cells"); cells_it != footprint_it->end()) {
++            if (!cells_it->is_array() || cells_it->size() != static_cast<std::size_t>(footprint_width * footprint_height)) {
++                return Invalid("footprint.cells must hold width*height values, row by row");
++            }
++            for (const Json &cell : *cells_it) {
++                if (!cell.is_number_integer() || cell.get<std::int64_t>() < 0 || cell.get<std::int64_t>() > 255) {
++                    return Invalid("footprint.cells values must be integers from 0 through 255");
++                }
++                footprint_cells.push_back(cell.get<int>());
++            }
++            if (std::ranges::all_of(footprint_cells, [](int cell) { return cell == 0; })) {
++                return Invalid("footprint.cells must mark at least one cell as part of the piece");
++            }
 +        }
 +    }
 +    int town_id = -1;
@@ -9184,7 +9651,8 @@ index 00000000..ed96c6a8
 +    if (existing != g_mod_georama_pieces.end()) {
 +        const ModGeoramaPiece &piece = existing->second;
 +        if (piece.owner != mod_id || piece.name != display_name || piece.template_part_id != template_part_id ||
-+            piece.town_id != town_id || piece.stock != stock) {
++            piece.town_id != town_id || piece.stock != stock || piece.footprint_width != footprint_width ||
++            piece.footprint_height != footprint_height || piece.footprint_cells != footprint_cells) {
 +            return Invalid("a registered Georama piece cannot change until its owning mod is unloaded");
 +        }
 +        return {ApiCallStatus::Ok, ModGeoramaPieceJson(piece), {}};
@@ -9209,6 +9677,12 @@ index 00000000..ed96c6a8
 +    piece.model_scene = model_scene;
 +    piece.model_part = model_part;
 +    SetChronicleModGeoramaPieceModel(native_part_id, model_scene.c_str(), model_part.c_str());
++    piece.footprint_width = footprint_width;
++    piece.footprint_height = footprint_height;
++    piece.footprint_cells = footprint_cells;
++    std::vector<u8> native_cells(footprint_cells.begin(), footprint_cells.end());
++    SetChronicleModGeoramaPieceFootprint(native_part_id, footprint_width, footprint_height,
++                                         native_cells.empty() ? nullptr : native_cells.data());
 +    auto [registered_piece, inserted] = g_mod_georama_pieces.emplace(qualified_id, std::move(piece));
 +    (void)inserted;
 +    g_mod_georama_piece_by_native_id[native_part_id] = qualified_id;
@@ -9498,6 +9972,7 @@ index 00000000..ed96c6a8
 +    for (const auto &[id, character] : g_mod_characters) { (void)id; append("character", ModCharacterJson(character)); }
 +    for (const auto &[id, dungeon] : g_mod_dungeons) { (void)id; append("dungeon", ModDungeonJson(dungeon)); }
 +    for (const auto &[id, piece] : g_mod_georama_pieces) { (void)id; append("georama_piece", ModGeoramaPieceJson(piece)); }
++    for (const auto &[id, npc] : g_mod_npcs) { (void)id; append("npc", ModNpcJson(npc)); }
 +    return {ApiCallStatus::Ok, {{"count", entries.size()}, {"entries", std::move(entries)}}, {}};
 +}
 +
@@ -11662,7 +12137,7 @@ index 00000000..ed96c6a8
 +    result["template_item"] = item.template_item;
 +    result["status"] = "registered";
 +    result["mod_owned"] = true;
-+    result["assets"] = Json::object();
++    result["assets"] = item.icon.empty() ? Json::object() : Json{{"icon", "icons/" + item.icon + ".png"}};
 +    return result;
 +}
 +
@@ -11703,6 +12178,10 @@ index 00000000..ed96c6a8
 +    const auto assets = definition.find("assets");
 +    if (assets != definition.end() && ((!assets->is_object() && !assets->is_array()) || !assets->empty())) {
 +        return Invalid("Chronicle item registration inherits vanilla assets; asset overrides are not accepted");
++    }
++    std::string icon_stem;
++    if (std::string asset_error; !ReadOwnedAssetStem(definition, "icon", mod_id, "icons", "png", icon_stem, asset_error)) {
++        return Invalid(std::move(asset_error));
 +    }
 +    int template_item_no = ITEM_BREAD;
 +    const auto template_it = definition.find("template_item");
@@ -11794,8 +12273,9 @@ index 00000000..ed96c6a8
 +    data->vol_range = 0;
 +    data->stack_kind = template_data->stack_kind;
 +
++    SetItemIconOverride(native_item_no, icon_stem.empty() ? "" : ("icons/" + icon_stem + ".png").c_str());
 +    ModItem item{qualified_id, std::string(mod_id), display_name, template_item_no, effect_name, amount,
-+                 effect_status, native_item_no};
++                 effect_status, native_item_no, icon_stem};
 +    g_mod_items[qualified_id] = std::move(item);
 +    g_mod_item_by_native_id[native_item_no] = qualified_id;
 +    return {ApiCallStatus::Ok, ModItemJson(g_mod_items.at(qualified_id)), {}};
@@ -12101,7 +12581,10 @@ index 00000000..ed96c6a8
 +    result["template_weapon"] = "chronicle:weapon:" + std::to_string(weapon.template_weapon);
 +    result["mod_owned"] = true;
 +    result["owner_mod"] = weapon.owner_mod;
-+    result["assets"] = {{"source", "native_template"}, {"overridden", false}};
++    result["assets"] = {{"source", weapon.model.empty() ? "native_template" : "package_override"},
++                        {"overridden", !weapon.model.empty() || !weapon.icon.empty()},
++                        {"model", weapon.model.empty() ? Json(nullptr) : Json("commenu/weapon/" + weapon.model + ".chr")},
++                        {"icon", weapon.icon.empty() ? Json(nullptr) : Json("icons/" + weapon.icon + ".png")}};
 +    result["status"] = "registered";
 +    return result;
 +}
@@ -12154,7 +12637,7 @@ index 00000000..ed96c6a8
 +    for (auto it = definition.begin(); it != definition.end(); ++it) {
 +        const std::string_view key(it.key());
 +        if (key != "id" && key != "name" && key != "kind" && key != "template_weapon" && key != "owner" &&
-+            key != "stats" && key != "stat_caps" && key != "assets") {
++            key != "stats" && key != "stat_caps" && key != "assets" && key != "model" && key != "icon") {
 +            return Invalid("weapon definition contains an unsupported field: " + it.key());
 +        }
 +    }
@@ -12243,12 +12726,24 @@ index 00000000..ed96c6a8
 +        }
 +    }
 +
++    std::string model_stem;
++    std::string icon_stem;
++    std::string asset_error;
++    if (!ReadOwnedAssetStem(definition, "model", mod_id, "commenu/weapon", "chr", model_stem, asset_error) ||
++        !ReadOwnedAssetStem(definition, "icon", mod_id, "icons", "png", icon_stem, asset_error)) {
++        return Invalid(std::move(asset_error));
++    }
++    if (!model_stem.empty() && model_stem.size() == 6 && model_stem[0] == 'c' && model_stem[3] == 'w') {
++        return Invalid("model must not be a native weapon model name (cNNwNN); give the new model a stem of its own");
++    }
++
 +    const auto current = g_mod_weapons.find(qualified_id);
 +    if (current != g_mod_weapons.end()) {
 +        const ModWeapon &old = current->second;
 +        if (old.owner_mod != mod_id) return Invalid("a weapon with this stable id is already owned by another mod");
 +        if (old.name != display_name || old.template_weapon != template_item_no || old.owner_character != owner_character ||
-+            old.attack != attack || old.durability != durability || old.attack_max != attack_max || old.magic_max != magic_max) {
++            old.attack != attack || old.durability != durability || old.attack_max != attack_max || old.magic_max != magic_max ||
++            old.model != model_stem || old.icon != icon_stem) {
 +            return Invalid("a registered weapon definition cannot be changed until its owning mod is unloaded");
 +        }
 +        return {ApiCallStatus::Ok, ModWeaponJson(old, false), {}};
@@ -12270,8 +12765,10 @@ index 00000000..ed96c6a8
 +                               owner_character, registration_error, sizeof(registration_error))) {
 +        return Failed(registration_error[0] == '\0' ? "native weapon registration failed" : registration_error);
 +    }
++    SetMoonModWeaponModel(native_item_no, model_stem.c_str());
++    SetItemIconOverride(native_item_no, icon_stem.empty() ? "" : ("icons/" + icon_stem + ".png").c_str());
 +    ModWeapon weapon{qualified_id, std::string(mod_id), display_name, template_item_no, owner_character,
-+                     attack, durability, attack_max, magic_max, native_item_no};
++                     attack, durability, attack_max, magic_max, native_item_no, model_stem, icon_stem};
 +    g_mod_weapons.emplace(qualified_id, std::move(weapon));
 +    g_mod_weapon_by_native_id[native_item_no] = qualified_id;
 +    return {ApiCallStatus::Ok, ModWeaponJson(g_mod_weapons.at(qualified_id), false), {}};
@@ -15513,6 +16010,7 @@ index 00000000..ed96c6a8
 +        RefreshChronicleWheelMode();
 +        UnloadChronicleAnimations(mod_id);
 +        UnloadModText(mod_id);
++        UnloadModNpcs(mod_id);
 +        g_combat_damage_formulas.RemoveOwner(mod_id);
 +        g_player_damage_formulas.RemoveOwner(mod_id);
 +        RestoreWeaponDefinitionsByOwner(mod_id);
@@ -15574,7 +16072,17 @@ index 00000000..ed96c6a8
 +    ResetMoonModWeaponSlotsForTests();
 +}
 +
++void ChronicleModVillagerTalked(int index) {
++    const auto npc = std::ranges::find_if(g_mod_npcs, [index](const auto &entry) { return entry.second.index == index; });
++    if (npc == g_mod_npcs.end()) return;
++    SharedRuntime().QueueEvent("game.npc.talk", {{"id", npc->second.id}, {"name", npc->second.name},
++                                                 {"town_id", npc->second.town_id}, {"source_mod", npc->second.owner},
++                                                 {"frame", SharedRuntime().Frame()}});
++}
++
 +void ResetChronicleCharactersForTests() {
++    UnloadModNpcs({});
++    ResetChronicleModVillagersForTests();
 +    RestoreChronicleModelReplacements();
 +    g_mod_animations.clear();
 +    g_mod_animation_plays.clear();
@@ -23997,7 +24505,7 @@ index ee8b9d59..2a720439 100644
 +    PASS_REGULAR_EXPRESSION "MOONFACTORY_PREFLIGHT_OK"
 +    TIMEOUT 120 RUN_SERIAL TRUE LABELS gpu)
 diff --git a/port/src/tests/data_read_test.cpp b/port/src/tests/data_read_test.cpp
-index cb5dea09..da51d4aa 100644
+index cb5dea09..cb0cfd06 100644
 --- a/port/src/tests/data_read_test.cpp
 +++ b/port/src/tests/data_read_test.cpp
 @@ -6,11 +6,13 @@
@@ -24014,7 +24522,7 @@ index cb5dea09..da51d4aa 100644
  #include "platform_fixture.hpp"
  
  using namespace datafix;
-@@ -97,6 +99,224 @@ TEST(DataRead, Loadfile2ReadsExactSizeAndZeroFills) {
+@@ -97,6 +99,255 @@ TEST(DataRead, Loadfile2ReadsExactSizeAndZeroFills) {
      fs::remove_all(dir);
  }
  
@@ -24059,6 +24567,37 @@ index cb5dea09..da51d4aa 100644
 +    size = 99;
 +    EXPECT_EQ(LoadFile2(Mutable("dun/monstor/too_large.chr"), buffer, &size, 0), 0);
 +    EXPECT_EQ(size, 0);
++    fs::remove_all(dir);
++}
++
++TEST(DataRead, NativeResourceOverrideCanSupplyNewWeaponAndVillagerModels) {
++    fs::path dir = InstallStandardData("read_virtual_weapon_villager");
++    const fs::path package = dir / "mods" / "test.virtual-weapon";
++    const Bytes model = Pattern(1500, 0x63);
++    WriteBytes(package / "resources" / "model.chr", model);
++    InitCDFile();
++    moonmod::ResetNativeResourceOverridesForTests();
++    struct ResetOverrides {
++        ~ResetOverrides() { moonmod::ResetNativeResourceOverridesForTests(); }
++    } reset;
++    for (const char *game_path : {"commenu/weapon/annexmdl.chr", "gedit/e01/chara/moonnpc.chr", "gedit/e01/moonnpc.chr"}) {
++        ASSERT_EQ(moonmod::RegisterNativeResourceOverride(
++                      "test.virtual-weapon", package,
++                      moonmod::Json::array({{{"path", "resources/model.chr"}, {"game_path", game_path}}})).status,
++                  moonmod::ApiCallStatus::Ok);
++    }
++    int size = 0;
++    Clear();
++    ASSERT_EQ(LoadFile2(Mutable("commenu/weapon/annexmdl.chr"), buffer, &size, 0), 1);
++    EXPECT_EQ(size, static_cast<int>(model.size()));
++    EXPECT_TRUE(Equals(buffer, model));
++    Clear();
++    ASSERT_EQ(LoadFile2(Mutable("gedit/e01/chara/moonnpc.chr"), buffer, &size, 0), 1);
++    EXPECT_EQ(size, static_cast<int>(model.size()));
++    // Only those two folders take a new name.
++    size = 99;
++    EXPECT_EQ(LoadFile2(Mutable("gedit/e01/moonnpc.chr"), buffer, &size, 0), 0);
++    EXPECT_FALSE(NativeDataFileExists("gedit/e01/chara/moonnpc.chr"));
 +    fs::remove_all(dir);
 +}
 +
@@ -24239,7 +24778,7 @@ index cb5dea09..da51d4aa 100644
  TEST(DataRead, LanguagesFromTheExtraction) {
      fs::path dir = InstallStandardData("read_languages");
      ASSERT_TRUE((DataLanguages() == std::vector<s32>{2, 3, 4, 5, 6}));
-@@ -266,6 +486,9 @@ TEST(DataRead, PathsFromArguments) {
+@@ -266,6 +517,9 @@ TEST(DataRead, PathsFromArguments) {
  
  TEST(DataRead, PathsFromEnvironment) {
      fs::path dir = TempDir("paths_env");
@@ -24249,7 +24788,7 @@ index cb5dea09..da51d4aa 100644
      dc::test::SetEnv("DC_DATA", (dir / "env_data"), 1);
      dc::test::SetEnv("DC_SAVE", (dir / "env_save"), 1);
      ASSERT_TRUE(PathsDataRoot() == dir / "env_data");
-@@ -277,6 +500,9 @@ TEST(DataRead, PathsFromEnvironment) {
+@@ -277,6 +531,9 @@ TEST(DataRead, PathsFromEnvironment) {
  
  TEST(DataRead, PathsDefaultToWorkingDirectory) {
      fs::path dir = TempDir("paths_cwd");
@@ -26132,10 +26671,10 @@ index 00000000..b29dfad4
 +
 diff --git a/port/src/tests/moonmod_character_registration_test.cpp b/port/src/tests/moonmod_character_registration_test.cpp
 new file mode 100644
-index 00000000..4afbbf69
+index 00000000..ea096e01
 --- /dev/null
 +++ b/port/src/tests/moonmod_character_registration_test.cpp
-@@ -0,0 +1,649 @@
+@@ -0,0 +1,718 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -26143,9 +26682,11 @@ index 00000000..4afbbf69
 +#include <filesystem>
 +#include <fstream>
 +#include <memory>
++#include <cstdio>
 +
 +#include "dun/gameloop.hpp"
 +#include "main.hpp"
++#include "editloop.hpp"
 +#include "monstorunit.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
@@ -26155,6 +26696,17 @@ index 00000000..4afbbf69
 +extern s32 mode;
 +
 +namespace {
++
++namespace fs = std::filesystem;
++
++struct TempRoot {
++    fs::path path = fs::temp_directory_path() /
++                    ("moonmod-npc-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    ~TempRoot() {
++        std::error_code ignored;
++        fs::remove_all(path, ignored);
++    }
++};
 +
 +struct ResetContentRegistries {
 +    ResetContentRegistries() { Reset(); }
@@ -26784,6 +27336,62 @@ index 00000000..4afbbf69
 +    const moonmod::ApiCallResult removed = config.api_handler(owner, *content_unregister, remove_request);
 +    ASSERT_EQ(removed.status, moonmod::ApiCallStatus::Ok) << removed.message;
 +    EXPECT_EQ(GetMonstorTable(native_model_no), nullptr);
++}
++
++TEST(MoonModCharacterRegistration, RegistersTownVillagersInFreeNativeSlots) {
++    TempRoot root;
++    const fs::path package = root.path / "package";
++    fs::create_directories(package / "resources");
++    { std::ofstream(package / "resources" / "moonnpc.chr", std::ios::binary) << std::string(256, 'n'); }
++    moonmod::ResetNativeResourceOverridesForTests();
++    moonmod::ResetChronicleCharactersForTests();
++    moonmod::RuntimeConfig config;
++    config.save_root = root.path / "save";
++    moonmod::ConfigureChronicleApi(config);
++    const moonmod::ApiOperationSpec *register_operation = moonmod::FindApiOperation("characters.register");
++    ASSERT_NE(register_operation, nullptr);
++    const std::string mod_id = "test.moonmod.npc";
++    ASSERT_EQ(moonmod::RegisterNativeResourceOverride(
++                  mod_id, package, moonmod::Json::array({{{"path", "resources/moonnpc.chr"},
++                                                          {"game_path", "gedit/e02/chara/moonnpc.chr"}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    auto define = [](const char *id) {
++        return moonmod::Json::array({moonmod::Json{{"id", id}, {"kind", "npc"}, {"name", "Moon Trader"}, {"town_id", 1},
++                                                   {"model", "moonnpc"}, {"position", {{"x", 10}, {"y", 0}, {"z", -20}}},
++                                                   {"facing", 90}, {"talk_event", 300}}});
++    };
++    const auto registered = config.api_handler(mod_id, *register_operation, define("trader"));
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++    EXPECT_EQ(registered.value.at("game_path"), "gedit/e02/chara/moonnpc.chr");
++    EXPECT_FALSE(registered.value.at("in_town").get<bool>());
++    EXPECT_EQ(config.api_handler(mod_id, *register_operation, define("trader")).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++
++    // The town picks six native villagers; the mod's takes the first free slot and keeps its place.
++    VILLAGER_INFO villagers[10]{};
++    for (int slot = 0; slot < 6; ++slot) std::snprintf(villagers[slot].name, sizeof villagers[slot].name, "v%d", slot);
++    const int previous_map = NowEditMap;
++    const int previous_map_no = MapNo;
++    NowEditMap = 1;
++    MapNo = 1;
++    ChronicleAddModVillagers(villagers, nullptr);
++    EXPECT_STREQ(villagers[6].name, "moonnpc");
++    EXPECT_EQ(villagers[6].talk_event_no, 300);
++    EXPECT_EQ(villagers[6].talk_event_level, 0);
++    EXPECT_FLOAT_EQ(villagers[6].position[2], -20.0f);
++    EXPECT_EQ(ChronicleModVillagerInSlot(6), 0);
++    EXPECT_EQ(ChronicleModVillagerTalkEvent(0), 300);
++    // Another town leaves the slots alone.
++    VILLAGER_INFO other[10]{};
++    NowEditMap = 2;
++    ChronicleAddModVillagers(other, nullptr);
++    EXPECT_EQ(other[0].name[0], '\0');
++    EXPECT_EQ(ChronicleModVillagerInSlot(0), -1);
++    NowEditMap = previous_map;
++    MapNo = previous_map_no;
++
++    moonmod::ResetChronicleCharactersForTests();
++    moonmod::ResetNativeResourceOverridesForTests();
 +}
 diff --git a/port/src/tests/moonmod_combat_api_test.cpp b/port/src/tests/moonmod_combat_api_test.cpp
 new file mode 100644
@@ -28522,10 +29130,10 @@ index 00000000..7ad011e1
 +}
 diff --git a/port/src/tests/moonmod_georama_api_test.cpp b/port/src/tests/moonmod_georama_api_test.cpp
 new file mode 100644
-index 00000000..46789d1f
+index 00000000..2f7ba533
 --- /dev/null
 +++ b/port/src/tests/moonmod_georama_api_test.cpp
-@@ -0,0 +1,869 @@
+@@ -0,0 +1,976 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -29394,6 +30002,113 @@ index 00000000..46789d1f
 +    ASSERT_EQ(sparse.status, moonmod::ApiCallStatus::Ok) << sparse.message;
 +    EXPECT_EQ(sparse.value.at("native_part_id"), CHRONICLE_GEORAMA_NATIVE_PART_COUNT + 1);
 +    EXPECT_EQ(EditPartsInfo.GetNextParts(-1), CHRONICLE_GEORAMA_NATIVE_PART_COUNT + 1);
++}
++
++TEST(MoonModGeoramaApi, RegisteredPieceVariantsCanHaveTheirOwnFootprint) {
++    CSaveData *previous_save = SaveData;
++    CEditGround *previous_ground = pEditGround;
++    CEditPartsInfo previous_parts = EditPartsInfo;
++    const int previous_edit_map = NowEditMap;
++    const s32 previous_mode = mode;
++    struct Restore {
++        CEditGround *ground;
++        CSaveData *save;
++        CEditPartsInfo parts;
++        int edit_map;
++        s32 game_mode;
++        ~Restore() {
++            moonmod::ResetChronicleGeoramaForTests();
++            SaveData = save;
++            pEditGround = ground;
++            EditPartsInfo = parts;
++            NowEditMap = edit_map;
++            mode = game_mode;
++        }
++    } restore{previous_ground, previous_save, previous_parts, previous_edit_map, previous_mode};
++
++    moonmod::ResetChronicleGeoramaForTests();
++    EditPartsInfo = {};
++    EditPartsInfo.Initialize(2);
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    save->GetDngStatus()->cur_georama = 2;
++    SaveData = save.get();
++    // A 2x2 template whose filled cells are 5.
++    u8 template_cells[4] = {0, 5, 5, 5};
++    EPARTS_INFO_HEADER template_shape{};
++    template_shape.width = 2;
++    template_shape.height = 2;
++    template_shape.cell = template_cells;
++    EditPartsInfo.parts[4].width = 2;
++    EditPartsInfo.parts[4].height = 2;
++    EditPartsInfo.parts[4].header = &template_shape;
++    CMapParts templates[CHRONICLE_GEORAMA_PART_CAPACITY]{};
++    for (CMapParts &part : templates) part.handle = -1;
++    templates[4].handle = 4;
++    templates[4].parts_no = 4;
++    templates[4].subtype = MAP_PARTS_SUBTYPE_NONE;
++    templates[4].info = &EditPartsInfo.parts[4];
++    CEditGround ground{};
++    ground.map_no = 2;
++    ground.plot_parts = templates;
++    ground.parts_info = &EditPartsInfo;
++    for (CMapParts &part : ground.parts) part.handle = -1;
++    pEditGround = &ground;
++    NowEditMap = 2;
++    mode = GAME_MODE_EDIT;
++
++    TempRoot root;
++    moonmod::RuntimeConfig config;
++    config.save_root = root.path / "save";
++    moonmod::ConfigureChronicleApi(config);
++    const moonmod::ApiOperationSpec *register_piece = moonmod::FindApiOperation("georama.register");
++    ASSERT_NE(register_piece, nullptr);
++    auto define = [](const char *id, moonmod::Json footprint) {
++        return moonmod::Json::array({moonmod::Json{{"id", id}, {"name", "Long Fence"}, {"template_part_id", 4},
++                                                   {"town_id", 2}, {"footprint", std::move(footprint)}}});
++    };
++
++    // A footprint without cells fills every cell with the template's value.
++    const auto filled = config.api_handler("test.moonmod.georama", *register_piece,
++                                           define("long_fence", {{"width", 3}, {"height", 1}}));
++    ASSERT_EQ(filled.status, moonmod::ApiCallStatus::Ok) << filled.message;
++    EXPECT_EQ(filled.value.at("footprint").at("width"), 3);
++    const EDITPARTS_INFO *fence = EditPartsInfo.GetPartsInfo(filled.value.at("native_part_id").get<int>());
++    ASSERT_NE(fence, nullptr);
++    ASSERT_NE(fence->header, nullptr);
++    EXPECT_NE(fence->header, &template_shape);
++    EXPECT_EQ(fence->width, 3);
++    EXPECT_EQ(fence->height, 1);
++    EXPECT_EQ(fence->header->width, 3);
++    for (int cell = 0; cell < 3; ++cell) EXPECT_EQ(fence->header->cell[cell], 5);
++    // The template keeps its own shape.
++    EXPECT_EQ(EditPartsInfo.GetPartsInfo(4)->header, &template_shape);
++    EXPECT_EQ(EditPartsInfo.GetPartsInfo(4)->width, 2);
++
++    const auto shaped = config.api_handler("test.moonmod.georama", *register_piece,
++                                           define("corner", {{"width", 2}, {"height", 3},
++                                                             {"cells", {5, 0, 5, 0, 5, 5}}}));
++    ASSERT_EQ(shaped.status, moonmod::ApiCallStatus::Ok) << shaped.message;
++    const EDITPARTS_INFO *corner = EditPartsInfo.GetPartsInfo(shaped.value.at("native_part_id").get<int>());
++    ASSERT_NE(corner, nullptr);
++    EXPECT_EQ(corner->height, 3);
++    EXPECT_EQ(corner->header->cell[1], 0);
++    EXPECT_EQ(corner->header->cell[5], 5);
++    // Placement reads the cells through CMapParts::GetInfoData.
++    CMapParts &placed = templates[shaped.value.at("native_part_id").get<int>()];
++    placed.rot_y = 0;
++    EXPECT_EQ(placed.GetInfoData(1, 0), 0);
++    EXPECT_EQ(placed.GetInfoData(1, 2), 5);
++
++    EXPECT_EQ(config.api_handler("test.moonmod.georama", *register_piece,
++                                 define("bad_count", {{"width", 2}, {"height", 2}, {"cells", {5, 5}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(config.api_handler("test.moonmod.georama", *register_piece,
++                                 define("empty", {{"width", 1}, {"height", 1}, {"cells", {0}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(config.api_handler("test.moonmod.georama", *register_piece,
++                                 define("huge", {{"width", 33}, {"height", 1}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
 +}
 diff --git a/port/src/tests/moonmod_input_api_test.cpp b/port/src/tests/moonmod_input_api_test.cpp
 new file mode 100644
@@ -32117,10 +32832,10 @@ index 00000000..5891a907
 +
 diff --git a/port/src/tests/moonmod_weapon_api_test.cpp b/port/src/tests/moonmod_weapon_api_test.cpp
 new file mode 100644
-index 00000000..2ad26f4b
+index 00000000..ad0a7266
 --- /dev/null
 +++ b/port/src/tests/moonmod_weapon_api_test.cpp
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,607 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -32132,7 +32847,11 @@ index 00000000..2ad26f4b
 +#include <string_view>
 +#include <vector>
 +
++#include "btmisc.hpp"
++#include "dun/gameloop.hpp"
++#include "dataread.hpp"
 +#include "itemdata.hpp"
++#include "moonmod/native_resource_overrides.hpp"
 +#include "main.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/runtime.hpp"
@@ -32145,6 +32864,7 @@ index 00000000..2ad26f4b
 +namespace {
 +
 +namespace fs = std::filesystem;
++
 +
 +struct TempRoot {
 +    fs::path path = fs::temp_directory_path() /
@@ -32403,10 +33123,14 @@ index 00000000..2ad26f4b
 +    status->chara_weapons[CHARA_TOAN][0].item_no = ITEM_WEAPON_DAGGER_BROKEN;
 +    status->equipped_weapon_slot[CHARA_TOAN] = 0;
 +    mode = GAME_MODE_DUNGEON;
++    const s32 previous_dungeon = selectMapNo;
++    selectMapNo = -1; // a dungeon mode with no dungeon scene loaded
 +    const moonmod::ApiCallResult dungeon_rejected = config.api_handler(
 +        "test.moonmod.chronicle-weapons", *equip, moonmod::Json::array({selector}));
 +    EXPECT_EQ(dungeon_rejected.status, moonmod::ApiCallStatus::Failed);
 +    EXPECT_EQ(status->equipped_weapon_slot[CHARA_TOAN], 0);
++
++    selectMapNo = previous_dungeon;
 +
 +    SaveData = previous_save;
 +    mode = previous_mode;
@@ -32510,6 +33234,68 @@ index 00000000..2ad26f4b
 +    EXPECT_EQ(GetWeaponData(native_item_no)->attack, 37);
 +    moonmod::ResetChronicleWeaponsForTests();
 +    SaveData = previous_save;
++}
++
++TEST(MoonModWeaponsApi, RegisteredWeaponDrawsItsOwnModelAndIcon) {
++    TempRoot root;
++    const fs::path package = root.path / "package";
++    Write(package / "resources" / "annexmdl.chr", std::string(1024, '\x51'));
++    Write(package / "resources" / "annexicon.png", "not checked until drawn");
++    moonmod::ResetNativeResourceOverridesForTests();
++    moonmod::RuntimeConfig config;
++    config.save_root = root.path / "save";
++    moonmod::ResetChronicleWeaponsForTests();
++    moonmod::ConfigureChronicleApi(config);
++    const auto *register_weapon = moonmod::FindApiOperation("weapons.register");
++    ASSERT_NE(register_weapon, nullptr);
++    const std::string mod_id = "test.moonmod.weapon-model";
++    auto define = [](const char *id, const char *model) {
++        moonmod::Json definition{{"id", id}, {"name", "Annex"}, {"template_weapon", ITEM_WEAPON_DAGGER}, {"owner", "toan"}};
++        if (model != nullptr) definition["model"] = model;
++        return moonmod::Json::array({definition});
++    };
++
++    // The model and icon must be this mod's own overrides.
++    EXPECT_EQ(config.api_handler(mod_id, *register_weapon, define("annex", "annexmdl")).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    for (const auto &[resource, game_path] : {std::pair{"resources/annexmdl.chr", "commenu/weapon/annexmdl.chr"},
++                                              std::pair{"resources/annexicon.png", "icons/annexicon.png"}}) {
++        ASSERT_EQ(moonmod::RegisterNativeResourceOverride(
++                      mod_id, package, moonmod::Json::array({{{"path", resource}, {"game_path", game_path}}})).status,
++                  moonmod::ApiCallStatus::Ok);
++    }
++    EXPECT_EQ(config.api_handler(mod_id, *register_weapon, define("native", "c01w05")).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++
++    moonmod::Json with_icon = define("annex", "annexmdl");
++    with_icon[0]["icon"] = "annexicon";
++    const auto registered = config.api_handler(mod_id, *register_weapon, with_icon);
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++    const int item_no = registered.value.value("native_item_no", -1);
++    EXPECT_EQ(registered.value.at("assets").value("model", ""), "commenu/weapon/annexmdl.chr");
++    EXPECT_EQ(registered.value.at("assets").value("icon", ""), "icons/annexicon.png");
++    EXPECT_EQ(MoonModWeaponTemplate(item_no), ITEM_WEAPON_DAGGER);
++
++    // Every loader names the weapon's files through BtGetWeaponNamePath2/3: the mod's model, the template's .cfg.
++    char chr[64] = {};
++    char cfg[64] = {};
++    BtGetWeaponNamePath3(chr, cfg, item_no);
++    EXPECT_STREQ(chr, "annexmdl.chr");
++    char template_chr[64] = {};
++    char template_cfg[64] = {};
++    BtGetWeaponNamePath3(template_chr, template_cfg, ITEM_WEAPON_DAGGER);
++    EXPECT_STREQ(cfg, template_cfg);
++    EXPECT_TRUE(moonmod::FindNativeResourceOverride("commenu/weapon/annexmdl.chr").has_value());
++
++    // Without a model the weapon draws its template's.
++    const auto plain = config.api_handler(mod_id, *register_weapon, define("plain", nullptr));
++    ASSERT_EQ(plain.status, moonmod::ApiCallStatus::Ok) << plain.message;
++    BtGetWeaponNamePath3(chr, cfg, plain.value.value("native_item_no", -1));
++    EXPECT_STREQ(chr, template_chr);
++    EXPECT_STREQ(cfg, template_cfg);
++
++    moonmod::ResetChronicleWeaponsForTests();
++    moonmod::ResetNativeResourceOverridesForTests();
 +}
 +
 +TEST(MoonModWeaponsApi, PublishesNativeUpgradeForQuestObjectivesOnNextPump) {
@@ -66372,11 +67158,41 @@ index ecc64ed8..32e22eec 100644
 +#ifndef PORT
  STATIC_ASSERT(sizeof(CDungeonMap) == 0x10B10);
 +#endif
+diff --git a/ps2/include/editloop.hpp b/ps2/include/editloop.hpp
+index eedae400..551bc384 100644
+--- a/ps2/include/editloop.hpp
++++ b/ps2/include/editloop.hpp
+@@ -220,6 +220,25 @@ struct VILLAGER_INFO {
+ /** Runtime metadata for the ten villagers selected for the current period. */
+ extern VILLAGER_INFO EdVillagerInfo[10];
+ 
++#ifdef PORT
++/* Port-only: villagers a mod adds to a town (characters.register kind = "npc"). Retail fills at most 6 of the 10
++   villager slots, so up to 4 more stand in the free ones, at a fixed place, whenever the town picks its villagers.
++   name is a model in the town's chara folder (gedit/<town>/chara/<name>.chr; a mod may add a new one). A talk_event
++   above 0 runs that native event; 0 publishes game.npc.talk instead. An empty name clears the entry. */
++constexpr int CHRONICLE_MOD_VILLAGER_COUNT = 4;
++bool SetChronicleModVillager(int index, int town_id, const char *name, const float *position, float rotation_y,
++                             int talk_event);
++/* The mod villager entry standing in villager slot `slot` (0-9), or -1. */
++int ChronicleModVillagerInSlot(int slot);
++/* The villager slot mod villager entry `index` stands in, or -1 while it is not in the town. */
++int ChronicleModVillagerSlot(int index);
++int ChronicleModVillagerTalkEvent(int index);
++void ResetChronicleModVillagersForTests();
++/* editloop3.cpp hooks: fill free slots after the native pick, and put them in place after the native placement. */
++void ChronicleAddModVillagers(VILLAGER_INFO *villagers, VILLAGER_INFO *restore);
++void ChroniclePlaceModVillagers(CNPCharacter *characters, VILLAGER_INFO *villagers);
++#endif
++
+ /**
+  * Stores the fog parameters belonging to one lighting preset.
+  */
 diff --git a/ps2/include/editpartsinfo.hpp b/ps2/include/editpartsinfo.hpp
-index 2473f05e..c4884e33 100644
+index 2473f05e..ce5399b5 100644
 --- a/ps2/include/editpartsinfo.hpp
 +++ b/ps2/include/editpartsinfo.hpp
-@@ -3,6 +3,40 @@
+@@ -3,6 +3,44 @@
  #include "common.h"
  
  struct EPARTS_FUNC_DATA;
@@ -66407,6 +67223,10 @@ index 2473f05e..c4884e33 100644
 +// Gives a registered variant its own model: the part archive `part` inside the scene file `scene`
 +// (a retail gedit/<town>/scene.scn or a mod's gedit/mod/<name>.scn). Empty strings clear it.
 +bool SetChronicleModGeoramaPieceModel(int part_id, const char *scene, const char *part);
++// Gives a registered variant its own footprint: width x height cells (1-32 each), one byte a cell row by row as the
++// part definition file has them (0 empty; the template's values otherwise). cells NULL fills every cell with the
++// template's most used non-empty value. width 0 goes back to the template's footprint.
++bool SetChronicleModGeoramaPieceFootprint(int part_id, int width, int height, const u8 *cells);
 +// editloop.cpp: rebuilds a part's models from that archive; false leaves the template's models.
 +bool ChronicleLoadModPartModel(CMapParts *parts, const char *scene, const char *part);
 +bool GetChronicleModGeoramaPiece(int part_id, CHRONICLE_MOD_GEORAMA_PIECE *out_piece);
@@ -66418,7 +67238,7 @@ index 2473f05e..c4884e33 100644
  /**
   * @file
 diff --git a/ps2/include/itemdata.hpp b/ps2/include/itemdata.hpp
-index e3328c3d..8c593d91 100644
+index e3328c3d..be3c49e9 100644
 --- a/ps2/include/itemdata.hpp
 +++ b/ps2/include/itemdata.hpp
 @@ -1,5 +1,7 @@
@@ -66448,7 +67268,7 @@ index e3328c3d..8c593d91 100644
      ITEMKINDF_CONSUMABLE = 0x0004, /**< Item is consumed on use. */
      ITEMKINDF_THROWABLE  = 0x0010, /**< Item can be thrown. */
      ITEMKINDF_RANDOM     = 0x0020, /**< Item has random properties. */
-@@ -761,6 +768,11 @@ ATTACH_DATA *GetAttachData(int item_no);
+@@ -761,6 +768,16 @@ ATTACH_DATA *GetAttachData(int item_no);
   */
  WEAPON_DATA *GetWeaponData(int item_no);
  
@@ -66456,6 +67276,11 @@ index e3328c3d..8c593d91 100644
 +bool RegisterMoonModWeapon(int item_no, int template_item_no, int attack, int durability,
 +                           int attack_max, int magic_max, int owner, char *error, std::size_t error_size);
 +void ResetMoonModWeaponSlotsForTests();
++/* The built-in weapon a registered weapon (items 377-408) was made from, or -1. */
++int MoonModWeaponTemplate(int item_no);
++/* The model stem a registered weapon draws (commenu/weapon/<stem>.chr), or "" for the template's model. */
++const char *MoonModWeaponModel(int item_no);
++bool SetMoonModWeaponModel(int item_no, const char *stem);
 +
  /**
   * Gets the message id for an item, or zero if the id has no entry.
@@ -66652,6 +67477,39 @@ index 1d16e5bb..8405ecd3 100644
          for (int i = 0; i < 16; i++) {
              if (NowMonstorUnit->effect[unit_no].timer[i] != 0 && DistVector(NowMonstorUnit->effect[unit_no].position[i], position) <= 1.5f + NowMonstorUnit->effect[unit_no].radius[i]) {
                  return 2;
+diff --git a/ps2/src/btmisc.cpp b/ps2/src/btmisc.cpp
+index d76aa6d4..4e8cf252 100644
+--- a/ps2/src/btmisc.cpp
++++ b/ps2/src/btmisc.cpp
+@@ -193,6 +193,28 @@ void BtGetWeaponNamePath2(char *chr_name, char *cfg_name, int chara, int weapon_
+     char  number[32];
+     char *base = prefix[chara];
+ 
++#ifdef PORT
++    // A registered weapon (items 377-408) has no file of its own number: it reads its template's .cfg from its own
++    // model when the mod gave one, else its template's model.
++    {
++        const int item_no = defWeapon__2[chara] + weapon_index;
++        const int template_no = MoonModWeaponTemplate(item_no);
++        WEAPON_DATA *template_data = template_no >= 0 ? GetWeaponData(template_no) : NULL;
++
++        if (template_data != NULL && template_data->owner < 6) {
++            const int owner = (s8) template_data->owner;
++            BtGetWeaponNamePath2(chr_name, cfg_name, owner, template_no - defWeapon__2[owner]);
++            const char *model = MoonModWeaponModel(item_no);
++
++            if (model[0] != '\0') {
++                sprintf(chr_name, "%s.chr", model);
++                strcpy(nameWepBuff_mds, chr_name);
++            }
++            return;
++        }
++    }
++#endif
++
+     strcpy(nameWepBuff_mds, base);
+     strcpy(nameWepBuff_img, base);
+ 
 diff --git a/ps2/src/character.cpp b/ps2/src/character.cpp
 index 68ce5db8..b6a3751b 100644
 --- a/ps2/src/character.cpp
@@ -69218,6 +70076,45 @@ index db82e278..aa28c705 100644
              if (map->boxes[k].used != 0) {
                  model = map->box_collision_model;
                  model->SetPosition(map->boxes[k].pos);
+diff --git a/ps2/src/ebattle.cpp b/ps2/src/ebattle.cpp
+index 1a1ea484..382ff80e 100644
+--- a/ps2/src/ebattle.cpp
++++ b/ps2/src/ebattle.cpp
+@@ -33,6 +33,12 @@
+ #include "sysmes.hpp"
+ #include "texture.hpp"
+ 
++#ifdef PORT
++namespace moonmod {
++void ChronicleModVillagerTalked(int index);
++}
++#endif
++
+ #pragma helper_mask_gpr 0x30
+ #pragma helper_mask_fpr 0x1000
+ #pragma name_counter 517
+@@ -2261,6 +2267,21 @@ void EdMoveChara() {
+             near_villager = -1;
+         }
+ 
++#ifdef PORT
++        // A mod's villager: the talk button runs its native event, or tells the mod.
++        if (acted == 0 && PadDown(0x40) != 0 && (viewMode == 0 || interior != 0) && key_lock == 0 && near_villager >= 0 &&
++            ChronicleModVillagerInSlot(near_villager) >= 0) {
++            const int mod_villager = ChronicleModVillagerInSlot(near_villager);
++            const int talk_event = ChronicleModVillagerTalkEvent(mod_villager);
++            if (talk_event > 0 && EdTalkModeInit(&EdVillager[near_villager], -1) != 0) {
++                event_no = talk_event;
++            } else {
++                moonmod::ChronicleModVillagerTalked(mod_villager);
++            }
++            acted = true;
++        }
++#endif
++
+         if (acted == 0 && (viewMode == 0 || interior != 0) && near_villager >= 0) {
+             if (EdVillagerInfo[near_villager].talk_event_no > 0 && EdVillagerInfo[near_villager].talk_event_level != 0 && EdTalkModeInit(&EdVillager[near_villager], -1) != 0) {
+                 event_no = EdVillagerInfo[near_villager].talk_event_no;
 diff --git a/ps2/src/editground.cpp b/ps2/src/editground.cpp
 index 6c23f397..52c9eb83 100644
 --- a/ps2/src/editground.cpp
@@ -69435,11 +70332,176 @@ index 0bddbbfa..f3cd5baf 100644
  EPARTS_INFO_HEADER *LoadPTS(CMapParts *parts, unsigned int *archive, MAP_PARTS_INFO *info, OBJ_ANIME_SEQ *anime, EDIT_EFFECT_INFO *effects, EDIT_OBJECT_TIMER *timers, ED_EVENT_POINT *points, CMapParts *shared) {
      EPARTS_INFO_HEADER *source;
      EPARTS_ARCHIVE     *record = (EPARTS_ARCHIVE *) archive;
+diff --git a/ps2/src/editloop3.cpp b/ps2/src/editloop3.cpp
+index 61762201..c7815863 100644
+--- a/ps2/src/editloop3.cpp
++++ b/ps2/src/editloop3.cpp
+@@ -714,6 +714,129 @@ void EdInitVillagerTable(float clock, EDIT_MAP_INFO *info) {
+ /** Saved state restored into the first ten villager entries. */
+ static VILLAGER_INFO restore_info[10];
+ 
++#ifdef PORT
++namespace {
++
++struct ChronicleModVillager {
++    int   town_id;
++    char  name[32];
++    float position[4];
++    float rotation_y;
++    int   talk_event;
++    int   slot;
++};
++
++ChronicleModVillager g_mod_villagers[CHRONICLE_MOD_VILLAGER_COUNT];
++int                  g_mod_villager_slots[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
++
++} // namespace
++
++bool SetChronicleModVillager(int index, int town_id, const char *name, const float *position, float rotation_y,
++                             int talk_event) {
++    if (index < 0 || index >= CHRONICLE_MOD_VILLAGER_COUNT || name == NULL || std::strlen(name) >= 32) {
++        return false;
++    }
++    ChronicleModVillager &villager = g_mod_villagers[index];
++    std::memset(&villager, 0, sizeof(villager));
++    villager.slot = -1;
++    if (name[0] == '\0') {
++        return true;
++    }
++    if (position == NULL || town_id < 0 || talk_event < 0) {
++        return false;
++    }
++    villager.town_id = town_id;
++    std::strcpy(villager.name, name);
++    std::memcpy(villager.position, position, sizeof(float) * 3);
++    villager.position[3] = 1.0f;
++    villager.rotation_y = rotation_y;
++    villager.talk_event = talk_event;
++    return true;
++}
++
++int ChronicleModVillagerInSlot(int slot) {
++    return slot >= 0 && slot < 10 ? g_mod_villager_slots[slot] : -1;
++}
++
++int ChronicleModVillagerSlot(int index) {
++    return index >= 0 && index < CHRONICLE_MOD_VILLAGER_COUNT && g_mod_villagers[index].name[0] != '\0'
++               ? g_mod_villagers[index].slot
++               : -1;
++}
++
++int ChronicleModVillagerTalkEvent(int index) {
++    return index >= 0 && index < CHRONICLE_MOD_VILLAGER_COUNT ? g_mod_villagers[index].talk_event : 0;
++}
++
++void ResetChronicleModVillagersForTests() {
++    std::memset(g_mod_villagers, 0, sizeof(g_mod_villagers));
++    for (int &slot : g_mod_villager_slots) slot = -1;
++}
++
++void ChronicleAddModVillagers(VILLAGER_INFO *villagers, VILLAGER_INFO *restore) {
++    for (int &slot : g_mod_villager_slots) slot = -1;
++    for (int index = 0; index < CHRONICLE_MOD_VILLAGER_COUNT; index++) {
++        ChronicleModVillager &mod = g_mod_villagers[index];
++        mod.slot = -1;
++        if (mod.name[0] == '\0' || mod.town_id != NowEditMap || MapNo > 10) {
++            continue;
++        }
++        int slot = 0;
++        while (slot < 10 && villagers[slot].name[0] != '\0') {
++            slot++;
++        }
++        if (slot >= 10) {
++            break;
++        }
++        VILLAGER_INFO &info = villagers[slot];
++        std::memset(&info, 0, sizeof(info));
++        std::strcpy(info.name, mod.name);
++        info.index = -1;
++        info.character_no = -1;
++        info.talk_event_no = mod.talk_event;
++        info.talk_event_level = 0; // only on the talk button, never on approach
++        std::memcpy(info.position, mod.position, sizeof(info.position));
++        info.rotation[1] = mod.rotation_y;
++        if (restore != NULL) {
++            restore[slot] = info;
++        }
++        mod.slot = slot;
++        g_mod_villager_slots[slot] = index;
++        if (slot + 1 < 10) {
++            villagers[slot + 1].name[0] = '\0';
++        }
++    }
++}
++
++void ChroniclePlaceModVillagers(CNPCharacter *characters, VILLAGER_INFO *villagers) {
++    for (int index = 0; index < CHRONICLE_MOD_VILLAGER_COUNT; index++) {
++        const ChronicleModVillager &mod = g_mod_villagers[index];
++        if (mod.slot < 0 || mod.slot >= 10 || std::strcmp(villagers[mod.slot].name, mod.name) != 0) {
++            continue;
++        }
++        VILLAGER_INFO &info = villagers[mod.slot];
++        CNPCharacter  &character = characters[mod.slot];
++        info.placed = true;
++        info.initial_motion = 0;
++        std::memcpy(info.position, mod.position, sizeof(info.position));
++        info.rotation[0] = 0.0f;
++        info.rotation[1] = mod.rotation_y;
++        info.rotation[2] = 0.0f;
++        character.ClearSeq();
++        character.event_status = 0;
++        character.villager_id = -1;
++        character.map_parts_no = -1;
++        sceVu0FVECTOR position = {mod.position[0], mod.position[1], mod.position[2], 1.0f};
++        character.SetPosition(position);
++        character.SetRotation(0.0f, mod.rotation_y, 0.0f);
++        character.draw_enabled = character.initialized;
++        character.SetMotion(0, 0);
++        std::printf("moonmod: villager %s stands in slot %d (%s)\n", mod.name, mod.slot,
++                    character.initialized ? "loaded" : "model not loaded");
++    }
++}
++#endif
++
+ void EdVillagerAppearOut(int index, int priority) {
+     if (index < 0 || index >= 16) {
+         return;
+@@ -864,6 +987,10 @@ int EdSelectVillager(VILLAGER_INFO *villagers, float clock, EDIT_MAP_INFO *map_i
+         villagers[i].name[0] = '\0';
+     }
+ 
++#ifdef PORT
++    ChronicleAddModVillagers(villagers, villagers == EdVillagerInfo ? restore_info : NULL);
++#endif
++
+     return i;
+ }
+ 
+@@ -1139,6 +1266,9 @@ void EdInitVilagerPosition(CNPCharacter *villagers, VILLAGER_INFO *info, CEditGr
+             }
+         }
+ 
++#ifdef PORT
++        ChroniclePlaceModVillagers(villagers, info);
++#endif
+         return;
+     }
+ 
+@@ -1314,6 +1444,9 @@ void EdInitVilagerPosition(CNPCharacter *villagers, VILLAGER_INFO *info, CEditGr
+     }
+ 
+     srand(random_state);
++#ifdef PORT
++    ChroniclePlaceModVillagers(villagers, info);
++#endif
+ }
+ 
+ static void GetNearVill(CCamera *camera, CCharacter *player, CNPCharacter *villagers, int *indices, float *distances) {
 diff --git a/ps2/src/editpartsinfo.cpp b/ps2/src/editpartsinfo.cpp
-index 4517bb72..7031a0d6 100644
+index 4517bb72..1c991d37 100644
 --- a/ps2/src/editpartsinfo.cpp
 +++ b/ps2/src/editpartsinfo.cpp
-@@ -3,11 +3,29 @@
+@@ -3,11 +3,38 @@
  
  #include "editpartsinfo.hpp"
  
@@ -69458,6 +70520,15 @@ index 4517bb72..7031a0d6 100644
 +EDIT_PARTS_ATRA g_chronicle_mod_georama_atra[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
 +char g_chronicle_mod_georama_scene[CHRONICLE_GEORAMA_MOD_PART_COUNT][64] = {};
 +char g_chronicle_mod_georama_model[CHRONICLE_GEORAMA_MOD_PART_COUNT][32] = {};
++constexpr int kModFootprintSide = 32;
++struct ModFootprint {
++    int  width;
++    int  height;
++    bool fill; // cells come from the template's most used value
++    u8   cells[kModFootprintSide * kModFootprintSide];
++};
++ModFootprint g_chronicle_mod_georama_footprint[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
++EPARTS_INFO_HEADER g_chronicle_mod_georama_header[CHRONICLE_GEORAMA_MOD_PART_COUNT] = {};
 +
 +int ModGeoramaPieceIndex(int part_id) {
 +    const int index = part_id - CHRONICLE_GEORAMA_NATIVE_PART_COUNT;
@@ -69469,7 +70540,7 @@ index 4517bb72..7031a0d6 100644
  /**
   * Reports whether an editable part is placed and still has work available.
   *
-@@ -17,11 +35,153 @@
+@@ -17,11 +44,193 @@
   */
  int CheckPartsInfo(EDITPARTS_INFO *info);
  
@@ -69518,11 +70589,27 @@ index 4517bb72..7031a0d6 100644
 +    return true;
 +}
 +
++bool SetChronicleModGeoramaPieceFootprint(int part_id, int width, int height, const u8 *cells) {
++    const int index = ModGeoramaPieceIndex(part_id);
++    if (index < 0 || width < 0 || width > kModFootprintSide || height < 0 || height > kModFootprintSide ||
++        (width == 0) != (height == 0)) {
++        return false;
++    }
++    ModFootprint &footprint = g_chronicle_mod_georama_footprint[index];
++    std::memset(&footprint, 0, sizeof(footprint));
++    footprint.width = width;
++    footprint.height = height;
++    footprint.fill = cells == NULL;
++    if (cells != NULL) std::memcpy(footprint.cells, cells, (size_t) (width * height));
++    return true;
++}
++
 +bool UnregisterChronicleModGeoramaPiece(int part_id) {
 +    const int index = ModGeoramaPieceIndex(part_id);
 +    if (index < 0 || g_chronicle_mod_georama_pieces[index].part_id != part_id) return false;
 +    g_chronicle_mod_georama_scene[index][0] = '\0';
 +    g_chronicle_mod_georama_model[index][0] = '\0';
++    std::memset(&g_chronicle_mod_georama_footprint[index], 0, sizeof(g_chronicle_mod_georama_footprint[index]));
 +    std::memset(&g_chronicle_mod_georama_pieces[index], 0, sizeof(g_chronicle_mod_georama_pieces[index]));
 +    std::memset(&g_chronicle_mod_georama_info[index], 0, sizeof(g_chronicle_mod_georama_info[index]));
 +    std::memset(&g_chronicle_mod_georama_atra[index], 0, sizeof(g_chronicle_mod_georama_atra[index]));
@@ -69585,6 +70672,29 @@ index 4517bb72..7031a0d6 100644
 +        atra.max = piece.stock;
 +        atra.kind = 0;
 +
++        ModFootprint &footprint = g_chronicle_mod_georama_footprint[index];
++        if (footprint.width > 0 && source_info->header != NULL) {
++            if (footprint.fill) {
++                // The template's most used non-empty cell value stands for "part of the piece".
++                int counts[256] = {};
++                const EPARTS_INFO_HEADER *shape = source_info->header;
++                for (int cell = 0; cell < shape->width * shape->height; ++cell) counts[shape->cell[cell]]++;
++                int value = 1;
++                for (int candidate = 1; candidate < 256; ++candidate) {
++                    if (counts[candidate] > counts[value]) value = candidate;
++                }
++                std::memset(footprint.cells, value, sizeof(footprint.cells));
++            }
++            EPARTS_INFO_HEADER &header = g_chronicle_mod_georama_header[index];
++            header = *source_info->header;
++            header.width = footprint.width;
++            header.height = footprint.height;
++            header.cell = footprint.cells;
++            info.header = &header;
++            info.width = footprint.width;
++            info.height = footprint.height;
++        }
++
 +        std::memcpy(&parts[piece.part_id], &source, sizeof(CMapParts));
 +        parts[piece.part_id].parts_no = piece.part_id;
 +        parts[piece.part_id].handle = piece.part_id;
@@ -69605,6 +70715,7 @@ index 4517bb72..7031a0d6 100644
 +    std::memset(g_chronicle_mod_georama_atra, 0, sizeof(g_chronicle_mod_georama_atra));
 +    std::memset(g_chronicle_mod_georama_scene, 0, sizeof(g_chronicle_mod_georama_scene));
 +    std::memset(g_chronicle_mod_georama_model, 0, sizeof(g_chronicle_mod_georama_model));
++    std::memset(g_chronicle_mod_georama_footprint, 0, sizeof(g_chronicle_mod_georama_footprint));
 +}
 +
  EDITPARTS_INFO *CEditPartsInfo::GetPartsInfo(int index) {
@@ -69624,7 +70735,7 @@ index 4517bb72..7031a0d6 100644
      return &parts[index];
  }
  
-@@ -76,11 +236,11 @@ int CEditPartsInfo::GetRequest(int index) {
+@@ -76,11 +285,11 @@ int CEditPartsInfo::GetRequest(int index) {
  int CEditPartsInfo::GetNextPartsNum(int index) {
      int remaining = 0;
  
@@ -69638,7 +70749,7 @@ index 4517bb72..7031a0d6 100644
          }
  
          if (CheckPartsInfo(info) != 0) {
-@@ -100,9 +260,8 @@ int CEditPartsInfo::GetNextParts(int index) {
+@@ -100,9 +309,8 @@ int CEditPartsInfo::GetNextParts(int index) {
              if (CheckPartsInfo(info) != 0) {
                  return index;
              }
@@ -69649,7 +70760,7 @@ index 4517bb72..7031a0d6 100644
      }
  }
  
-@@ -110,6 +269,10 @@ void CEditPartsInfo::Clear() {
+@@ -110,6 +318,10 @@ void CEditPartsInfo::Clear() {
      for (int plot = 0; plot < 24; plot++) {
          parts[plot].placed = false;
      }
@@ -69660,7 +70771,7 @@ index 4517bb72..7031a0d6 100644
  }
  
  void CEditPartsInfo::Save(int georama_no, CSaveData *save_data) {
-@@ -200,6 +363,14 @@ void CEditPartsInfo::Initialize(int georama_no) {
+@@ -200,6 +412,14 @@ void CEditPartsInfo::Initialize(int georama_no) {
  
      unk_1624 = 0;
  
