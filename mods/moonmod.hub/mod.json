@@ -2,11 +2,17 @@
   "schema_version": 1,
   "id": "moonmod.hub",
   "name": "MoonMod Hub",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Jeffiest",
-  "description": "Quick links to the integrated progression, dungeon, controls, and autosave pages in the MoonFactory Mod Manager.",
+  "description": "Hotkeys and quick links: K (or L1+R1+R3) opens the Journal's Character page (RPG: Character Paths), J opens the Dungeon+ journal, and the Actions tab links to the other packages' Mod Manager pages.",
   "framework_api": 1,
-  "games": ["chronicle"],
+  "games": [
+    "chronicle"
+  ],
   "entry": "main.lua",
-  "permissions": ["game.read", "game.write", "content.register"]
+  "permissions": [
+    "game.read",
+    "game.write",
+    "content.register"
+  ]
 }

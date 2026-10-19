@@ -21,6 +21,8 @@ The catalog is broader than the current adapters. Authored locations and indepen
 
 The runtime searches the local save directory (`<save>/mods`) and the game's install directory (`mods/` beside the executable). It reads the profile from `<save>/moonmod/profile.json`; that existing storage path and the `moonmod` Lua namespace stay stable for compatibility. MoonFactory does not use an online catalog.
 
+The packages shipped with this repository are listed in [mods/README.md](mods/README.md); `examples/` holds tutorial and test packages.
+
 Lua is vendored at `vendor/lua-5.5.1/src` and in each port's `port/third_party/lua-5.5.1`. Upstream Lua is MIT licensed; see `vendor/LUA-LICENSE.txt`.
 
 ## Package sketch

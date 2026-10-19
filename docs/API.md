@@ -233,7 +233,7 @@ shows a notice if neither opens. **J** opens the Dungeon+ journal tab.
 ### Cross-package Mod Manager navigation
 
 ```lua
-local opened, err = game.ui.navigate({mod_id = "moonmod.adventurer", tab = "skills"})
+local opened, err = game.ui.navigate({mod_id = "moonmod.rpg", tab = "skills"})
 if not opened then game.ui.notify({message = err.message}) end
 ```
 

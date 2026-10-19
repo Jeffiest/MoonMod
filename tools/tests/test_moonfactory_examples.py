@@ -50,12 +50,12 @@ class MoonFactoryExampleTests(unittest.TestCase):
         self.assertIn("game.combat.register_formula", script)
         self.assertIn("moonmod.storage.get", script)
 
-    def test_ascension_package_structure(self) -> None:
+    def test_rpg_package_structure(self) -> None:
         project = Path(__file__).resolve().parents[2]
-        package = project / "mods" / "moonmod.adventurer"
+        package = project / "mods" / "moonmod.rpg"
         manifest = json.loads((package / "mod.json").read_text(encoding="utf-8"))
         script = (package / "main.lua").read_text(encoding="utf-8")
-        self.assertEqual(manifest["id"], "moonmod.adventurer")
+        self.assertEqual(manifest["id"], "moonmod.rpg")
         self.assertEqual(manifest["games"], ["chronicle"])
         self.assertTrue({"game.read", "game.write", "content.register", "storage.read", "storage.write"}.issubset(manifest["permissions"]))
         self.assertIn("game.skills.register", script)

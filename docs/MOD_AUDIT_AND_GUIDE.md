@@ -1,5 +1,7 @@
 # Ascension and Dungeon+ legacy suite integration
 
+> 2026-10-19: the Ascension package audited here became `moonmod.adventurer` and was then replaced by `moonmod.rpg` (RPG: Character Paths, see `mods/README.md`). Dungeon+ is current. The rest of this page is the audit as it was written.
+
 This source audit covers the Chronicle packages in MoonFactory. The changes have not been run in the game or a headless test, following the user's instruction. The feature list describes the implementation and available API hooks; gameplay behavior still needs an in-game check.
 
 For the broader Windows branch reconciliation (including autosave, controls, town/menu packages, the 3D replacement system, and the new room-based spawn scaling), see [LEGACY_MOD_PARITY_PLAN.md](LEGACY_MOD_PARITY_PLAN.md).

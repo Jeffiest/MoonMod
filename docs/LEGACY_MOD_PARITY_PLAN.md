@@ -1,6 +1,6 @@
 # Windows mod suite parity plan
 
-> 2026-10-18: Ascension 1.6 and the Weapon Mastery migration described below were replaced by Ascension 3.0 (`mods/moonmod.adventurer`), which imports their saved progress. This plan is kept as the record of the legacy-parity work.
+> 2026-10-18: Ascension 1.6 and the Weapon Mastery migration described below were replaced by Ascension 3.0 (`moonmod.adventurer`), which imported their saved progress; on 2026-10-19 that package was replaced in turn by RPG: Character Paths (`mods/moonmod.rpg`, see `mods/README.md`). This plan is kept as the record of the legacy-parity work.
 
 Scope: migrate the useful gameplay and presentation features from `Jeffiest/Chronicle`'s `windows` branch into MoonFactory's current Chronicle integration. Exclude test-only packages and co-op/network packages. Keep feature presentation inside the existing MoonFactory Mod Manager, including its Skills, Actions, Quests, and Journal views.
 
