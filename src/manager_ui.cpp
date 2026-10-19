@@ -459,12 +459,20 @@ struct GameToast {
 std::vector<GameToast> g_game_toasts;
 // Set when a mod opens a manager page during play: the dungeon loop opens its menu, where the manager draws.
 bool g_menu_open_request = false;
+// Top edges of the native-trust modal's Confirm and Cancel buttons, as last drawn.
+int g_trust_confirm_y = -100;
+int g_trust_cancel_y = -100;
 } // namespace
 
 bool TakeManagerHostCloseRequest() {
     const bool requested = g_host_close_request;
     g_host_close_request = false;
     return requested;
+}
+
+void SetManagerTrustButtons(int confirm_y, int cancel_y) {
+    g_trust_confirm_y = confirm_y;
+    g_trust_cancel_y = cancel_y;
 }
 
 bool TakeManagerMenuOpenRequest() {
@@ -646,13 +654,14 @@ bool HandleManagerInput(const ManagerInput &input) {
     if (!g_state.open) return false;
 
     if (g_state.native_trust_confirmation) {
-        if (input.cancel || input.mouse_right ||
-            (input.mouse_left && input.mouse_x >= 406 && input.mouse_x < 493 &&
-             input.mouse_y >= 318 && input.mouse_y < 346)) {
+        // The modal's two buttons are stacked and centred; the drawing reports where they are.
+        const auto on_button = [&](int top) {
+            return input.mouse_left && input.mouse_x >= 270 && input.mouse_x < 370 && input.mouse_y >= top &&
+                   input.mouse_y < top + 26;
+        };
+        if (input.cancel || input.mouse_right || on_button(g_trust_cancel_y)) {
             g_state.native_trust_confirmation = false;
-        } else if (input.confirm ||
-                   (input.mouse_left && input.mouse_x >= 300 && input.mouse_x < 398 &&
-                    input.mouse_y >= 318 && input.mouse_y < 346)) {
+        } else if (input.confirm || on_button(g_trust_confirm_y)) {
             ConfirmNativeTrustChange();
         }
         return true;
@@ -707,14 +716,14 @@ bool HandleManagerInput(const ManagerInput &input) {
     }
 
     if (g_state.settings_focus && skill_tab && input.mouse_left) {
-        if(input.mouse_x>=56 && input.mouse_x<592 && input.mouse_y>=155 && input.mouse_y<340) {
+        if(input.mouse_x>=56 && input.mouse_x<592 && input.mouse_y>=128 && input.mouse_y<278) {
             std::vector<std::string> branches;
             for(const auto &skill:skill_list) {
                 auto tree=skill.value("tree_title",std::string{});
                 if(std::find(branches.begin(),branches.end(),tree)==branches.end()) branches.push_back(tree);
             }
             const int col=std::clamp(int((input.mouse_x-56)/(536/int(branches.size()))),0,int(branches.size())-1);
-            int row=0,target=int((input.mouse_y-155)/55);
+            int row=0,target=int((input.mouse_y-128)/50);
             for(int i=0;i<int(skill_list.size());++i) if(skill_list[i].value("tree_title",std::string{})==branches[col] && row++==target) {g_state.selected_skill=i;break;}
             Reconcile();
         }

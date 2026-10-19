@@ -76,6 +76,8 @@ void           ShowManagerNotice(std::string message, int duration_frames);
 std::vector<std::string> GameToastLines();
 // True once after a mod opened a manager page outside the menu (the menu must open to show it).
 bool TakeManagerMenuOpenRequest();
+// Where the native-trust modal drew its Confirm and Cancel buttons (top edges, logical pixels).
+void SetManagerTrustButtons(int confirm_y, int cancel_y);
 // True once after a page a mod opened during play (hotkey) was closed: the host menu closes too.
 bool TakeManagerHostCloseRequest();
 void           AdvanceManagerUi();

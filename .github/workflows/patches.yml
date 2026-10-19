@@ -15,7 +15,7 @@ jobs:
         include:
           - port: chronicle
             repo: TheMoonPeople/Chronicle
-            base: 50eaff633e4e02e5dbc6a7a6a84c7e34688cb738
+            base: 6ec3b808dd8a9b15704cbce29e40be84591954ce
             patch: moonfactory-chronicle.patch
           - port: chronicle-two
             repo: TheMoonPeople/ChronicleTwo

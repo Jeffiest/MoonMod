@@ -1,20 +1,19 @@
 diff --git a/.gitignore b/.gitignore
-index 3fc0bede..f4603268 100644
+index 0a822519..b012e202 100644
 --- a/.gitignore
 +++ b/.gitignore
-@@ -5,6 +5,10 @@
- !/ps2/build/.gitkeep
- !/port/build/.gitkeep
- 
+@@ -16,6 +16,9 @@
+ /android/host-tools/glslang.exe
+ /android/app/src/main/jniLibs/*/libSDL3.so
+ /android/*.log
 +# Pinned local Windows toolchains and download archives from tools/windows/acquire.ps1.
 +/archives/
 +/deps/
-+
+ 
  # Reference assembly, split from the disc by splat and never committed: one
  # tree per release, ps2/asm/ntsc and ps2/asm/pal.
- /ps2/asm/
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 78da31ab..de91a5eb 100644
+index d26cdde0..de947702 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -13,10 +13,24 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -60,7 +59,7 @@ index 78da31ab..de91a5eb 100644
  set(PS2_DIR ${CMAKE_SOURCE_DIR}/ps2/src)
  set(PORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
  file(GLOB_RECURSE PS2_SOURCES CONFIGURE_DEPENDS RELATIVE ${PS2_DIR} ${PS2_DIR}/*.cpp)
-@@ -175,7 +200,9 @@ file(CONFIGURE OUTPUT ${SHADER_HEADER_DIR}/options/credits.hpp
+@@ -186,7 +211,9 @@ file(CONFIGURE OUTPUT ${SHADER_HEADER_DIR}/options/credits.hpp
  kz_port_sce_sources(DC_SCE_SOURCES LIBS libvu0 libpad libmc sifdev sifrpc eekernel libcdvd libgraph libdma libpkt)
  add_library(dc_port OBJECT ${PORT_LIB_SOURCES} ${DC_SCE_SOURCES})
  target_link_libraries(dc_port PRIVATE dc_options SDL3::SDL3 Vulkan::Vulkan nlohmann_json::nlohmann_json kz_port_headers)
@@ -71,7 +70,7 @@ index 78da31ab..de91a5eb 100644
  # captionfont.cpp rasterizes with stb_truetype, which Kazarov stages (or fetches) for dc_host.
  get_target_property(dc_host_includes dc_host INCLUDE_DIRECTORIES)
  foreach(include_dir IN LISTS dc_host_includes)
-@@ -212,7 +239,8 @@ endif()
+@@ -228,7 +255,8 @@ endif()
  
  function(dc_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:dc_port> $<TARGET_OBJECTS:dc_host> $<TARGET_OBJECTS:dc_ps2>)
@@ -676,10 +675,10 @@ index 00000000..da69f15d
 +} // namespace moonmod
 diff --git a/port/include/moonmod/manager_ui.hpp b/port/include/moonmod/manager_ui.hpp
 new file mode 100644
-index 00000000..18487513
+index 00000000..b560675c
 --- /dev/null
 +++ b/port/include/moonmod/manager_ui.hpp
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,122 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -762,6 +761,8 @@ index 00000000..18487513
 +bool TakeManagerMenuOpenRequest();
 +// The same, without consuming it: the host checks it can open the menu first.
 +bool PeekManagerMenuOpenRequest();
++// Where the native-trust modal drew its Confirm and Cancel buttons (top edges, logical pixels).
++void SetManagerTrustButtons(int confirm_y, int cancel_y);
 +// True once after a page a mod opened during play (hotkey) was closed: the host menu closes too.
 +bool TakeManagerHostCloseRequest();
 +void           AdvanceManagerUi();
@@ -1247,7 +1248,7 @@ index 00000000..6e5acc5a
 +
 +} // namespace moonmod
 diff --git a/port/lang/de_de.json b/port/lang/de_de.json
-index 655661c3..88cfa98f 100644
+index c6098cbc..81bee844 100644
 --- a/port/lang/de_de.json
 +++ b/port/lang/de_de.json
 @@ -7,6 +7,8 @@
@@ -1274,27 +1275,23 @@ index 655661c3..88cfa98f 100644
      "options.game.time_speed.label": "Zeitgeschwindigkeit",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Schnell",
-@@ -336,9 +346,16 @@
-     "tracker.progress": "Fortschritt: %1%",
-     "tracker.area_total": "Gebiet Gesamt",
-     "tracker.controls": "{up} / {down} Wählen   {cross} / {square} Filtern   {circle} Zurück",
+@@ -369,5 +379,12 @@
+     "quest.carls_slingshot.gina.excuse": "Carls Schleuder?{page}Ähm... ein, ein großer Vogel hat sie geklaut! Er war *SO* groß!{page}Er hat wusch gemacht und ist damit weggeflogen!",
+     "quest.carls_slingshot.gina.bird": "Der Vogel hat sie geklaut! Ehrlich!",
+     "quest.carls_slingshot.gina.confess": "...Carl glaubt das mit dem Vogel nicht?{page}...Na gut. Ich hab auf Flaschen geschossen, und dann hat es KNACKS gemacht.{page}Das wollte ich nicht! Darum hab ich ihm eine neue gebastelt!{page}Kannst du sie ihm geben? Ich hab Angst, dass er sauer ist..",
+-    "quest.carls_slingshot.gina.waiting": "Hast du Carl die neue Schleuder gegeben? Ist er sauer?"
++    "quest.carls_slingshot.gina.waiting": "Hast du Carl die neue Schleuder gegeben? Ist er sauer?",
 +    "manual.category.character": "Charakter",
 +    "character.title": "LOGBUCH: %1",
 +    "character.status": "STATUS",
 +    "character.tree": "< %1 >",
 +    "character.no_skills": "Noch keine Fähigkeiten",
 +    "character.needs": "Benötigt %1 %2",
-+    "character.controls": "{up} / {down} Wählen   {left} / {right} Pfad   {cross} Lernen   {circle} Zurück",
-     "tracker.town.0": "Dorf Nolun",
-     "tracker.town.1": "Dorf Matataki",
-     "tracker.town.2": "Queens",
-     "tracker.town.3": "Muska Lacka",
-     "tracker.town.4": "Gelbe Tropfen"
--}
++    "character.controls": "{up} / {down} Wählen   {left} / {right} Pfad   {cross} Lernen   {circle} Zurück"
+ }
 \ No newline at end of file
-+}
 diff --git a/port/lang/es_es.json b/port/lang/es_es.json
-index a5b32732..ba90cca3 100644
+index a365b99d..34dd6aa1 100644
 --- a/port/lang/es_es.json
 +++ b/port/lang/es_es.json
 @@ -7,6 +7,8 @@
@@ -1321,27 +1318,23 @@ index a5b32732..ba90cca3 100644
      "options.game.time_speed.label": "Velocidad del tiempo",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rápido",
-@@ -336,9 +346,16 @@
-     "tracker.progress": "Progreso: %1%",
-     "tracker.area_total": "Total de zona",
-     "tracker.controls": "{up} / {down} Elegir   {cross} / {square} Filtrar   {circle} Volver",
+@@ -369,5 +379,12 @@
+     "quest.carls_slingshot.gina.excuse": "¿La honda de Carlos?{page}Esto... ¡un, un pájaro enorme se la llevó! ¡Era *ASÍ* de grande!{page}¡Hizo fiuuu y se fue volando con ella!",
+     "quest.carls_slingshot.gina.bird": "¡Se la llevó el pájaro! ¡De verdad!",
+     "quest.carls_slingshot.gina.confess": "...¿Carlos no se cree lo del pájaro?{page}...Vale. Estaba disparando a botellas, y hizo CRAC.{page}¡No fue a propósito! ¡Así que le hice una nueva!{page}¿Se la puedes dar? Me da miedo que se enfade..",
+-    "quest.carls_slingshot.gina.waiting": "¿Le diste la honda nueva a Carlos? ¿Está enfadado?"
++    "quest.carls_slingshot.gina.waiting": "¿Le diste la honda nueva a Carlos? ¿Está enfadado?",
 +    "manual.category.character": "Personaje",
 +    "character.title": "DIARIO: %1",
 +    "character.status": "ESTADO",
 +    "character.tree": "< %1 >",
 +    "character.no_skills": "Aún sin habilidades",
 +    "character.needs": "Requiere %1 %2",
-+    "character.controls": "{up} / {down} Elegir   {left} / {right} Vía   {cross} Aprender   {circle} Volver",
-     "tracker.town.0": "Aldea Norune",
-     "tracker.town.1": "Aldea Matataki",
-     "tracker.town.2": "Queens",
-     "tracker.town.3": "Muska Lacka",
-     "tracker.town.4": "Gotas Amarillas"
--}
++    "character.controls": "{up} / {down} Elegir   {left} / {right} Vía   {cross} Aprender   {circle} Volver"
+ }
 \ No newline at end of file
-+}
 diff --git a/port/lang/fr_fr.json b/port/lang/fr_fr.json
-index f06cd5f0..59b417ba 100644
+index f0ad5c12..4a0ca2ab 100644
 --- a/port/lang/fr_fr.json
 +++ b/port/lang/fr_fr.json
 @@ -7,6 +7,8 @@
@@ -1368,27 +1361,23 @@ index f06cd5f0..59b417ba 100644
      "options.game.time_speed.label": "Vitesse du temps",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rapide",
-@@ -336,9 +346,16 @@
-     "tracker.progress": "Progression : %1%",
-     "tracker.area_total": "Total de zone",
-     "tracker.controls": "{up} / {down} Choisir   {cross} / {square} Filtrer   {circle} Retour",
+@@ -369,5 +379,12 @@
+     "quest.carls_slingshot.gina.excuse": "Le lance-pierre de Carl ?{page}Euh... un, un gros oiseau l'a pris ! Il était *GRAND COMME ÇA* !{page}Il a fait whoosh, et il s'est envolé avec !",
+     "quest.carls_slingshot.gina.bird": "C'est l'oiseau qui l'a pris ! Promis !",
+     "quest.carls_slingshot.gina.confess": "...Carl ne croit pas à l'oiseau ?{page}...Bon. Je tirais sur des bouteilles, et ça a fait CRAC.{page}J'ai pas fait exprès ! Alors je lui en ai fabriqué un nouveau !{page}Tu peux le lui donner ? J'ai peur qu'il soit fâché..",
+-    "quest.carls_slingshot.gina.waiting": "Tu as donné le nouveau lance-pierre à Carl ? Il est fâché ?"
++    "quest.carls_slingshot.gina.waiting": "Tu as donné le nouveau lance-pierre à Carl ? Il est fâché ?",
 +    "manual.category.character": "Personnage",
 +    "character.title": "JOURNAL : %1",
 +    "character.status": "ÉTAT",
 +    "character.tree": "< %1 >",
 +    "character.no_skills": "Pas encore de compétences",
 +    "character.needs": "Requiert %1 %2",
-+    "character.controls": "{up} / {down} Choisir   {left} / {right} Voie   {cross} Apprendre   {circle} Retour",
-     "tracker.town.0": "Village Nolun",
-     "tracker.town.1": "Village Matataki",
-     "tracker.town.2": "Queens",
-     "tracker.town.3": "Muska Lacka",
-     "tracker.town.4": "Gouttes Jaunes"
--}
++    "character.controls": "{up} / {down} Choisir   {left} / {right} Voie   {cross} Apprendre   {circle} Retour"
+ }
 \ No newline at end of file
-+}
 diff --git a/port/lang/it_it.json b/port/lang/it_it.json
-index 12b02b34..79fd5868 100644
+index 0d9ce70c..c57d12ca 100644
 --- a/port/lang/it_it.json
 +++ b/port/lang/it_it.json
 @@ -7,6 +7,8 @@
@@ -1415,27 +1404,23 @@ index 12b02b34..79fd5868 100644
      "options.game.time_speed.label": "Velocità del tempo",
      "options.game.time_speed.choice.0": "Normale",
      "options.game.time_speed.choice.1": "Veloce",
-@@ -336,9 +346,16 @@
-     "tracker.progress": "Progresso: %1%",
-     "tracker.area_total": "Totale area",
-     "tracker.controls": "{up} / {down} Seleziona   {cross} / {square} Filtra   {circle} Indietro",
+@@ -369,5 +379,12 @@
+     "quest.carls_slingshot.gina.excuse": "La fionda di Carl?{page}Ehm... un, un grosso uccello l'ha presa! Era grande *COSÌ*!{page}Ha fatto fiuuu, ed è volato via con lei!",
+     "quest.carls_slingshot.gina.bird": "L'ha presa l'uccello! Davvero!",
+     "quest.carls_slingshot.gina.confess": "...Carl non crede all'uccello?{page}...Va bene. Tiravo alle bottiglie, e ha fatto CRAC.{page}Non l'ho fatto apposta! Così gliene ho fatta una nuova!{page}Puoi dargliela tu? Ho paura che si arrabbi..",
+-    "quest.carls_slingshot.gina.waiting": "Hai dato a Carl la fionda nuova? È arrabbiato?"
++    "quest.carls_slingshot.gina.waiting": "Hai dato a Carl la fionda nuova? È arrabbiato?",
 +    "manual.category.character": "Personaggio",
 +    "character.title": "REGISTRO: %1",
 +    "character.status": "STATO",
 +    "character.tree": "< %1 >",
 +    "character.no_skills": "Nessuna abilità ancora",
 +    "character.needs": "Richiede %1 %2",
-+    "character.controls": "{up} / {down} Seleziona   {left} / {right} Via   {cross} Apprendi   {circle} Indietro",
-     "tracker.town.0": "Villaggio Nolun",
-     "tracker.town.1": "Villaggio Matataki",
-     "tracker.town.2": "Queens",
-     "tracker.town.3": "Muska Lacka",
-     "tracker.town.4": "Gocce Gialle"
--}
++    "character.controls": "{up} / {down} Seleziona   {left} / {right} Via   {cross} Apprendi   {circle} Indietro"
+ }
 \ No newline at end of file
-+}
 diff --git a/port/src/battlemenu/main_ring.cpp b/port/src/battlemenu/main_ring.cpp
-index 8bfa0c19..34a3b935 100644
+index d82b8957..a05e8200 100644
 --- a/port/src/battlemenu/main_ring.cpp
 +++ b/port/src/battlemenu/main_ring.cpp
 @@ -1,6 +1,9 @@
@@ -1587,13 +1572,6 @@ index 8bfa0c19..34a3b935 100644
              }
              case BTLMENU_PAGE_QUIT:
                  quit_confirm_active = true;
-@@ -707,4 +779,4 @@ bool TakeBattleMenuLoadRequest() {
-     }
-     ingame_load_pending = false;
-     return true;
--}
-\ No newline at end of file
-+}
 diff --git a/port/src/btitem.cpp b/port/src/btitem.cpp
 index ad8154dc..51c41587 100644
 --- a/port/src/btitem.cpp
@@ -1650,7 +1628,7 @@ index 20e41f73..7b15ec3d 100644
  void TownMouseApply(CCamera *shown, CEditGround *ground, int map, int mode);
 +
 diff --git a/port/src/dataread.cpp b/port/src/dataread.cpp
-index edf90fa0..fc5022fb 100644
+index fab19af8..7cff2973 100644
 --- a/port/src/dataread.cpp
 +++ b/port/src/dataread.cpp
 @@ -2,6 +2,7 @@
@@ -1908,7 +1886,7 @@ index edf90fa0..fc5022fb 100644
      if (out_size) {
          *out_size = size;
      }
-@@ -216,6 +393,21 @@ PORT_OVERRIDE void InitReadBG() {
+@@ -223,6 +400,21 @@ PORT_OVERRIDE void InitReadBG() {
      }
  }
  
@@ -1930,7 +1908,7 @@ index edf90fa0..fc5022fb 100644
  PORT_OVERRIDE void StartReadBG() {
      InitReadBG();
  }
-@@ -246,12 +438,36 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
+@@ -253,12 +445,36 @@ PORT_OVERRIDE int LoadFileBG(char *name, u_long128 *buffer, int *out_size) {
      if (reinterpret_cast<std::uintptr_t>(buffer) % 64) {
          printf("/*/*/*/*/not 64byte align at %p %s\n", static_cast<void *>(buffer), name);
      }
@@ -1972,21 +1950,13 @@ index edf90fa0..fc5022fb 100644
      info->busy = true;
      info->id = 1;
 diff --git a/port/src/dataread_port.hpp b/port/src/dataread_port.hpp
-index bce9ac5f..badf623d 100644
+index e658bc82..257865a0 100644
 --- a/port/src/dataread_port.hpp
 +++ b/port/src/dataread_port.hpp
-@@ -1,5 +1,6 @@
- #pragma once
- 
-+#include <string_view>
- #include <vector>
- 
- #include "common.h"
-@@ -11,3 +12,9 @@ std::vector<s32> DataLanguages();
- // The languages the game can offer: the disc's own. A localization pack, once the port has them,
- // adds the languages it carries here.
- std::vector<s32> SupportedLanguages();
-+
+@@ -17,3 +17,8 @@ std::vector<s32> SupportedLanguages();
+ // The size of a file of the game's data ("gedit/e01/chara/p13a.chr"), as the loaders find it; 0 for
+ // one the data does not have.
+ std::uintmax_t DataFileSize(std::string_view path);
 +// Returns whether the extracted disc already contains files below a normalized game-data folder.
 +bool NativeResourceDirectoryIndexed(std::string_view directory);
 +
@@ -2021,10 +1991,10 @@ index 33b3d2d5..971ff6e2 100644
  
  Draw3DVisual *Draw3DFindVisual(const void *block);
 diff --git a/port/src/dun/gameloop.cpp b/port/src/dun/gameloop.cpp
-index 9af344c9..74df4b91 100644
+index 9347158c..cb4cde7a 100644
 --- a/port/src/dun/gameloop.cpp
 +++ b/port/src/dun/gameloop.cpp
-@@ -119,12 +119,46 @@ extern s32             rogoY3;
+@@ -120,12 +120,46 @@ extern s32             rogoY3;
  // Draws the floor's monsters. CMonstorUnit::DrawMonstor draws the ones taking part; a dormant one
  // within video.detail_distance of the player is passed off as taking part for the length of the
  // call, so that its model draws and animates without the monster waking.
@@ -2073,7 +2043,7 @@ index 9af344c9..74df4b91 100644
          MONSTOR *monster = &unit->monster[i];
          dormant[i] = monster->state == 1 && monster->revealed != 0 && monster->player_distance < detail;
  
-@@ -135,7 +169,7 @@ static void DrawMonstorDetail() {
+@@ -136,7 +170,7 @@ static void DrawMonstorDetail() {
  
      unit->DrawMonstor();
  
@@ -2082,7 +2052,7 @@ index 9af344c9..74df4b91 100644
          if (dormant[i]) {
              unit->monster[i].state = 1;
          }
-@@ -255,6 +289,7 @@ PORT_OVERRIDE void DunMainDraw() {
+@@ -256,6 +290,7 @@ PORT_OVERRIDE void DunMainDraw() {
          NowDngMap->DrawAtraBoll(atra_pos);
      }
  
@@ -2090,7 +2060,7 @@ index 9af344c9..74df4b91 100644
      Draw_MainUnitShadow();
  
      if (BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0) {
-@@ -264,6 +299,7 @@ PORT_OVERRIDE void DunMainDraw() {
+@@ -265,6 +300,7 @@ PORT_OVERRIDE void DunMainDraw() {
      if (CMonUnitHyde == 0 && BtEventMode == 0) {
          DrawMonstorDetail();
      }
@@ -2098,7 +2068,7 @@ index 9af344c9..74df4b91 100644
  
      if (CharaMainHandViewFlag != 0) {
          TexManager.ReloadTexture(Vif1Packet, 0x11);
-@@ -572,18 +608,22 @@ PORT_OVERRIDE void DunMainDraw() {
+@@ -573,6 +609,8 @@ PORT_OVERRIDE void DunMainDraw() {
              set2DSprite(Vif1Packet, TEX_WepGage, CRect_i_(0x42, SCREEN_HEIGHT - 0x34, left, 0x1C), CRect_i_(0x1A, 0x38, left, 0x1C), gauge_alpha);
          }
  
@@ -2107,21 +2077,24 @@ index 9af344c9..74df4b91 100644
          if (infoMap != 0 && NowDngMap->map_type == 1) {
              sceVu0FVECTOR map_pos;
              sceVu0FVECTOR map_rot;
- 
--            gfx::UiAnchorScope map_anchor(kMiniMapAnchor);
-+            gfx::UiAnchorScope map_anchor((ConfigGet().fit_dungeon_map || ConfigGet().dungeon_aerial_map) ? gfx::UiAnchor{} : kMiniMapAnchor);
- 
+@@ -582,13 +620,15 @@ PORT_OVERRIDE void DunMainDraw() {
              TexManager.ReloadTexture(Vif1Packet, 0x1F);
              sceVu0CopyVector(map_pos, CharaFrame->position);
              CharaFrame->GetRotation(map_rot);
 -            NowDngMap->DrawMiniMap(map_pos, map_rot[1]);
--            NowMonstorUnit->DrawMapSymbol(map_pos);
--            RandomItem->MapSymbolDraw();
 +            if (UserStatus->minimap_status != 3) {
 +                NowDngMap->DrawMiniMap(map_pos, map_rot[1]);
-+                NowMonstorUnit->DrawMapSymbol(map_pos);
+ 
+-            // The aerial map shows the monsters as their models.
+-            if (!DungeonAerialMapDrawn()) {
+-                NowMonstorUnit->DrawMapSymbol(map_pos);
++                // The aerial map shows the monsters as their models.
++                if (!DungeonAerialMapDrawn()) {
++                    NowMonstorUnit->DrawMapSymbol(map_pos);
++                }
 +                RandomItem->MapSymbolDraw();
-+            }
+             }
+-            RandomItem->MapSymbolDraw();
          }
  
          topStatusInfo(rogoY3, itemNowSel, UserStatus->cur_floor);
@@ -2482,7 +2455,7 @@ index 8ec72e26..6c115b65 100644
              }
          }
 diff --git a/port/src/dungeonmap.cpp b/port/src/dungeonmap.cpp
-index 56c0f07e..cd41aac4 100644
+index 56c0f07e..6bf98dee 100644
 --- a/port/src/dungeonmap.cpp
 +++ b/port/src/dungeonmap.cpp
 @@ -6,6 +6,8 @@
@@ -2783,7 +2756,7 @@ index 56c0f07e..cd41aac4 100644
              this->cells[cell_no].camera_dist = dist;
  
              if (this->cells[cell_no].parts_no == MAP_PARTS_NONE) {
-@@ -609,3 +672,419 @@ PORT_OVERRIDE void CDungeonMap::DrawAtraBoll(float *pos) {
+@@ -609,3 +672,422 @@ PORT_OVERRIDE void CDungeonMap::DrawAtraBoll(float *pos) {
          }
      }
  }
@@ -2950,6 +2923,8 @@ index 56c0f07e..cd41aac4 100644
 +
 +} // namespace moonmod
 +
++// The aerial map (dungeon_aerial.cpp) replaces the mini map; this 2D large-floor version is kept for reference.
++#if 0
 +PORT_OVERRIDE void CDungeonMap::DrawMiniMap(float *pos, float angle) {
 +    const auto viewport=gfx::VisibleLogicalRect(gfx::kMainTarget);
 +    const bool aerial=ConfigGet().dungeon_aerial_map;
@@ -3203,6 +3178,7 @@ index 56c0f07e..cd41aac4 100644
 +    BtEquipMap = saved_map;
 +    BtEquipMasuisyou = saved_crystal;
 +}
++#endif
 diff --git a/port/src/editloop.cpp b/port/src/editloop.cpp
 index 2d8015c1..cd3135dc 100644
 --- a/port/src/editloop.cpp
@@ -3225,10 +3201,10 @@ index 2d8015c1..cd3135dc 100644
      sceVu0FMATRIX view;
      sceVu0FVECTOR eye;
 diff --git a/port/src/editloop_init.cpp b/port/src/editloop_init.cpp
-index adf457e6..4242cd91 100644
+index 0e46363e..d8a73a92 100644
 --- a/port/src/editloop_init.cpp
 +++ b/port/src/editloop_init.cpp
-@@ -38,6 +38,7 @@
+@@ -39,6 +39,7 @@
  #include "gamemode.hpp"
  #include "gamepad.hpp"
  #include "mainselect.hpp"
@@ -3236,7 +3212,7 @@ index adf457e6..4242cd91 100644
  #include "mapparts.hpp"
  #include "mathutil.hpp"
  #include "mds.hpp"
-@@ -175,7 +176,7 @@ PORT_OVERRIDE int EditInit(void *param) {
+@@ -176,7 +177,7 @@ PORT_OVERRIDE int EditInit(void *param) {
      SetDataBuffer(&EdScriptBuffer, 16000);
  #endif
      SetDataBuffer(&EPartsInfoBuff, 8000);
@@ -3245,7 +3221,7 @@ index adf457e6..4242cd91 100644
      SetDataBuffer(&TextureData, 10);
      SetDataBuffer(&MotionData, 7900);
      SetDataBuffer(&EdMesBuffer, 13000);
-@@ -187,7 +188,8 @@ PORT_OVERRIDE int EditInit(void *param) {
+@@ -188,7 +189,8 @@ PORT_OVERRIDE int EditInit(void *param) {
      EPartsInfoBuff.used = 0;
      EditArea = new ((u_long128 *) EtcDataBuffer.Alloc(Quadwords<CEditArea>(4))) CEditArea[4];
      pEditGround = new ((u_long128 *) EtcDataBuffer.Alloc(Quadwords<CEditGround>(1))) CEditGround;
@@ -3255,7 +3231,7 @@ index adf457e6..4242cd91 100644
      MotionParts = new ((u_long128 *) EtcDataBuffer.Alloc(Quadwords<CCharacter>(4))) CCharacter[4];
      RiverParts = new ((u_long128 *) EtcDataBuffer.Alloc(Quadwords<CMapParts>(16))) CMapParts[16];
      RoadParts = new ((u_long128 *) EtcDataBuffer.Alloc(Quadwords<CMapParts>(6))) CMapParts[6];
-@@ -415,7 +417,7 @@ PORT_OVERRIDE int EditInit(void *param) {
+@@ -416,7 +418,7 @@ PORT_OVERRIDE int EditInit(void *param) {
      EdCreateVillagerTable(EditMapInfo);
      EdInitVillagerControl();
      EdInitVillagerTable(NowTime, EditMapInfo);
@@ -3282,10 +3258,10 @@ index 9ddf0b36..a1e9fe33 100644
                      continue;
                  }
 diff --git a/port/src/gameloop.cpp b/port/src/gameloop.cpp
-index 71a6845f..c7bd187a 100644
+index 468b23af..fd0340fb 100644
 --- a/port/src/gameloop.cpp
 +++ b/port/src/gameloop.cpp
-@@ -6,6 +6,7 @@
+@@ -7,6 +7,7 @@
  #include <cstdlib>
  #include <cstring>
  #include <format>
@@ -3293,7 +3269,7 @@ index 71a6845f..c7bd187a 100644
  #include <string_view>
  #include <thread>
  #include <vector>
-@@ -20,7 +21,10 @@
+@@ -21,7 +22,10 @@
  #include "dngstatusdata.hpp"
  #include "draw2d_port.hpp"
  #include "dun/gameloop.hpp"
@@ -3304,7 +3280,7 @@ index 71a6845f..c7bd187a 100644
  #include "exitcodes.hpp"
  #include "gamemode.hpp"
  #include "gamepad.hpp"
-@@ -33,6 +37,9 @@
+@@ -34,6 +38,9 @@
  #include "menu_save.hpp"
  #include "mglib.hpp"
  #include "mglib_port.hpp"
@@ -3314,7 +3290,7 @@ index 71a6845f..c7bd187a 100644
  #include "nowload.hpp"
  #include "platform/clock.hpp"
  #include "platform/config.hpp"
-@@ -49,6 +56,7 @@
+@@ -51,6 +58,7 @@
  #include "title/rushmovi.hpp"
  #include "title/title.hpp"
  
@@ -3322,7 +3298,7 @@ index 71a6845f..c7bd187a 100644
  int  EditInit(void *param);
  int  EditLoop();
  void SndInit();
-@@ -73,6 +81,8 @@ constexpr int kConfigLastFile = 17;
+@@ -75,6 +83,8 @@ constexpr int kConfigLastFile = 17;
  constexpr int kSaveMapNoOffset = 0x1C8;
  
  constexpr int kWarmUpTicks = 60;
@@ -3331,7 +3307,7 @@ index 71a6845f..c7bd187a 100644
  
  // The TEXA vudata.cpp's My_DrawEnv loads at the start of every mode, through My_dma_start0.
  constexpr sceGsTexa kDrawEnvTexa = {0x80, 0, 1, 0, 0x80, 0};
-@@ -89,6 +99,7 @@ PresentClock::time_point g_last_present;
+@@ -91,6 +101,7 @@ PresentClock::time_point g_last_present;
  bool g_menu_chord_held = false;
  bool g_debug_r3_held = false;
  
@@ -3339,7 +3315,7 @@ index 71a6845f..c7bd187a 100644
  double SecondsSince(PresentClock::time_point start) {
      return std::chrono::duration<double>(PresentClock::now() - start).count();
  }
-@@ -114,6 +125,15 @@ void PollFpsToggle() {
+@@ -116,6 +127,15 @@ void PollFpsToggle() {
  
  std::vector<int> g_give;
  
@@ -3355,7 +3331,7 @@ index 71a6845f..c7bd187a 100644
  bool Holds(CDngStatusData &status, int item) {
      if (item >= ITEM_WEAPON_START) {
          for (const auto &weapons : status.chara_weapons) {
-@@ -132,15 +152,38 @@ void GiveOnArrival() {
+@@ -134,15 +154,38 @@ void GiveOnArrival() {
      static int last_mode = -1;
      bool       arrived = mode != last_mode && (mode == GAME_MODE_EDIT || mode == GAME_MODE_DUNGEON);
      last_mode = mode;
@@ -3399,7 +3375,7 @@ index 71a6845f..c7bd187a 100644
  }
  
  bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
-@@ -152,15 +195,38 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
+@@ -154,15 +197,38 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
  // own 5x7 font, so the badge looks the same on every screen: the game's message font is only
  // loaded inside a mode, which made a second, different-looking badge for the intro and loading.
  const gfx::DisplayList *FpsOverlayList() {
@@ -3442,7 +3418,7 @@ index 71a6845f..c7bd187a 100644
          g_fps.text = std::move(text);
          g_fps.mapping = mapping;
      }
-@@ -207,6 +273,7 @@ struct Jump {
+@@ -209,6 +275,7 @@ struct Jump {
  Jump g_jump;
  bool g_fast_load;
  bool g_autosave;
@@ -3450,7 +3426,7 @@ index 71a6845f..c7bd187a 100644
  int g_developer_return_mode = GAME_MODE_TITLE;
  int g_developer_return_map = 800;
  int g_developer_return_local_map = 0;
-@@ -217,6 +284,36 @@ std::int64_t g_frame_budget = -1;
+@@ -219,6 +286,36 @@ std::int64_t g_frame_budget = -1;
  std::int64_t g_frames;
  bool         g_stop;
  
@@ -3487,7 +3463,7 @@ index 71a6845f..c7bd187a 100644
  // Retail's save_data and config_data are static in main.cpp, so the port
  // keeps its own; everything else reaches the save through SaveData.
  alignas(64) CSaveData g_save_data;
-@@ -449,6 +546,10 @@ void GameFollowMapJump() {
+@@ -452,6 +549,10 @@ void GameFollowMapJump() {
      }
  }
  
@@ -3498,7 +3474,7 @@ index 71a6845f..c7bd187a 100644
  void GameApplyLoopResult(int loop_mode, int result) {
      switch (loop_mode) {
          case GAME_MODE_LANGUAGE:
-@@ -573,6 +674,36 @@ bool GameSetGive(const char *list) {
+@@ -576,6 +677,36 @@ bool GameSetGive(const char *list) {
      return !g_give.empty();
  }
  
@@ -3535,7 +3511,7 @@ index 71a6845f..c7bd187a 100644
  bool GameSetJump(const char *spec) {
      std::string_view text = spec;
      std::string_view name = text.substr(0, text.find(':'));
-@@ -658,7 +789,12 @@ void GameEnterDeveloperMenu() {
+@@ -661,7 +792,12 @@ void GameEnterDeveloperMenu() {
  }
  
  void GameSetAutosave(bool on) {
@@ -3548,7 +3524,7 @@ index 71a6845f..c7bd187a 100644
  }
  
  void GameSetFastLoad(bool fast) {
-@@ -909,20 +1045,41 @@ int RunGame(int argc, char **argv) {
+@@ -913,20 +1049,41 @@ int RunGame(int argc, char **argv) {
          // A save loaded since the last mode brought its own options.
          GameOptionsApply(ConfigGet().options);
          bool event_start = StartEventNo >= 0;
@@ -3592,7 +3568,7 @@ index 71a6845f..c7bd187a 100644
          }
  
          int result;
-@@ -940,6 +1097,8 @@ int RunGame(int argc, char **argv) {
+@@ -944,6 +1101,8 @@ int RunGame(int argc, char **argv) {
  
              result = ModeLoop(skip_title);
              GameApplyLoopResult(old_main_mode, result);
@@ -3687,12 +3663,38 @@ index 733e1f0a..659e68ac 100644
      }
  
      return list->next;
+diff --git a/port/src/item_icon3d.cpp b/port/src/item_icon3d.cpp
+index 8f859f61..ec39b34d 100644
+--- a/port/src/item_icon3d.cpp
++++ b/port/src/item_icon3d.cpp
+@@ -35,6 +35,7 @@
+ #include "renderinfo.hpp"
+ #include "texture.hpp"
+ #include "texture_port.hpp"
++#include "item_icon_override.hpp"
+ 
+ namespace {
+ 
+@@ -580,6 +581,13 @@ PORT_OVERRIDE CTexture *RetCTex(short item_no, int &u, int &v) {
+         ItemIcons3DDrawSheet(); // every ask, so the last one is on top of the menu panels
+     }
+ 
++    // A mod's own icon first: its whole 32x32 texture is the cell.
++    if (CTexture *own = ItemIconOverrideTexture(item_no)) {
++        u = 0;
++        v = 0;
++        return own;
++    }
++
+     if (CTexture *model = ItemIcon3DTexture(item_no)) {
+         u = 0;
+         v = 0;
 diff --git a/port/src/item_icon_override.cpp b/port/src/item_icon_override.cpp
 new file mode 100644
-index 00000000..a7ddb9ac
+index 00000000..fcd0181f
 --- /dev/null
 +++ b/port/src/item_icon_override.cpp
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,92 @@
 +#include "item_icon_override.hpp"
 +
 +#include <cstdio>
@@ -3784,39 +3786,7 @@ index 00000000..a7ddb9ac
 +    return icon.texture.get();
 +}
 +
-+// Retail's RetCTex, asking for a mod's own icon first: its whole 32x32 texture is the cell.
-+PORT_OVERRIDE CTexture *RetCTex(short item_no, int &u, int &v) {
-+    COM_ITEM_INFO *info = GetCommonItemInfo(item_no);
-+
-+    if (info == nullptr) {
-+        return nullptr;
-+    }
-+
-+    if (CTexture *own = ItemIconOverrideTexture(item_no)) {
-+        u = 0;
-+        v = 0;
-+        return own;
-+    }
-+
-+    int icon = info->icon_index;
-+
-+    if (icon < 0) {
-+        return nullptr;
-+    }
-+
-+    u = ((icon + 8) % 8) << 5;
-+    v = (icon >> 3) << 5;
-+
-+    switch (info->kind) {
-+        case ITEMKIND_ITEM:
-+            return ItemIcon;
-+        case ITEMKIND_ATTACH:
-+        case ITEMKIND_WEAPON:
-+            return WepIcon;
-+    }
-+
-+    return nullptr;
-+}
++// RetCTex (item_icon3d.cpp) asks ItemIconOverrideTexture first, so a mod's own icon wins.
 diff --git a/port/src/item_icon_override.hpp b/port/src/item_icon_override.hpp
 new file mode 100644
 index 00000000..dc60c1ff
@@ -4059,7 +4029,7 @@ index 8c7f92ca..a046a817 100644
 +// The text the language file or a mod gives a message, or nothing when it stays as the disc has it.
 +std::optional<std::string> LocalizeGetText(std::string_view key);
 diff --git a/port/src/main.cpp b/port/src/main.cpp
-index 1f5d3b35..23d512c5 100644
+index fbb80c0f..ea120736 100644
 --- a/port/src/main.cpp
 +++ b/port/src/main.cpp
 @@ -5,6 +5,7 @@
@@ -4069,8 +4039,8 @@ index 1f5d3b35..23d512c5 100644
 +#include <utility>
  #include <vector>
  
- #include "audio/mixer.hpp"
-@@ -22,6 +23,10 @@
+ #if defined(__ANDROID__)
+@@ -33,6 +34,10 @@ void TouchOverlaySetOpacity(float opacity);
  #include "menu_option.hpp"
  #include "menu_save.hpp"
  #include "mglib.hpp"
@@ -4081,7 +4051,7 @@ index 1f5d3b35..23d512c5 100644
  #include "nowload.hpp"
  #include "platform/audio.hpp"
  #include "platform/clock.hpp"
-@@ -59,6 +64,7 @@ struct Options {
+@@ -70,6 +75,7 @@ struct Options {
      int          display_per_tick = 0;
      const char  *jump = nullptr;
      const char  *give = nullptr;
@@ -4089,7 +4059,7 @@ index 1f5d3b35..23d512c5 100644
      bool         fast_load = false;
      bool         show_fps = false;
      bool         screenshot_fps = false;
-@@ -73,6 +79,7 @@ Options g_options;
+@@ -84,6 +90,7 @@ Options g_options;
                   "usage: %s [--data DIR] [--save DIR] [--headless] [--frames N] [--screenshot PATH]\n"
                   "          [--input FILE] [--width W] [--height H] [--offscreen]\n"
                   "          [--display-per-tick N] [--show-fps] [--jump MODE[:MAP]] [--fast-load]\n"
@@ -4097,7 +4067,7 @@ index 1f5d3b35..23d512c5 100644
                   "          [--give ITEM,...]\n"
                   "  --data DIR         the extracted game data (default: DC_DATA, then ./data, then data/\n"
                   "                     beside the executable)\n"
-@@ -97,7 +104,8 @@ Options g_options;
+@@ -108,7 +115,8 @@ Options g_options;
                   "                     skipping the warm-up (DC_JUMP); see docs/PC.md\n"
                   "  --fast-load        loading-screen holds and fades of a few ticks (DC_FAST_LOAD=1)\n"
                   "  --give ITEM,...    give the party these item and weapon numbers when a town or dungeon\n"
@@ -4107,7 +4077,7 @@ index 1f5d3b35..23d512c5 100644
                   program);
      std::exit(kExitUsage);
  }
-@@ -139,6 +147,8 @@ Options ParseOptions(int argc, const char **argv) {
+@@ -150,6 +158,8 @@ Options ParseOptions(int argc, const char **argv) {
              options.jump = value();
          } else if (arg == "--give") {
              options.give = value();
@@ -4116,7 +4086,7 @@ index 1f5d3b35..23d512c5 100644
          } else if (arg == "--fast-load") {
              options.fast_load = true;
          } else if (arg == "--export-text") {
-@@ -237,6 +247,24 @@ void PumpHost() {
+@@ -248,6 +258,24 @@ void PumpHost() {
      InputScriptApply(GameFrameCount());
  }
  
@@ -4141,7 +4111,7 @@ index 1f5d3b35..23d512c5 100644
  void LoadInputScript(const char *path) {
  #ifdef _WIN32
      std::string environment;
-@@ -380,11 +408,18 @@ int Run(int argc, const char **argv) {
+@@ -404,11 +432,18 @@ int Run(int argc, const char **argv) {
          std::fprintf(stderr, "bad --give: %s\n", options.give);
          std::exit(kExitUsage);
      }
@@ -4161,15 +4131,15 @@ index 1f5d3b35..23d512c5 100644
      const char *fast_load = std::getenv("DC_FAST_LOAD");
      GameSetFastLoad(options.fast_load || (fast_load != nullptr && *fast_load != '\0' && *fast_load != '0'));
      RequireData();
-@@ -434,6 +469,7 @@ int Run(int argc, const char **argv) {
-     renderer.layout = Layout(config);
+@@ -472,6 +507,7 @@ int Run(int argc, const char **argv) {
      renderer.validation = renderer.validation || SettingsEnv("VULKAN_VALIDATION") != nullptr;
      gfx::RendererInit(WindowHandle(), renderer);
+     DC_ANDROID_TRACE("Run: renderer initialized");
 +    WindowShow();
      gfx::SetAnisotropy(config.anisotropy);
- 
-     audio::DefaultMixer().SetMasterGain(config.master_volume);
-@@ -443,6 +479,24 @@ int Run(int argc, const char **argv) {
+ #if defined(__ANDROID__)
+     gfx::SetRenderScale(config.render_scale);
+@@ -484,6 +520,24 @@ int Run(int argc, const char **argv) {
      ClockSetTickRate(config.tick_rate);
      ClockSetUnbounded(options.headless);
      ClockAddPumpHook(PumpHost);
@@ -4194,7 +4164,7 @@ index 1f5d3b35..23d512c5 100644
      GameSetFrameBudget(options.frames);
      ApplyDiscord(config);
      GameSetPresentSettings(PresentSettings(config));
-@@ -461,7 +515,9 @@ int Run(int argc, const char **argv) {
+@@ -502,7 +556,9 @@ int Run(int argc, const char **argv) {
      ConfigRemoveChangeHook(GameOptionsChanged);
      ConfigRemoveChangeHook(ConfigDisplayChanged);
      ConfigRemoveChangeHook(ApplyConfigChange);
@@ -4205,7 +4175,7 @@ index 1f5d3b35..23d512c5 100644
      AudioOutputStop();
      InputShutdown();
 diff --git a/port/src/memorycardaccess.cpp b/port/src/memorycardaccess.cpp
-index 1a3f812c..fd075b03 100644
+index a902461d..08e165a2 100644
 --- a/port/src/memorycardaccess.cpp
 +++ b/port/src/memorycardaccess.cpp
 @@ -5,6 +5,7 @@
@@ -4216,7 +4186,7 @@ index 1a3f812c..fd075b03 100644
  #include <system_error>
  #include <vector>
  
-@@ -55,6 +56,14 @@ SaveState CurrentState() {
+@@ -56,6 +57,14 @@ SaveState CurrentState() {
      return state;
  }
  
@@ -4231,9 +4201,9 @@ index 1a3f812c..fd075b03 100644
  void BuildImage(char *image, const char *version) {
      CSaveData *save = reinterpret_cast<CSaveData *>(image);
      memcpy(save, SaveData, sizeof(CSaveData));
-@@ -106,6 +115,30 @@ bool ReadImage(int file_no, const char *version) {
- 
- } // namespace
+@@ -146,6 +155,30 @@ PORT_OVERRIDE void CMemoryCardAccess::MakeMcIconSysInfo() {
+     strcpy(this->icon_sys.fname_del, this->icon.del.name);
+ }
  
 +int SaveSlotCurrentNativeFileNo() {
 +    return CurrentNativeFileNoInternal();
@@ -4262,7 +4232,7 @@ index 1a3f812c..fd075b03 100644
  PORT_OVERRIDE int CMemoryCardAccess::InitForMC() {
      this->Initialize();
      InitSaveFileInfoTbl();
-@@ -166,7 +199,12 @@ PORT_OVERRIDE int CMemoryCardAccess::LoadSysConfig() {
+@@ -206,7 +239,12 @@ PORT_OVERRIDE int CMemoryCardAccess::LoadSysConfig() {
  }
  
  PORT_OVERRIDE int CMemoryCardAccess::SaveSysConfig() {
@@ -4276,10 +4246,10 @@ index 1a3f812c..fd075b03 100644
  }
  
  // The card's write test and the copy out of the NTSC 1.0 directory have nothing to work on.
-@@ -277,18 +315,34 @@ PORT_OVERRIDE int CMemoryCardAccess::SaveToMc(int file_no) {
-     this->file_no = file_no;
-     ConfigWord(kConfigLastFile) = file_no;
+@@ -319,18 +357,34 @@ PORT_OVERRIDE int CMemoryCardAccess::SaveToMc(int file_no) {
      this->card[this->port].dir_exists = 1;
+     // The quests' progress goes beside the save; a failure is reported, and the save stands.
+     QuestHostSave(SaveSlotDirectory(file_no));
 -    return SaveStateWrite(SaveStatePath(), CurrentState()) ? 1 : -1;
 +    SaveState state;
 +    SaveStateRead(SaveStatePath(), state);
@@ -4311,11 +4281,11 @@ index 1a3f812c..fd075b03 100644
      SaveStateRead(SaveStatePath(), state);
 +    state.game_clear = state.game_clear || session.game_clear;
      memcpy(SaveData, g_image, sizeof(CSaveData));
+     QuestHostLoad(SaveSlotDirectory(file_no));
  
-     // The save screen keeps starting at the last numbered save.
-@@ -321,7 +375,11 @@ PORT_OVERRIDE int CMemoryCardAccess::DeleteFile(int file_no) {
-     }
+@@ -365,7 +419,11 @@ PORT_OVERRIDE int CMemoryCardAccess::DeleteFile(int file_no) {
  
+     QuestHostDelete(SaveSlotDirectory(file_no));
      fs::remove(SaveSlotDirectory(file_no), error);
 -    return 1;
 +    if (error) return -1;
@@ -20637,10 +20607,10 @@ index 00000000..286d8dce
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manager_ui.cpp b/port/src/moonmod/manager_ui.cpp
 new file mode 100644
-index 00000000..c6d23422
+index 00000000..a47725c9
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
-@@ -0,0 +1,965 @@
+@@ -0,0 +1,974 @@
 +#include "moonmod/manager_ui.hpp"
 +
 +#include <algorithm>
@@ -21046,12 +21016,20 @@ index 00000000..c6d23422
 +std::vector<GameToast> g_game_toasts;
 +// Set when a mod opens a manager page during play: the dungeon loop opens its menu, where the manager draws.
 +bool g_menu_open_request = false;
++// Top edges of the native-trust modal's Confirm and Cancel buttons, as last drawn.
++int g_trust_confirm_y = -100;
++int g_trust_cancel_y = -100;
 +} // namespace
 +
 +bool TakeManagerHostCloseRequest() {
 +    const bool requested = g_host_close_request;
 +    g_host_close_request = false;
 +    return requested;
++}
++
++void SetManagerTrustButtons(int confirm_y, int cancel_y) {
++    g_trust_confirm_y = confirm_y;
++    g_trust_cancel_y = cancel_y;
 +}
 +
 +bool TakeManagerMenuOpenRequest() {
@@ -21350,13 +21328,14 @@ index 00000000..c6d23422
 +    if (!g_state.open) return false;
 +
 +    if (g_state.native_trust_confirmation) {
-+        if (input.cancel || input.mouse_right ||
-+            (input.mouse_left && input.mouse_x >= 406 && input.mouse_x < 493 &&
-+             input.mouse_y >= 318 && input.mouse_y < 346)) {
++        // The modal's two buttons are stacked and centred; the drawing reports where they are.
++        const auto on_button = [&](int top) {
++            return input.mouse_left && input.mouse_x >= 270 && input.mouse_x < 370 && input.mouse_y >= top &&
++                   input.mouse_y < top + 26;
++        };
++        if (input.cancel || input.mouse_right || on_button(g_trust_cancel_y)) {
 +            g_state.native_trust_confirmation = false;
-+        } else if (input.confirm ||
-+                   (input.mouse_left && input.mouse_x >= 300 && input.mouse_x < 398 &&
-+                    input.mouse_y >= 318 && input.mouse_y < 346)) {
++        } else if (input.confirm || on_button(g_trust_confirm_y)) {
 +            ConfirmNativeTrustChange();
 +        }
 +        return true;
@@ -21411,14 +21390,14 @@ index 00000000..c6d23422
 +    }
 +
 +    if (g_state.settings_focus && skill_tab && input.mouse_left) {
-+        if(input.mouse_x>=56 && input.mouse_x<592 && input.mouse_y>=155 && input.mouse_y<340) {
++        if(input.mouse_x>=56 && input.mouse_x<592 && input.mouse_y>=128 && input.mouse_y<278) {
 +            std::vector<std::string> branches;
 +            for(const auto &skill:skill_list) {
 +                auto tree=skill.value("tree_title",std::string{});
 +                if(std::find(branches.begin(),branches.end(),tree)==branches.end()) branches.push_back(tree);
 +            }
 +            const int col=std::clamp(int((input.mouse_x-56)/(536/int(branches.size()))),0,int(branches.size())-1);
-+            int row=0,target=int((input.mouse_y-155)/55);
++            int row=0,target=int((input.mouse_y-128)/50);
 +            for(int i=0;i<int(skill_list.size());++i) if(skill_list[i].value("tree_title",std::string{})==branches[col] && row++==target) {g_state.selected_skill=i;break;}
 +            Reconcile();
 +        }
@@ -24484,14 +24463,14 @@ index 5fb3083b..9596b9f9 100644
      }
 diff --git a/port/src/options/mod_manager_ui.cpp b/port/src/options/mod_manager_ui.cpp
 new file mode 100644
-index 00000000..9b994494
+index 00000000..0d0b3d2c
 --- /dev/null
 +++ b/port/src/options/mod_manager_ui.cpp
-@@ -0,0 +1,526 @@
+@@ -0,0 +1,447 @@
 +#include "options/mod_manager_ui.hpp"
 +
 +#include <algorithm>
-+#include <array>
++#include <cmath>
 +#include <format>
 +#include <map>
 +#include <string>
@@ -24499,517 +24478,438 @@ index 00000000..9b994494
 +#include <vector>
 +
 +#include "gameutil.hpp"
-+#include "gfx/gfx.hpp"
-+#include <cmath>
-+#include "gametext.hpp"
 +#include "menu_draw.hpp"
-+#include "mglib.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/runtime.hpp"
-+#include "options/screen.hpp"
-+#include "rect.hpp"
++#include "ui_framework.hpp"
 +
++// The MoonFactory mod manager, drawn with the UI framework like the other menus: a stone window
++// with a title banner, recessed list and detail panes, framework labels, a tab plate, and the
++// bracket-and-hand selection. Layout is in the 640x480 logical frame (the window spans 36..604 by
++// 66..462), which is also the space manager_ui.cpp hit-tests mouse input in.
 +namespace options::mod_manager_ui {
 +namespace {
 +
-+std::map<int, GameText> g_text;
-+struct ManagerBounds { float left, top, sx, sy; };
-+ManagerBounds Bounds() {
-+    const auto visible = gfx::VisibleLogicalRect(gfx::kMainTarget);
-+    return {visible.x + 18.0f, visible.y + 18.0f,
-+            std::max(1.0f, visible.w - 36.0f) / 568.0f,
-+            std::max(1.0f, visible.h - 36.0f) / 396.0f};
-+}
-+int X(int x) { const auto b = Bounds(); return std::lround(b.left + (x - 36) * b.sx); }
-+int Y(int y) { const auto b = Bounds(); return std::lround(b.top + (y - 66) * b.sy); }
-+int W(int width) { return std::max(1, int(std::floor(width * Bounds().sx))); }
-+int MeasureText(const std::string &value);
-+std::string Ellipsize(std::string value, int width) {
-+    if (MeasureText(value) <= width) return value;
-+    while (!value.empty() && MeasureText(value + "...") > width) {
-+        value.pop_back();
-+        // Remove a complete UTF-8 codepoint, never leave a partial sequence.
-+        while (!value.empty() && (static_cast<unsigned char>(value.back()) & 0xc0) == 0x80) value.pop_back();
-+        if (!value.empty() && static_cast<unsigned char>(value.back()) >= 0xc0) value.pop_back();
++constexpr float kHeader = UI::Metrics::kScaleHeader;
++constexpr float kBody = UI::Metrics::kScaleBody;
++constexpr float kSmall = UI::Metrics::kScaleSmall;
++
++UI::Cursor    s_cursor;
++UI::Brackets  s_brackets;
++UI::ScrollBar s_mod_bar;
++UI::ScrollBar s_detail_bar;
++
++// Where the hand and brackets go this frame; the last call wins.
++struct Focus {
++    bool     set = false;
++    UI::Rect box;
++};
++Focus g_focus;
++
++void FocusOn(const UI::Rect &box) { g_focus = {true, box}; }
++
++int Measure(const std::string &text, float scale) { return UI::Label(text, UI::ColorWhite, UI::Alignment::Left, true, scale).GetWidth(); }
++
++// Shortens text with "..." until it fits width, never splitting a UTF-8 sequence.
++std::string Fit(std::string text, int width, float scale) {
++    if (Measure(text, scale) <= width) return text;
++    while (!text.empty() && Measure(text + "...", scale) > width) {
++        text.pop_back();
++        while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xc0) == 0x80) text.pop_back();
++        if (!text.empty() && static_cast<unsigned char>(text.back()) >= 0xc0) text.pop_back();
 +    }
-+    return value.empty() && MeasureText("...") > width ? "" : value + "...";
++    return text + "...";
 +}
 +
-+void Fill(int x, int y, int width, int height, int red, int green, int blue, int alpha) {
-+    MGFillBox(CRect_i_(X(x) * 16, Y(y) * 8, (X(x + width) - X(x)) * 16, (Y(y + height) - Y(y)) * 8), red, green, blue,
-+              static_cast<unsigned char>(std::clamp(alpha, 0, 0x80)));
++void Text(const std::string &text, int x, int y, int width, u32 color, int alpha, float scale = kBody,
++          UI::Alignment align = UI::Alignment::Left) {
++    UI::Label(Fit(text, width, scale), color, align, true, scale).Draw(x, y, alpha);
 +}
 +
-+void Text(int slot, std::string value, int x, int y, int width, bool selected, int alpha, int size = 16) {
-+    (void)size; // Keep the native font glyphs at readable size; never squeeze character spacing.
-+    GameText &text = g_text.try_emplace(slot).first->second;
-+    text.KeepGameRandom(true);
-+    text.SetColour(selected ? FONT_COLOR_YELLOW : FONT_COLOR_WHITE);
-+    text.Set(Ellipsize(std::move(value), W(width)));
-+    text.RefreshGlyphs();
-+    text.Draw(X(x), Y(y), alpha);
-+}
++u32 RowColor(bool selected) { return selected ? UI::ColorYellow : UI::ColorWhite; }
 +
-+// Natural width of a string in the manager font, before any fitting.
-+int MeasureText(const std::string &value) {
-+    static GameText measure;
-+    measure.KeepGameRandom(true);
-+    measure.Set(value);
-+    measure.RefreshGlyphs();
-+    return measure.Width();
-+}
-+
-+// Word-wraps value into at most max_lines lines of width, so long descriptions
-+// stay readable instead of being squeezed onto one line. Text that does not fit
-+// in max_lines ends the last line with "...". Returns the number of lines drawn.
-+int WrappedText(int first_slot, const std::string &value, int x, int y, int width, int line_step, int max_lines,
-+                int alpha) {
-+    std::vector<std::string> words;
-+    std::size_t start = 0;
-+    while (start < value.size()) {
-+        const std::size_t end = value.find(' ', start);
-+        const std::size_t stop = end == std::string::npos ? value.size() : end;
-+        if (stop > start) words.push_back(value.substr(start, stop - start));
-+        start = stop + 1;
++// Word-wraps text into at most max_lines lines; the last line ends with "..." if it runs out.
++void Wrapped(const std::string &text, int x, int y, int width, int line_step, int max_lines, int alpha,
++             float scale = kSmall) {
++    std::vector<std::string> lines = UI::WrapText(text, width, scale);
++    if (static_cast<int>(lines.size()) > max_lines) {
++        lines.resize(max_lines);
++        lines.back() = Fit(lines.back() + "...", width, scale);
 +    }
-+    std::vector<std::string> lines;
-+    std::string line;
-+    std::size_t next = 0;
-+    for (; next < words.size(); ++next) {
-+        const std::string candidate = line.empty() ? words[next] : line + " " + words[next];
-+        if (line.empty() || MeasureText(candidate) <= W(width)) {
-+            line = candidate;
-+            continue;
-+        }
-+        lines.push_back(std::move(line));
-+        line = words[next];
-+        if (static_cast<int>(lines.size()) == max_lines) break;
++    for (std::size_t i = 0; i < lines.size(); ++i) {
++        UI::Label(lines[i], UI::ColorWhite, UI::Alignment::Left, true, scale).Draw(x, y + int(i) * line_step, alpha);
 +    }
-+    if (static_cast<int>(lines.size()) < max_lines) {
-+        if (!line.empty() || lines.empty()) lines.push_back(std::move(line));
-+        next = words.size();
-+    }
-+    if (next < words.size() && !lines.empty()) {
-+        // Out of lines: shorten the last one until it fits with an ellipsis.
-+        std::string &last = lines.back();
-+        while (!last.empty() && MeasureText(last + "...") > W(width)) {
-+            const std::size_t space = last.rfind(' ');
-+            last.erase(space == std::string::npos ? 0 : space);
-+        }
-+        last += "...";
-+    }
-+    for (std::size_t index = 0; index < lines.size(); ++index) {
-+        Text(first_slot + static_cast<int>(index), lines[index], x, y + static_cast<int>(index) * line_step, width,
-+             false, alpha);
-+    }
-+    return static_cast<int>(lines.size());
 +}
 +
 +std::string ModTitle(const moonmod::ModRecord &record) {
 +    return std::format("{}  {}", record.display_name, record.manifest.version);
 +}
 +
-+std::string JournalStatus(std::string status) {
++std::string JournalStatus(const std::string &status) {
 +    if (status == "completed") return "DONE";
 +    if (status == "registered") return "NEW";
 +    if (status == "failed") return "FAILED";
 +    return status == "active" ? "ACTIVE" : status;
 +}
 +
-+std::vector<std::string> NativePermissionLines(const moonmod::ModRecord *record) {
-+    std::vector<std::string> lines;
-+    std::string line = "Permissions:";
-+    if (record == nullptr || record->manifest.permissions.empty()) {
-+        lines.push_back("Permissions: none");
-+        return lines;
-+    }
++std::string SkillState(const moonmod::Json &skill) {
++    if (skill.value("rank", 0) >= skill.value("max_rank", 1)) return "MAX";
++    return skill.value("prerequisites_met", false) ? "READY" : "LOCKED";
++}
++
++std::string NativePermissions(const moonmod::ModRecord *record) {
++    if (record == nullptr || record->manifest.permissions.empty()) return "Permissions: none";
 +    std::vector<std::string> sorted = record->manifest.permissions;
 +    std::ranges::sort(sorted);
-+    for (const std::string &permission : sorted) {
-+        const std::string separator = line == "Permissions:" ? " " : ", ";
-+        if (line.size() + separator.size() + permission.size() > 46 && line != "Permissions:") {
-+            lines.push_back(std::move(line));
-+            line = "  " + permission;
-+        } else {
-+            line += separator + permission;
++    std::string line = "Permissions:";
++    for (std::size_t i = 0; i < sorted.size(); ++i) line += (i == 0 ? " " : ", ") + sorted[i];
++    return line;
++}
++
++void Frame(const std::string &title, int alpha) {
++    UI::Window::Draw(36, 66, 568, 396, alpha, UI::WindowPreset::BlueStone);
++    UI::TrackerWindow::DrawStoneBanner(UI::Rect(150, 52, 340, 28), alpha, 0x80, title);
++    MenuTextureReload(0x1A);
++}
++
++void Footer(const std::string &line, const std::string &hint, bool highlight, int alpha) {
++    UI::HelpBox::Draw(UI::Rect(45, 397, 550, 55), alpha);
++    MenuTextureReload(0x1A);
++    Text(line, 56, 403, 528, highlight ? UI::ColorYellow : UI::ColorWhite, alpha, kSmall);
++    Text(hint, 56, 427, 528, UI::ColorGold, alpha, kSmall);
++}
++
++void DrawSkillTree(const moonmod::ModRecord &record, const moonmod::Json &skills, int alpha) {
++    using namespace moonmod;
++    const ManagerUiState &state = ManagerState();
++    Frame(record.display_name + " / SKILL TREE", alpha);
++
++    std::vector<std::string> branches;
++    std::vector<int> rows;
++    std::map<std::string, std::pair<int, int>> positions;
++    for (const auto &skill : skills) {
++        const std::string branch = skill.value("tree_title", std::string("Skills"));
++        auto it = std::find(branches.begin(), branches.end(), branch);
++        if (it == branches.end()) {
++            branches.push_back(branch);
++            rows.push_back(0);
++            it = branches.end() - 1;
++        }
++        const int col = int(it - branches.begin());
++        positions[skill.value("id", std::string{})] = {col, rows[col]++};
++    }
++    constexpr int kVisibleRows = 3, kRowPitch = 50, kFirstRowY = 128, kCardHeight = 44;
++    const int cols = std::max(1, int(branches.size()));
++    const int width = 536 / cols;
++    std::vector<int> starts(branches.size(), 0);
++    if (state.selected_skill >= 0 && state.selected_skill < int(skills.size())) {
++        if (auto found = positions.find(skills[state.selected_skill].value("id", std::string{})); found != positions.end()) {
++            const auto [col, row] = found->second;
++            starts[col] = std::clamp(row - kVisibleRows + 1, 0, std::max(0, rows[col] - kVisibleRows));
 +        }
 +    }
-+    lines.push_back(std::move(line));
-+    return lines;
++    for (int col = 0; col < cols; ++col) {
++        const int x = 56 + col * width;
++        Text(branches[col], x, 98, width - 30, UI::ColorGold, alpha, kHeader);
++        // Glyph tokens are drawn whole, never shortened.
++        if (starts[col] > 0) UI::Label("{up}", UI::ColorWhite, UI::Alignment::Left, true, kSmall).Draw(x + width - 46, 98, alpha);
++        if (starts[col] + kVisibleRows < rows[col]) {
++            UI::Label("{down}", UI::ColorWhite, UI::Alignment::Left, true, kSmall).Draw(x + width - 28, 98, alpha);
++        }
++    }
++    int index = 0;
++    for (const auto &skill : skills) {
++        const auto [col, row] = positions.at(skill.value("id", std::string{}));
++        const int start = starts[col];
++        if (row < start || row >= start + kVisibleRows) {
++            ++index;
++            continue;
++        }
++        const int x = 56 + col * width;
++        const int y = kFirstRowY + (row - start) * kRowPitch;
++        const bool selected = index == state.selected_skill;
++        UI::TrackerWindow::DrawIndentation(UI::Rect(x, y, width - 14, kCardHeight), !selected, alpha);
++        MenuTextureReload(0x1A);
++        Text(skill.value("title", std::string("Skill")), x + 8, y + 4, width - 30, RowColor(selected), alpha);
++        Text(std::format("{}/{}  {}", skill.value("rank", 0), skill.value("max_rank", 1), SkillState(skill)), x + 8,
++             y + 24, width - 30, selected ? UI::ColorYellow : UI::ColorGold, alpha, kSmall);
++        if (selected) FocusOn(UI::Rect(x - 4, y - 2, width - 6, kCardHeight + 4));
++        ++index;
++    }
++    UI::Divider::DrawHorizontal(52, 588, 284, alpha);
++    if (state.selected_skill >= 0 && state.selected_skill < int(skills.size())) {
++        const Json &skill = skills[state.selected_skill];
++        Text(skill.value("title", std::string("Skill")) + "  " +
++                 std::format("{}/{}  {}", skill.value("rank", 0), skill.value("max_rank", 1), SkillState(skill)),
++             56, 294, 528, UI::ColorYellow, alpha, kBody);
++        Wrapped(skill.value("description", std::string{}), 56, 320, 528, 20, 3, alpha);
++    }
++    Footer(state.notice.empty() ? "{up}{down} skill   {left}{right} branch   {cross} train" : state.notice,
++           "{circle} packages   {L1}/{R1} tabs", !state.notice.empty(), alpha);
++}
++
++void DrawObjectives(const moonmod::Json &objectives, int first, int count, int y, int step, bool focus, int alpha) {
++    if (!objectives.is_array()) return;
++    for (int row = 0; row < count; ++row) {
++        const int index = first + row;
++        if (index >= int(objectives.size())) break;
++        const moonmod::Json &objective = objectives[std::size_t(index)];
++        const int target = std::max(1, objective.value("target", 1));
++        const int progress = std::clamp(objective.value("progress", 0), 0, target);
++        const int row_y = y + row * step;
++        Text(objective.value("title", std::string("Objective")), 270, row_y, 190, RowColor(focus && row == 0), alpha, kSmall);
++        UI::ProgressBarStyle style{};
++        style.text_scale = 0.68f;
++        UI::ProgressBar::Draw(UI::Rect(466, row_y + 1, 112, 16), float(progress) / float(target),
++                              std::format("{}/{}", progress, target), style, alpha);
++        MenuTextureReload(0x1A);
++    }
++}
++
++int QuestsDone(const moonmod::Json &objectives) {
++    if (!objectives.is_array()) return 0;
++    return int(std::ranges::count_if(objectives, [](const moonmod::Json &o) { return o.value("complete", false); }));
 +}
 +
 +} // namespace
 +
-+std::pair<float, float> InputPoint(float x, float y) {
-+    const auto b = Bounds();
-+    return {36.0f + (x - b.left) / b.sx, 66.0f + (y - b.top) / b.sy};
-+}
++// The manager lays out and hit-tests in the 640x480 logical frame, the same space the menus report
++// the pointer in, so the point passes through unchanged.
++std::pair<float, float> InputPoint(float x, float y) { return {x, y}; }
 +
 +void Draw(int alpha) {
 +    using namespace moonmod;
 +    const ManagerUiState &state = ManagerState();
-+    const auto           mods = SharedRuntime().Mods();
-+    const auto           journal_quests = ManagerJournalQuests();
-+    const bool           journal_tab = state.detail_tab == 4 && !journal_quests.empty();
-+    Fill(36, 66, 568, 396, 14, 17, 23, alpha);
-+    Fill(39, 69, 562, 390, 39, 44, 54, alpha);
-+    Fill(43, 73, 554, 382, 22, 25, 31, alpha);
-+    Fill(45, 111, 198, 274, 12, 14, 18, alpha);
-+    Fill(252, 111, 344, 274, 12, 14, 18, alpha);
-+    Fill(247, 113, 2, 270, 77, 81, 89, alpha);
-+    Fill(45, 397, 550, 55, 22, 25, 31, alpha);
++    const auto mods = SharedRuntime().Mods();
++    const auto journal_quests = ManagerJournalQuests();
++    const bool journal_tab = state.detail_tab == 4 && !journal_quests.empty();
++    g_focus = {};
 +
-+    if (state.settings_focus && state.detail_tab==3) {
-+        const auto *record=ManagerSelectedMod();
-+        const auto result=record ? ManagerSkills(record->id) : ApiCallResult{};
-+        if (result.status==ApiCallStatus::Ok && result.value.contains("skills")) {
-+            const auto &skills=result.value["skills"];
-+            Fill(45,111,550,274,12,14,18,alpha);
-+            // Keep the title clear of the game's status overlay. The tree itself
-+            // scrolls per branch so long trees never draw underneath the details/footer.
-+            Text(900,record->display_name+" / SKILL TREE",58,104,510,true,alpha);
-+            std::vector<std::string> branches;
-+            std::vector<int> rows;
-+            std::map<std::string,std::pair<int,int>> positions;
-+            for (const auto &skill:skills) {
-+                auto branch=skill.value("tree_title",std::string("Skills"));
-+                auto it=std::find(branches.begin(),branches.end(),branch);
-+                if(it==branches.end()){branches.push_back(branch);rows.push_back(0);it=branches.end()-1;}
-+                const int col=int(it-branches.begin()),row=rows[col]++;
-+                positions[skill.value("id",std::string{})]={col,row};
-+            }
-+            constexpr int visible_rows=3;
-+            constexpr int row_pitch=50;
-+            constexpr int first_row_y=166;
-+            constexpr int card_height=44;
-+            const int cols=std::max(1,int(branches.size())),width=536/cols;
-+            std::vector<int> branch_starts(branches.size(),0);
-+            if(state.selected_skill>=0 && state.selected_skill<int(skills.size())) {
-+                const auto selected_pos=positions.find(skills[state.selected_skill].value("id",std::string{}));
-+                if(selected_pos!=positions.end()) {
-+                    const int col=selected_pos->second.first;
-+                    const int count=rows[col];
-+                    branch_starts[col]=std::clamp(selected_pos->second.second-visible_rows+1,0,
-+                                                   std::max(0,count-visible_rows));
++    if (state.settings_focus && state.detail_tab == 3) {
++        if (const ModRecord *record = ManagerSelectedMod()) {
++            const ApiCallResult result = ManagerSkills(record->id);
++            if (result.status == ApiCallStatus::Ok && result.value.contains("skills") && result.value["skills"].is_array() &&
++                !result.value["skills"].empty()) {
++                DrawSkillTree(*record, result.value["skills"], alpha);
++                if (g_focus.set) {
++                    s_brackets.Draw(g_focus.box, alpha);
++                    s_cursor.SetTarget(float(g_focus.box.x - 34), float(g_focus.box.y + g_focus.box.h / 2 - 8));
 +                }
++                s_cursor.Draw(alpha);
++                return;
 +            }
-+            for(int col=0;col<cols;++col) {
-+                const int start=branch_starts[col];
-+                Text(910+col,branches[col],56+col*width,140,width-12,true,alpha);
-+                if(start>0) Text(920+col,"^",56+col*width+width-27,140,14,false,alpha);
-+                if(start+visible_rows<rows[col]) Text(925+col,"v",56+col*width+width-14,140,14,false,alpha);
-+            }
-+            int index=0;
-+            for(const auto &skill:skills) {
-+                const auto [col,row]=positions.at(skill.value("id",std::string{}));
-+                const int start=branch_starts[col];
-+                if(row<start || row>=start+visible_rows) { ++index; continue; }
-+                const int x=56+col*width,y=first_row_y+(row-start)*row_pitch;
-+                const bool selected=index==state.selected_skill;
-+                for(const auto &pre:skill.value("prerequisites",Json::array())) {
-+                    if(auto it=positions.find(pre.value("id",std::string{}));it!=positions.end() &&
-+                       it->second.first==col && it->second.second>=start && it->second.second<row) {
-+                        const int py=first_row_y+(it->second.second-start)*row_pitch;
-+                        Fill(x+width/2,py+card_height,2,std::max(1,y-py-card_height),100,100,70,alpha);
-+                    }
-+                }
-+                Fill(x,y,width-14,card_height,selected?67:27,selected?55:32,selected?37:39,alpha);
-+                Text(930+index*2,skill.value("title",std::string("Skill")),x+6,y+3,width-26,selected,alpha);
-+                std::string status=skill.value("rank",0)>=skill.value("max_rank",1)?"MAX":skill.value("prerequisites_met",false)?"READY":"LOCKED";
-+                Text(931+index*2,std::format("{}/{}  {}",skill.value("rank",0),skill.value("max_rank",1),status),x+6,y+24,width-26,selected,alpha);
-+                ++index;
-+            }
-+            if(state.selected_skill>=0 && state.selected_skill<int(skills.size())) {
-+                const auto &selected_skill=skills[state.selected_skill];
-+                const std::string selected_status=selected_skill.value("rank",0)>=selected_skill.value("max_rank",1)
-+                                                      ? "MAX"
-+                                                      : selected_skill.value("prerequisites_met",false)?"READY":"LOCKED";
-+                Fill(52,314,536,72,22,25,31,alpha);
-+                Text(1099,std::format("{}/{}  {}",selected_skill.value("rank",0),selected_skill.value("max_rank",1),
-+                     selected_status),56,316,524,true,alpha,11);
-+                WrappedText(1100,selected_skill.value("description",std::string{}),56,334,524,16,3,alpha);
-+            }
-+            Text(1110,state.notice.empty()?"{dpad-updown} node  {dpad-sides} branch  {cross} train":state.notice,53,400,530,true,alpha);
-+            Text(1111,"{circle} packages   {L1}/{R1} tabs",53,426,530,false,alpha);
-+            return;
 +        }
 +    }
 +
-+    Text(0, "MOON FACTORY  /  MOD MANAGER", 58, 79, 440, true, alpha, 18);
-+    Text(1, journal_tab ? "QUEST JOURNAL" : "LOCAL PACKAGES", 56, 116, 166, true, alpha, 14);
-+    Text(2, journal_tab ? "QUEST DETAILS" : "DETAILS AND SETTINGS", 265, 116, 294, true, alpha, 14);
-+    Fill(55, 136, 174, 1, 91, 95, 103, alpha);
-+    Fill(264, 136, 320, 1, 91, 95, 103, alpha);
++    Frame("MOD MANAGER", alpha);
++    UI::TrackerWindow::DrawIndentation(UI::Rect(45, 104, 198, 284), true, alpha);
++    UI::TrackerWindow::DrawIndentation(UI::Rect(252, 104, 344, 284), true, alpha);
++    MenuTextureReload(0x1A);
++    Text(journal_tab ? "QUEST JOURNAL" : "PACKAGES", 56, 112, 176, UI::ColorGold, alpha, kHeader);
++    // On the Journal tab the tab plate sits where the details heading would be.
++    if (!journal_tab) Text("DETAILS", 264, 112, 320, UI::ColorGold, alpha, kHeader);
++    UI::Divider::DrawHorizontal(54, 234, 136, alpha);
 +
 +    if (mods.empty()) {
-+        Text(10, "No local mods found.", 62, 159, 164, false, alpha);
-+        Text(11, "Create a package folder in", 62, 189, 164, false, alpha, 14);
-+        Text(12, "save/mods and add mod.json", 62, 211, 164, false, alpha, 14);
-+        Text(13, "plus a Lua entry script.", 62, 233, 164, false, alpha, 14);
-+        Text(14, "See the MoonFactory example.", 62, 255, 164, false, alpha, 14);
-+        Text(15, "The package can target either game.", 268, 160, 300, false, alpha, 14);
-+    } else {
-+        if (journal_tab) {
-+            const int entry_end = std::min(static_cast<int>(journal_quests.size()), state.first_journal_quest + kManagerVisibleMods);
-+            for (int row = state.first_journal_quest; row < entry_end; ++row) {
-+                const ManagerJournalQuest &entry = journal_quests[static_cast<std::size_t>(row)];
-+                const int y = 143 + (row - state.first_journal_quest) * 29;
-+                const bool selected = row == state.selected_journal_quest;
-+                Fill(49, y - 2, 190, 26, selected ? 69 : 31, selected ? 54 : 33, selected ? 36 : 40, alpha);
-+                Text(20 + row, entry.quest.value("title", std::string("Untitled quest")), 56, y + 1, 122, selected, alpha, 13);
-+                Text(40 + row, JournalStatus(entry.quest.value("status", std::string("unknown"))),
-+                     181, y + 2, 52, selected, alpha, 10);
-+            }
-+            if (journal_quests.empty()) {
-+                Text(10, "No mod quests are registered.", 58, 159, 174, false, alpha, 12);
-+                Text(11, "Quest packages appear here.", 58, 181, 174, false, alpha, 11);
-+            }
-+        } else {
-+            const int mod_end = std::min(static_cast<int>(mods.size()), state.first_mod + kManagerVisibleMods);
-+            for (int row = state.first_mod; row < mod_end; ++row) {
-+                const ModRecord &record = mods[static_cast<std::size_t>(row)];
-+                const int y = 143 + (row - state.first_mod) * 29;
-+                const bool selected = row == state.selected_mod;
-+                Fill(49, y - 2, 190, 26, selected ? 69 : 31, selected ? 54 : 33, selected ? 36 : 40, alpha);
-+                Text(20 + row, record.display_name, 56, y + 1, 126, selected, alpha, 14);
-+                const bool has_native = !record.manifest.native_library.empty();
-+                Fill(184, y, has_native ? 31 : 50, 21, record.enabled ? 34 : 59, record.enabled ? 82 : 44, record.enabled ? 58 : 41, alpha);
-+                Text(40 + row, record.restart_required ? (record.enabled_next_launch ? "ON*" : "OFF*") : (record.enabled ? "ON" : "OFF"), 187, y + 2, has_native ? 26 : 43, selected, alpha, 13);
-+                if (has_native) {
-+                    Fill(217, y, 26, 21,
-+                         state.native_trust_confirmation && selected ? 104 : record.native_trusted ? 34 : 82,
-+                         record.native_trusted ? 82 : 48, record.native_trusted ? 58 : 35, alpha);
-+                    Text(140 + row, record.native_trusted ? "N+" : "N?", 219, y + 2, 22,
-+                         selected && state.native_trust_focus, alpha, 12);
-+                }
-+            }
++        Wrapped("No local mods found. Create a package folder in save/mods with a mod.json and a Lua entry "
++                "script; see the MoonFactory examples.",
++                56, 148, 176, 20, 8, alpha);
++    } else if (journal_tab) {
++        const int end = std::min(int(journal_quests.size()), state.first_journal_quest + kManagerVisibleMods);
++        for (int row = state.first_journal_quest; row < end; ++row) {
++            const ManagerJournalQuest &entry = journal_quests[std::size_t(row)];
++            const int y = 143 + (row - state.first_journal_quest) * 29;
++            const bool selected = row == state.selected_journal_quest;
++            Text(entry.quest.value("title", std::string("Untitled quest")), 56, y + 2, 112, RowColor(selected), alpha, kSmall);
++            Text(JournalStatus(entry.quest.value("status", std::string("unknown"))), 228, y + 3, 54, UI::ColorGold, alpha,
++                 kSmall, UI::Alignment::Right);
++            if (selected && !state.settings_focus) FocusOn(UI::Rect(50, y - 3, 188, 26));
 +        }
-+        if (const ModRecord *record = ManagerSelectedMod()) {
-+            if (!journal_tab) {
-+                Text(60, ModTitle(*record), 269, 145, 315, true, alpha, 18);
-+                const std::string author = record->manifest.author.empty() ? "Unknown author" : record->manifest.author;
-+                Text(61, std::format("{}  /  {}{}", author, ModStateText(record->state), record->restart_required ? " / RESTART REQUIRED" : ""), 269, 169, 315, false, alpha, 13);
-+                const std::string &description =
-+                    record->manifest.description.empty() ? record->status_message : record->manifest.description;
-+                // Two lines fit above the detail tabs (y 230). The load state is already on
-+                // the author line, so the status message shows only when there is no description.
-+                if (!record->native_status.empty()) {
-+                    WrappedText(62, description, 269, 187, 315, 19, 1, alpha);
-+                    Text(66, record->native_status, 269, 207, 315, false, alpha, 10);
-+                } else {
-+                    WrappedText(62, description, 269, 187, 315, 19, 2, alpha);
-+                }
++        MenuTextureReload(0x1A);
++        s_mod_bar.Draw(238, 143, kManagerVisibleMods * 29, int(journal_quests.size()), kManagerVisibleMods,
++                       state.first_journal_quest, alpha);
++    } else {
++        const int end = std::min(int(mods.size()), state.first_mod + kManagerVisibleMods);
++        for (int row = state.first_mod; row < end; ++row) {
++            const ModRecord &record = mods[std::size_t(row)];
++            const int y = 143 + (row - state.first_mod) * 29;
++            const bool selected = row == state.selected_mod;
++            const bool native = !record.manifest.native_library.empty();
++            Text(record.display_name, 56, y + 2, native ? 128 : 150, RowColor(selected), alpha, kSmall);
++            const std::string on = record.restart_required ? (record.enabled_next_launch ? "ON*" : "OFF*")
++                                                           : (record.enabled ? "ON" : "OFF");
++            Text(on, native ? 202 : 228, y + 3, 44, record.enabled ? UI::ColorGold : UI::ColorWhite,
++                 record.enabled ? alpha : alpha / 2, kSmall, UI::Alignment::Right);
++            if (native) {
++                Text(record.native_trusted ? "N+" : "N?", 228, y + 3, 24,
++                     selected && state.native_trust_focus ? UI::ColorYellow : UI::ColorWhite, alpha, kSmall,
++                     UI::Alignment::Right);
 +            }
-+            const auto actions = ManagerActions(record->id);
-+            const ApiCallResult quest_result = ManagerQuests(record->id);
-+            const Json quests = quest_result.status == ApiCallStatus::Ok && quest_result.value.is_object()
-+                                    ? quest_result.value.value("quests", Json::array())
-+                                    : Json::array();
-+            const ApiCallResult skill_result = ManagerSkills(record->id);
-+            const Json skills = skill_result.status == ApiCallStatus::Ok && skill_result.value.is_object()
-+                                    ? skill_result.value.value("skills", Json::array())
-+                                    : Json::array();
-+            const bool has_quests = quests.is_array() && !quests.empty();
-+            const bool has_skills = skills.is_array() && !skills.empty();
-+            const bool action_tab = state.detail_tab == 1 && !actions.empty();
-+            const bool quest_tab = state.detail_tab == 2 && has_quests;
-+            const bool skill_tab = state.detail_tab == 3 && has_skills;
-+            const bool manager_journal_tab = state.detail_tab == 4 && !journal_quests.empty();
-+            const int tab_y = manager_journal_tab ? 139 : 230;
-+            const auto draw_tab = [&](int index, std::string label, bool available, int text_id) {
-+                const int x = 263 + index * 64;
-+                const bool selected = state.settings_focus && state.detail_tab == index && available;
-+                if (selected) Fill(x, tab_y, 62, 23, 67, 55, 37, alpha);
-+                if (MeasureText(label) > W(58)) {
-+                    static const std::array<const char *, 5> short_labels = {"SETUP", "ACT", "QUEST", "SKILL", "LOG"};
-+                    label = short_labels[index];
-+                }
-+                Text(text_id, std::move(label), x + 2, tab_y + 5, 58, selected, available ? alpha : alpha / 3, 10);
-+            };
-+            draw_tab(0, "SETTINGS", !record->manifest.settings.empty(), 64);
-+            draw_tab(1, "ACTIONS", !actions.empty(), 65);
-+            draw_tab(2, "QUESTS", has_quests, 67);
-+            draw_tab(3, "SKILLS", has_skills, 68);
-+            draw_tab(4, "JOURNAL", !journal_quests.empty(), 69);
-+            Fill(266, tab_y + 24, 320, 1, 77, 81, 89, alpha);
-+            if (manager_journal_tab) {
-+                if (state.selected_journal_quest >= 0 && state.selected_journal_quest < static_cast<int>(journal_quests.size())) {
-+                    const ManagerJournalQuest &entry = journal_quests[static_cast<std::size_t>(state.selected_journal_quest)];
-+                    const Json &quest = entry.quest;
-+                    const Json objectives = quest.value("objectives", Json::array());
-+                    const int completed = objectives.is_array()
-+                                              ? static_cast<int>(std::ranges::count_if(objectives, [](const Json &objective) {
-+                                                    return objective.value("complete", false);
-+                                                }))
-+                                              : 0;
-+                    Text(400, std::format("{}  /  {}/{} objectives",
-+                                          JournalStatus(quest.value("status", std::string("unknown"))),
-+                                          completed, objectives.size()),
-+                         270, 170, 310, false, alpha, 12);
-+                    Text(401, quest.value("title", std::string("Untitled quest")), 270, 192, 310, true, alpha, 14);
-+                    Text(402, entry.mod_name, 270, 214, 310, false, alpha, 10);
-+                    Text(403, quest.value("description", std::string("")), 270, 236, 310, false, alpha, 10);
-+                    Text(404, ManagerQuestRewardSummary(quest), 270, 258, 310, false, alpha, 10);
-+                    if (objectives.is_array()) {
-+                        for (int row = 0; row < kManagerVisibleJournalObjectives; ++row) {
-+                            const int index = state.first_quest_objective + row;
-+                            if (index >= static_cast<int>(objectives.size())) break;
-+                            const Json &objective = objectives[static_cast<std::size_t>(index)];
-+                            const int y = 281 + row * 22;
-+                            const int target = std::max(1, objective.value("target", 1));
-+                            const int progress = std::clamp(objective.value("progress", 0), 0, target);
-+                            Text(410 + row, objective.value("title", std::string("Objective")), 270, y, 230,
-+                                 state.settings_focus && row == 0, alpha, 9);
-+                            Text(420 + row, std::format("{}/{}", progress, target),
-+                                 510, y, 65, state.settings_focus && row == 0, alpha, 9);
-+                            Fill(270, y + 21, 300, 2, 62, 67, 75, alpha);
-+                            if (progress > 0) Fill(270, y + 21, 300 * progress / target, 2, 29, 169, 112, alpha);
-+                        }
-+                    }
-+                } else {
-+                    Text(400, "Select a quest to see its progress.", 270, 170, 310, false, alpha, 12);
-+                }
-+            } else if (action_tab) {
-+                const int action_end = std::min(static_cast<int>(actions.size()),
-+                                                state.first_action + kManagerVisibleSettings);
-+                for (int row = state.first_action; row < action_end; ++row) {
-+                    const ManagerUiAction &action = actions[static_cast<std::size_t>(row)];
-+                    const int y = 262 + (row - state.first_action) * 24;
-+                    const bool selected = state.settings_focus && row == state.selected_action;
-+                    if (selected) Fill(263, y - 2, 326, 23, 67, 55, 37, alpha);
-+                    Text(120 + row - state.first_action, action.label, 270, y, 310, selected, alpha, 13);
-+                }
-+            } else if (quest_tab && state.selected_quest >= 0 && state.selected_quest < static_cast<int>(quests.size())) {
-+                const Json &quest = quests[static_cast<std::size_t>(state.selected_quest)];
++            if (selected && !state.settings_focus) FocusOn(UI::Rect(50, y - 3, 188, 26));
++        }
++        MenuTextureReload(0x1A);
++        s_mod_bar.Draw(238, 143, kManagerVisibleMods * 29, int(mods.size()), kManagerVisibleMods, state.first_mod, alpha);
++    }
++
++    std::string footer = state.detail_tab == 4   ? "{up}{down} quest   {left}{right} objectives   {L1}/{R1} tabs"
++                         : state.detail_tab == 2 ? "{up}{down} objectives   {left}{right} quest   {L1}/{R1} tabs"
++                         : state.detail_tab == 3 ? "{up}{down} skill   {cross} open tree   {L1}/{R1} tabs"
++                                                 : "{up}{down} select   {right} details   {L1}/{R1} tabs   {circle} back";
++
++    if (const ModRecord *record = ManagerSelectedMod(); record != nullptr && !mods.empty()) {
++        if (!journal_tab) {
++            Text(ModTitle(*record), 264, 144, 320, UI::ColorYellow, alpha, kHeader);
++            const std::string author = record->manifest.author.empty() ? "Unknown author" : record->manifest.author;
++            Text(std::format("{}  /  {}{}", author, ModStateText(record->state),
++                             record->restart_required ? "  /  RESTART REQUIRED" : ""),
++                 264, 166, 320, UI::ColorWhite, alpha, kSmall);
++            const std::string &description =
++                record->manifest.description.empty() ? record->status_message : record->manifest.description;
++            Wrapped(description, 264, 184, 320, 17, record->native_status.empty() ? 2 : 1, alpha);
++            if (!record->native_status.empty()) Text(record->native_status, 264, 201, 320, UI::ColorWhite, alpha, kSmall);
++        }
++
++        const auto actions = ManagerActions(record->id);
++        const ApiCallResult quest_result = ManagerQuests(record->id);
++        const Json quests = quest_result.status == ApiCallStatus::Ok && quest_result.value.is_object()
++                                ? quest_result.value.value("quests", Json::array())
++                                : Json::array();
++        const ApiCallResult skill_result = ManagerSkills(record->id);
++        const Json skills = skill_result.status == ApiCallStatus::Ok && skill_result.value.is_object()
++                                ? skill_result.value.value("skills", Json::array())
++                                : Json::array();
++        const bool has_quests = quests.is_array() && !quests.empty();
++        const bool has_skills = skills.is_array() && !skills.empty();
++        const bool action_tab = state.detail_tab == 1 && !actions.empty();
++        const bool quest_tab = state.detail_tab == 2 && has_quests;
++        const bool skill_tab = state.detail_tab == 3 && has_skills;
++
++        // Detail tabs on a tab plate; the shown one is gold, unavailable ones are dimmed.
++        const int tab_y = journal_tab ? 139 : 230;
++        UI::TabPlate::Draw(258, 590, tab_y, alpha);
++        MenuTextureReload(0x1A);
++        const struct {
++            const char *label;
++            bool available;
++        } tabs[5] = {{"SETTINGS", !record->manifest.settings.empty()},
++                     {"ACTIONS", !actions.empty()},
++                     {"QUESTS", has_quests},
++                     {"SKILLS", has_skills},
++                     {"JOURNAL", !journal_quests.empty()}};
++        for (int index = 0; index < 5; ++index) {
++            const int x = 263 + index * 64;
++            const bool shown = state.detail_tab == index && tabs[index].available;
++            const u32 color = shown ? (state.settings_focus ? UI::ColorYellow : UI::ColorGold) : UI::ColorWhite;
++            Text(tabs[index].label, x + 30, tab_y + 5, 62, color, tabs[index].available ? (shown ? alpha : alpha * 3 / 4) : alpha / 3,
++                 0.62f, UI::Alignment::Center);
++        }
++
++        if (journal_tab) {
++            if (state.selected_journal_quest >= 0 && state.selected_journal_quest < int(journal_quests.size())) {
++                const ManagerJournalQuest &entry = journal_quests[std::size_t(state.selected_journal_quest)];
++                const Json &quest = entry.quest;
 +                const Json objectives = quest.value("objectives", Json::array());
-+                const int completed = objectives.is_array()
-+                                          ? static_cast<int>(std::ranges::count_if(objectives, [](const Json &objective) {
-+                                                return objective.value("complete", false);
-+                                            }))
-+                                          : 0;
-+                Text(200, std::format("QUEST {}/{}  /  {}  /  {}/{} objectives",
-+                                      state.selected_quest + 1, quests.size(), quest.value("status", std::string("unknown")),
-+                                      completed, objectives.size()), 270, 260, 310, false, alpha, 12);
-+                Text(201, quest.value("title", std::string("Untitled quest")), 270, 279, 310, true, alpha, 14);
-+                Text(202, quest.value("description", std::string("")), 270, 298, 310, false, alpha, 11);
-+                Text(203, ManagerQuestRewardSummary(quest), 270, 313, 310, false, alpha, 11);
-+                if (objectives.is_array()) {
-+                    for (int row = 0; row < kManagerVisibleQuestObjectives; ++row) {
-+                        const int index = state.first_quest_objective + row;
-+                        if (index >= static_cast<int>(objectives.size())) break;
-+                        const Json &objective = objectives[static_cast<std::size_t>(index)];
-+                        const std::string progress = std::format("{}  {}/{}", objective.value("title", std::string("Objective")),
-+                                                                  objective.value("progress", 0), objective.value("target", 0));
-+                        Text(210 + row, progress, 270, 333 + row * 16, 310,
-+                             state.settings_focus && row == 0, alpha, 11);
-+                    }
-+                }
-+            } else if (skill_tab && state.selected_skill >= 0 && state.selected_skill < static_cast<int>(skills.size())) {
-+                const Json &selected_skill = skills[static_cast<std::size_t>(state.selected_skill)];
-+                Text(300, selected_skill.value("tree_title", std::string("Skill tree")), 270, 260, 310, true, alpha, 12);
-+                const int skill_end = std::min(static_cast<int>(skills.size()),
-+                                               state.first_skill + kManagerVisibleSkills);
-+                for (int row = state.first_skill; row < skill_end; ++row) {
-+                    const Json &skill = skills[static_cast<std::size_t>(row)];
-+                    const int visible_row = row - state.first_skill;
-+                    const int y = 280 + visible_row * 24;
-+                    const bool selected = state.settings_focus && row == state.selected_skill;
-+                    if (selected) Fill(263, y - 2, 326, 22, 67, 55, 37, alpha);
-+                    Text(310 + visible_row, skill.value("title", std::string("Skill")), 270, y, 168, selected, alpha, 12);
-+                    Text(320 + visible_row, std::format("{}/{}", skill.value("rank", 0), skill.value("max_rank", 1)),
-+                         444, y, 42, selected, alpha, 11);
-+                    const std::string state_text = skill.value("rank", 0) >= skill.value("max_rank", 1)
-+                                                       ? "MAX"
-+                                                       : skill.value("prerequisites_met", false) ? "READY" : "LOCKED";
-+                    Text(330 + visible_row, state_text, 494, y, 84, selected, alpha, 10);
-+                }
-+                const Json effects = selected_skill.value("effects", Json::object());
-+                const auto damage_effect = effects.is_object() ? effects.find("enemy_damage_per_rank") : effects.end();
-+                if (damage_effect != effects.end() && damage_effect->is_number() && damage_effect->get<double>() > 0.0) {
-+                    Text(340, std::format("Effect: +{:.3g}% enemy damage per rank",
-+                                          damage_effect->get<double>() * 100.0),
-+                         270, 376, 310, false, alpha, 9);
-+                }
++                Text(quest.value("title", std::string("Untitled quest")), 264, 170, 320, UI::ColorYellow, alpha, kHeader);
++                Text(std::format("{}  /  {}  /  {}/{} objectives", entry.mod_name,
++                                 JournalStatus(quest.value("status", std::string("unknown"))), QuestsDone(objectives),
++                                 objectives.size()),
++                     264, 194, 320, UI::ColorWhite, alpha, kSmall);
++                Wrapped(quest.value("description", std::string{}), 264, 214, 320, 18, 2, alpha);
++                Text(ManagerQuestRewardSummary(quest), 264, 252, 320, UI::ColorGold, alpha, kSmall);
++                DrawObjectives(objectives, state.first_quest_objective, kManagerVisibleJournalObjectives, 278, 26,
++                               state.settings_focus, alpha);
 +            } else {
-+                const int setting_end = std::min(static_cast<int>(record->manifest.settings.size()),
-+                                                 state.first_setting + kManagerVisibleSettings);
-+                for (int row = state.first_setting; row < setting_end; ++row) {
-+                    const SettingDefinition &setting = record->manifest.settings[static_cast<std::size_t>(row)];
-+                    const int y = 262 + (row - state.first_setting) * 24;
-+                    const bool selected = state.settings_focus && row == state.selected_setting;
-+                    if (selected) Fill(263, y - 2, 326, 23, 67, 55, 37, alpha);
-+                    Text(80 + row - state.first_setting, setting.name, 270, y, 224, selected, alpha, 13);
-+                    Text(90 + row - state.first_setting, SettingValueText(setting, SharedRuntime().Setting(record->id, setting.id)),
-+                         506, y, 76, selected, alpha, 13);
-+                }
-+                if (record->manifest.settings.empty()) {
-+                    Text(100, "This mod has no generated settings.", 270, 266, 300, false, alpha, 13);
++                Text("Select a quest to see its progress.", 264, 170, 320, UI::ColorWhite, alpha, kSmall);
++            }
++        } else if (action_tab) {
++            const int end = std::min(int(actions.size()), state.first_action + kManagerVisibleSettings);
++            for (int row = state.first_action; row < end; ++row) {
++                const int y = 262 + (row - state.first_action) * 24;
++                const bool selected = state.settings_focus && row == state.selected_action;
++                Text(actions[std::size_t(row)].label, 270, y, 300, RowColor(selected), alpha);
++                if (selected) {
++                    FocusOn(UI::Rect(264, y - 3, 310, 24));
++                    footer = actions[std::size_t(row)].description;
 +                }
 +            }
++            MenuTextureReload(0x1A);
++            s_detail_bar.Draw(584, 262, kManagerVisibleSettings * 24, int(actions.size()), kManagerVisibleSettings,
++                              state.first_action, alpha);
++        } else if (quest_tab && state.selected_quest >= 0 && state.selected_quest < int(quests.size())) {
++            const Json &quest = quests[std::size_t(state.selected_quest)];
++            const Json objectives = quest.value("objectives", Json::array());
++            Text(quest.value("title", std::string("Untitled quest")), 270, 260, 310, UI::ColorYellow, alpha);
++            Text(std::format("Quest {}/{}  /  {}  /  {}/{} done", state.selected_quest + 1, quests.size(),
++                             JournalStatus(quest.value("status", std::string("unknown"))), QuestsDone(objectives),
++                             objectives.size()),
++                 270, 282, 310, UI::ColorWhite, alpha, kSmall);
++            Text(ManagerQuestRewardSummary(quest), 270, 300, 310, UI::ColorGold, alpha, kSmall);
++            DrawObjectives(objectives, state.first_quest_objective, kManagerVisibleQuestObjectives, 322, 20,
++                           state.settings_focus, alpha);
++            if (state.settings_focus) FocusOn(UI::Rect(264, 319, 320, 22));
++        } else if (skill_tab && state.selected_skill >= 0 && state.selected_skill < int(skills.size())) {
++            Text(skills[std::size_t(state.selected_skill)].value("tree_title", std::string("Skill tree")), 270, 260, 310,
++                 UI::ColorGold, alpha, kSmall);
++            const int end = std::min(int(skills.size()), state.first_skill + kManagerVisibleSkills);
++            for (int row = state.first_skill; row < end; ++row) {
++                const Json &skill = skills[std::size_t(row)];
++                const int y = 280 + (row - state.first_skill) * 24;
++                const bool selected = state.settings_focus && row == state.selected_skill;
++                Text(skill.value("title", std::string("Skill")), 270, y, 170, RowColor(selected), alpha);
++                Text(std::format("{}/{}  {}", skill.value("rank", 0), skill.value("max_rank", 1), SkillState(skill)), 578,
++                     y + 2, 130, selected ? UI::ColorYellow : UI::ColorGold, alpha, kSmall, UI::Alignment::Right);
++                if (selected) FocusOn(UI::Rect(264, y - 3, 310, 24));
++            }
++            const std::string description = skills[std::size_t(state.selected_skill)].value("description", std::string{});
++            if (!description.empty()) footer = description;
++        } else {
++            const int end = std::min(int(record->manifest.settings.size()), state.first_setting + kManagerVisibleSettings);
++            for (int row = state.first_setting; row < end; ++row) {
++                const SettingDefinition &setting = record->manifest.settings[std::size_t(row)];
++                const int y = 262 + (row - state.first_setting) * 24;
++                const bool selected = state.settings_focus && row == state.selected_setting;
++                Text(setting.name, 270, y, 210, RowColor(selected), alpha);
++                const std::string value = SettingValueText(setting, SharedRuntime().Setting(record->id, setting.id));
++                Text(selected ? "< " + value + " >" : value, 526, y, 96, RowColor(selected), alpha, kBody,
++                     UI::Alignment::Center);
++                if (selected) FocusOn(UI::Rect(264, y - 3, 310, 24));
++            }
++            if (record->manifest.settings.empty()) {
++                Text("This mod has no settings.", 270, 266, 300, UI::ColorWhite, alpha, kSmall);
++            }
++            MenuTextureReload(0x1A);
++            s_detail_bar.Draw(584, 262, kManagerVisibleSettings * 24, int(record->manifest.settings.size()),
++                              kManagerVisibleSettings, state.first_setting, alpha);
 +        }
 +    }
 +
-+    Fill(43, 394, 554, 1, 77, 81, 89, alpha);
-+    std::string footer = state.detail_tab == 4
-+                             ? "Up/Down list/objectives   Left/Right quest   L1/R1: tabs"
-+                             : state.detail_tab == 2
-+                             ? "Up/Down objectives   Left/Right quest   L1/R1 switch tab"
-+                             : state.detail_tab == 3
-+                                   ? "Up/Down select   Confirm: train   L1/R1: tabs"
-+                                   : "Up/Down select   Right: details   L1/R1: tabs   B: back";
-+    if (state.settings_focus && state.detail_tab == 1) {
-+        if (const auto *record = ManagerSelectedMod()) {
-+            const auto actions = ManagerActions(record->id);
-+            if (state.selected_action >= 0 && state.selected_action < int(actions.size()))
-+                footer = actions[state.selected_action].description;
-+        }
-+    }
-+    if (state.detail_tab == 3) {
-+        const ModRecord *record = ManagerSelectedMod();
-+        if (record != nullptr) {
-+            const ApiCallResult result = ManagerSkills(record->id);
-+            if (result.status == ApiCallStatus::Ok && result.value.is_object() &&
-+                result.value.contains("skills") && result.value["skills"].is_array() &&
-+                state.selected_skill >= 0 && state.selected_skill < static_cast<int>(result.value["skills"].size())) {
-+                const std::string description = result.value["skills"][static_cast<std::size_t>(state.selected_skill)]
-+                                                    .value("description", std::string{});
-+                if (!description.empty()) footer = description;
-+            }
-+        }
-+    }
-+    if (state.native_menu_context) {
-+        footer = "Up/Down select   Left/Right change   L1/R1 tabs   Triangle: Manuals";
-+    }
-+    Text(110, state.notice.empty() ? footer : state.notice, 53, 400, 475, state.notice_frames > 0, alpha, 13);
-+    Fill(47, 422, 95, 25, 65, 49, 34, alpha);
-+    Text(111, state.settings_focus ? "Mods" : "Back", 56, 426, 78, false, alpha, 13);
-+    Text(112, state.native_menu_context ? "Triangle: game manuals   Confirm: open or apply"
-+                                   : state.detail_tab == 4 ? "Journal progress updates as you play"
-+                                   : (state.settings_focus ? "B: packages   Confirm: apply" : "Confirm: enable/disable   B: options"),
-+         150, 426, 420, false, alpha, 12);
++    if (state.native_menu_context) footer = "{up}{down} select   {left}{right} change   {L1}/{R1} tabs   {triangle} manuals";
++    const std::string hint = state.native_menu_context ? "{triangle} game manuals   {cross} open or apply"
++                             : state.detail_tab == 4   ? "Journal progress updates as you play"
++                             : state.settings_focus    ? "{circle} packages   {cross} apply"
++                                                       : "{cross} enable / disable   {circle} back";
++    Footer(state.notice.empty() ? footer : state.notice, hint, state.notice_frames > 0, alpha);
 +
 +    if (state.native_trust_confirmation) {
 +        const ModRecord *record = ManagerSelectedMod();
-+        Fill(142, 168, 366, 182, 5, 7, 11, alpha);
-+        Fill(146, 172, 358, 174, 39, 44, 54, alpha);
-+        Fill(150, 176, 350, 166, 16, 19, 26, alpha);
-+        Text(150, state.pending_native_trust ? "TRUST NATIVE CODE?" : "REMOVE NATIVE TRUST?",
-+             165, 185, 320, true, alpha, 16);
-+        Text(151, "This library runs inside the game with your user permissions.", 165, 212, 320, false, alpha, 11);
-+        if (record != nullptr) {
-+            Text(152, record->id, 165, 234, 320, true, alpha, 12);
-+            Text(153, record->manifest.native_library.lexically_relative(record->package_root).generic_string(),
-+                 165, 254, 320, false, alpha, 10);
-+        }
-+        const std::vector<std::string> permissions = NativePermissionLines(record);
-+        for (std::size_t index = 0; index < permissions.size() && index < 3; ++index) {
-+            Text(156 + static_cast<int>(index), permissions[index], 165, 274 + static_cast<int>(index) * 14,
-+                 320, false, alpha, 10);
-+        }
-+        Fill(300, 318, 94, 27, 49, 90, 61, alpha);
-+        Fill(406, 318, 87, 27, 64, 56, 52, alpha);
-+        Text(154, "Confirm", 306, 323, 82, true, alpha, 12);
-+        Text(155, "Cancel", 412, 323, 76, false, alpha, 12);
++        const std::string description =
++            "This library runs inside the game with your user permissions.  " +
++            (record != nullptr ? record->id + "  " : std::string{}) + NativePermissions(record);
++        const std::string title = state.pending_native_trust ? "TRUST NATIVE CODE?" : "REMOVE NATIVE TRUST?";
++        UI::ConfirmModal::Draw(title, description, "Confirm", "Cancel", 0, s_cursor, alpha);
++        // Same geometry as ConfirmModal::Draw, so the mouse can press its buttons.
++        const int lines = int(UI::WrapText(title, 280).size() + UI::WrapText(description, 280).size());
++        const int box_y = 164 - std::max(0, lines - 2) * 12;
++        const int box_h = 38 + (lines - 1) * 20;
++        const int confirm_y = box_y + box_h + 10;
++        SetManagerTrustButtons(confirm_y, confirm_y + UI::Metrics::kButtonHeight + UI::Metrics::kButtonGap);
++        return;
++    }
++
++    if (g_focus.set) {
++        s_brackets.Draw(g_focus.box, alpha);
++        s_cursor.SetTarget(float(g_focus.box.x - 34), float(g_focus.box.y + g_focus.box.h / 2 - 8));
++        s_cursor.Draw(alpha);
 +    }
 +}
 +
@@ -25030,7 +24930,7 @@ index 00000000..bd14705c
 +
 +} // namespace options::mod_manager_ui
 diff --git a/port/src/options/rows.cpp b/port/src/options/rows.cpp
-index 128b6337..b17eef87 100644
+index d3330272..c4ff2679 100644
 --- a/port/src/options/rows.cpp
 +++ b/port/src/options/rows.cpp
 @@ -13,6 +13,7 @@
@@ -25041,7 +24941,7 @@ index 128b6337..b17eef87 100644
  #include "platform/input.hpp"
  #include "platform/window.hpp"
  
-@@ -573,10 +574,14 @@ std::string PictureShadowText(const Config &config) {
+@@ -597,6 +598,8 @@ std::string PictureShadowText(const Config &config) {
  }
  
  const Row kGameRows[] = {
@@ -25050,13 +24950,7 @@ index 128b6337..b17eef87 100644
      GameRow<&ConfigGameOptions::save_cursor_position, true>("game.save_cursor_position", "Save Cursor Position",
                                                              "On|Off", 0x15E),
      GameRow<&ConfigGameOptions::clock, true>("game.clock", "Clock", "On|Off", 0x162),
-     GameRow<&ConfigGameOptions::fast_time, false>("game.time_speed", "Time Speed", "Normal|Fast", 0x163),
-+    OnOffRow<&Config::dungeon_aerial_map>("game.dungeon_aerial_map", "Dungeon Aerial Map", "Expand the current floor map\nto a centered, overhead view.\nUnexplored rooms stay hidden."),
-+    OnOffRow<&Config::fit_dungeon_map>("game.fit_dungeon_map", "Fit Dungeon Map to Screen", "Keep the whole generated map\ninside the screen. Does not reveal\nunexplored rooms."),
-     Row{.key = "game.map",
-         .label = "Dungeon Map",
-         .game_help = 0x164,
-@@ -859,7 +864,7 @@ std::vector<std::pair<std::string, std::string>> RowStrings() {
+@@ -914,7 +917,7 @@ std::vector<std::pair<std::string, std::string>> RowStrings() {
              if (row.help != nullptr) {
                  add(prefix + ".help", row.help);
              }
@@ -25065,7 +24959,7 @@ index 128b6337..b17eef87 100644
                  const int count = row.count(ConfigGet());
                  for (int choice = 0; choice < count; ++choice) {
                      add(prefix + ".choice." + std::to_string(choice), ChoiceName(row.names, choice));
-@@ -876,6 +881,9 @@ std::string RowValue(const Row &row, const Config &config) {
+@@ -931,6 +934,9 @@ std::string RowValue(const Row &row, const Config &config) {
      if (row.action != nullptr) {
          return InputBindingLabel(row.action);
      }
@@ -25075,7 +24969,7 @@ index 128b6337..b17eef87 100644
      std::string value = row.text != nullptr ? ValueText(row, row.text(config)) : ChoiceText(row, row.get(config));
      if (ConfigAppliesOnRestart(row.key)) {
          value += " *";
-@@ -884,6 +892,9 @@ std::string RowValue(const Row &row, const Config &config) {
+@@ -939,6 +945,9 @@ std::string RowValue(const Row &row, const Config &config) {
  }
  
  bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
@@ -25085,7 +24979,7 @@ index 128b6337..b17eef87 100644
      int count = row.count(config);
      int choice = row.get(config);
      int next = wrap ? (choice + direction + count) % count : std::clamp(choice + direction, 0, count - 1);
-@@ -897,11 +908,13 @@ bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
+@@ -952,11 +961,13 @@ bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
  void ResetPage(const Page &page, Config &config) {
      const Config defaults;
      for (const Row &row : page.rows) {
@@ -25102,7 +24996,7 @@ index 128b6337..b17eef87 100644
          }
      }
 diff --git a/port/src/options/screen.cpp b/port/src/options/screen.cpp
-index b27269a3..70f65102 100644
+index 7af7312a..8fc8ad4e 100644
 --- a/port/src/options/screen.cpp
 +++ b/port/src/options/screen.cpp
 @@ -1,3 +1,4 @@
@@ -25110,7 +25004,7 @@ index b27269a3..70f65102 100644
  #include "options/screen.hpp"
  
  #include <algorithm>
-@@ -15,6 +16,8 @@
+@@ -17,6 +18,8 @@
  #include "memcard.hpp"
  #include "menu_draw.hpp"
  #include "menuetc.hpp"
@@ -25119,7 +25013,7 @@ index b27269a3..70f65102 100644
  #include "platform/display.hpp"
  #include "platform/input.hpp"
  #include "platform/window.hpp"
-@@ -404,7 +407,53 @@ void RunMouse() {
+@@ -411,7 +414,53 @@ void RunMouse() {
      }
  }
  
@@ -25173,7 +25067,7 @@ index b27269a3..70f65102 100644
      if (g_screen.binding_row >= 0) {
          RunBindingCapture();
          return;
-@@ -673,9 +722,11 @@ int Run() {
+@@ -680,9 +729,11 @@ int Run() {
              if (g_screen.bar_frames > 0) {
                  g_screen.bar_frames--;
              }
@@ -25189,10 +25083,10 @@ index b27269a3..70f65102 100644
              ShowHelp();
              break;
 diff --git a/port/src/platform/config.cpp b/port/src/platform/config.cpp
-index e4d5cd3d..5e6e45e9 100644
+index b25269e3..00429d25 100644
 --- a/port/src/platform/config.cpp
 +++ b/port/src/platform/config.cpp
-@@ -520,6 +520,8 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
+@@ -567,6 +567,8 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
          config.shadow_distance = distance;
          return true;
      }
@@ -25201,7 +25095,7 @@ index e4d5cd3d..5e6e45e9 100644
      if (name == "discord.rich_presence") {
          return ReadBool(value, config.discord_rich_presence);
      }
-@@ -681,6 +683,8 @@ std::string ConfigSerialize(const Config &config) {
+@@ -738,6 +740,8 @@ std::string ConfigSerialize(const Config &config) {
      root["input"]["mouse_release"] = config.mouse_release_keys;
      root["input"]["vibration"] = options.vibration;
      root["input"]["bindings"] = std::move(bindings);
@@ -25211,10 +25105,10 @@ index e4d5cd3d..5e6e45e9 100644
      return root.dump(4) + "\n";
  }
 diff --git a/port/src/platform/config.hpp b/port/src/platform/config.hpp
-index fff028f2..99988a3b 100644
+index c7b1c78a..4044e1d6 100644
 --- a/port/src/platform/config.hpp
 +++ b/port/src/platform/config.hpp
-@@ -48,6 +48,8 @@ struct Config : HostSettings {
+@@ -66,6 +66,8 @@ struct Config : HostSettings {
      // Third-person vertical return after mouse input: 0 holds height, 1 is retail's rate.
      float                    mouse_camera_return = 0.2f;
      ConfigGameOptions        options;
@@ -25310,18 +25204,18 @@ index 6d3d21b5..2fdd7b43 100644
  
  // False when there is no such file or it is not JSON; a key missing or of another type keeps
 diff --git a/port/src/runscript.cpp b/port/src/runscript.cpp
-index 54f204c0..be3789ef 100644
+index ad8c24f8..aa7abc8c 100644
 --- a/port/src/runscript.cpp
 +++ b/port/src/runscript.cpp
-@@ -9,6 +9,7 @@
- 
+@@ -12,6 +12,7 @@
  #include "battle_globals.hpp"
  #include "dataalloc.hpp"
+ #include "runscript_port.hpp"
 +#include "moonmod/runtime.hpp"
  
  // The script VM on the host. A compiled script (.stb) is read where it was loaded, as retail
  // does: the header, the program table and the instructions are 32-bit integers on disc and on
-@@ -124,7 +125,20 @@ void RunEvent(CRunScript *script, int program, CDataAlloc2<1> *arena);
+@@ -196,7 +197,20 @@ void RunEvent(CRunScript *script, int program, CDataAlloc2<1> *arena);
  // ran to its end and -1 for a program the script does not have. EdEventInit treats the last two
  // as an event with nothing to show.
  PORT_OVERRIDE int EdRunEvent(int program, CDataAlloc2<1> *arena) {
@@ -32316,7 +32210,7 @@ index 00000000..9c12042d
 +}
 diff --git a/port/src/tests/moonmod_manager_ui_test.cpp b/port/src/tests/moonmod_manager_ui_test.cpp
 new file mode 100644
-index 00000000..d554fd3c
+index 00000000..ceeb43ec
 --- /dev/null
 +++ b/port/src/tests/moonmod_manager_ui_test.cpp
 @@ -0,0 +1,348 @@
@@ -32527,7 +32421,7 @@ index 00000000..d554fd3c
 +    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.next_focus = true}));
 +    EXPECT_EQ(moonmod::ManagerState().detail_tab, 3);
 +    EXPECT_EQ(moonmod::ManagerState().selected_skill, 0);
-+    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.mouse_left = true, .mouse_x = 512.0f, .mouse_y = 242.0f}));
++    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.mouse_left = true, .mouse_x = 512.0f, .mouse_y = 200.0f}));
 +    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.mouse_left = true, .mouse_x = 270.0f, .mouse_y = 292.0f}));
 +    EXPECT_EQ(moonmod::ManagerState().selected_skill, 1);
 +    EXPECT_TRUE(moonmod::HandleManagerInput(moonmod::ManagerInput{.next_focus = true}));
@@ -35288,7 +35182,7 @@ index 00000000..ce9d3d6f
 +endif()
 +message("MOONFACTORY_PREFLIGHT_OK|${api_record_count}; retail game boot waits for extracted data")
 diff --git a/port/src/texture.cpp b/port/src/texture.cpp
-index 844ce721..65bb497c 100644
+index dc7232e7..5af21332 100644
 --- a/port/src/texture.cpp
 +++ b/port/src/texture.cpp
 @@ -10,6 +10,7 @@
@@ -35297,29 +35191,29 @@ index 844ce721..65bb497c 100644
  #include "localize_texture.hpp"
 +#include "modtexture_port.hpp"
  #include "mglib.hpp"
+ #include "texture_assets.hpp"
  #include "texture_port.hpp"
- #include "tim2.hpp"
-@@ -351,6 +352,7 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
-             return;
+@@ -354,6 +355,7 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+         if (!LocalizeTexture(name, decoded)) {
+             TextureAssetApply(name, decoded);
          }
-         LocalizeTexture(name, decoded);
 +        ModsTextureOverride(name, decoded);
          caption::PreparePainted(name, decoded);
          MakeGroundPeriodic(name, decoded);
          DumpTexture(name, decoded);
 diff --git a/port/src/visualvu1.cpp b/port/src/visualvu1.cpp
-index 0feba88d..023ce060 100644
+index e0926d59..57c3c472 100644
 --- a/port/src/visualvu1.cpp
 +++ b/port/src/visualvu1.cpp
-@@ -11,6 +11,7 @@
+@@ -12,6 +12,7 @@
  #include "dataset.hpp"
  #include "draw3d.hpp"
  #include "mdt.hpp"
 +#include "modmodel_port.hpp"
  #include "mglib.hpp"
+ #include "normal_smoothing.hpp"
  #include "renderinfo.hpp"
- #include "texture.hpp"
-@@ -24,6 +25,7 @@ std::unordered_map<const void *, std::unique_ptr<Draw3DVisual>> g_visuals;
+@@ -93,6 +94,7 @@ std::unordered_map<const void *, std::unique_ptr<Draw3DVisual>> g_visuals;
  std::unordered_map<const void *, std::unique_ptr<Draw3DVisual>> g_transient;
  
  void Release(Draw3DVisual &visual) {
@@ -35327,7 +35221,7 @@ index 0feba88d..023ce060 100644
      if (visual.mesh != gfx::kNullMesh) {
          gfx::DestroyMesh(visual.mesh);
          visual.mesh = gfx::kNullMesh;
-@@ -662,6 +664,15 @@ PORT_OVERRIDE int CVisualVu1::CreateVUdataFromMDT(u_int *block, u_int *data, int
+@@ -734,6 +736,15 @@ PORT_OVERRIDE int CVisualVu1::CreateVUdataFromMDT(u_int *block, u_int *data, int
              strip.ground_uv_flip_v = true;
          }
      }
@@ -35343,7 +35237,7 @@ index 0feba88d..023ce060 100644
      Draw3DFinishVisual(visual);
      return vu_size;
  }
-@@ -695,16 +706,21 @@ PORT_OVERRIDE int CVisualVu1::CreateVUdataFromMDTRemake(u_int *block, u_int *dat
+@@ -767,16 +778,21 @@ PORT_OVERRIDE int CVisualVu1::CreateVUdataFromMDTRemake(u_int *block, u_int *dat
              }
          }
          strip_number++;
@@ -71597,7 +71491,7 @@ index 0bddbbfa..f3cd5baf 100644
      EPARTS_INFO_HEADER *source;
      EPARTS_ARCHIVE     *record = (EPARTS_ARCHIVE *) archive;
 diff --git a/ps2/src/editloop3.cpp b/ps2/src/editloop3.cpp
-index 61762201..5bed1629 100644
+index 411eafd2..8815298a 100644
 --- a/ps2/src/editloop3.cpp
 +++ b/ps2/src/editloop3.cpp
 @@ -714,6 +714,129 @@ void EdInitVillagerTable(float clock, EDIT_MAP_INFO *info) {
@@ -71774,7 +71668,7 @@ index 61762201..5bed1629 100644
              ((CCharacter *) ((char *) EdVillager + offset))->CCharacter::SetPosition(position);
              ((CCharacter *) ((char *) EdVillager + offset))->CCharacter::SetRotation(rotation[0], rotation[1], rotation[2]);
          } else {
-@@ -9134,9 +9273,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+@@ -9139,9 +9278,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
      character->GetRotation(character_rotation);
  
      for (i = 0; i < count; i++) {
@@ -71792,7 +71686,7 @@ index 61762201..5bed1629 100644
  
          int available = npcs[i].initialized != 0 && npcs[i].draw_enabled != 0;
  
-@@ -9172,7 +9319,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+@@ -9177,7 +9324,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
          npcs[i].GetDir(*character, direction);
          float npc_angle = atan2f(direction[0], direction[2]);
          npcs[i].GetRotation(npc_rotation);

@@ -9,8 +9,16 @@ separate download. You build the game yourself from your own disc; nothing from 
 | `moonfactory-kazarov.patch` | The changes MoonFactory needs in the Kazarov renderer submodule (`tools/kazarov`): named input bindings for mods and the window hooks they use. |
 | `apply-moonfactory.ps1` | Checks out the matching Chronicle commit and applies both patches. |
 
-The patch is made against Chronicle commit `50eaff633e4e02e5dbc6a7a6a84c7e34688cb738` ("Player menu framework
-(#189)"). It may not apply to later Chronicle commits until it is refreshed.
+The patch is made against Chronicle commit `6ec3b808dd8a9b15704cbce29e40be84591954ce` ("Dialog and Quest
+framework (#198)"), the master that has the player menu framework (#189), mouse menus (#194) and the
+dialog/quest framework (#198). It may not apply to later Chronicle commits until it is refreshed.
+
+The Mod Manager is drawn with that menu framework (`UI::` windows, labels, tab plate, cursor and brackets,
+scroll and progress bars, confirm modal), so it matches the game's other menus and takes the same mouse input.
+
+That commit pins Kazarov `611182d`, which lacks `a78762c` (TextureDesc logical size) that Chronicle's texture
+overrides (#187) need, so plain master does not build. `moonfactory-kazarov.patch` carries `a78762c` along with
+MoonFactory's own Kazarov changes, so a checkout with both patches builds.
 
 ## What you need
 
@@ -30,7 +38,7 @@ The patch is made against Chronicle commit `50eaff633e4e02e5dbc6a7a6a84c7e34688c
 
    ```powershell
    cd Chronicle
-   git checkout 50eaff633e4e02e5dbc6a7a6a84c7e34688cb738
+   git checkout 6ec3b808dd8a9b15704cbce29e40be84591954ce
    git apply --whitespace=nowarn ..\MoonMod\ports\chronicle\moonfactory-chronicle.patch
    git -C tools\kazarov apply --whitespace=nowarn ..\..\..\MoonMod\ports\chronicle\moonfactory-kazarov.patch
    ```

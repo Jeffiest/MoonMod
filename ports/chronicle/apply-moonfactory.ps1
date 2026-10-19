@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$base = '50eaff633e4e02e5dbc6a7a6a84c7e34688cb738'
+$base = '6ec3b808dd8a9b15704cbce29e40be84591954ce'
 $patch = Join-Path $PSScriptRoot 'moonfactory-chronicle.patch'
 $kazarovPatch = Join-Path $PSScriptRoot 'moonfactory-kazarov.patch'
 $kazarov = Join-Path $Chronicle 'tools\kazarov'
