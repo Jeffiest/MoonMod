@@ -70333,7 +70333,7 @@ index 0bddbbfa..f3cd5baf 100644
      EPARTS_INFO_HEADER *source;
      EPARTS_ARCHIVE     *record = (EPARTS_ARCHIVE *) archive;
 diff --git a/ps2/src/editloop3.cpp b/ps2/src/editloop3.cpp
-index 61762201..05fb4ac6 100644
+index 61762201..5bed1629 100644
 --- a/ps2/src/editloop3.cpp
 +++ b/ps2/src/editloop3.cpp
 @@ -714,6 +714,129 @@ void EdInitVillagerTable(float clock, EDIT_MAP_INFO *info) {
@@ -70497,7 +70497,20 @@ index 61762201..05fb4ac6 100644
  }
  
  static void GetNearVill(CCamera *camera, CCharacter *player, CNPCharacter *villagers, int *indices, float *distances) {
-@@ -9134,9 +9267,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+@@ -1420,6 +1553,12 @@ void EdMoveVillager(VILLAGER_INFO *villagers) {
+         }
+ 
+         if (info->initial_motion == 0) {
++#ifdef PORT
++            // A mod's villager stands on the ground under it, which a placed piece can raise.
++            if (ChronicleModVillagerInSlot(i) >= 0 && ground != NULL) {
++                position[1] = ground->GetAlt(position[0], position[1] + 50.0f, position[2]);
++            }
++#endif
+             ((CCharacter *) ((char *) EdVillager + offset))->CCharacter::SetPosition(position);
+             ((CCharacter *) ((char *) EdVillager + offset))->CCharacter::SetRotation(rotation[0], rotation[1], rotation[2]);
+         } else {
+@@ -9134,9 +9273,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
      character->GetRotation(character_rotation);
  
      for (i = 0; i < count; i++) {
@@ -70515,7 +70528,7 @@ index 61762201..05fb4ac6 100644
  
          int available = npcs[i].initialized != 0 && npcs[i].draw_enabled != 0;
  
-@@ -9172,7 +9313,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+@@ -9172,7 +9319,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
          npcs[i].GetDir(*character, direction);
          float npc_angle = atan2f(direction[0], direction[2]);
          npcs[i].GetRotation(npc_rotation);
