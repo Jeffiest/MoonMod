@@ -1,5 +1,5 @@
 diff --git a/.gitignore b/.gitignore
-index 17ddf996..bb4557e9 100644
+index 17ddf9963..bb4557e9d 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -12,6 +12,8 @@ tools/ghidra
@@ -12,7 +12,7 @@ index 17ddf996..bb4557e9 100644
  # Kazarov's locks and run descriptors.
  /.kazarov/
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 13e8dd8d..98952b7c 100644
+index 13e8dd8d7..98952b7c8 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -10,10 +10,24 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -79,7 +79,7 @@ index 13e8dd8d..98952b7c 100644
          -Wno-overloaded-virtual -Wno-unused-function)
 diff --git a/port/include/moonmod/api.hpp b/port/include/moonmod/api.hpp
 new file mode 100644
-index 00000000..7efb8eb7
+index 000000000..7efb8eb76
 --- /dev/null
 +++ b/port/include/moonmod/api.hpp
 @@ -0,0 +1,63 @@
@@ -148,7 +148,7 @@ index 00000000..7efb8eb7
 +} // namespace moonmod
 diff --git a/port/include/moonmod/audio_api.hpp b/port/include/moonmod/audio_api.hpp
 new file mode 100644
-index 00000000..2c0ab1b9
+index 000000000..2c0ab1b95
 --- /dev/null
 +++ b/port/include/moonmod/audio_api.hpp
 @@ -0,0 +1,35 @@
@@ -189,7 +189,7 @@ index 00000000..2c0ab1b9
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_two_adapter.hpp b/port/include/moonmod/chronicle_two_adapter.hpp
 new file mode 100644
-index 00000000..5837fa41
+index 000000000..5837fa410
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_two_adapter.hpp
 @@ -0,0 +1,35 @@
@@ -230,7 +230,7 @@ index 00000000..5837fa41
 +} // namespace moonmod
 diff --git a/port/include/moonmod/combat_formula.hpp b/port/include/moonmod/combat_formula.hpp
 new file mode 100644
-index 00000000..0c35a2d9
+index 000000000..05f72c886
 --- /dev/null
 +++ b/port/include/moonmod/combat_formula.hpp
 @@ -0,0 +1,318 @@
@@ -552,9 +552,67 @@ index 00000000..0c35a2d9
 +}
 +
 +} // namespace moonmod
+diff --git a/port/include/moonmod/dng_event_moonmod.hpp b/port/include/moonmod/dng_event_moonmod.hpp
+new file mode 100644
+index 000000000..452c98a5c
+--- /dev/null
++++ b/port/include/moonmod/dng_event_moonmod.hpp
+@@ -0,0 +1,17 @@
++#pragma once
++
++// Mod hooks around the dungeon event unit; dng_event.hpp includes this in the port build.
++
++class CScene;
++class CMonsterMan;
++class mgCMemory;
++
++/** Returns true once the active dungeon's native monster manager has finished initialization. */
++bool IsMonsterManagerReadyForModSpawn(const CScene *scene);
++
++namespace moonmod {
++int ChronicleTwoRequestedDungeonEntryFloor(int requested_floor);
++int ChronicleTwoDungeonFloorSource(int dungeon, int floor);
++bool InheritChronicleTwoTreasureFloor(TRESURE_BOX_FLOOR_INFO *table, int dungeon, int floor);
++void PreloadChronicleTwoCharacterTemplates(CMonsterMan *manager, mgCMemory *memory);
++}
+diff --git a/port/include/moonmod/dngfloor_moonmod.hpp b/port/include/moonmod/dngfloor_moonmod.hpp
+new file mode 100644
+index 000000000..b9c0f47c6
+--- /dev/null
++++ b/port/include/moonmod/dngfloor_moonmod.hpp
+@@ -0,0 +1,14 @@
++#pragma once
++
++// Mod floors appended to a dungeon's floor graph (port/src/moonmod/dngfloor_moonmod.cpp).
++
++class CDngFloorManager;
++
++constexpr int MOONMOD_FLOOR_CAPACITY = 8;                               /**< Mod floors per dungeon map. */
++constexpr int MOONMOD_FLOOR_CELL_CAPACITY = MOONMOD_FLOOR_CAPACITY * 2; /**< Grid cells: a root and a room each. */
++
++/** Records the grid the floor script allocated, with room for MOONMOD_FLOOR_CELL_CAPACITY extra cells. */
++void MoonModDngFloorMapInfo(CDngFloorManager *manager, int cell_capacity);
++
++/** Forgets the mod floors of the previous map; called by CDngFloorManager::Initialize. */
++void ResetMoonModDngFloors();
+diff --git a/port/include/moonmod/gamedata_moonmod.hpp b/port/include/moonmod/gamedata_moonmod.hpp
+new file mode 100644
+index 000000000..fc7d4a552
+--- /dev/null
++++ b/port/include/moonmod/gamedata_moonmod.hpp
+@@ -0,0 +1,9 @@
++#pragma once
++
++// Capacity the port build adds to the item tables of ps2/src/gamedata.cpp for mod items and weapons.
++
++constexpr int MOONMOD_ITEM_CAPACITY = 32;   /**< Data-only mod items beyond the 162 native usable items. */
++constexpr int MOONMOD_WEAPON_CAPACITY = 32; /**< Data-only mod weapons beyond the 116 native weapons. */
++
++/** Clears the mod item and weapon registrations and the item number table; called by CGameData::Initialize. */
++void ResetMoonModGameData();
 diff --git a/port/include/moonmod/manager_ui.hpp b/port/include/moonmod/manager_ui.hpp
 new file mode 100644
-index 00000000..33f3479b
+index 000000000..e9944aebf
 --- /dev/null
 +++ b/port/include/moonmod/manager_ui.hpp
 @@ -0,0 +1,98 @@
@@ -658,7 +716,7 @@ index 00000000..33f3479b
 +} // namespace moonmod
 diff --git a/port/include/moonmod/manifest.hpp b/port/include/moonmod/manifest.hpp
 new file mode 100644
-index 00000000..00c145b0
+index 000000000..00c145b0d
 --- /dev/null
 +++ b/port/include/moonmod/manifest.hpp
 @@ -0,0 +1,67 @@
@@ -729,9 +787,41 @@ index 00000000..00c145b0
 +std::string               SettingValueText(const SettingDefinition &setting, const Json &value);
 +
 +} // namespace moonmod
+diff --git a/port/include/moonmod/mapselect_moonmod.hpp b/port/include/moonmod/mapselect_moonmod.hpp
+new file mode 100644
+index 000000000..2d2511efd
+--- /dev/null
++++ b/port/include/moonmod/mapselect_moonmod.hpp
+@@ -0,0 +1,26 @@
++#pragma once
++
++// Mod map identities appended after the native map catalog; mapselect.hpp includes this in the port build.
++
++/**
++ * Returns the number of native map records loaded from map/map*.cfg.
++ *
++ * This count is used by PC-port APIs that enumerate the native map catalog.
++ */
++int GetMapNameCount();
++
++/**
++ * Appends a bounded MoonMod-authored map identity to the runtime catalog.
++ * The initial supported authored-map type is a standalone native interior map.
++ * Returns the runtime map index, or -1 when the name conflicts or capacity is reached.
++ */
++int RegisterMoonModMapName(const char *name, const char *title);
++
++/** Returns whether map_no refers to an appended MoonMod map identity. */
++int IsMoonModMapName(int map_no);
++
++/** Clears appended map identities between isolated native unit tests. */
++void ResetMoonModMapNamesForTests();
++
++/** Gives the record of appended map index (0 = first appended map), or NULL. */
++MAP_NAME_INFO *GetMoonModMapNameInfo(int index);
 diff --git a/port/include/moonmod/native_events.hpp b/port/include/moonmod/native_events.hpp
 new file mode 100644
-index 00000000..77119347
+index 000000000..771193477
 --- /dev/null
 +++ b/port/include/moonmod/native_events.hpp
 @@ -0,0 +1,10 @@
@@ -747,7 +837,7 @@ index 00000000..77119347
 +} // namespace moonmod
 diff --git a/port/include/moonmod/native_plugin.h b/port/include/moonmod/native_plugin.h
 new file mode 100644
-index 00000000..9eb83037
+index 000000000..9eb830371
 --- /dev/null
 +++ b/port/include/moonmod/native_plugin.h
 @@ -0,0 +1,99 @@
@@ -852,7 +942,7 @@ index 00000000..9eb83037
 +#endif /* MOONMOD_NATIVE_PLUGIN_H */
 diff --git a/port/include/moonmod/native_plugin_contract.hpp b/port/include/moonmod/native_plugin_contract.hpp
 new file mode 100644
-index 00000000..8c7c664b
+index 000000000..8c7c664b1
 --- /dev/null
 +++ b/port/include/moonmod/native_plugin_contract.hpp
 @@ -0,0 +1,32 @@
@@ -890,7 +980,7 @@ index 00000000..8c7c664b
 +} // namespace moonmod
 diff --git a/port/include/moonmod/native_plugin_hash.hpp b/port/include/moonmod/native_plugin_hash.hpp
 new file mode 100644
-index 00000000..22db877c
+index 000000000..22db877cf
 --- /dev/null
 +++ b/port/include/moonmod/native_plugin_hash.hpp
 @@ -0,0 +1,11 @@
@@ -907,7 +997,7 @@ index 00000000..22db877c
 +} // namespace moonmod
 diff --git a/port/include/moonmod/native_plugin_loader.hpp b/port/include/moonmod/native_plugin_loader.hpp
 new file mode 100644
-index 00000000..04071911
+index 000000000..04071911c
 --- /dev/null
 +++ b/port/include/moonmod/native_plugin_loader.hpp
 @@ -0,0 +1,44 @@
@@ -957,7 +1047,7 @@ index 00000000..04071911
 +} // namespace moonmod
 diff --git a/port/include/moonmod/native_resource_overrides.hpp b/port/include/moonmod/native_resource_overrides.hpp
 new file mode 100644
-index 00000000..b33cd414
+index 000000000..b33cd414f
 --- /dev/null
 +++ b/port/include/moonmod/native_resource_overrides.hpp
 @@ -0,0 +1,27 @@
@@ -990,7 +1080,7 @@ index 00000000..b33cd414
 +} // namespace moonmod
 diff --git a/port/include/moonmod/runtime.hpp b/port/include/moonmod/runtime.hpp
 new file mode 100644
-index 00000000..29a29a24
+index 000000000..29a29a243
 --- /dev/null
 +++ b/port/include/moonmod/runtime.hpp
 @@ -0,0 +1,125 @@
@@ -1119,8 +1209,218 @@ index 00000000..29a29a24
 +Runtime &SharedRuntime();
 +
 +} // namespace moonmod
+diff --git a/port/include/moonmod/savedatadungeon_moonmod.hpp b/port/include/moonmod/savedatadungeon_moonmod.hpp
+new file mode 100644
+index 000000000..c88347137
+--- /dev/null
++++ b/port/include/moonmod/savedatadungeon_moonmod.hpp
+@@ -0,0 +1,47 @@
++#pragma once
++
++// Mod floor save records kept beside CSaveDataDungeon; savedatadungeon.hpp includes this in the port build.
++
++#include <cstddef>
++
++enum {
++    SAVE_DUNGEON_FLOOR_ID_MAX = 40 /**< Largest floor id held by the native dungeon graph. */
++};
++
++/**
++ * Gives the number of floor records the original save format allocates to a dungeon.
++ *
++ * Mod-added floors must stay within this range until the game has an extended save backend.
++ */
++int GetSavedDungeonFloorCount(int dungeon);
++
++/** Gives whether the original save format can persist this dungeon/floor pair. */
++bool HasSavedDungeonFloorRecord(int dungeon, int floor);
++
++enum {
++    MOONMOD_DUNGEON_SAVE_RECORD_MAX = 8,
++    MOONMOD_DUNGEON_SAVE_ID_SIZE = 256,
++};
++
++/** Stable-id keyed progress for mod floors that do not fit the retail save table. */
++struct MOONMOD_DUNGEON_SAVE_RECORD {
++    char           id[MOONMOD_DUNGEON_SAVE_ID_SIZE];
++    DNG_FLOOR_SAVE data;
++};
++
++/** Versioned sidecar payload; kept outside CSaveData so the retail save ABI stays fixed. */
++struct MOONMOD_DUNGEON_SAVE_EXTENSION {
++    char                          magic[8];
++    u32                           version;
++    u32                           record_count;
++    MOONMOD_DUNGEON_SAVE_RECORD   records[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
++};
++
++bool RegisterMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor, const char *stable_id);
++DNG_FLOOR_SAVE *GetMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor);
++void ResetMoonModDungeonSaveExtension(CSaveDataDungeon *owner);
++bool ExportMoonModDungeonSaveExtension(const CSaveDataDungeon *owner, MOONMOD_DUNGEON_SAVE_EXTENSION *extension);
++bool ImportMoonModDungeonSaveExtension(CSaveDataDungeon *owner, const MOONMOD_DUNGEON_SAVE_EXTENSION *extension);
++
++STATIC_ASSERT(sizeof(MOONMOD_DUNGEON_SAVE_RECORD) == 0x114);
++STATIC_ASSERT(sizeof(MOONMOD_DUNGEON_SAVE_EXTENSION) == 0x8B0);
+diff --git a/port/include/stubs/dng_event.hpp b/port/include/stubs/dng_event.hpp
+new file mode 100644
+index 000000000..d1aa51b8d
+--- /dev/null
++++ b/port/include/stubs/dng_event.hpp
+@@ -0,0 +1,7 @@
++#pragma once
++#include <dng_event.hpp>
++#include <scriptinterpreter.hpp>
++
++// The treasure table parser's state, shared with CreatTresuarBoxInfo in port/src/dng_event.cpp.
++extern TRESURE_BOX_FLOOR_INFO *nowTbFloor asm("DngEvent_NowTbFloor");
++extern SPI_TAG_PARAM           tag__5[6] asm("DngEvent_TreasureTags");
+diff --git a/port/include/stubs/dng_object.hpp b/port/include/stubs/dng_object.hpp
+new file mode 100644
+index 000000000..03b2b4914
+--- /dev/null
++++ b/port/include/stubs/dng_object.hpp
+@@ -0,0 +1,3 @@
++#pragma once
++
++#include "moonmod/native_events.hpp"
+diff --git a/port/include/stubs/dngfloor.hpp b/port/include/stubs/dngfloor.hpp
+new file mode 100644
+index 000000000..5b6c290a4
+--- /dev/null
++++ b/port/include/stubs/dngfloor.hpp
+@@ -0,0 +1,11 @@
++#pragma once
++#include <dngfloor.hpp>
++
++#include "moonmod/dngfloor_moonmod.hpp"
++
++class mgCMemory;
++
++// The floor script's parser state, shared with the mod floors in port/src/moonmod/dngfloor_moonmod.cpp.
++extern CDngFloorManager *tree_dngmap asm("DngFloor_TreeDngMap");
++extern GLID_INFO        *tree_glid_info asm("DngFloor_TreeGlidInfo");
++extern mgCMemory        *tree_spi_stack asm("DngFloor_TreeSpiStack");
+diff --git a/port/include/stubs/editloop.hpp b/port/include/stubs/editloop.hpp
+index f978ced08..6b05b897f 100644
+--- a/port/include/stubs/editloop.hpp
++++ b/port/include/stubs/editloop.hpp
+@@ -5,3 +5,10 @@ extern int LoopMode asm("EditLoop_Mode");
+ extern int ControlMode asm("EditLoop_Control");
+ extern int LockChara asm("EditLoop_PlayerLock");
+ extern int PauseFlag asm("EditLoop_Pause");
++
++class CEditMap;
++class mgCMemory;
++void GameGrantGeoramaStockForTest(::CEditMap *map);
++namespace moonmod {
++void ApplyChronicleTwoGeorama(::CEditMap *map, ::mgCMemory *memory);
++}
+diff --git a/port/include/stubs/event_func.hpp b/port/include/stubs/event_func.hpp
+index bc52709fa..f2b998492 100644
+--- a/port/include/stubs/event_func.hpp
++++ b/port/include/stubs/event_func.hpp
+@@ -2,3 +2,6 @@
+ 
+ // Retail binds event_func's VectMatMul under the __2 name; eventedit's copy keeps the plain one.
+ #define VectMatMul VectMatMul__2
++
++// Mod event notifications raised from the floor script opcodes.
++#include "moonmod/native_events.hpp"
+diff --git a/port/include/stubs/gamedata.hpp b/port/include/stubs/gamedata.hpp
+index 5986db6aa..2f437b8f1 100644
+--- a/port/include/stubs/gamedata.hpp
++++ b/port/include/stubs/gamedata.hpp
+@@ -7,3 +7,7 @@ class mgCMemory;
+ // Share retail dispatch and name allocation with the native message arena.
+ extern SPI_TAG_PARAM gamedata_tag[25] asm("GameData_Tags");
+ extern mgCMemory    *gamedata_build_stack asm("GameData_BuildStack");
++
++// Mod item and weapon registration (port/src/moonmod/gamedata_moonmod.cpp) shares the item number table.
++#include "moonmod/gamedata_moonmod.hpp"
++extern short local_itemdatano_converttable[ITEM_NO_MAX] asm("GameData_ItemNoTable");
+diff --git a/port/include/stubs/inventmn.hpp b/port/include/stubs/inventmn.hpp
+index 473e382ba..652b61562 100644
+--- a/port/include/stubs/inventmn.hpp
++++ b/port/include/stubs/inventmn.hpp
+@@ -9,3 +9,6 @@ extern mgCMemory          InventTeigiStack asm("Inventmn_RecipeStack");
+ extern CInventDataManage *InventManagePt asm("Inventmn_RecipeManager");
+ extern SPI_TAG_PARAM      invent_teigi_func[3] asm("Inventmn_RecipeTags");
+ extern CInventUserData   *InventUserDataPtr asm("Inventmn_PhotoData");
++
++// MoonMod: reports a created invention with its recipe's three ideas (port/src/moonmod/inventmn_moonmod.cpp).
++void MoonModNotifyInventionCreated(int item_id);
+diff --git a/port/include/stubs/mapselect.hpp b/port/include/stubs/mapselect.hpp
+new file mode 100644
+index 000000000..5c1fa9bbd
+--- /dev/null
++++ b/port/include/stubs/mapselect.hpp
+@@ -0,0 +1,6 @@
++#pragma once
++#include <mapselect.hpp>
++
++// Share the native map catalog with the mod map identities in port/src/moonmod/mapselect_moonmod.cpp.
++extern int            MapNameNum asm("MapSelect_MapNameNum");
++extern MAP_NAME_INFO *map_name asm("MapSelect_MapName");
+diff --git a/port/include/stubs/monster.hpp b/port/include/stubs/monster.hpp
+new file mode 100644
+index 000000000..fe3752fbd
+--- /dev/null
++++ b/port/include/stubs/monster.hpp
+@@ -0,0 +1,11 @@
++#pragma once
++
++#include <monster.hpp>
++
++namespace moonmod {
++float ApplyChronicleTwoCombatDamageFormula(float damage);
++}
++
++// Retail GetMonsterTable, kept by RETAIL_BRIDGES (scripts/port/unit_copy.py); the port's override consults the
++// MoonMod monster variants first and delegates here.
++BASE_MONSTER_TBL *PortRetailGetMonsterTable(int monster_id) asm("Monster_GetMonsterTable");
+diff --git a/port/include/stubs/photo.hpp b/port/include/stubs/photo.hpp
+index a4b58e9f5..5f373b60c 100644
+--- a/port/include/stubs/photo.hpp
++++ b/port/include/stubs/photo.hpp
+@@ -8,3 +8,9 @@ extern float        AddProj asm("Photo_Zoom");
+ extern int          ShowTakePhotoCnt asm("Photo_PreviewFrames");
+ extern int          ShutterAnmCnt asm("Photo_ShutterFrames");
+ extern unsigned int OpenMenu asm("Photo_OpenMenu");
++
++struct USER_PICTURE_INFO;
++
++// Retail SetTookPhotoData, kept by RETAIL_BRIDGES (scripts/port/unit_copy.py); the port's override runs it and then
++// reports the photo to MoonMod.
++void PortRetailSetTookPhotoData(USER_PICTURE_INFO *photo) asm("Photo_SetTookPhotoData");
+diff --git a/port/include/stubs/runscript_opcodes.hpp b/port/include/stubs/runscript_opcodes.hpp
+new file mode 100644
+index 000000000..a344c917d
+--- /dev/null
++++ b/port/include/stubs/runscript_opcodes.hpp
+@@ -0,0 +1,6 @@
++#pragma once
++
++class CActiveMonster;
++namespace moonmod {
++void ChronicleTwoEnemyDefeated(::CActiveMonster *monster, const char *source);
++}
+diff --git a/port/src/automap.cpp b/port/src/automap.cpp
+index 4d5ea7f04..c39d7d140 100644
+--- a/port/src/automap.cpp
++++ b/port/src/automap.cpp
+@@ -220,3 +220,9 @@ PORT_OVERRIDE void CMiniMapSymbol::Draw(float *pos) {
+     sprite.SetScirror(0, 0, mgScreenWidth - 1, mgScreenHeight - 1);
+     sprite.End();
+ }
++
++// Random floor layout knobs that mods set; 0 keeps retail's layout (declared in ps2/include/automap.hpp).
++int DngLayoutRooms = 0;
++int DngLayoutArea = 0;
++int DngLayoutRoomMin = 0;
++int DngLayoutRoomMax = 0;
 diff --git a/port/src/dataread.cpp b/port/src/dataread.cpp
-index 26aa406c..8c05d58f 100644
+index 26aa406ca..8c05d58fc 100644
 --- a/port/src/dataread.cpp
 +++ b/port/src/dataread.cpp
 @@ -14,6 +14,7 @@
@@ -1348,13 +1648,24 @@ index 26aa406c..8c05d58f 100644
          return size;
      }
 diff --git a/port/src/dng_event.cpp b/port/src/dng_event.cpp
-index 715da133..481369b8 100644
+index 715da1339..1d8078530 100644
 --- a/port/src/dng_event.cpp
 +++ b/port/src/dng_event.cpp
-@@ -13,6 +13,14 @@
+@@ -2,6 +2,7 @@
+ 
+ #include <cmath>
+ #include <cstdio>
++#include <cstring>
+ 
+ #include "dataread.hpp"
+ #include "dng_event.hpp"
+@@ -12,6 +13,16 @@
+ #include "runscript.hpp"
  #include "scene.hpp"
  #include "snd_mngr.hpp"
- 
++#include "savedatadungeon.hpp"
++#include "scriptinterpreter.hpp"
++
 +namespace {
 +CScene *g_ready_monster_manager_scene = nullptr;
 +}
@@ -1362,11 +1673,10 @@ index 715da133..481369b8 100644
 +bool IsMonsterManagerReadyForModSpawn(const CScene *scene) {
 +    return scene != nullptr && g_ready_monster_manager_scene == scene;
 +}
-+
+ 
  void PrepareMonsterMemory(CMonsterMan &manager, mgCMemory &memory) {
      // Preserve the retail model budget and account for the two script arrays' wider entries.
-     constexpr int extra_bytes = 128 * (sizeof(RS_STACKDATA) - 8) + 512 * (sizeof(RS_CALLDATA) - 12);
-@@ -25,6 +33,7 @@ void PrepareMonsterMemory(CMonsterMan &manager, mgCMemory &memory) {
+@@ -25,6 +36,7 @@ void PrepareMonsterMemory(CMonsterMan &manager, mgCMemory &memory) {
  }
  
  PORT_OVERRIDE void LoadMonsterFile() {
@@ -1374,7 +1684,7 @@ index 715da133..481369b8 100644
      if (!ActiveMonster) {
          return;
      }
-@@ -54,6 +63,8 @@ PORT_OVERRIDE void LoadMonsterFile() {
+@@ -54,6 +66,8 @@ PORT_OVERRIDE void LoadMonsterFile() {
              ActiveMonster->EntryRefer(id, memory);
          }
      }
@@ -1383,7 +1693,7 @@ index 715da133..481369b8 100644
  }
  
  PORT_OVERRIDE void LoadMonsterFile(int monster_id, int initialize) {
-@@ -65,6 +76,7 @@ PORT_OVERRIDE void LoadMonsterFile(int monster_id, int initialize) {
+@@ -65,6 +79,7 @@ PORT_OVERRIDE void LoadMonsterFile(int monster_id, int initialize) {
      }
  
      if (initialize != 0) {
@@ -1391,7 +1701,7 @@ index 715da133..481369b8 100644
          manager->Initialize(scene);
          scene->AssignStack(3);
          scene->ClearStack(3);
-@@ -79,6 +91,7 @@ PORT_OVERRIDE void LoadMonsterFile(int monster_id, int initialize) {
+@@ -79,6 +94,7 @@ PORT_OVERRIDE void LoadMonsterFile(int monster_id, int initialize) {
          // Retail places these at +4 with a 0x30 stride; host pointers enlarge both fields.
          PrepareMonsterMemory(*manager, *memory);
          sndInitPort(5);
@@ -1399,8 +1709,105 @@ index 715da133..481369b8 100644
      }
  
      if (manager->SearchBaseIndex(monster_id) < 0) {
+@@ -103,3 +119,28 @@ PORT_OVERRIDE int CRedMarkModel::Draw() {
+ 
+     return 0;
+ }
++
++// The treasure table parser's state in ps2/src/dng_event.cpp, named for the port by port/include/stubs/dng_event.hpp.
++extern TRESURE_BOX_FLOOR_INFO *PortDngEventNowTbFloor asm("DngEvent_NowTbFloor");
++extern SPI_TAG_PARAM           PortDngEventTreasureTags[6] asm("DngEvent_TreasureTags");
++
++// Clears the floor table first and lets a mod floor inherit its source floor's treasure.
++PORT_OVERRIDE void CreatTresuarBoxInfo(TRESURE_BOX_FLOOR_INFO *table, char *script, int length) {
++    table->group_num = 0;
++    table->floor_start = 0;
++    table->rank_max = 0;
++    table->rank_min = 100;
++    std::memset(table->floor, 0, sizeof(table->floor));
++    PortDngEventNowTbFloor = table;
++    CScriptInterpreter interpreter;
++
++    interpreter.SetTag(PortDngEventTreasureTags);
++    interpreter.SetScript(script, length);
++    interpreter.Run();
++    table->group_num += 1;
++    const int dungeon = DngSaveDataDungeon != NULL ? DngSaveDataDungeon->stage_id : -1;
++    if (dungeon >= 0 && dungeon < SAVE_DUNGEON_NUM) {
++        const int floor = DngSaveDataDungeon->floor_id[dungeon];
++        moonmod::InheritChronicleTwoTreasureFloor(table, dungeon, floor);
++    }
++}
+diff --git a/port/src/dngfloor.cpp b/port/src/dngfloor.cpp
+new file mode 100644
+index 000000000..f81ce0c6f
+--- /dev/null
++++ b/port/src/dngfloor.cpp
+@@ -0,0 +1,62 @@
++#include "common.h"
++
++#include <cstdio>
++
++#include "dataread.hpp"
++#include "dngfloor.hpp"
++#include "menucommon.hpp"
++#include "moonmod/chronicle_two_adapter.hpp"
++#include "moonmod/dngfloor_moonmod.hpp"
++
++// Also forgets the previous map's mod floors.
++PORT_OVERRIDE void CDngFloorManager::Initialize() {
++    dng_no = 0;
++    glid_info = NULL;
++    glid_num = 0;
++    glid_w = 0;
++    glid_h = 0;
++    ResetMoonModDngFloors();
++}
++
++// Adds the mods' floors once the native tables are read.
++PORT_OVERRIDE void CDngFloorManager::LoadDataTable(int dungeon, mgCMemory *memory) {
++    char path[0x60];
++    u8   scratch[0xA000];
++    char menu_path[0x40];
++    int  size;
++
++    if (memory == NULL) {
++        return;
++    }
++
++    if (dungeon < 0 || dungeon >= DNGMAP_DUNGEON_NUM) {
++        dungeon = 0;
++    }
++
++    Initialize();
++    dng_no = dungeon;
++    sprintf(path, "menu/dngmap/dmap%d.cfg", dungeon);
++    u8 *data = (u8 *) MenuCalcBufAlignment((u_long128 *) scratch);
++    LoadFile2(path, data, &size, 0);
++
++    if (size > 0) {
++        AnalyzeFile((char *) data, size, memory);
++    }
++
++    sprintf(path, "menu/dngmap/dflr%d.cfg", dungeon);
++    data = (u8 *) MenuCalcBufAlignment((u_long128 *) scratch);
++    LoadFile2(path, data, &size, 0);
++
++    if (size > 0) {
++        AnalyzeFile((char *) data, size, memory);
++    }
++
++    sprintf(menu_path, "flrtitle%d.txt", dungeon);
++    size = LoadFileMenu(menu_path, (u_long128 *) data, 1);
++
++    if (size > 0) {
++        AnalyzeFile((char *) data, size, memory);
++    }
++
++    moonmod::ApplyChronicleTwoDungeons(this);
++}
 diff --git a/port/src/event.cpp b/port/src/event.cpp
-index f231809f..8689209f 100644
+index f231809f1..8689209f4 100644
 --- a/port/src/event.cpp
 +++ b/port/src/event.cpp
 @@ -10,6 +10,7 @@
@@ -1433,7 +1840,7 @@ index f231809f..8689209f 100644
 +    return -1;
 +}
 diff --git a/port/src/main.cpp b/port/src/main.cpp
-index 9cbc3e37..13e389ba 100644
+index 9cbc3e378..13e389ba1 100644
 --- a/port/src/main.cpp
 +++ b/port/src/main.cpp
 @@ -6,6 +6,7 @@
@@ -1536,7 +1943,7 @@ index 9cbc3e37..13e389ba 100644
      InputShutdown();
  #ifdef CT_HAVE_AUDIO_INIT
 diff --git a/port/src/mainloop.cpp b/port/src/mainloop.cpp
-index bb5cbf58..ce76cac2 100644
+index bb5cbf58a..ce76cac28 100644
 --- a/port/src/mainloop.cpp
 +++ b/port/src/mainloop.cpp
 @@ -6,6 +6,7 @@
@@ -1656,8 +2063,38 @@ index bb5cbf58..ce76cac2 100644
  
          bool developer_menu_requested = false;
          auto request_developer_menu = [&]() {
+diff --git a/port/src/mapselect.cpp b/port/src/mapselect.cpp
+new file mode 100644
+index 000000000..8c770f570
+--- /dev/null
++++ b/port/src/mapselect.cpp
+@@ -0,0 +1,24 @@
++#include "common.h"
++
++#include <cstring>
++
++#include "mapselect.hpp"
++
++// Searches the appended mod map identities too; GetMapName reaches both catalogs.
++PORT_OVERRIDE int SearchMapNo(char *name) {
++    if (name == NULL) {
++        return -1;
++    }
++
++    const int count = GetMapNameCount();
++
++    for (int no = 0; no < count; no++) {
++        const char *map_name = GetMapName(no, NULL);
++
++        if (map_name != NULL && strcmp(map_name, name) == 0) {
++            return no;
++        }
++    }
++
++    return -1;
++}
 diff --git a/port/src/memcard.cpp b/port/src/memcard.cpp
-index 634a70e8..600bc5f4 100644
+index 634a70e8f..600bc5f4f 100644
 --- a/port/src/memcard.cpp
 +++ b/port/src/memcard.cpp
 @@ -1,15 +1,21 @@
@@ -1767,7 +2204,7 @@ index 634a70e8..600bc5f4 100644
      return MC_STEP_DONE;
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..f9d0b2c6
+index 000000000..4deed04ae
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,471 @@
@@ -2244,7 +2681,7 @@ index 00000000..f9d0b2c6
 +} // namespace moonmod
 diff --git a/port/src/moonmod/audio_api.cpp b/port/src/moonmod/audio_api.cpp
 new file mode 100644
-index 00000000..f11b202d
+index 000000000..f11b202db
 --- /dev/null
 +++ b/port/src/moonmod/audio_api.cpp
 @@ -0,0 +1,397 @@
@@ -2647,7 +3084,7 @@ index 00000000..f11b202d
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_two_adapter.cpp b/port/src/moonmod/chronicle_two_adapter.cpp
 new file mode 100644
-index 00000000..b8bc0301
+index 000000000..b8bc0301a
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_two_adapter.cpp
 @@ -0,0 +1,7190 @@
@@ -9841,9 +10278,513 @@ index 00000000..b8bc0301
 +} // namespace moonmod
 +
 +
+diff --git a/port/src/moonmod/dngfloor_moonmod.cpp b/port/src/moonmod/dngfloor_moonmod.cpp
+new file mode 100644
+index 000000000..5009003b5
+--- /dev/null
++++ b/port/src/moonmod/dngfloor_moonmod.cpp
+@@ -0,0 +1,200 @@
++// Mod floors appended beside an existing floor of a dungeon map (moved out of ps2/src/dngfloor.cpp).
++
++#include "common.h"
++
++#include <cstdio>
++#include <cstring>
++
++#include "dngfloor.hpp"
++#include "mainloop.hpp"
++#include "moonmod/dngfloor_moonmod.hpp"
++#include "savedata.hpp"
++#include "savedatadungeon.hpp"
++
++class mgCMemory;
++
++// The floor script's parser state in ps2/src/dngfloor.cpp, named for the port by port/include/stubs/dngfloor.hpp.
++extern CDngFloorManager *tree_dngmap asm("DngFloor_TreeDngMap");
++extern GLID_INFO        *tree_glid_info asm("DngFloor_TreeGlidInfo");
++extern mgCMemory        *tree_spi_stack asm("DngFloor_TreeSpiStack");
++
++namespace {
++constexpr int kMoonModFloorCapacity = MOONMOD_FLOOR_CAPACITY;
++constexpr int kMoonModFloorTitleSize = 96;
++
++/** Base of the current manager's grid allocation. tree_glid_info is also the parser cursor and advances per cell. */
++GLID_INFO *tree_glid_base;
++int        tree_glid_capacity;
++int        tree_moonmod_floor_count;
++int        tree_moonmod_floor_ids[kMoonModFloorCapacity];
++char       tree_moonmod_floor_titles[kMoonModFloorCapacity][kMoonModFloorTitleSize];
++} // namespace
++
++void MoonModDngFloorMapInfo(CDngFloorManager *manager, int cell_capacity) {
++    tree_glid_base = manager->glid_info;
++    tree_glid_capacity = cell_capacity;
++}
++
++void ResetMoonModDngFloors() {
++    tree_dngmap = NULL;
++    tree_glid_info = NULL;
++    tree_glid_base = NULL;
++    tree_spi_stack = NULL;
++    tree_glid_capacity = 0;
++    tree_moonmod_floor_count = 0;
++    for (int i = 0; i < kMoonModFloorCapacity; ++i) {
++        tree_moonmod_floor_ids[i] = -1;
++    }
++    memset(tree_moonmod_floor_titles, 0, sizeof(tree_moonmod_floor_titles));
++}
++
++bool CDngFloorManager::RegisterMoonModFloor(int source_floor, const char *title, const char *stable_id, int *out_floor_id,
++                                            char *error, size_t error_size) {
++    auto fail = [error, error_size](const char *message) {
++        if (error != NULL && error_size > 0) {
++            std::snprintf(error, error_size, "%s", message);
++        }
++        return false;
++    };
++    if (out_floor_id != NULL) {
++        *out_floor_id = -1;
++    }
++    if (tree_dngmap != this || tree_glid_base != glid_info || tree_spi_stack == NULL || glid_info == NULL ||
++        title == NULL || title[0] == '\0' || stable_id == NULL || stable_id[0] == '\0' || out_floor_id == NULL) {
++        return fail("dungeon map is not ready for mod floors");
++    }
++    if (std::strlen(title) >= kMoonModFloorTitleSize) {
++        return fail("floor title is longer than 95 bytes");
++    }
++    if (tree_moonmod_floor_count >= kMoonModFloorCapacity || glid_num + 2 > tree_glid_capacity) {
++        return fail("this dungeon's mod floor capacity is exhausted");
++    }
++    DNGMAP_ROOM_INFO *source_info = GetDngMapFloorInfo(source_floor);
++    GLID_INFO *source_glid = GetDngMapFloorGlidInfo(source_floor);
++    if (source_info == NULL || source_glid == NULL) {
++        return fail("source_floor is not present in this dungeon map");
++    }
++    if (source_info->order >= 126) {
++        return fail("source floor order cannot be extended safely");
++    }
++
++    int floor_id = 0;
++    for (; floor_id < DNGMAP_FLOOR_NUM; ++floor_id) {
++        if (GetDngMapFloorInfo(floor_id) == NULL) {
++            break;
++        }
++    }
++    if (floor_id >= DNGMAP_FLOOR_NUM) {
++        return fail("no free native floor ids remain in this dungeon");
++    }
++
++    static constexpr int kDirections[GLID_DIR_NUM] = {GLID_DIR_RIGHT, GLID_DIR_DOWN, GLID_DIR_LEFT, GLID_DIR_UP};
++    static constexpr int kDeltaX[GLID_DIR_NUM] = {0, 0, -1, 1};
++    static constexpr int kDeltaY[GLID_DIR_NUM] = {-1, 1, 0, 0};
++    static constexpr int kOpposite[GLID_DIR_NUM] = {GLID_DIR_DOWN, GLID_DIR_UP, GLID_DIR_RIGHT, GLID_DIR_LEFT};
++    int selected_direction = -1;
++    int root_x = 0;
++    int root_y = 0;
++    int room_x = 0;
++    int room_y = 0;
++    for (int i = 0; i < GLID_DIR_NUM; ++i) {
++        const int dir = kDirections[i];
++        if (source_info->link[dir] >= 0) {
++            continue;
++        }
++        const int dx = kDeltaX[dir];
++        const int dy = kDeltaY[dir];
++        const int candidate_root_x = source_glid->x + dx;
++        const int candidate_root_y = source_glid->y + dy;
++        const int candidate_room_x = source_glid->x + 2 * dx;
++        const int candidate_room_y = source_glid->y + 2 * dy;
++        if (candidate_root_x < 0 || candidate_root_y < 0 || candidate_room_x < 0 || candidate_room_y < 0) {
++            continue;
++        }
++        bool root_occupied = false;
++        bool room_occupied = false;
++        for (int cell = 0; cell < glid_num; ++cell) {
++            root_occupied |= glid_info[cell].x == candidate_root_x && glid_info[cell].y == candidate_root_y;
++            room_occupied |= glid_info[cell].x == candidate_room_x && glid_info[cell].y == candidate_room_y;
++        }
++        if (!root_occupied && !room_occupied) {
++            selected_direction = dir;
++            root_x = candidate_root_x;
++            root_y = candidate_root_y;
++            room_x = candidate_room_x;
++            room_y = candidate_room_y;
++            break;
++        }
++    }
++    if (selected_direction < 0) {
++        return fail("source floor has no free adjacent route for a new room");
++    }
++
++    CSaveData *save = GetSaveData();
++    if (save == NULL || !RegisterMoonModDungeonSaveRecord(&save->save_dungeon, dng_no, floor_id, stable_id)) {
++        return fail("no persistent MoonFactory floor-save record is available");
++    }
++
++    char *stable_title = tree_moonmod_floor_titles[tree_moonmod_floor_count];
++    memcpy(stable_title, title, std::strlen(title) + 1);
++    GLID_INFO *root = &glid_info[glid_num];
++    GLID_INFO *room = &glid_info[glid_num + 1];
++    std::memset(root, 0, sizeof(*root));
++    std::memset(room, 0, sizeof(*room));
++    root->type = GLID_TYPE_ROOT;
++    root->x = static_cast<s16>(root_x);
++    root->y = static_cast<s16>(root_y);
++    root->root.type = 0;
++    root->root.shape = 0;
++    root->root.show_mark = 0;
++    room->type = GLID_TYPE_ROOM;
++    room->x = static_cast<s16>(room_x);
++    room->y = static_cast<s16>(room_y);
++    room->room.floor_id = static_cast<s8>(floor_id);
++    room->room.order = static_cast<s8>(source_info->order + 1);
++    room->room.flag = DNGMAP_ROOM_FLAG_ROOM;
++    room->room.unk_0 = source_info->unk_0;
++    room->room.title = stable_title;
++    room->room.practice_type = -1;
++    room->room.tex_no = source_info->tex_no;
++    room->room.selectable = true;
++    for (int direction = 0; direction < GLID_DIR_NUM; ++direction) {
++        room->room.link[direction] = -1;
++    }
++    room->room.link[kOpposite[selected_direction]] = static_cast<s16>(source_floor);
++    room->room.key_room[0] = -1;
++    room->room.key_room[1] = -1;
++    room->room.key_room[2] = -1;
++    room->room.key_room[3] = -1;
++    source_info->link[selected_direction] = static_cast<s16>(floor_id);
++
++    glid_num += 2;
++    if (glid_w <= room_x) {
++        glid_w = static_cast<s16>(room_x + 1);
++    }
++    if (glid_h <= room_y) {
++        glid_h = static_cast<s16>(room_y + 1);
++    }
++    tree_moonmod_floor_ids[tree_moonmod_floor_count] = floor_id;
++    ++tree_moonmod_floor_count;
++    RelationGlid();
++    *out_floor_id = floor_id;
++    if (error != NULL && error_size > 0) {
++        error[0] = '\0';
++    }
++    return true;
++}
++
++bool CDngFloorManager::IsMoonModFloor(int floor_id, const char *title) const {
++    if (tree_dngmap != this || title == NULL) {
++        return false;
++    }
++    for (int i = 0; i < tree_moonmod_floor_count; ++i) {
++        if (tree_moonmod_floor_ids[i] != floor_id) {
++            continue;
++        }
++        DNGMAP_ROOM_INFO *info = const_cast<CDngFloorManager *>(this)->GetDngMapFloorInfo(floor_id);
++        return info != NULL && info->title != NULL && std::strcmp(info->title, title) == 0;
++    }
++    return false;
++}
+diff --git a/port/src/moonmod/gamedata_moonmod.cpp b/port/src/moonmod/gamedata_moonmod.cpp
+new file mode 100644
+index 000000000..6040a0854
+--- /dev/null
++++ b/port/src/moonmod/gamedata_moonmod.cpp
+@@ -0,0 +1,246 @@
++// Data-only mod items and weapons appended to the live item tables (moved out of ps2/src/gamedata.cpp).
++
++#include "common.h"
++
++#include <cstdio>
++#include <cstring>
++
++#include "gamedata.hpp"
++#include "moonmod/gamedata_moonmod.hpp"
++
++// The item number table of ps2/src/gamedata.cpp, named for the port by port/include/stubs/gamedata.hpp.
++extern short local_itemdatano_converttable[ITEM_NO_MAX] asm("GameData_ItemNoTable");
++
++namespace {
++constexpr int kMoonModItemCapacity = MOONMOD_ITEM_CAPACITY;
++constexpr int kMoonModWeaponCapacity = MOONMOD_WEAPON_CAPACITY;
++constexpr int kMoonModItemNameSize = 96;
++constexpr int kCommonItemStorageCapacity = ITEM_COMMON_DATA_MAX + kMoonModItemCapacity + kMoonModWeaponCapacity;
++
++/**
++ * Display names for data-only mod items. CDataCommon stores a borrowed pointer, so these buffers
++ * stay at fixed addresses for the lifetime of the game process.
++ */
++char local_moonmod_item_names[kMoonModItemCapacity][kMoonModItemNameSize];
++int  local_moonmod_item_count;
++char local_moonmod_weapon_names[kMoonModWeaponCapacity][kMoonModItemNameSize];
++int  local_moonmod_weapon_count;
++} // namespace
++
++void ResetMoonModGameData() {
++    memset(local_itemdatano_converttable, -1, sizeof(local_itemdatano_converttable));
++    local_moonmod_item_count = 0;
++    memset(local_moonmod_item_names, 0, sizeof(local_moonmod_item_names));
++    local_moonmod_weapon_count = 0;
++    memset(local_moonmod_weapon_names, 0, sizeof(local_moonmod_weapon_names));
++}
++
++bool CGameData::RegisterMoonModItem(int template_item_no, const char *display_name, int max_num, int stack_num,
++                                    int effect_flags, int effect_amount, int *out_item_no, char *error, size_t error_size) {
++    auto fail = [error, error_size](const char *message) {
++        if (error != NULL && error_size > 0) {
++            std::snprintf(error, error_size, "%s", message);
++        }
++        return false;
++    };
++
++    if (out_item_no != NULL) {
++        *out_item_no = -1;
++    }
++    if (display_name == NULL || display_name[0] == '\0') {
++        return fail("item name is required");
++    }
++    if (max_num <= 0 || max_num > 999 || stack_num <= 0 || stack_num > max_num) {
++        return fail("item limits must satisfy 1 <= stack_num <= max_num <= 999");
++    }
++    const unsigned int cure_all_effects = ITEM_USE_FLAG_CURE_STOP | ITEM_USE_FLAG_CURE_POISON | ITEM_USE_FLAG_CURE_CURSE |
++                                          ITEM_USE_FLAG_CURE_SLOW | ITEM_USE_FLAG_CURE_STONE | ITEM_USE_FLAG_CURE_DRY;
++    const unsigned int allowed_effects = ITEM_USE_FLAG_RESTORE_HP | ITEM_USE_FLAG_ADD_POWER | cure_all_effects;
++    const unsigned int requested_effects = static_cast<unsigned int>(effect_flags);
++    const bool one_effect = requested_effects != 0 && (requested_effects & (requested_effects - 1)) == 0;
++    if (effect_flags < 0 || (requested_effects & ~allowed_effects) != 0 ||
++        (requested_effects != 0 && !one_effect && requested_effects != cure_all_effects)) {
++        return fail("item effect override must select one supported native recovery/status effect or the complete cure-all set");
++    }
++    if ((requested_effects == ITEM_USE_FLAG_RESTORE_HP && (effect_amount < 1 || effect_amount > 32767)) ||
++        (requested_effects != 0 && requested_effects != ITEM_USE_FLAG_RESTORE_HP && effect_amount != 0) ||
++        (requested_effects == 0 && effect_amount != 0)) {
++        return fail("item effect amount does not match the selected native effect");
++    }
++    if (out_item_no == NULL || common_data == NULL || item_data == NULL || common_num < 0 || item_num < 0 ||
++        common_num >= kCommonItemStorageCapacity || item_num >= 162 + kMoonModItemCapacity) {
++        return fail("item table capacity is exhausted or not initialized");
++    }
++    if (local_moonmod_item_count >= kMoonModItemCapacity) {
++        return fail("MoonMod item capacity is exhausted (32 items)");
++    }
++
++    CDataCommon *template_common = NULL;
++    for (int i = 0; i < common_num; ++i) {
++        if (common_data[i].item_no == template_item_no) {
++            template_common = &common_data[i];
++            break;
++        }
++    }
++    if (template_common == NULL) {
++        return fail("template item does not exist in the loaded game data");
++    }
++    if (ConvertUsedItemType(template_common->type) != USED_ITEM_TYPE_ITEM || template_common->list_no < 0 ||
++        template_common->list_no >= item_num || (template_common->attribute & ITEM_ATTRIBUTE_USABLE) == 0) {
++        return fail("template must be a usable item with a native item-data record");
++    }
++    if (std::strlen(display_name) >= kMoonModItemNameSize) {
++        return fail("item name is longer than 95 bytes");
++    }
++
++    int item_no = ITEM_NO_MAX - 1;
++    while (item_no > 0 && local_itemdatano_converttable[item_no] >= 0) {
++        --item_no;
++    }
++    if (item_no <= 0) {
++        return fail("no free item numbers remain");
++    }
++
++    const CDataItem template_item = item_data[template_common->list_no];
++    CDataCommon *new_common = &common_data[common_num];
++    CDataItem *new_item = &item_data[item_num];
++    *new_common = *template_common;
++    *new_item = template_item;
++
++    new_common->item_no = static_cast<s16>(item_no);
++    new_common->list_no = static_cast<s16>(item_num);
++    new_common->max_num = static_cast<u16>(max_num);
++    new_common->stack_num = static_cast<s16>(stack_num);
++    new_common->name = local_moonmod_item_names[local_moonmod_item_count];
++    memcpy(local_moonmod_item_names[local_moonmod_item_count], display_name, std::strlen(display_name) + 1);
++    if (effect_flags != 0) {
++        new_item->use_flags = static_cast<u32>(effect_flags);
++        new_item->value[0] = static_cast<s16>(effect_amount);
++        new_item->value[1] = 0;
++        new_item->value[2] = 0;
++    }
++
++    local_itemdatano_converttable[item_no] = static_cast<short>(common_num);
++    ++common_num;
++    ++item_num;
++    ++local_moonmod_item_count;
++    if (item_no > max_item_no) {
++        max_item_no = item_no;
++    }
++    *out_item_no = item_no;
++    if (error != NULL && error_size > 0) {
++        error[0] = '\0';
++    }
++    return true;
++}
++
++bool CGameData::RegisterMoonModWeapon(int template_item_no, const char *display_name, int max_num, int stack_num,
++                                      int attack, int durability_stat, int attack_cap, int durability_cap,
++                                      int durability_capacity, int levelup_exp, const int *attributes,
++                                      const int *attribute_caps, int *out_item_no, char *error, size_t error_size) {
++    auto fail = [error, error_size](const char *message) {
++        if (error != NULL && error_size > 0) {
++            std::snprintf(error, error_size, "%s", message);
++        }
++        return false;
++    };
++
++    if (out_item_no != NULL) {
++        *out_item_no = -1;
++    }
++    if (display_name == NULL || display_name[0] == '\0') {
++        return fail("weapon name is required");
++    }
++    if (max_num <= 0 || max_num > 999 || stack_num <= 0 || stack_num > max_num) {
++        return fail("weapon limits must satisfy 1 <= stack_num <= max_num <= 999");
++    }
++    if (out_item_no == NULL || common_data == NULL || weapon_data == NULL || common_num < 0 || weapon_num < 0 ||
++        common_num >= kCommonItemStorageCapacity || weapon_num >= 116 + kMoonModWeaponCapacity) {
++        return fail("weapon table capacity is exhausted or not initialized");
++    }
++    if (local_moonmod_weapon_count >= kMoonModWeaponCapacity) {
++        return fail("MoonMod weapon capacity is exhausted (32 weapons)");
++    }
++    if (std::strlen(display_name) >= kMoonModItemNameSize) {
++        return fail("weapon name is longer than 95 bytes");
++    }
++    const int optional_values[] = {attack, durability_stat, attack_cap, durability_cap, durability_capacity, levelup_exp};
++    for (int value : optional_values) {
++        if (value < -1 || value > 32767) {
++            return fail("weapon stat overrides must be -1 (unchanged) or from 0 to 32767");
++        }
++    }
++    if ((attributes == NULL) != (attribute_caps == NULL)) {
++        return fail("weapon attributes and attribute_caps must be supplied together");
++    }
++    if (attributes != NULL) {
++        for (int index = 0; index < 8; ++index) {
++            if (attributes[index] < 0 || attributes[index] > 32767 || attribute_caps[index] < 0 ||
++                attribute_caps[index] > 32767) {
++                return fail("weapon attribute values and caps must be from 0 to 32767");
++            }
++        }
++    }
++
++    CDataCommon *template_common = NULL;
++    for (int index = 0; index < common_num; ++index) {
++        if (common_data[index].item_no == template_item_no) {
++            template_common = &common_data[index];
++            break;
++        }
++    }
++    if (template_common == NULL) {
++        return fail("template weapon does not exist in the loaded game data");
++    }
++    if (ConvertUsedItemType(template_common->type) != USED_ITEM_TYPE_WEAPON || template_common->list_no < 0 ||
++        template_common->list_no >= weapon_num) {
++        return fail("template must be a weapon with a native weapon-data record");
++    }
++
++    int item_no = ITEM_NO_MAX - 1;
++    while (item_no > 0 && local_itemdatano_converttable[item_no] >= 0) {
++        --item_no;
++    }
++    if (item_no <= 0) {
++        return fail("no free item numbers remain");
++    }
++
++    const CDataWeapon template_weapon = weapon_data[template_common->list_no];
++    CDataCommon *new_common = &common_data[common_num];
++    CDataWeapon *new_weapon = &weapon_data[weapon_num];
++    *new_common = *template_common;
++    *new_weapon = template_weapon;
++
++    new_common->item_no = static_cast<s16>(item_no);
++    new_common->list_no = static_cast<s16>(weapon_num);
++    new_common->max_num = static_cast<u16>(max_num);
++    new_common->stack_num = static_cast<s16>(stack_num);
++    new_common->name = local_moonmod_weapon_names[local_moonmod_weapon_count];
++    memcpy(local_moonmod_weapon_names[local_moonmod_weapon_count], display_name, std::strlen(display_name) + 1);
++    if (attack >= 0) new_weapon->status[0] = static_cast<s16>(attack);
++    if (durability_stat >= 0) new_weapon->status[1] = static_cast<s16>(durability_stat);
++    if (attack_cap >= 0) new_weapon->status_max[0] = static_cast<s16>(attack_cap);
++    if (durability_cap >= 0) new_weapon->status_max[1] = static_cast<s16>(durability_cap);
++    if (durability_capacity >= 0) new_weapon->durability = static_cast<s16>(durability_capacity);
++    if (levelup_exp >= 0) new_weapon->levelup_exp = static_cast<s16>(levelup_exp);
++    if (attributes != NULL) {
++        for (int index = 0; index < 8; ++index) {
++            new_weapon->attribute[index] = static_cast<s16>(attributes[index]);
++            new_weapon->attribute_max[index] = static_cast<s16>(attribute_caps[index]);
++        }
++    }
++
++    local_itemdatano_converttable[item_no] = static_cast<short>(common_num);
++    ++common_num;
++    ++weapon_num;
++    ++local_moonmod_weapon_count;
++    if (item_no > max_item_no) {
++        max_item_no = item_no;
++    }
++    *out_item_no = item_no;
++    if (error != NULL && error_size > 0) {
++        error[0] = '\0';
++    }
++    return true;
++}
++
+diff --git a/port/src/moonmod/inventmn_moonmod.cpp b/port/src/moonmod/inventmn_moonmod.cpp
+new file mode 100644
+index 000000000..702059197
+--- /dev/null
++++ b/port/src/moonmod/inventmn_moonmod.cpp
+@@ -0,0 +1,40 @@
++#include "common.h"
++
++#include "dataread.hpp"
++#include "inventmn.hpp"
++#include "mg_memory.hpp"
++#include "moonmod/native_events.hpp"
++#include "stubs/inventmn.hpp"
++
++// A private copy of the invention recipe table for MoonMod, loaded once from menu/inv6.lst.
++CInventDataManage *MoonModGetNativeInventDataManage() {
++    static CInventDataManage manager;
++    static bool             loaded = false;
++    alignas(16) static char recipe_file[0x7800];
++    alignas(16) static u_long128 recipe_pool[0x4000];
++
++    if (!loaded) {
++        loaded = true;
++        int file_size = 0;
++
++        if (LoadFile2("menu/inv6.lst", recipe_file, &file_size, 0) == 0 && file_size > 0) {
++            mgCMemory saved_stack = InventTeigiStack;
++            InventTeigiStack.stSetBuffer(recipe_pool, 0x4000);
++            manager.LoadAnalyzeInventFile(recipe_file, file_size);
++            InventTeigiStack = saved_stack;
++        }
++    }
++
++    return &manager;
++}
++
++void MoonModNotifyInventionCreated(int item_id) {
++    INVENT_DATA_INFO *created = InventManagePt->GetInventDataInfoByItemID(item_id);
++    int               ideas[3] = {0, 0, 0};
++    if (created != NULL) {
++        ideas[0] = created->neta_id[0];
++        ideas[1] = created->neta_id[1];
++        ideas[2] = created->neta_id[2];
++    }
++    moonmod::ChronicleTwoInventionCreated(item_id, ideas[0], ideas[1], ideas[2]);
++}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..23d235a6
+index 000000000..23d235a63
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
 @@ -0,0 +1,3392 @@
@@ -13241,7 +14182,7 @@ index 00000000..23d235a6
 +} // namespace moonmod
 diff --git a/port/src/moonmod/lua_runtime.hpp b/port/src/moonmod/lua_runtime.hpp
 new file mode 100644
-index 00000000..286d8dce
+index 000000000..286d8dce8
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.hpp
 @@ -0,0 +1,38 @@
@@ -13285,7 +14226,7 @@ index 00000000..286d8dce
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manager_ui.cpp b/port/src/moonmod/manager_ui.cpp
 new file mode 100644
-index 00000000..18d65543
+index 000000000..fbaf06849
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
 @@ -0,0 +1,908 @@
@@ -14199,7 +15140,7 @@ index 00000000..18d65543
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manifest.cpp b/port/src/moonmod/manifest.cpp
 new file mode 100644
-index 00000000..0d0d56e4
+index 000000000..0d0d56e40
 --- /dev/null
 +++ b/port/src/moonmod/manifest.cpp
 @@ -0,0 +1,434 @@
@@ -14637,9 +15578,373 @@ index 00000000..0d0d56e4
 +}
 +
 +} // namespace moonmod
+diff --git a/port/src/moonmod/mapselect_moonmod.cpp b/port/src/moonmod/mapselect_moonmod.cpp
+new file mode 100644
+index 000000000..1b006218c
+--- /dev/null
++++ b/port/src/moonmod/mapselect_moonmod.cpp
+@@ -0,0 +1,79 @@
++// Mod map identities appended after the native map catalog (moved out of ps2/src/mapselect.cpp).
++
++#include "common.h"
++
++#include <cstring>
++
++#include "mapselect.hpp"
++
++extern int            PortMapNameNum asm("MapSelect_MapNameNum");
++extern MAP_NAME_INFO *PortMapName asm("MapSelect_MapName");
++
++namespace {
++constexpr int MOONMOD_MAP_NAME_MAX = 64;
++struct MoonModMapNameInfo {
++    MAP_NAME_INFO info;
++    char name[16];
++    char title[128];
++};
++MoonModMapNameInfo MoonModMapNames[MOONMOD_MAP_NAME_MAX];
++int MoonModMapNameNum;
++} // namespace
++
++MAP_NAME_INFO *GetMoonModMapNameInfo(int index) {
++    if (index < 0 || index >= MoonModMapNameNum) {
++        return NULL;
++    }
++    return &MoonModMapNames[index].info;
++}
++
++int GetMapNameCount() {
++    const int maximum = MAP_NAME_BUFF_SIZE * 16 / static_cast<int>(sizeof(MAP_NAME_INFO)) - 1;
++    if (PortMapNameNum < 0 || PortMapNameNum > maximum) return 0;
++    if (PortMapNameNum + MoonModMapNameNum > maximum + MOONMOD_MAP_NAME_MAX) return 0;
++    return PortMapNameNum + MoonModMapNameNum;
++}
++
++int RegisterMoonModMapName(const char *name, const char *title) {
++    if (name == NULL || title == NULL) return -1;
++    const int name_length = strlen(name);
++    const int title_length = strlen(title);
++    if (name_length < 3 || name_length > 15 || title_length < 1 || title_length >= 128) return -1;
++    for (int index = 0; index < name_length; ++index) {
++        const unsigned char character = static_cast<unsigned char>(name[index]);
++        const bool alpha_numeric = (character >= 'a' && character <= 'z') ||
++                                  (character >= '0' && character <= '9');
++        if (!alpha_numeric && character != '_' && character != '-') return -1;
++    }
++    for (int index = 0; index < MoonModMapNameNum; ++index) {
++        MoonModMapNameInfo &entry = MoonModMapNames[index];
++        if (strcmp(entry.name, name) != 0) continue;
++        return strcmp(entry.title, title) == 0 ? PortMapNameNum + index : -1;
++    }
++    for (int index = 0; index < PortMapNameNum; ++index) {
++        if (PortMapName[index].name != NULL && strcmp(PortMapName[index].name, name) == 0) return -1;
++    }
++    if (MoonModMapNameNum >= MOONMOD_MAP_NAME_MAX || GetMapNameCount() <= 0) return -1;
++
++    MoonModMapNameInfo &entry = MoonModMapNames[MoonModMapNameNum];
++    memset(&entry, 0, sizeof(entry));
++    strcpy(entry.name, name);
++    strcpy(entry.title, title);
++    entry.info.name = entry.name;
++    entry.info.title = entry.title;
++    entry.info.add_path = NULL;
++    entry.info.type = MAP_TYPE_INTERIOR;
++    entry.info.sel_type = MAP_SEL_SPECIAL;
++    entry.info.snd_data_id = -1;
++    entry.info.area_no = -1;
++    return PortMapNameNum + MoonModMapNameNum++;
++}
++
++int IsMoonModMapName(int map_no) {
++    return map_no >= PortMapNameNum && map_no - PortMapNameNum >= 0 && map_no - PortMapNameNum < MoonModMapNameNum;
++}
++
++void ResetMoonModMapNamesForTests() {
++    memset(MoonModMapNames, 0, sizeof(MoonModMapNames));
++    MoonModMapNameNum = 0;
++}
+diff --git a/port/src/moonmod/monster_moonmod.cpp b/port/src/moonmod/monster_moonmod.cpp
+new file mode 100644
+index 000000000..d4e45eba9
+--- /dev/null
++++ b/port/src/moonmod/monster_moonmod.cpp
+@@ -0,0 +1,273 @@
++#include "common.h"
++#include "mw_runtime.h"
++
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++
++#include "actionchara.hpp"
++#include "actscript.hpp"
++#include "automap.hpp"
++#include "cameracontrol.hpp"
++#include "character.hpp"
++#include "collision.hpp"
++#include "colprim.hpp"
++#include "dataread.hpp"
++#include "dng_debug.hpp"
++#include "dng_effect.hpp"
++#include "dng_event.hpp"
++#include "dng_main.hpp"
++#include "dng_status.hpp"
++#include "dngfloor.hpp"
++#include "effscript.hpp"
++#include "gameutil.hpp"
++#include "mainloop.hpp"
++#include "maintex.hpp"
++#include "map.hpp"
++#include "mapinfo.hpp"
++#include "mapparts.hpp"
++#include "menucommon.hpp"
++#include "mg_camera.hpp"
++#include "mg_drawenv.hpp"
++#include "mg_frame.hpp"
++#include "mg_math.hpp"
++#include "mg_memory.hpp"
++#include "mg_texture.hpp"
++#include "mglib.hpp"
++#include "monster.hpp"
++#include "runscript_opcodes.hpp"
++#include "savedata.hpp"
++#include "scene.hpp"
++#include "sceneload.hpp"
++#include "scenesnd.hpp"
++#include "scriptinterpreter.hpp"
++#include "snd_mngr.hpp"
++#include "sound.hpp"
++#include "swordeffect.hpp"
++#include "userdata.hpp"
++
++#include "stubs/monster.hpp"
++
++// MoonMod's monster additions for the ChronicleTwo port: data-only monster variants, per-slot generations that
++// let mods hold stale-safe handles, a despawn path for mod-spawned monsters, and the active-monster limit.
++
++int MonsterActiveLimit = 5;
++
++struct MOONMOD_MONSTER_VARIANT {
++    int used;
++    BASE_MONSTER_TBL definition;
++};
++
++static MOONMOD_MONSTER_VARIANT moonmod_variants[32];
++static unsigned int moonmod_monster_slot_generation[MONSTER_ACTIVE_MAX];
++
++static void BumpSlotGeneration(int slot) {
++    moonmod_monster_slot_generation[slot]++;
++    if (moonmod_monster_slot_generation[slot] == 0) {
++        moonmod_monster_slot_generation[slot]++;
++    }
++}
++
++unsigned int GetMoonModMonsterSlotGeneration(int slot) {
++    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
++        return 0;
++    }
++    return moonmod_monster_slot_generation[slot];
++}
++
++unsigned int EnsureMoonModMonsterSlotGeneration(int slot) {
++    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
++        return 0;
++    }
++    if (moonmod_monster_slot_generation[slot] == 0) {
++        moonmod_monster_slot_generation[slot] = 1;
++    }
++    return moonmod_monster_slot_generation[slot];
++}
++
++PORT_OVERRIDE BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
++    for (int variant = 0; variant < 32; variant++) {
++        if (moonmod_variants[variant].used && moonmod_variants[variant].definition.id == monster_id) {
++            return &moonmod_variants[variant].definition;
++        }
++    }
++
++    return PortRetailGetMonsterTable(monster_id);
++}
++
++// Retail searches base_monster_define alone; the variants must resolve here too.
++PORT_OVERRIDE BASE_MONSTER_TBL *CMonsterMan::GetReferPtr2(int monster_id) {
++    return GetMonsterTable(monster_id);
++}
++
++bool RegisterMoonModMonsterVariant(int template_id, const char *display_name, int hp, int attack,
++                                   int defense, int reward_exp, int reward_money,
++                                   const char *model, const char *script, int *out_id) {
++    BASE_MONSTER_TBL *template_definition = GetMonsterTable(template_id);
++    if (template_definition == NULL || display_name == NULL || display_name[0] == '\0' ||
++        model == NULL || model[0] == '\0' || strlen(model) >= sizeof(BASE_MONSTER_TBL::model) ||
++        script == NULL || script[0] == '\0' || strlen(script) >= sizeof(BASE_MONSTER_TBL::script) || out_id == NULL) {
++        return false;
++    }
++
++    int slot = -1;
++    for (int variant = 0; variant < 32; variant++) {
++        if (!moonmod_variants[variant].used) {
++            slot = variant;
++            break;
++        }
++    }
++    if (slot < 0) {
++        return false;
++    }
++
++    int native_id = 0x400 + slot;
++    while (GetMonsterTable(native_id) != NULL) {
++        native_id++;
++    }
++    memcpy(&moonmod_variants[slot].definition, template_definition, sizeof(BASE_MONSTER_TBL));
++    moonmod_variants[slot].definition.id = native_id;
++    memset(moonmod_variants[slot].definition.name, 0, sizeof(moonmod_variants[slot].definition.name));
++    strncpy(moonmod_variants[slot].definition.name, display_name,
++            sizeof(moonmod_variants[slot].definition.name) - 1);
++    memset(moonmod_variants[slot].definition.model, 0, sizeof(moonmod_variants[slot].definition.model));
++    memcpy(moonmod_variants[slot].definition.model, model, strlen(model));
++    memset(moonmod_variants[slot].definition.script, 0, sizeof(moonmod_variants[slot].definition.script));
++    memcpy(moonmod_variants[slot].definition.script, script, strlen(script));
++    moonmod_variants[slot].definition.life = hp;
++    moonmod_variants[slot].definition.attack = attack;
++    moonmod_variants[slot].definition.defense = defense;
++    moonmod_variants[slot].definition.reward_exp = reward_exp;
++    moonmod_variants[slot].definition.reward_money = reward_money;
++    moonmod_variants[slot].used = 1;
++    *out_id = native_id;
++    return true;
++}
++
++void ResetMoonModMonsterVariants() {
++    memset(moonmod_variants, 0, sizeof(moonmod_variants));
++}
++
++PORT_OVERRIDE void CMonsterLocateInfo::SetPutFlag(int slot, int put) {
++    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
++        return;
++    }
++
++    // CMonsterMan::SetActiveMonster calls this once per spawn, right after claiming the slot: a new generation
++    // invalidates every handle mods hold for the slot's previous monster.
++    if (put != 0) {
++        BumpSlotGeneration(slot);
++    }
++
++    const u32 mask = 1u << slot;
++    const bool was_put = (put_flag & mask) != 0;
++    if (put != 0) {
++        if (!was_put && put_num < num) {
++            put_flag |= mask;
++            put_num += 1;
++        }
++    } else if (was_put) {
++        put_flag &= ~mask;
++        put_num -= 1;
++    }
++}
++
++// Retail with priority_limit read from MonsterActiveLimit (retail 5) instead of the literal.
++PORT_OVERRIDE void CMonsterMan::Initialize(CScene *scene) {
++    mgCTextureManager *textures;
++    int                i;
++    DNG_BATTLE_AREA   *area = &scene->battle_area;
++    int                texb;
++    int                j;
++    int                k;
++    int                m;
++
++    SetMonsterExtendTable();
++    textures = &mgTexManager;
++    this->scene = scene;
++    effect_man = FxScriptMan;
++    priority_limit = MonsterActiveLimit;
++
++    for (i = 0; i < MONSTER_ACTIVE_MAX; i++) {
++        active[i] = (CActiveMonster *) scene->GetCharacter(i + MONSTER_ACTIVE_MAX);
++        active[i]->Initialize();
++    }
++
++    for (j = 0; j < MONSTER_REFER_MAX; j++) {
++        textures->DeleteBlock(j + MONSTER_TEXB_REFER);
++        refer[j].id = -1;
++    }
++
++    for (k = 0; k < MONSTER_SHARE_MAX; k++) {
++        shared_script_vars[k].i = 0;
++    }
++
++    FxScriptMan->ClearBaseFromLevel(3, NULL, -1);
++
++    for (texb = area->free_texb; texb < MONSTER_TEXB_FREE_END; texb++) {
++        textures->DeleteBlock(texb);
++    }
++
++    boss_life_gage.Initialize(0);
++    boss_max_life = 0;
++    locate.num = 0;
++    locate.put_num = 0;
++    locate.put_flag = 0;
++
++    for (m = 0; m < MONSTER_LOCATE_MAX; m++) {
++        s16 *param = locate.param;
++        s16 *id = locate.monster_id;
++        param[m] = -1;
++        id[m] = -1;
++    }
++}
++
++bool CMonsterMan::DespawnMoonModMonster(int slot, unsigned int generation) {
++    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX || generation == 0 ||
++        GetMoonModMonsterSlotGeneration(slot) != generation || active[slot] == NULL || scene == NULL) {
++        return false;
++    }
++
++    CActiveMonster *monster = active[slot];
++    if (monster->state == ACTIVE_MONSTER_NONE || monster->catch_state == ACTION_CATCH_HELD) {
++        return false;
++    }
++
++    const int chara_id = slot + MONSTER_ACTIVE_MAX;
++    CActionChara *player = static_cast<CActionChara *>(scene->GetCharacter(scene->player_chara));
++    if (player != NULL && player->target_no == chara_id) {
++        player->target_no = -1;
++        player->lock_on = false;
++    }
++
++    for (int other_slot = 0; other_slot < MONSTER_ACTIVE_MAX; ++other_slot) {
++        CActiveMonster *other = active[other_slot];
++        if (other != NULL && other_slot != slot && other->target_no == chara_id) {
++            other->target_no = -1;
++        }
++    }
++
++    if (effect_man != NULL) {
++        effect_man->ClearEffectFromChrid(chara_id);
++    }
++    ColPrimMan.Delete(chara_id);
++
++    if (monster->tbl != NULL && monster->tbl->boss != 0) {
++        boss_max_life -= monster->max_life;
++        if (boss_max_life < 0) {
++            boss_max_life = 0;
++        }
++    }
++
++    locate.SetPutFlag(slot, false);
++    monster->Initialize();
++    monster->target_no = -1;
++    monster->tbl = NULL;
++    monster->base_tbl = NULL;
++    monster->refer_no = -1;
++    memory[slot].stReset();
++
++    BumpSlotGeneration(slot);
++    return true;
++}
 diff --git a/port/src/moonmod/native_plugin_contract.cpp b/port/src/moonmod/native_plugin_contract.cpp
 new file mode 100644
-index 00000000..78a4d750
+index 000000000..78a4d7503
 --- /dev/null
 +++ b/port/src/moonmod/native_plugin_contract.cpp
 @@ -0,0 +1,94 @@
@@ -14739,7 +16044,7 @@ index 00000000..78a4d750
 +} // namespace moonmod
 diff --git a/port/src/moonmod/native_plugin_hash.cpp b/port/src/moonmod/native_plugin_hash.cpp
 new file mode 100644
-index 00000000..5f91b7ae
+index 000000000..5f91b7ae4
 --- /dev/null
 +++ b/port/src/moonmod/native_plugin_hash.cpp
 @@ -0,0 +1,116 @@
@@ -14861,7 +16166,7 @@ index 00000000..5f91b7ae
 +} // namespace moonmod
 diff --git a/port/src/moonmod/native_plugin_loader.cpp b/port/src/moonmod/native_plugin_loader.cpp
 new file mode 100644
-index 00000000..82cdf697
+index 000000000..82cdf6977
 --- /dev/null
 +++ b/port/src/moonmod/native_plugin_loader.cpp
 @@ -0,0 +1,382 @@
@@ -15249,7 +16554,7 @@ index 00000000..82cdf697
 +} // namespace moonmod
 diff --git a/port/src/moonmod/native_resource_overrides.cpp b/port/src/moonmod/native_resource_overrides.cpp
 new file mode 100644
-index 00000000..b6293361
+index 000000000..b6293361c
 --- /dev/null
 +++ b/port/src/moonmod/native_resource_overrides.cpp
 @@ -0,0 +1,339 @@
@@ -15594,7 +16899,7 @@ index 00000000..b6293361
 +} // namespace moonmod
 diff --git a/port/src/moonmod/runtime.cpp b/port/src/moonmod/runtime.cpp
 new file mode 100644
-index 00000000..f7adcd40
+index 000000000..a114b524a
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
 @@ -0,0 +1,1459 @@
@@ -17057,8 +18362,167 @@ index 00000000..f7adcd40
 +}
 +
 +} // namespace moonmod
+diff --git a/port/src/moonmod/savedatadungeon_moonmod.cpp b/port/src/moonmod/savedatadungeon_moonmod.cpp
+new file mode 100644
+index 000000000..0f78b7221
+--- /dev/null
++++ b/port/src/moonmod/savedatadungeon_moonmod.cpp
+@@ -0,0 +1,153 @@
++// Mod floor save records for CSaveDataDungeon (moved out of ps2/src/savedatadungeon.cpp).
++
++#include "common.h"
++
++#include <cstdio>
++#include <cstring>
++
++#include "savedatadungeon.hpp"
++
++namespace {
++/** Saved floor records in each dungeon; mirrors limmit_table in ps2/src/savedatadungeon.cpp. */
++constexpr short limmit_table[SAVE_DUNGEON_NUM] = {9, 16, 25, 21, 23, 29, 39};
++} // namespace
++
++namespace {
++struct MoonModFloorBinding {
++    int dungeon = -1;
++    int floor = -1;
++    int record = -1;
++};
++
++CSaveDataDungeon                         *moonmod_save_owner;
++MOONMOD_DUNGEON_SAVE_RECORD              moonmod_saved_records[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
++bool                                      moonmod_saved_record_used[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
++MoonModFloorBinding                      moonmod_floor_bindings[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
++int                                       moonmod_floor_binding_count;
++
++void ClearMoonModDungeonSaveExtension(CSaveDataDungeon *owner) {
++    moonmod_save_owner = owner;
++    memset(moonmod_saved_records, 0, sizeof(moonmod_saved_records));
++    memset(moonmod_saved_record_used, 0, sizeof(moonmod_saved_record_used));
++    for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
++        moonmod_floor_bindings[index] = {-1, -1, -1};
++    }
++    moonmod_floor_binding_count = 0;
++}
++
++int FindMoonModRecord(const char *stable_id) {
++    for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
++        if (moonmod_saved_record_used[index] && std::strcmp(moonmod_saved_records[index].id, stable_id) == 0) {
++            return index;
++        }
++    }
++    return -1;
++}
++} // namespace
++
++int GetSavedDungeonFloorCount(int dungeon) {
++    if (dungeon < 0 || dungeon >= SAVE_DUNGEON_NUM) {
++        return 0;
++    }
++    return limmit_table[dungeon];
++}
++
++bool HasSavedDungeonFloorRecord(int dungeon, int floor) {
++    return floor >= 0 && floor < GetSavedDungeonFloorCount(dungeon);
++}
++
++bool RegisterMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor, const char *stable_id) {
++    if (owner == NULL || dungeon < 0 || dungeon >= SAVE_DUNGEON_NUM || floor < 0 ||
++        floor >= SAVE_DUNGEON_FLOOR_ID_MAX || stable_id == NULL || stable_id[0] == '\0' ||
++        std::strlen(stable_id) >= MOONMOD_DUNGEON_SAVE_ID_SIZE) {
++        return false;
++    }
++    if (moonmod_save_owner != owner) {
++        ClearMoonModDungeonSaveExtension(owner);
++    }
++
++    int record = FindMoonModRecord(stable_id);
++    if (record < 0) {
++        for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
++            if (!moonmod_saved_record_used[index]) {
++                record = index;
++                moonmod_saved_record_used[index] = true;
++                std::snprintf(moonmod_saved_records[index].id, sizeof(moonmod_saved_records[index].id), "%s", stable_id);
++                break;
++            }
++        }
++    }
++    if (record < 0) {
++        return false;
++    }
++
++    for (int index = 0; index < moonmod_floor_binding_count; ++index) {
++        MoonModFloorBinding &binding = moonmod_floor_bindings[index];
++        if (binding.dungeon == dungeon && binding.floor == floor) {
++            return binding.record == record;
++        }
++        if (binding.record == record) {
++            binding.dungeon = dungeon;
++            binding.floor = floor;
++            return true;
++        }
++    }
++    if (moonmod_floor_binding_count >= MOONMOD_DUNGEON_SAVE_RECORD_MAX) {
++        return false;
++    }
++    moonmod_floor_bindings[moonmod_floor_binding_count++] = {dungeon, floor, record};
++    return true;
++}
++
++DNG_FLOOR_SAVE *GetMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor) {
++    if (owner == NULL || owner != moonmod_save_owner) {
++        return NULL;
++    }
++    for (int index = 0; index < moonmod_floor_binding_count; ++index) {
++        const MoonModFloorBinding &binding = moonmod_floor_bindings[index];
++        if (binding.dungeon == dungeon && binding.floor == floor && binding.record >= 0 &&
++            binding.record < MOONMOD_DUNGEON_SAVE_RECORD_MAX) {
++            return &moonmod_saved_records[binding.record].data;
++        }
++    }
++    return NULL;
++}
++
++void ResetMoonModDungeonSaveExtension(CSaveDataDungeon *owner) { ClearMoonModDungeonSaveExtension(owner); }
++
++bool ExportMoonModDungeonSaveExtension(const CSaveDataDungeon *owner, MOONMOD_DUNGEON_SAVE_EXTENSION *extension) {
++    if (owner == NULL || extension == NULL) {
++        return false;
++    }
++    memset(extension, 0, sizeof(*extension));
++    memcpy(extension->magic, "MFDNGSV1", 8);
++    extension->version = 1;
++    if (owner != moonmod_save_owner) {
++        return true;
++    }
++    for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
++        if (moonmod_saved_record_used[index]) {
++            extension->records[extension->record_count++] = moonmod_saved_records[index];
++        }
++    }
++    return true;
++}
++
++bool ImportMoonModDungeonSaveExtension(CSaveDataDungeon *owner, const MOONMOD_DUNGEON_SAVE_EXTENSION *extension) {
++    if (owner == NULL || extension == NULL || std::memcmp(extension->magic, "MFDNGSV1", 8) != 0 ||
++        extension->version != 1 || extension->record_count > MOONMOD_DUNGEON_SAVE_RECORD_MAX) {
++        return false;
++    }
++    ClearMoonModDungeonSaveExtension(owner);
++    for (u32 source = 0; source < extension->record_count; ++source) {
++        const MOONMOD_DUNGEON_SAVE_RECORD &entry = extension->records[source];
++        if (entry.id[0] == '\0' || memchr(entry.id, '\0', sizeof(entry.id)) == NULL || FindMoonModRecord(entry.id) >= 0) {
++            ClearMoonModDungeonSaveExtension(owner);
++            return false;
++        }
++        moonmod_saved_records[source] = entry;
++        moonmod_saved_record_used[source] = true;
++    }
++    return true;
++}
++
 diff --git a/port/src/options/draw.cpp b/port/src/options/draw.cpp
-index 4c4f7b77..490e663f 100644
+index 4c4f7b774..490e663fd 100644
 --- a/port/src/options/draw.cpp
 +++ b/port/src/options/draw.cpp
 @@ -5,6 +5,8 @@
@@ -17083,7 +18547,7 @@ index 4c4f7b77..490e663f 100644
      const auto  hit = Pointing() ? HitTest(g_screen, point.x, point.y) : Hit{};
 diff --git a/port/src/options/mod_manager_ui.cpp b/port/src/options/mod_manager_ui.cpp
 new file mode 100644
-index 00000000..52f057ce
+index 000000000..52f057ce2
 --- /dev/null
 +++ b/port/src/options/mod_manager_ui.cpp
 @@ -0,0 +1,384 @@
@@ -17473,7 +18937,7 @@ index 00000000..52f057ce
 +} // namespace options::mod_manager_ui
 diff --git a/port/src/options/mod_manager_ui.hpp b/port/src/options/mod_manager_ui.hpp
 new file mode 100644
-index 00000000..248a3c43
+index 000000000..248a3c432
 --- /dev/null
 +++ b/port/src/options/mod_manager_ui.hpp
 @@ -0,0 +1,7 @@
@@ -17485,7 +18949,7 @@ index 00000000..248a3c43
 +
 +} // namespace options::mod_manager_ui
 diff --git a/port/src/options/rows.cpp b/port/src/options/rows.cpp
-index a2af3dc8..759d40f1 100644
+index a2af3dc81..759d40f13 100644
 --- a/port/src/options/rows.cpp
 +++ b/port/src/options/rows.cpp
 @@ -7,6 +7,7 @@
@@ -17519,7 +18983,7 @@ index a2af3dc8..759d40f1 100644
                          Resolution(),
                          Choice<&Config::present_mode>("video.present_mode", "Present mode", "FIFO prevents tearing. Mailbox keeps the newest frame.\nUnsupported modes fall back to FIFO.", {"FIFO", "Mailbox", "Immediate"}),
 diff --git a/port/src/options/rows.hpp b/port/src/options/rows.hpp
-index ec1aaf3e..a88ef0d3 100644
+index ec1aaf3ef..a88ef0d33 100644
 --- a/port/src/options/rows.hpp
 +++ b/port/src/options/rows.hpp
 @@ -17,6 +17,7 @@ struct Row {
@@ -17531,7 +18995,7 @@ index ec1aaf3e..a88ef0d3 100644
  
  struct Page {
 diff --git a/port/src/options/screen.cpp b/port/src/options/screen.cpp
-index a1e99df5..41a31de1 100644
+index a1e99df5a..41a31de12 100644
 --- a/port/src/options/screen.cpp
 +++ b/port/src/options/screen.cpp
 @@ -14,6 +14,8 @@
@@ -17593,8 +19057,34 @@ index a1e99df5..41a31de1 100644
                  BeginBinding();
              } else {
                  Change(1);
+diff --git a/port/src/photo.cpp b/port/src/photo.cpp
+index ff87edf55..a3a12ef66 100644
+--- a/port/src/photo.cpp
++++ b/port/src/photo.cpp
+@@ -9,6 +9,8 @@
+ #include "padcontrol.hpp"
+ #include "photo.hpp"
+ #include "stubs/photo.hpp"
++#include "moonmod/native_events.hpp"
++#include "userdata.hpp"
+ 
+ PORT_OVERRIDE void LoopTakePhoto(CPadControl *pad, CInventUserData *user) {
+     if (user == nullptr) {
+@@ -46,3 +48,12 @@ PORT_OVERRIDE void LoopTakePhoto(CPadControl *pad, CInventUserData *user) {
+         mgStoreZBuffImage(lens, depth);
+     }
+ }
++
++// Retail, then MoonMod's photo event.
++PORT_OVERRIDE void SetTookPhotoData(USER_PICTURE_INFO *photo) {
++    PortRetailSetTookPhotoData(photo);
++    if (photo != NULL) {
++        moonmod::ChronicleTwoPhotoTaken(photo->neta_id, photo->map_no, photo->npc_no, photo->monster_no,
++                                        photo->used != 0);
++    }
++}
 diff --git a/port/src/present.cpp b/port/src/present.cpp
-index fa4dd90e..4d2655e7 100644
+index fa4dd90ea..4d2655e79 100644
 --- a/port/src/present.cpp
 +++ b/port/src/present.cpp
 @@ -12,6 +12,7 @@
@@ -17646,8 +19136,69 @@ index fa4dd90e..4d2655e7 100644
      gfx::RenderOptions options;
      options.present = true;
      options.overlay = fps.get();
+diff --git a/port/src/savedatadungeon.cpp b/port/src/savedatadungeon.cpp
+new file mode 100644
+index 000000000..0cfababe5
+--- /dev/null
++++ b/port/src/savedatadungeon.cpp
+@@ -0,0 +1,55 @@
++#include "common.h"
++
++#include <cstring>
++
++#include "savedatadungeon.hpp"
++
++// Floors registered by mods resolve to the save extension records; native floors keep retail's layout.
++PORT_OVERRIDE DNG_FLOOR_SAVE *CSaveDataDungeon::GetFloorInfoPtr(int dungeon, int floor) {
++    if (DNG_FLOOR_SAVE *mod_floor = GetMoonModDungeonSaveRecord(this, dungeon, floor)) {
++        return mod_floor;
++    }
++    if (!HasSavedDungeonFloorRecord(dungeon, floor)) {
++        return NULL;
++    }
++
++    int index = 0;
++
++    for (int i = 0; i < dungeon; i++) {
++        index += GetSavedDungeonFloorCount(i);
++    }
++
++    index += floor;
++
++    return &floor_info[index];
++}
++
++PORT_OVERRIDE void CSaveDataDungeon::Initialize() {
++    ResetMoonModDungeonSaveExtension(this);
++    memset(floor_info, 0, sizeof(floor_info));
++
++    for (int i = 0; i < 7; i++) {
++        DNG_FLOOR_SAVE *info = GetFloorInfoPtr(i, 0);
++
++        if (info) {
++            info->visit_count = 1;
++            info->flag = 3;
++        }
++
++        info = GetFloorInfoPtr(i, 1);
++
++        if (info) {
++            info->flag = 1;
++        }
++    }
++
++    for (int i = 0; i < 7; i++) {
++        prev_floor_id[i] = -1;
++    }
++
++    for (int i = 0; i < 7; i++) {
++        floor_id[i] = 1;
++    }
++
++    stage_id = 0;
++}
 diff --git a/port/src/test_hooks.cpp b/port/src/test_hooks.cpp
-index 141b3e60..d363e448 100644
+index 141b3e609..d363e4489 100644
 --- a/port/src/test_hooks.cpp
 +++ b/port/src/test_hooks.cpp
 @@ -9,8 +9,12 @@
@@ -17786,7 +19337,7 @@ index 141b3e60..d363e448 100644
  
  bool GameDeveloperMenuRequested(int mode) {
 diff --git a/port/src/test_hooks.hpp b/port/src/test_hooks.hpp
-index b1d9b6ff..fef7c2b8 100644
+index b1d9b6ffb..fef7c2b8e 100644
 --- a/port/src/test_hooks.hpp
 +++ b/port/src/test_hooks.hpp
 @@ -1,11 +1,14 @@
@@ -17833,7 +19384,7 @@ index b1d9b6ff..fef7c2b8 100644
  bool GameDebugPauseRequested(CGamePad &pad);
  bool GameDebugPauseResumeRequested(CGamePad &pad);
 diff --git a/port/src/tests/CMakeLists.txt b/port/src/tests/CMakeLists.txt
-index 1b6755ff..c3b6d916 100644
+index 1b6755ff8..c3b6d9161 100644
 --- a/port/src/tests/CMakeLists.txt
 +++ b/port/src/tests/CMakeLists.txt
 @@ -18,6 +18,35 @@ add_test(NAME PalettePaths.Check
@@ -18970,7 +20521,7 @@ index 1b6755ff..c3b6d916 100644
      COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:darkchronicle>
          -DROOT=${CMAKE_BINARY_DIR}/smoke-fixture
 diff --git a/port/src/tests/dataread_test.cpp b/port/src/tests/dataread_test.cpp
-index a2c92e12..0b459e0a 100644
+index a2c92e126..0b459e0a2 100644
 --- a/port/src/tests/dataread_test.cpp
 +++ b/port/src/tests/dataread_test.cpp
 @@ -17,6 +17,7 @@
@@ -19229,7 +20780,7 @@ index a2c92e12..0b459e0a 100644
      const auto first = base_ / "datapacks" / "First pack";
      const auto last = base_ / "datapacks" / "Last pack";
 diff --git a/port/src/tests/event_runtime_memory_test.cpp b/port/src/tests/event_runtime_memory_test.cpp
-index 17a7b5e6..9183616a 100644
+index 17a7b5e63..9183616a3 100644
 --- a/port/src/tests/event_runtime_memory_test.cpp
 +++ b/port/src/tests/event_runtime_memory_test.cpp
 @@ -1,15 +1,24 @@
@@ -19350,7 +20901,7 @@ index 17a7b5e6..9183616a 100644
 +}
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
-index 00000000..64727980
+index 000000000..647279809
 --- /dev/null
 +++ b/port/src/tests/moonmod_api_test.cpp
 @@ -0,0 +1,1604 @@
@@ -20960,7 +22511,7 @@ index 00000000..64727980
 +
 diff --git a/port/src/tests/moonmod_audio_api_test.cpp b/port/src/tests/moonmod_audio_api_test.cpp
 new file mode 100644
-index 00000000..b29dfad4
+index 000000000..b29dfad4a
 --- /dev/null
 +++ b/port/src/tests/moonmod_audio_api_test.cpp
 @@ -0,0 +1,229 @@
@@ -21195,7 +22746,7 @@ index 00000000..b29dfad4
 +
 diff --git a/port/src/tests/moonmod_character_registration_test.cpp b/port/src/tests/moonmod_character_registration_test.cpp
 new file mode 100644
-index 00000000..9e0fa22f
+index 000000000..9e0fa22f7
 --- /dev/null
 +++ b/port/src/tests/moonmod_character_registration_test.cpp
 @@ -0,0 +1,488 @@
@@ -21689,7 +23240,7 @@ index 00000000..9e0fa22f
 +}
 diff --git a/port/src/tests/moonmod_combat_api_test.cpp b/port/src/tests/moonmod_combat_api_test.cpp
 new file mode 100644
-index 00000000..d8ea575e
+index 000000000..d8ea575e6
 --- /dev/null
 +++ b/port/src/tests/moonmod_combat_api_test.cpp
 @@ -0,0 +1,271 @@
@@ -21966,7 +23517,7 @@ index 00000000..d8ea575e
 +}
 diff --git a/port/src/tests/moonmod_commands_test.cpp b/port/src/tests/moonmod_commands_test.cpp
 new file mode 100644
-index 00000000..8fa38f3b
+index 000000000..8fa38f3bd
 --- /dev/null
 +++ b/port/src/tests/moonmod_commands_test.cpp
 @@ -0,0 +1,146 @@
@@ -22118,7 +23669,7 @@ index 00000000..8fa38f3b
 +}
 diff --git a/port/src/tests/moonmod_content_e2e_test.cpp b/port/src/tests/moonmod_content_e2e_test.cpp
 new file mode 100644
-index 00000000..677faa36
+index 000000000..677faa365
 --- /dev/null
 +++ b/port/src/tests/moonmod_content_e2e_test.cpp
 @@ -0,0 +1,417 @@
@@ -22541,7 +24092,7 @@ index 00000000..677faa36
 +}
 diff --git a/port/src/tests/moonmod_debug_inspect_test.cpp b/port/src/tests/moonmod_debug_inspect_test.cpp
 new file mode 100644
-index 00000000..5e7cafb3
+index 000000000..5e7cafb3d
 --- /dev/null
 +++ b/port/src/tests/moonmod_debug_inspect_test.cpp
 @@ -0,0 +1,135 @@
@@ -22682,7 +24233,7 @@ index 00000000..5e7cafb3
 +}
 diff --git a/port/src/tests/moonmod_dungeon_registration_test.cpp b/port/src/tests/moonmod_dungeon_registration_test.cpp
 new file mode 100644
-index 00000000..eba21def
+index 000000000..eba21def1
 --- /dev/null
 +++ b/port/src/tests/moonmod_dungeon_registration_test.cpp
 @@ -0,0 +1,408 @@
@@ -23096,7 +24647,7 @@ index 00000000..eba21def
 +}
 diff --git a/port/src/tests/moonmod_economy_api_test.cpp b/port/src/tests/moonmod_economy_api_test.cpp
 new file mode 100644
-index 00000000..0b285f76
+index 000000000..0b285f76a
 --- /dev/null
 +++ b/port/src/tests/moonmod_economy_api_test.cpp
 @@ -0,0 +1,71 @@
@@ -23173,7 +24724,7 @@ index 00000000..0b285f76
 +}
 diff --git a/port/src/tests/moonmod_entities_api_test.cpp b/port/src/tests/moonmod_entities_api_test.cpp
 new file mode 100644
-index 00000000..6e9632e7
+index 000000000..6e9632e77
 --- /dev/null
 +++ b/port/src/tests/moonmod_entities_api_test.cpp
 @@ -0,0 +1,383 @@
@@ -23562,7 +25113,7 @@ index 00000000..6e9632e7
 +}
 diff --git a/port/src/tests/moonmod_example_package_test.cpp b/port/src/tests/moonmod_example_package_test.cpp
 new file mode 100644
-index 00000000..9380dc1d
+index 000000000..9380dc1d5
 --- /dev/null
 +++ b/port/src/tests/moonmod_example_package_test.cpp
 @@ -0,0 +1,228 @@
@@ -23796,7 +25347,7 @@ index 00000000..9380dc1d
 +}
 diff --git a/port/src/tests/moonmod_georama_api_test.cpp b/port/src/tests/moonmod_georama_api_test.cpp
 new file mode 100644
-index 00000000..5c66acce
+index 000000000..5c66acce2
 --- /dev/null
 +++ b/port/src/tests/moonmod_georama_api_test.cpp
 @@ -0,0 +1,1133 @@
@@ -24935,7 +26486,7 @@ index 00000000..5c66acce
 +}
 diff --git a/port/src/tests/moonmod_input_api_test.cpp b/port/src/tests/moonmod_input_api_test.cpp
 new file mode 100644
-index 00000000..27078dbb
+index 000000000..27078dbbe
 --- /dev/null
 +++ b/port/src/tests/moonmod_input_api_test.cpp
 @@ -0,0 +1,205 @@
@@ -25146,7 +26697,7 @@ index 00000000..27078dbb
 +}
 diff --git a/port/src/tests/moonmod_item_registration_test.cpp b/port/src/tests/moonmod_item_registration_test.cpp
 new file mode 100644
-index 00000000..59fc251a
+index 000000000..59fc251a2
 --- /dev/null
 +++ b/port/src/tests/moonmod_item_registration_test.cpp
 @@ -0,0 +1,215 @@
@@ -25367,7 +26918,7 @@ index 00000000..59fc251a
 +}
 diff --git a/port/src/tests/moonmod_location_registration_test.cpp b/port/src/tests/moonmod_location_registration_test.cpp
 new file mode 100644
-index 00000000..bf064257
+index 000000000..bf064257a
 --- /dev/null
 +++ b/port/src/tests/moonmod_location_registration_test.cpp
 @@ -0,0 +1,205 @@
@@ -25578,7 +27129,7 @@ index 00000000..bf064257
 +}
 diff --git a/port/src/tests/moonmod_locations_api_test.cpp b/port/src/tests/moonmod_locations_api_test.cpp
 new file mode 100644
-index 00000000..337b979d
+index 000000000..337b979d2
 --- /dev/null
 +++ b/port/src/tests/moonmod_locations_api_test.cpp
 @@ -0,0 +1,32 @@
@@ -25616,7 +27167,7 @@ index 00000000..337b979d
 +}
 diff --git a/port/src/tests/moonmod_manager_ui_test.cpp b/port/src/tests/moonmod_manager_ui_test.cpp
 new file mode 100644
-index 00000000..76ca8b2a
+index 000000000..76ca8b2a9
 --- /dev/null
 +++ b/port/src/tests/moonmod_manager_ui_test.cpp
 @@ -0,0 +1,277 @@
@@ -25899,7 +27450,7 @@ index 00000000..76ca8b2a
 +}
 diff --git a/port/src/tests/moonmod_native_plugin_fixture.c b/port/src/tests/moonmod_native_plugin_fixture.c
 new file mode 100644
-index 00000000..4a611470
+index 000000000..4a6114704
 --- /dev/null
 +++ b/port/src/tests/moonmod_native_plugin_fixture.c
 @@ -0,0 +1,34 @@
@@ -25939,7 +27490,7 @@ index 00000000..4a611470
 +}
 diff --git a/port/src/tests/moonmod_native_plugin_runtime_test.cpp b/port/src/tests/moonmod_native_plugin_runtime_test.cpp
 new file mode 100644
-index 00000000..04aec23b
+index 000000000..04aec23b1
 --- /dev/null
 +++ b/port/src/tests/moonmod_native_plugin_runtime_test.cpp
 @@ -0,0 +1,198 @@
@@ -26143,7 +27694,7 @@ index 00000000..04aec23b
 +}
 diff --git a/port/src/tests/moonmod_native_plugin_shared_fixture.c b/port/src/tests/moonmod_native_plugin_shared_fixture.c
 new file mode 100644
-index 00000000..174516d1
+index 000000000..174516d1a
 --- /dev/null
 +++ b/port/src/tests/moonmod_native_plugin_shared_fixture.c
 @@ -0,0 +1,104 @@
@@ -26253,7 +27804,7 @@ index 00000000..174516d1
 +}
 diff --git a/port/src/tests/moonmod_native_plugin_test.cpp b/port/src/tests/moonmod_native_plugin_test.cpp
 new file mode 100644
-index 00000000..8b01af97
+index 000000000..8b01af972
 --- /dev/null
 +++ b/port/src/tests/moonmod_native_plugin_test.cpp
 @@ -0,0 +1,44 @@
@@ -26303,7 +27854,7 @@ index 00000000..8b01af97
 +}
 diff --git a/port/src/tests/moonmod_party_api_test.cpp b/port/src/tests/moonmod_party_api_test.cpp
 new file mode 100644
-index 00000000..84f0ed06
+index 000000000..84f0ed06c
 --- /dev/null
 +++ b/port/src/tests/moonmod_party_api_test.cpp
 @@ -0,0 +1,193 @@
@@ -26502,7 +28053,7 @@ index 00000000..84f0ed06
 +}
 diff --git a/port/src/tests/moonmod_party_events_test.cpp b/port/src/tests/moonmod_party_events_test.cpp
 new file mode 100644
-index 00000000..996edeca
+index 000000000..996edeca1
 --- /dev/null
 +++ b/port/src/tests/moonmod_party_events_test.cpp
 @@ -0,0 +1,319 @@
@@ -26827,7 +28378,7 @@ index 00000000..996edeca
 +}
 diff --git a/port/src/tests/moonmod_player_api_test.cpp b/port/src/tests/moonmod_player_api_test.cpp
 new file mode 100644
-index 00000000..21e5d18d
+index 000000000..21e5d18d1
 --- /dev/null
 +++ b/port/src/tests/moonmod_player_api_test.cpp
 @@ -0,0 +1,320 @@
@@ -27153,7 +28704,7 @@ index 00000000..21e5d18d
 +}
 diff --git a/port/src/tests/moonmod_render_api_test.cpp b/port/src/tests/moonmod_render_api_test.cpp
 new file mode 100644
-index 00000000..565a6128
+index 000000000..565a61280
 --- /dev/null
 +++ b/port/src/tests/moonmod_render_api_test.cpp
 @@ -0,0 +1,104 @@
@@ -27263,7 +28814,7 @@ index 00000000..565a6128
 +}
 diff --git a/port/src/tests/moonmod_signature_api_test.cpp b/port/src/tests/moonmod_signature_api_test.cpp
 new file mode 100644
-index 00000000..1de9497c
+index 000000000..1de9497ce
 --- /dev/null
 +++ b/port/src/tests/moonmod_signature_api_test.cpp
 @@ -0,0 +1,411 @@
@@ -27680,7 +29231,7 @@ index 00000000..1de9497c
 +
 diff --git a/port/src/tests/moonmod_weapon_registration_test.cpp b/port/src/tests/moonmod_weapon_registration_test.cpp
 new file mode 100644
-index 00000000..7f4fa00e
+index 000000000..7f4fa00eb
 --- /dev/null
 +++ b/port/src/tests/moonmod_weapon_registration_test.cpp
 @@ -0,0 +1,185 @@
@@ -27871,7 +29422,7 @@ index 00000000..7f4fa00e
 +}
 diff --git a/port/src/tests/moonmod_weapons_api_test.cpp b/port/src/tests/moonmod_weapons_api_test.cpp
 new file mode 100644
-index 00000000..b2ee55bf
+index 000000000..b2ee55bfe
 --- /dev/null
 +++ b/port/src/tests/moonmod_weapons_api_test.cpp
 @@ -0,0 +1,230 @@
@@ -28107,7 +29658,7 @@ index 00000000..b2ee55bf
 +}
 diff --git a/port/src/tests/moonmod_world_api_test.cpp b/port/src/tests/moonmod_world_api_test.cpp
 new file mode 100644
-index 00000000..a7164a16
+index 000000000..a7164a16a
 --- /dev/null
 +++ b/port/src/tests/moonmod_world_api_test.cpp
 @@ -0,0 +1,124 @@
@@ -28237,7 +29788,7 @@ index 00000000..a7164a16
 +}
 diff --git a/port/src/tests/moonmod_world_flags_api_test.cpp b/port/src/tests/moonmod_world_flags_api_test.cpp
 new file mode 100644
-index 00000000..a3a9e304
+index 000000000..a3a9e3040
 --- /dev/null
 +++ b/port/src/tests/moonmod_world_flags_api_test.cpp
 @@ -0,0 +1,133 @@
@@ -28376,7 +29927,7 @@ index 00000000..a3a9e304
 +}
 diff --git a/port/src/tests/moonmod_world_transition_api_test.cpp b/port/src/tests/moonmod_world_transition_api_test.cpp
 new file mode 100644
-index 00000000..969ae090
+index 000000000..969ae090d
 --- /dev/null
 +++ b/port/src/tests/moonmod_world_transition_api_test.cpp
 @@ -0,0 +1,103 @@
@@ -28484,7 +30035,7 @@ index 00000000..969ae090
 +    fs::remove_all(root, error);
 +}
 diff --git a/port/src/tests/platform_pad_test.cpp b/port/src/tests/platform_pad_test.cpp
-index c3228071..8ac7ff09 100644
+index c3228071e..8ac7ff095 100644
 --- a/port/src/tests/platform_pad_test.cpp
 +++ b/port/src/tests/platform_pad_test.cpp
 @@ -8,6 +8,7 @@
@@ -28511,7 +30062,7 @@ index c3228071..8ac7ff09 100644
      InstallScript(kPressFirstPort);
      InitGamePad();
 diff --git a/port/src/tests/save_slots_test.cpp b/port/src/tests/save_slots_test.cpp
-index b66f09e5..44670d09 100644
+index b66f09e51..44670d09d 100644
 --- a/port/src/tests/save_slots_test.cpp
 +++ b/port/src/tests/save_slots_test.cpp
 @@ -26,6 +26,7 @@
@@ -28560,7 +30111,7 @@ index b66f09e5..44670d09 100644
      image->check_digit_half = 123456;
      Write(SaveSlotPath(0));
 diff --git a/port/src/tests/test_hooks_test.cpp b/port/src/tests/test_hooks_test.cpp
-index 43fa8cfc..0ea47985 100644
+index 43fa8cfc1..0ea479857 100644
 --- a/port/src/tests/test_hooks_test.cpp
 +++ b/port/src/tests/test_hooks_test.cpp
 @@ -47,6 +47,31 @@ TEST(TestHooks, GiveRejectsMalformedListsWithoutChangingThePreviousList) {
@@ -28596,7 +30147,7 @@ index 43fa8cfc..0ea47985 100644
      CGamePad pad{};
      pad.key_lock2 = 1;
 diff --git a/port/src/tests/texture_pack_test.cpp b/port/src/tests/texture_pack_test.cpp
-index 18ae4511..526d549b 100644
+index 18ae45115..526d549b7 100644
 --- a/port/src/tests/texture_pack_test.cpp
 +++ b/port/src/tests/texture_pack_test.cpp
 @@ -19,6 +19,8 @@ struct CatalogFixture {
@@ -28636,7 +30187,7 @@ index 18ae4511..526d549b 100644
 +    EXPECT_EQ(TextureSourceLookup(member), "map/i/i01/h01/i01h01.ipk/room.img");
 +}
 diff --git a/port/src/texture_source.cpp b/port/src/texture_source.cpp
-index 747321e2..8548f94b 100644
+index 747321e29..8548f94b9 100644
 --- a/port/src/texture_source.cpp
 +++ b/port/src/texture_source.cpp
 @@ -1,6 +1,8 @@
@@ -28707,7 +30258,7 @@ index 747321e2..8548f94b 100644
  
  void TextureSourceClear() { sources.clear(); }
 diff --git a/port/src/texture_source.hpp b/port/src/texture_source.hpp
-index 3edad6c1..d7a40d17 100644
+index 3edad6c17..d7a40d172 100644
 --- a/port/src/texture_source.hpp
 +++ b/port/src/texture_source.hpp
 @@ -6,6 +6,9 @@
@@ -28722,7 +30273,7 @@ index 3edad6c1..d7a40d17 100644
  std::optional<std::string> TextureSourceLookup(const void *buffer);
 diff --git a/port/third_party/lua-5.5.1/LUA-LICENSE.txt b/port/third_party/lua-5.5.1/LUA-LICENSE.txt
 new file mode 100644
-index 00000000..819fac89
+index 000000000..819fac893
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/LUA-LICENSE.txt
 @@ -0,0 +1,7 @@
@@ -28735,7 +30286,7 @@ index 00000000..819fac89
 +THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 diff --git a/port/third_party/lua-5.5.1/Makefile b/port/third_party/lua-5.5.1/Makefile
 new file mode 100644
-index 00000000..317cb854
+index 000000000..317cb8545
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/Makefile
 @@ -0,0 +1,232 @@
@@ -28973,7 +30524,7 @@ index 00000000..317cb854
 +# (end of Makefile)
 diff --git a/port/third_party/lua-5.5.1/README b/port/third_party/lua-5.5.1/README
 new file mode 100644
-index 00000000..32681fa6
+index 000000000..32681fa6a
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/README
 @@ -0,0 +1,6 @@
@@ -28985,7 +30536,7 @@ index 00000000..32681fa6
 +
 diff --git a/port/third_party/lua-5.5.1/lapi.c b/port/third_party/lua-5.5.1/lapi.c
 new file mode 100644
-index 00000000..8bc2ddd1
+index 000000000..8bc2ddd14
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lapi.c
 @@ -0,0 +1,1479 @@
@@ -30470,7 +32021,7 @@ index 00000000..8bc2ddd1
 +
 diff --git a/port/third_party/lua-5.5.1/lapi.h b/port/third_party/lua-5.5.1/lapi.h
 new file mode 100644
-index 00000000..9b545344
+index 000000000..9b5453442
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lapi.h
 @@ -0,0 +1,65 @@
@@ -30541,7 +32092,7 @@ index 00000000..9b545344
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lauxlib.c b/port/third_party/lua-5.5.1/lauxlib.c
 new file mode 100644
-index 00000000..8620c8b3
+index 000000000..8620c8b33
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lauxlib.c
 @@ -0,0 +1,1215 @@
@@ -31762,7 +33313,7 @@ index 00000000..8620c8b3
 +
 diff --git a/port/third_party/lua-5.5.1/lauxlib.h b/port/third_party/lua-5.5.1/lauxlib.h
 new file mode 100644
-index 00000000..2d015362
+index 000000000..2d015362f
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lauxlib.h
 @@ -0,0 +1,271 @@
@@ -32039,7 +33590,7 @@ index 00000000..2d015362
 +
 diff --git a/port/third_party/lua-5.5.1/lbaselib.c b/port/third_party/lua-5.5.1/lbaselib.c
 new file mode 100644
-index 00000000..3962ea53
+index 000000000..3962ea539
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lbaselib.c
 @@ -0,0 +1,552 @@
@@ -32597,7 +34148,7 @@ index 00000000..3962ea53
 +
 diff --git a/port/third_party/lua-5.5.1/lcode.c b/port/third_party/lua-5.5.1/lcode.c
 new file mode 100644
-index 00000000..8b61d5de
+index 000000000..8b61d5de9
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lcode.c
 @@ -0,0 +1,1970 @@
@@ -34573,7 +36124,7 @@ index 00000000..8b61d5de
 +}
 diff --git a/port/third_party/lua-5.5.1/lcode.h b/port/third_party/lua-5.5.1/lcode.h
 new file mode 100644
-index 00000000..09e5c802
+index 000000000..09e5c802b
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lcode.h
 @@ -0,0 +1,105 @@
@@ -34684,7 +36235,7 @@ index 00000000..09e5c802
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lcorolib.c b/port/third_party/lua-5.5.1/lcorolib.c
 new file mode 100644
-index 00000000..eb30bf4d
+index 000000000..eb30bf4da
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lcorolib.c
 @@ -0,0 +1,225 @@
@@ -34915,7 +36466,7 @@ index 00000000..eb30bf4d
 +
 diff --git a/port/third_party/lua-5.5.1/lctype.c b/port/third_party/lua-5.5.1/lctype.c
 new file mode 100644
-index 00000000..b1a43e44
+index 000000000..b1a43e44b
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lctype.c
 @@ -0,0 +1,64 @@
@@ -34985,7 +36536,7 @@ index 00000000..b1a43e44
 +#endif			/* } */
 diff --git a/port/third_party/lua-5.5.1/lctype.h b/port/third_party/lua-5.5.1/lctype.h
 new file mode 100644
-index 00000000..864e1901
+index 000000000..864e19018
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lctype.h
 @@ -0,0 +1,101 @@
@@ -35092,7 +36643,7 @@ index 00000000..864e1901
 +
 diff --git a/port/third_party/lua-5.5.1/ldblib.c b/port/third_party/lua-5.5.1/ldblib.c
 new file mode 100644
-index 00000000..051327cc
+index 000000000..051327cc1
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ldblib.c
 @@ -0,0 +1,477 @@
@@ -35575,7 +37126,7 @@ index 00000000..051327cc
 +
 diff --git a/port/third_party/lua-5.5.1/ldebug.c b/port/third_party/lua-5.5.1/ldebug.c
 new file mode 100644
-index 00000000..5293ccb9
+index 000000000..5293ccb9f
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ldebug.c
 @@ -0,0 +1,979 @@
@@ -36560,7 +38111,7 @@ index 00000000..5293ccb9
 +
 diff --git a/port/third_party/lua-5.5.1/ldebug.h b/port/third_party/lua-5.5.1/ldebug.h
 new file mode 100644
-index 00000000..20d07818
+index 000000000..20d07818b
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ldebug.h
 @@ -0,0 +1,65 @@
@@ -36631,7 +38182,7 @@ index 00000000..20d07818
 +#endif
 diff --git a/port/third_party/lua-5.5.1/ldo.c b/port/third_party/lua-5.5.1/ldo.c
 new file mode 100644
-index 00000000..fe8bf20f
+index 000000000..fe8bf20f8
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ldo.c
 @@ -0,0 +1,1192 @@
@@ -37829,7 +39380,7 @@ index 00000000..fe8bf20f
 +
 diff --git a/port/third_party/lua-5.5.1/ldo.h b/port/third_party/lua-5.5.1/ldo.h
 new file mode 100644
-index 00000000..85a00e38
+index 000000000..85a00e38c
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ldo.h
 @@ -0,0 +1,99 @@
@@ -37934,7 +39485,7 @@ index 00000000..85a00e38
 +
 diff --git a/port/third_party/lua-5.5.1/ldump.c b/port/third_party/lua-5.5.1/ldump.c
 new file mode 100644
-index 00000000..57957889
+index 000000000..579578892
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ldump.c
 @@ -0,0 +1,307 @@
@@ -38247,7 +39798,7 @@ index 00000000..57957889
 +
 diff --git a/port/third_party/lua-5.5.1/lfunc.c b/port/third_party/lua-5.5.1/lfunc.c
 new file mode 100644
-index 00000000..b6fd9ceb
+index 000000000..b6fd9ceb5
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lfunc.c
 @@ -0,0 +1,314 @@
@@ -38567,7 +40118,7 @@ index 00000000..b6fd9ceb
 +
 diff --git a/port/third_party/lua-5.5.1/lfunc.h b/port/third_party/lua-5.5.1/lfunc.h
 new file mode 100644
-index 00000000..d6aad3a6
+index 000000000..d6aad3a6d
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lfunc.h
 @@ -0,0 +1,65 @@
@@ -38638,7 +40189,7 @@ index 00000000..d6aad3a6
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lgc.c b/port/third_party/lua-5.5.1/lgc.c
 new file mode 100644
-index 00000000..a463e41e
+index 000000000..a463e41e6
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lgc.c
 @@ -0,0 +1,1804 @@
@@ -40448,7 +41999,7 @@ index 00000000..a463e41e
 +
 diff --git a/port/third_party/lua-5.5.1/lgc.h b/port/third_party/lua-5.5.1/lgc.h
 new file mode 100644
-index 00000000..ee054179
+index 000000000..ee0541793
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lgc.h
 @@ -0,0 +1,268 @@
@@ -40722,7 +42273,7 @@ index 00000000..ee054179
 +#endif
 diff --git a/port/third_party/lua-5.5.1/linit.c b/port/third_party/lua-5.5.1/linit.c
 new file mode 100644
-index 00000000..00d06f7e
+index 000000000..00d06f7ec
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/linit.c
 @@ -0,0 +1,63 @@
@@ -40791,7 +42342,7 @@ index 00000000..00d06f7e
 +
 diff --git a/port/third_party/lua-5.5.1/liolib.c b/port/third_party/lua-5.5.1/liolib.c
 new file mode 100644
-index 00000000..57615e6f
+index 000000000..57615e6f3
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/liolib.c
 @@ -0,0 +1,841 @@
@@ -41638,7 +43189,7 @@ index 00000000..57615e6f
 +
 diff --git a/port/third_party/lua-5.5.1/ljumptab.h b/port/third_party/lua-5.5.1/ljumptab.h
 new file mode 100644
-index 00000000..52fa6d74
+index 000000000..52fa6d746
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ljumptab.h
 @@ -0,0 +1,114 @@
@@ -41758,7 +43309,7 @@ index 00000000..52fa6d74
 +};
 diff --git a/port/third_party/lua-5.5.1/llex.c b/port/third_party/lua-5.5.1/llex.c
 new file mode 100644
-index 00000000..7cd9fcaf
+index 000000000..7cd9fcaf5
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/llex.c
 @@ -0,0 +1,604 @@
@@ -42368,7 +43919,7 @@ index 00000000..7cd9fcaf
 +
 diff --git a/port/third_party/lua-5.5.1/llex.h b/port/third_party/lua-5.5.1/llex.h
 new file mode 100644
-index 00000000..37016e8a
+index 000000000..37016e8a3
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/llex.h
 @@ -0,0 +1,93 @@
@@ -42467,7 +44018,7 @@ index 00000000..37016e8a
 +#endif
 diff --git a/port/third_party/lua-5.5.1/llimits.h b/port/third_party/lua-5.5.1/llimits.h
 new file mode 100644
-index 00000000..3f037255
+index 000000000..3f0372552
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/llimits.h
 @@ -0,0 +1,357 @@
@@ -42830,7 +44381,7 @@ index 00000000..3f037255
 +
 diff --git a/port/third_party/lua-5.5.1/lmathlib.c b/port/third_party/lua-5.5.1/lmathlib.c
 new file mode 100644
-index 00000000..a6b13f96
+index 000000000..a6b13f969
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lmathlib.c
 @@ -0,0 +1,765 @@
@@ -43601,7 +45152,7 @@ index 00000000..a6b13f96
 +
 diff --git a/port/third_party/lua-5.5.1/lmem.c b/port/third_party/lua-5.5.1/lmem.c
 new file mode 100644
-index 00000000..de8503d9
+index 000000000..de8503d91
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lmem.c
 @@ -0,0 +1,215 @@
@@ -43822,7 +45373,7 @@ index 00000000..de8503d9
 +}
 diff --git a/port/third_party/lua-5.5.1/lmem.h b/port/third_party/lua-5.5.1/lmem.h
 new file mode 100644
-index 00000000..dc714fb2
+index 000000000..dc714fb2e
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lmem.h
 @@ -0,0 +1,96 @@
@@ -43924,7 +45475,7 @@ index 00000000..dc714fb2
 +
 diff --git a/port/third_party/lua-5.5.1/loadlib.c b/port/third_party/lua-5.5.1/loadlib.c
 new file mode 100644
-index 00000000..ef09c9a5
+index 000000000..ef09c9a54
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/loadlib.c
 @@ -0,0 +1,748 @@
@@ -44678,7 +46229,7 @@ index 00000000..ef09c9a5
 +
 diff --git a/port/third_party/lua-5.5.1/lobject.c b/port/third_party/lua-5.5.1/lobject.c
 new file mode 100644
-index 00000000..763b4846
+index 000000000..763b48460
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lobject.c
 @@ -0,0 +1,718 @@
@@ -45402,7 +46953,7 @@ index 00000000..763b4846
 +
 diff --git a/port/third_party/lua-5.5.1/lobject.h b/port/third_party/lua-5.5.1/lobject.h
 new file mode 100644
-index 00000000..bf5b65b4
+index 000000000..bf5b65b46
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lobject.h
 @@ -0,0 +1,865 @@
@@ -46273,7 +47824,7 @@ index 00000000..bf5b65b4
 +
 diff --git a/port/third_party/lua-5.5.1/lopcodes.c b/port/third_party/lua-5.5.1/lopcodes.c
 new file mode 100644
-index 00000000..bb1a4162
+index 000000000..bb1a4162e
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lopcodes.c
 @@ -0,0 +1,131 @@
@@ -46410,7 +47961,7 @@ index 00000000..bb1a4162
 +
 diff --git a/port/third_party/lua-5.5.1/lopcodes.h b/port/third_party/lua-5.5.1/lopcodes.h
 new file mode 100644
-index 00000000..86cff065
+index 000000000..86cff065f
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lopcodes.h
 @@ -0,0 +1,444 @@
@@ -46860,7 +48411,7 @@ index 00000000..86cff065
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lopnames.h b/port/third_party/lua-5.5.1/lopnames.h
 new file mode 100644
-index 00000000..0554a2e9
+index 000000000..0554a2e9a
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lopnames.h
 @@ -0,0 +1,105 @@
@@ -46971,7 +48522,7 @@ index 00000000..0554a2e9
 +
 diff --git a/port/third_party/lua-5.5.1/loslib.c b/port/third_party/lua-5.5.1/loslib.c
 new file mode 100644
-index 00000000..b7a2b0d1
+index 000000000..b7a2b0d15
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/loslib.c
 @@ -0,0 +1,432 @@
@@ -47409,7 +48960,7 @@ index 00000000..b7a2b0d1
 +
 diff --git a/port/third_party/lua-5.5.1/lparser.c b/port/third_party/lua-5.5.1/lparser.c
 new file mode 100644
-index 00000000..3c26a4fd
+index 000000000..3c26a4fda
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lparser.c
 @@ -0,0 +1,2193 @@
@@ -49608,7 +51159,7 @@ index 00000000..3c26a4fd
 +
 diff --git a/port/third_party/lua-5.5.1/lparser.h b/port/third_party/lua-5.5.1/lparser.h
 new file mode 100644
-index 00000000..4fad6bdc
+index 000000000..4fad6bdc1
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lparser.h
 @@ -0,0 +1,197 @@
@@ -49811,7 +51362,7 @@ index 00000000..4fad6bdc
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lprefix.h b/port/third_party/lua-5.5.1/lprefix.h
 new file mode 100644
-index 00000000..484f2ad6
+index 000000000..484f2ad6f
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lprefix.h
 @@ -0,0 +1,45 @@
@@ -49862,7 +51413,7 @@ index 00000000..484f2ad6
 +
 diff --git a/port/third_party/lua-5.5.1/lstate.c b/port/third_party/lua-5.5.1/lstate.c
 new file mode 100644
-index 00000000..ada0b856
+index 000000000..ada0b8566
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lstate.c
 @@ -0,0 +1,425 @@
@@ -50293,7 +51844,7 @@ index 00000000..ada0b856
 +
 diff --git a/port/third_party/lua-5.5.1/lstate.h b/port/third_party/lua-5.5.1/lstate.h
 new file mode 100644
-index 00000000..30a560a7
+index 000000000..30a560a70
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lstate.h
 @@ -0,0 +1,451 @@
@@ -50750,7 +52301,7 @@ index 00000000..30a560a7
 +
 diff --git a/port/third_party/lua-5.5.1/lstring.c b/port/third_party/lua-5.5.1/lstring.c
 new file mode 100644
-index 00000000..75635142
+index 000000000..75635142e
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lstring.c
 @@ -0,0 +1,353 @@
@@ -51109,7 +52660,7 @@ index 00000000..75635142
 +
 diff --git a/port/third_party/lua-5.5.1/lstring.h b/port/third_party/lua-5.5.1/lstring.h
 new file mode 100644
-index 00000000..1643c3d8
+index 000000000..1643c3d82
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lstring.h
 @@ -0,0 +1,73 @@
@@ -51188,7 +52739,7 @@ index 00000000..1643c3d8
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lstrlib.c b/port/third_party/lua-5.5.1/lstrlib.c
 new file mode 100644
-index 00000000..dd3c0fd0
+index 000000000..dd3c0fd08
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lstrlib.c
 @@ -0,0 +1,1900 @@
@@ -53094,7 +54645,7 @@ index 00000000..dd3c0fd0
 +
 diff --git a/port/third_party/lua-5.5.1/ltable.c b/port/third_party/lua-5.5.1/ltable.c
 new file mode 100644
-index 00000000..2f2b5c1f
+index 000000000..2f2b5c1f5
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ltable.c
 @@ -0,0 +1,1355 @@
@@ -54455,7 +56006,7 @@ index 00000000..2f2b5c1f
 +#endif
 diff --git a/port/third_party/lua-5.5.1/ltable.h b/port/third_party/lua-5.5.1/ltable.h
 new file mode 100644
-index 00000000..f3b7bc7e
+index 000000000..f3b7bc7e7
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ltable.h
 @@ -0,0 +1,184 @@
@@ -54645,7 +56196,7 @@ index 00000000..f3b7bc7e
 +#endif
 diff --git a/port/third_party/lua-5.5.1/ltablib.c b/port/third_party/lua-5.5.1/ltablib.c
 new file mode 100644
-index 00000000..15c3c09f
+index 000000000..15c3c09f0
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ltablib.c
 @@ -0,0 +1,429 @@
@@ -55080,7 +56631,7 @@ index 00000000..15c3c09f
 +
 diff --git a/port/third_party/lua-5.5.1/ltm.c b/port/third_party/lua-5.5.1/ltm.c
 new file mode 100644
-index 00000000..cfe90e30
+index 000000000..cfe90e307
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ltm.c
 @@ -0,0 +1,364 @@
@@ -55450,7 +57001,7 @@ index 00000000..cfe90e30
 +
 diff --git a/port/third_party/lua-5.5.1/ltm.h b/port/third_party/lua-5.5.1/ltm.h
 new file mode 100644
-index 00000000..afc7ad00
+index 000000000..afc7ad00e
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/ltm.h
 @@ -0,0 +1,105 @@
@@ -55561,7 +57112,7 @@ index 00000000..afc7ad00
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lua.c b/port/third_party/lua-5.5.1/lua.c
 new file mode 100644
-index 00000000..858a04c0
+index 000000000..858a04c07
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lua.c
 @@ -0,0 +1,794 @@
@@ -56361,7 +57912,7 @@ index 00000000..858a04c0
 +
 diff --git a/port/third_party/lua-5.5.1/lua.h b/port/third_party/lua-5.5.1/lua.h
 new file mode 100644
-index 00000000..6deaed49
+index 000000000..6deaed49c
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lua.h
 @@ -0,0 +1,547 @@
@@ -56914,7 +58465,7 @@ index 00000000..6deaed49
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lua.hpp b/port/third_party/lua-5.5.1/lua.hpp
 new file mode 100644
-index 00000000..2853364f
+index 000000000..2853364f7
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lua.hpp
 @@ -0,0 +1,10 @@
@@ -56930,7 +58481,7 @@ index 00000000..2853364f
 +}
 diff --git a/port/third_party/lua-5.5.1/luac.c b/port/third_party/lua-5.5.1/luac.c
 new file mode 100644
-index 00000000..4a2016a2
+index 000000000..4a2016a22
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/luac.c
 @@ -0,0 +1,733 @@
@@ -57669,7 +59220,7 @@ index 00000000..4a2016a2
 +}
 diff --git a/port/third_party/lua-5.5.1/luaconf.h b/port/third_party/lua-5.5.1/luaconf.h
 new file mode 100644
-index 00000000..bdac085c
+index 000000000..bdac085c2
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/luaconf.h
 @@ -0,0 +1,756 @@
@@ -58431,7 +59982,7 @@ index 00000000..bdac085c
 +
 diff --git a/port/third_party/lua-5.5.1/lualib.h b/port/third_party/lua-5.5.1/lualib.h
 new file mode 100644
-index 00000000..068f60ab
+index 000000000..068f60ab3
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lualib.h
 @@ -0,0 +1,65 @@
@@ -58502,7 +60053,7 @@ index 00000000..068f60ab
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lundump.c b/port/third_party/lua-5.5.1/lundump.c
 new file mode 100644
-index 00000000..d5fdc64b
+index 000000000..d5fdc64b0
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lundump.c
 @@ -0,0 +1,421 @@
@@ -58929,7 +60480,7 @@ index 00000000..d5fdc64b
 +
 diff --git a/port/third_party/lua-5.5.1/lundump.h b/port/third_party/lua-5.5.1/lundump.h
 new file mode 100644
-index 00000000..186e25f8
+index 000000000..186e25f88
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lundump.h
 @@ -0,0 +1,40 @@
@@ -58975,7 +60526,7 @@ index 00000000..186e25f8
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lutf8lib.c b/port/third_party/lua-5.5.1/lutf8lib.c
 new file mode 100644
-index 00000000..0cd7f9c3
+index 000000000..0cd7f9c36
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lutf8lib.c
 @@ -0,0 +1,294 @@
@@ -59275,7 +60826,7 @@ index 00000000..0cd7f9c3
 +
 diff --git a/port/third_party/lua-5.5.1/lvm.c b/port/third_party/lua-5.5.1/lvm.c
 new file mode 100644
-index 00000000..986c7db8
+index 000000000..986c7db89
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lvm.c
 @@ -0,0 +1,1978 @@
@@ -61259,7 +62810,7 @@ index 00000000..986c7db8
 +/* }================================================================== */
 diff --git a/port/third_party/lua-5.5.1/lvm.h b/port/third_party/lua-5.5.1/lvm.h
 new file mode 100644
-index 00000000..be7b9cb0
+index 000000000..be7b9cb0e
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lvm.h
 @@ -0,0 +1,136 @@
@@ -61401,7 +62952,7 @@ index 00000000..be7b9cb0
 +#endif
 diff --git a/port/third_party/lua-5.5.1/lzio.c b/port/third_party/lua-5.5.1/lzio.c
 new file mode 100644
-index 00000000..301df4b9
+index 000000000..301df4b94
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lzio.c
 @@ -0,0 +1,89 @@
@@ -61496,7 +63047,7 @@ index 00000000..301df4b9
 +}
 diff --git a/port/third_party/lua-5.5.1/lzio.h b/port/third_party/lua-5.5.1/lzio.h
 new file mode 100644
-index 00000000..49047c98
+index 000000000..49047c98c
 --- /dev/null
 +++ b/port/third_party/lua-5.5.1/lzio.h
 @@ -0,0 +1,67 @@
@@ -61568,7 +63119,7 @@ index 00000000..49047c98
 +
 +#endif
 diff --git a/ps2/include/automap.hpp b/ps2/include/automap.hpp
-index 0fbbd2cf..6bd62573 100644
+index 0fbbd2cf8..6bd625737 100644
 --- a/ps2/include/automap.hpp
 +++ b/ps2/include/automap.hpp
 @@ -24,8 +24,26 @@
@@ -61613,114 +63164,68 @@ index 0fbbd2cf..6bd62573 100644
  /**
   *
 diff --git a/ps2/include/dng_event.hpp b/ps2/include/dng_event.hpp
-index 6e8659f3..941e8f80 100644
+index 6e8659f3d..37df9e47d 100644
 --- a/ps2/include/dng_event.hpp
 +++ b/ps2/include/dng_event.hpp
-@@ -956,6 +956,8 @@ void MinimapDoorEnable(float *pos);
-  * @address 0x293BB0
-  * @size 0x1E0
+@@ -1027,3 +1027,7 @@ int CheckObjectPutArea(float *pos);
+  * @size 0x64
   */
-+class CScene;
-+class CMonsterMan;
- void LoadMonsterFile();
- 
- /**
-@@ -968,6 +970,16 @@ void LoadMonsterFile();
-  */
- void LoadMonsterFile(int monster_id, int initialize);
- 
-+/** Returns true once the active dungeon's native monster manager has finished initialization. */
-+bool IsMonsterManagerReadyForModSpawn(const CScene *scene);
+ void CreatMonsterFloorInfo(char *script, int length);
 +
-+namespace moonmod {
-+int ChronicleTwoRequestedDungeonEntryFloor(int requested_floor);
-+int ChronicleTwoDungeonFloorSource(int dungeon, int floor);
-+bool InheritChronicleTwoTreasureFloor(TRESURE_BOX_FLOOR_INFO *table, int dungeon, int floor);
-+void PreloadChronicleTwoCharacterTemplates(CMonsterMan *manager, mgCMemory *memory);
-+}
-+
- /**
-  *
-  * Sounds the low-health warning while dungeon combat is active.
++#ifdef PORT
++#include "moonmod/dng_event_moonmod.hpp"
++#endif
 diff --git a/ps2/include/dngfloor.hpp b/ps2/include/dngfloor.hpp
-index fb0204c9..4e87796b 100644
+index fb0204c97..6e2d6dc13 100644
 --- a/ps2/include/dngfloor.hpp
 +++ b/ps2/include/dngfloor.hpp
-@@ -268,6 +268,11 @@ public:
+@@ -268,6 +268,12 @@ public:
       */
      void LoadDataTable(int dungeon, mgCMemory *memory);
  
-+    /** Adds one reachable mod floor beside an existing floor, reusing the source dungeon resources. */
++#ifdef PORT
 +    bool RegisterMoonModFloor(int source_floor, const char *title, const char *stable_id, int *out_floor_id, char *error,
 +                              size_t error_size);
 +    bool IsMoonModFloor(int floor_id, const char *title) const;
++#endif
 +
      /**
       *
       * Gives the room cell standing for a floor, or NULL.
 diff --git a/ps2/include/gamedata.hpp b/ps2/include/gamedata.hpp
-index 674df212..25c6b42b 100644
+index 674df2123..1ea60db27 100644
 --- a/ps2/include/gamedata.hpp
 +++ b/ps2/include/gamedata.hpp
-@@ -1448,6 +1448,25 @@ public:
+@@ -1448,6 +1448,15 @@ public:
       */
      int LoadData();
  
-+    /**
-+     * Adds one mod-owned, data-only consumable to the live item tables. The item inherits its
-+     * model, icon, type and use rules from template_item_no; nonzero effect_flags replace the
-+     * native effect flags, and effect_amount sets its first value. The caller owns the display
-+     * name for the process lifetime.
-+     */
++#ifdef PORT
 +    bool RegisterMoonModItem(int template_item_no, const char *display_name, int max_num, int stack_num,
 +                             int effect_flags, int effect_amount, int *out_item_no, char *error, size_t error_size);
-+
-+    /**
-+     * Adds one mod-owned, data-only weapon to the live weapon tables. It inherits the model,
-+     * icon, attack type, build-up path and other native behavior from template_item_no. Optional
-+     * values use -1 for unchanged, and optional attribute arrays are copied when non-null.
-+     */
 +    bool RegisterMoonModWeapon(int template_item_no, const char *display_name, int max_num, int stack_num,
 +                               int attack, int durability_stat, int attack_cap, int durability_cap,
 +                               int durability_capacity, int levelup_exp, const int *attributes,
 +                               const int *attribute_caps, int *out_item_no, char *error, size_t error_size);
++#endif
 +
      /**
       *
       * Reads the item name script of one language.
 diff --git a/ps2/include/mapselect.hpp b/ps2/include/mapselect.hpp
-index 7b738fbe..00fd76a6 100644
+index 7b738fbe6..1cd7ec54e 100644
 --- a/ps2/include/mapselect.hpp
 +++ b/ps2/include/mapselect.hpp
-@@ -249,6 +249,26 @@ int GetMapSndDataID(int map_no);
+@@ -353,3 +353,7 @@ void LoadEventViewData(u_long128 *buffer, mgCMemory *stack);
+  * @size 0x170
   */
- char *GetMapName(int map_no, char **title);
- 
-+/**
-+ * Returns the number of native map records loaded from map/map*.cfg.
-+ *
-+ * This count is used by PC-port APIs that enumerate the native map catalog.
-+ */
-+int GetMapNameCount();
+ void AtraMiriaOnOff(int mode, CCharacter2 *chara, int enable);
 +
-+/**
-+ * Appends a bounded MoonMod-authored map identity to the runtime catalog.
-+ * The initial supported authored-map type is a standalone native interior map.
-+ * Returns the runtime map index, or -1 when the name conflicts or capacity is reached.
-+ */
-+int RegisterMoonModMapName(const char *name, const char *title);
-+
-+/** Returns whether map_no refers to an appended MoonMod map identity. */
-+int IsMoonModMapName(int map_no);
-+
-+/** Clears appended map identities between isolated native unit tests. */
-+void ResetMoonModMapNamesForTests();
-+
- /**
-  *
-  * Returns the number of the map with a file name, or -1 when there is none.
++#ifdef PORT
++#include "moonmod/mapselect_moonmod.hpp"
++#endif
 diff --git a/ps2/include/monster.hpp b/ps2/include/monster.hpp
-index 6cdd516d..6b1b0469 100644
+index 6cdd516d2..026df1e56 100644
 --- a/ps2/include/monster.hpp
 +++ b/ps2/include/monster.hpp
 @@ -37,6 +37,10 @@ enum MONSTER_MAN_SIZE {
@@ -61734,10 +63239,11 @@ index 6cdd516d..6b1b0469 100644
  /**
   *
   * Kinds of monster that the code singles out by number.
-@@ -577,6 +581,15 @@ public:
+@@ -577,6 +581,17 @@ public:
       */
      CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
  
++#ifdef PORT
 +    /**
 +     * Removes a live mod-spawned monster without running the native kill, reward, or gate-drop path.
 +     *
@@ -61746,14 +63252,16 @@ index 6cdd516d..6b1b0469 100644
 +     * @return true when the matching live monster was safely removed.
 +     */
 +    bool DespawnMoonModMonster(int slot, unsigned int generation);
++#endif
 +
      /**
       *
       * Draws the monsters on the mini-map.
-@@ -747,6 +760,17 @@ extern BASE_MONSTER_TBL base_monster_define[344];
+@@ -747,6 +762,19 @@ extern BASE_MONSTER_TBL base_monster_define[344];
   */
  BASE_MONSTER_TBL *GetMonsterTable(int id);
  
++#ifdef PORT
 +/**
 + * Registers a port-owned enemy definition by copying a native template and overriding safe
 + * numeric fields. The variant reuses the template's model, script, drops, and other behavior.
@@ -61764,71 +63272,25 @@ index 6cdd516d..6b1b0469 100644
 +void ResetMoonModMonsterVariants();
 +unsigned int GetMoonModMonsterSlotGeneration(int slot);
 +unsigned int EnsureMoonModMonsterSlotGeneration(int slot);
++#endif
 +
  /**
   *
   * Gets the distance along a line from a point to the map, or the distance given when nothing is hit.
 diff --git a/ps2/include/savedatadungeon.hpp b/ps2/include/savedatadungeon.hpp
-index bc3b6851..5deb7c98 100644
+index bc3b6851b..be2c1f1a0 100644
 --- a/ps2/include/savedatadungeon.hpp
 +++ b/ps2/include/savedatadungeon.hpp
-@@ -15,9 +15,20 @@
-  */
- enum {
-     SAVE_DUNGEON_NUM = 7,        /**< Dungeons that the save data tracks a floor for. */
--    SAVE_DUNGEON_FLOOR_NUM = 162 /**< Floor records across every dungeon. */
-+    SAVE_DUNGEON_FLOOR_NUM = 162, /**< Floor records across every dungeon. */
-+    SAVE_DUNGEON_FLOOR_ID_MAX = 40 /**< Largest floor id held by the native dungeon graph. */
- };
+@@ -103,3 +103,7 @@ public:
  
-+/**
-+ * Gives the number of floor records the original save format allocates to a dungeon.
-+ *
-+ * Mod-added floors must stay within this range until the game has an extended save backend.
-+ */
-+int GetSavedDungeonFloorCount(int dungeon);
-+
-+/** Gives whether the original save format can persist this dungeon/floor pair. */
-+bool HasSavedDungeonFloorRecord(int dungeon, int floor);
-+
- /**
-  *
-  * Progress flags held in DNG_FLOOR_SAVE::flag.
-@@ -101,5 +112,32 @@ public:
-     void SetFloorID(int floor);
- };
- 
-+enum {
-+    MOONMOD_DUNGEON_SAVE_RECORD_MAX = 8,
-+    MOONMOD_DUNGEON_SAVE_ID_SIZE = 256,
-+};
-+
-+/** Stable-id keyed progress for mod floors that do not fit the retail save table. */
-+struct MOONMOD_DUNGEON_SAVE_RECORD {
-+    char           id[MOONMOD_DUNGEON_SAVE_ID_SIZE];
-+    DNG_FLOOR_SAVE data;
-+};
-+
-+/** Versioned sidecar payload; kept outside CSaveData so the retail save ABI stays fixed. */
-+struct MOONMOD_DUNGEON_SAVE_EXTENSION {
-+    char                          magic[8];
-+    u32                           version;
-+    u32                           record_count;
-+    MOONMOD_DUNGEON_SAVE_RECORD   records[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
-+};
-+
-+bool RegisterMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor, const char *stable_id);
-+DNG_FLOOR_SAVE *GetMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor);
-+void ResetMoonModDungeonSaveExtension(CSaveDataDungeon *owner);
-+bool ExportMoonModDungeonSaveExtension(const CSaveDataDungeon *owner, MOONMOD_DUNGEON_SAVE_EXTENSION *extension);
-+bool ImportMoonModDungeonSaveExtension(CSaveDataDungeon *owner, const MOONMOD_DUNGEON_SAVE_EXTENSION *extension);
-+
  STATIC_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
  PORT_RECORD_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
-+STATIC_ASSERT(sizeof(MOONMOD_DUNGEON_SAVE_RECORD) == 0x114);
-+STATIC_ASSERT(sizeof(MOONMOD_DUNGEON_SAVE_EXTENSION) == 0x8B0);
++
++#ifdef PORT
++#include "moonmod/savedatadungeon_moonmod.hpp"
++#endif
 diff --git a/ps2/src/automap.cpp b/ps2/src/automap.cpp
-index dadc6bcb..bd899769 100644
+index dadc6bcbb..e09154fdb 100644
 --- a/ps2/src/automap.cpp
 +++ b/ps2/src/automap.cpp
 @@ -846,6 +846,9 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
@@ -61841,14 +63303,19 @@ index dadc6bcb..bd899769 100644
          do {
              pick = iRand(room_info_num);
  
-@@ -853,9 +856,20 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
+@@ -853,9 +856,26 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
                  pick = -1;
              }
  
--            if (room_info[pick].rate < iRand(100)) {
++#ifdef PORT
 +            if (pick >= 0 && room_info[pick].rate < iRand(100)) {
++                pick = -1;
++            }
++#else
+             if (room_info[pick].rate < iRand(100)) {
                  pick = -1;
              }
++#endif
 +#ifdef PORT
 +            if (pick >= 0 && DngLayoutRoomMax > 0 && tries < 64) {
 +                int min_side = DNG_BUILD_ROOM_MIN;
@@ -61863,7 +63330,7 @@ index dadc6bcb..bd899769 100644
          } while (pick == -1);
  
          info_no = pick;
-@@ -1622,9 +1636,9 @@ void CAutoMapGen::CreatDoorRoom() {
+@@ -1622,9 +1642,9 @@ void CAutoMapGen::CreatDoorRoom() {
          return;
      }
  
@@ -61875,21 +63342,7 @@ index dadc6bcb..bd899769 100644
          candidates[i] = -1;
      }
  
-@@ -2125,6 +2139,13 @@ void CAutoMapGen::CreatFixedMap(int preset_no) {
-     room[0].h = preset_height;
- }
- 
-+#ifdef PORT
-+int DngLayoutRooms = 0;
-+int DngLayoutArea = 0;
-+int DngLayoutRoomMin = 0;
-+int DngLayoutRoomMax = 0;
-+#endif
-+
- void CAutoMapGen::RandomMapMainProc() {
-     int               link;
-     int               i;
-@@ -2175,6 +2196,11 @@ void CAutoMapGen::RandomMapMainProc() {
+@@ -2175,6 +2195,11 @@ void CAutoMapGen::RandomMapMainProc() {
  
      rooms = 2;
      goal = iRand(3) + 4;
@@ -61901,7 +63354,7 @@ index dadc6bcb..bd899769 100644
      round = 0;
  
      while (rooms < goal) {
-@@ -2318,14 +2344,24 @@ void CAutoMapGen::Build() {
+@@ -2318,14 +2343,24 @@ void CAutoMapGen::Build() {
      }
  
      if (mode & AUTOMAP_GEN_FIXED_START) {
@@ -61927,30 +63380,10 @@ index dadc6bcb..bd899769 100644
      map = DngMainScene->GetMap(0);
  
 diff --git a/ps2/src/dng_event.cpp b/ps2/src/dng_event.cpp
-index 45d42c88..7fbf64ed 100644
+index 45d42c885..d98132f52 100644
 --- a/ps2/src/dng_event.cpp
 +++ b/ps2/src/dng_event.cpp
-@@ -1494,6 +1494,7 @@ void CreatTresuarBoxInfo(TRESURE_BOX_FLOOR_INFO *table, char *script, int length
-     table->floor_start = 0;
-     table->rank_max = 0;
-     table->rank_min = 100;
-+    std::memset(table->floor, 0, sizeof(table->floor));
-     nowTbFloor = table;
-     CScriptInterpreter interpreter;
- 
-@@ -1501,6 +1502,11 @@ void CreatTresuarBoxInfo(TRESURE_BOX_FLOOR_INFO *table, char *script, int length
-     interpreter.SetScript(script, length);
-     interpreter.Run();
-     table->group_num += 1;
-+    const int dungeon = DngSaveDataDungeon != NULL ? DngSaveDataDungeon->stage_id : -1;
-+    if (dungeon >= 0 && dungeon < SAVE_DUNGEON_NUM) {
-+        const int floor = DngSaveDataDungeon->floor_id[dungeon];
-+        moonmod::InheritChronicleTwoTreasureFloor(table, dungeon, floor);
-+    }
- }
- 
- void PickupRandomItemCheckMax(TRESURE_BOX_FLOOR_INFO *table, int floor_index) {
-@@ -2282,7 +2288,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
+@@ -2282,7 +2282,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
          }
      }
  
@@ -61960,1119 +63393,237 @@ index 45d42c88..7fbf64ed 100644
      }
  
 diff --git a/ps2/src/dng_object.cpp b/ps2/src/dng_object.cpp
-index 1c931203..98d754eb 100644
+index 1c9312036..6faa7ea64 100644
 --- a/ps2/src/dng_object.cpp
 +++ b/ps2/src/dng_object.cpp
-@@ -17,6 +17,9 @@
- #include "dng_event.hpp"
- #include "dng_main.hpp"
- #include "dng_object.hpp"
-+#ifdef CT_PS2_TEXTURE_COPY
-+#include "moonmod/native_events.hpp"
-+#endif
- #include "dng_status.hpp"
- #include "editriver.hpp"
- #include "effscript.hpp"
-@@ -1585,7 +1588,10 @@ void CPullItem::Step() {
+@@ -1585,7 +1585,11 @@ void CPullItem::Step() {
                      }
  
                      MsgTaskMan.Print(item_message, 45, 8, 0);
--                    DngUserData->GetItem(item_no, 1);
-+                    const int added = DngUserData->GetItem(item_no, 1);
-+#ifdef CT_PS2_TEXTURE_COPY
-+                    if (added > 0) moonmod::ChronicleTwoNativeItemPickedUp(item_no, added);
++#ifdef PORT
++                    moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
++#else
+                     DngUserData->GetItem(item_no, 1);
 +#endif
                      state = PULL_ITEM_STATE_FREE;
                  }
              }
-@@ -1603,7 +1609,10 @@ void CPullItem::Step() {
+@@ -1603,7 +1607,11 @@ void CPullItem::Step() {
              } else {
                  sprintf(key_message, dung_progtxt_gkey_get[LanguageCode], GetItemMessage(item_no));
                  MsgTaskMan.Print(key_message, 90, 8, 0);
--                DngUserData->GetItem(item_no, 1);
-+                const int added = DngUserData->GetItem(item_no, 1);
-+#ifdef CT_PS2_TEXTURE_COPY
-+                if (added > 0) moonmod::ChronicleTwoNativeItemPickedUp(item_no, added);
++#ifdef PORT
++                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
++#else
+                 DngUserData->GetItem(item_no, 1);
 +#endif
                  state = PULL_ITEM_STATE_GOT;
                  get_delay = 60;
                  bob_height = 30.0f;
-@@ -1622,7 +1631,10 @@ void CPullItem::Step() {
+@@ -1622,7 +1630,11 @@ void CPullItem::Step() {
              } else {
                  sprintf(stolen_message, dung_progtxt_steal[LanguageCode], GetItemMessage(item_no));
                  MsgTaskMan.Print(stolen_message, 90, 8, 0);
--                DngUserData->GetItem(item_no, 1);
-+                const int added = DngUserData->GetItem(item_no, 1);
-+#ifdef CT_PS2_TEXTURE_COPY
-+                if (added > 0) moonmod::ChronicleTwoNativeItemPickedUp(item_no, added);
++#ifdef PORT
++                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
++#else
+                 DngUserData->GetItem(item_no, 1);
 +#endif
                  state = PULL_ITEM_STATE_GOT;
                  get_delay = 60;
                  bob_height = 30.0f;
 diff --git a/ps2/src/dngfloor.cpp b/ps2/src/dngfloor.cpp
-index 82033bb7..2d9b7b9d 100644
+index 82033bb75..9a63de399 100644
 --- a/ps2/src/dngfloor.cpp
 +++ b/ps2/src/dngfloor.cpp
-@@ -41,6 +41,10 @@
- #include "userdata.hpp"
- #include "water.hpp"
- 
-+namespace moonmod {
-+void ApplyChronicleTwoDungeons(CDngFloorManager *manager);
-+}
-+
- /**
-  *
-  * Room option entries used by the dungeon floor script.
-@@ -64,6 +68,11 @@ static CDngFloorManager *tree_dngmap;
-  */
- static GLID_INFO *tree_glid_info;
- 
-+/**
-+ * Base of the current manager's grid allocation. tree_glid_info is also the parser cursor and advances per cell.
-+ */
-+static GLID_INFO *tree_glid_base;
-+
- /**
-  *
-  * Memory arena used by the dungeon map script.
-@@ -85,6 +94,14 @@ static DNGMAP_ROOT_INFO *tree_spi_rootinfo;
-  */
- static DNGMAP_ROOM_INFO *tree_spi_roominfo;
- 
-+static constexpr int kMoonModFloorCapacity = 8;
-+static constexpr int kMoonModFloorCellCapacity = kMoonModFloorCapacity * 2;
-+static constexpr int kMoonModFloorTitleSize = 96;
-+static int             tree_glid_capacity;
-+static int             tree_moonmod_floor_count;
-+static int             tree_moonmod_floor_ids[kMoonModFloorCapacity];
-+static char            tree_moonmod_floor_titles[kMoonModFloorCapacity][kMoonModFloorTitleSize];
-+
- /**
-  *
-  * Number of grid cells read from the current dungeon map script.
-@@ -137,6 +154,16 @@ void CDngFloorManager::Initialize() {
-     glid_num = 0;
-     glid_w = 0;
-     glid_h = 0;
-+    tree_dngmap = NULL;
-+    tree_glid_info = NULL;
-+    tree_glid_base = NULL;
-+    tree_spi_stack = NULL;
-+    tree_glid_capacity = 0;
-+    tree_moonmod_floor_count = 0;
-+    for (int i = 0; i < kMoonModFloorCapacity; ++i) {
-+        tree_moonmod_floor_ids[i] = -1;
-+    }
-+    memset(tree_moonmod_floor_titles, 0, sizeof(tree_moonmod_floor_titles));
- }
- 
- /**
-@@ -148,7 +175,8 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
+@@ -148,7 +148,11 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
      int width = spiGetStackInt(stack++);
      int height = spiGetStackInt(stack++);
      int room_count = spiGetStackInt(stack);
--    u32 bytes = room_count * sizeof(GLID_INFO);
-+    const int cell_capacity = room_count + kMoonModFloorCellCapacity;
-+    u32 bytes = cell_capacity * sizeof(GLID_INFO);
++#ifdef PORT
++    u32 bytes = (room_count + MOONMOD_FLOOR_CELL_CAPACITY) * sizeof(GLID_INFO);
++#else
+     u32 bytes = room_count * sizeof(GLID_INFO);
++#endif
      tree_dngmap->glid_w = width;
      tree_dngmap->glid_h = height;
      u32 blocks;
-@@ -159,9 +187,11 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
+@@ -159,9 +163,16 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
          blocks = bytes >> 4;
      }
  
--    tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count];
-+    tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[cell_capacity];
++#ifdef PORT
++    tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count + MOONMOD_FLOOR_CELL_CAPACITY];
++#else
+     tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count];
++#endif
      tree_dngmap->glid_num = room_count;
--    tree_glid_info = tree_dngmap->glid_info;
-+    tree_glid_base = tree_dngmap->glid_info;
-+    tree_glid_info = tree_glid_base;
-+    tree_glid_capacity = cell_capacity;
+     tree_glid_info = tree_dngmap->glid_info;
++#ifdef PORT
++    MoonModDngFloorMapInfo(tree_dngmap, room_count + MOONMOD_FLOOR_CELL_CAPACITY);
++#endif
      return 1;
  }
  
-@@ -428,6 +458,159 @@ void CDngFloorManager::LoadDataTable(int dungeon, mgCMemory *memory) {
-     if (size > 0) {
-         AnalyzeFile((char *) data, size, memory);
-     }
-+
-+    moonmod::ApplyChronicleTwoDungeons(this);
-+}
-+
-+bool CDngFloorManager::RegisterMoonModFloor(int source_floor, const char *title, const char *stable_id, int *out_floor_id,
-+                                            char *error, size_t error_size) {
-+    auto fail = [error, error_size](const char *message) {
-+        if (error != NULL && error_size > 0) {
-+            std::snprintf(error, error_size, "%s", message);
-+        }
-+        return false;
-+    };
-+    if (out_floor_id != NULL) {
-+        *out_floor_id = -1;
-+    }
-+    if (tree_dngmap != this || tree_glid_base != glid_info || tree_spi_stack == NULL || glid_info == NULL ||
-+        title == NULL || title[0] == '\0' || stable_id == NULL || stable_id[0] == '\0' || out_floor_id == NULL) {
-+        return fail("dungeon map is not ready for mod floors");
-+    }
-+    if (std::strlen(title) >= kMoonModFloorTitleSize) {
-+        return fail("floor title is longer than 95 bytes");
-+    }
-+    if (tree_moonmod_floor_count >= kMoonModFloorCapacity || glid_num + 2 > tree_glid_capacity) {
-+        return fail("this dungeon's mod floor capacity is exhausted");
-+    }
-+    DNGMAP_ROOM_INFO *source_info = GetDngMapFloorInfo(source_floor);
-+    GLID_INFO *source_glid = GetDngMapFloorGlidInfo(source_floor);
-+    if (source_info == NULL || source_glid == NULL) {
-+        return fail("source_floor is not present in this dungeon map");
-+    }
-+    if (source_info->order >= 126) {
-+        return fail("source floor order cannot be extended safely");
-+    }
-+
-+    int floor_id = 0;
-+    for (; floor_id < DNGMAP_FLOOR_NUM; ++floor_id) {
-+        if (GetDngMapFloorInfo(floor_id) == NULL) {
-+            break;
-+        }
-+    }
-+    if (floor_id >= DNGMAP_FLOOR_NUM) {
-+        return fail("no free native floor ids remain in this dungeon");
-+    }
-+
-+    static constexpr int kDirections[GLID_DIR_NUM] = {GLID_DIR_RIGHT, GLID_DIR_DOWN, GLID_DIR_LEFT, GLID_DIR_UP};
-+    static constexpr int kDeltaX[GLID_DIR_NUM] = {0, 0, -1, 1};
-+    static constexpr int kDeltaY[GLID_DIR_NUM] = {-1, 1, 0, 0};
-+    static constexpr int kOpposite[GLID_DIR_NUM] = {GLID_DIR_DOWN, GLID_DIR_UP, GLID_DIR_RIGHT, GLID_DIR_LEFT};
-+    int selected_direction = -1;
-+    int root_x = 0;
-+    int root_y = 0;
-+    int room_x = 0;
-+    int room_y = 0;
-+    for (int i = 0; i < GLID_DIR_NUM; ++i) {
-+        const int dir = kDirections[i];
-+        if (source_info->link[dir] >= 0) {
-+            continue;
-+        }
-+        const int dx = kDeltaX[dir];
-+        const int dy = kDeltaY[dir];
-+        const int candidate_root_x = source_glid->x + dx;
-+        const int candidate_root_y = source_glid->y + dy;
-+        const int candidate_room_x = source_glid->x + 2 * dx;
-+        const int candidate_room_y = source_glid->y + 2 * dy;
-+        if (candidate_root_x < 0 || candidate_root_y < 0 || candidate_room_x < 0 || candidate_room_y < 0) {
-+            continue;
-+        }
-+        bool root_occupied = false;
-+        bool room_occupied = false;
-+        for (int cell = 0; cell < glid_num; ++cell) {
-+            root_occupied |= glid_info[cell].x == candidate_root_x && glid_info[cell].y == candidate_root_y;
-+            room_occupied |= glid_info[cell].x == candidate_room_x && glid_info[cell].y == candidate_room_y;
-+        }
-+        if (!root_occupied && !room_occupied) {
-+            selected_direction = dir;
-+            root_x = candidate_root_x;
-+            root_y = candidate_root_y;
-+            room_x = candidate_room_x;
-+            room_y = candidate_room_y;
-+            break;
-+        }
-+    }
-+    if (selected_direction < 0) {
-+        return fail("source floor has no free adjacent route for a new room");
-+    }
-+
-+    CSaveData *save = GetSaveData();
-+    if (save == NULL || !RegisterMoonModDungeonSaveRecord(&save->save_dungeon, dng_no, floor_id, stable_id)) {
-+        return fail("no persistent MoonFactory floor-save record is available");
-+    }
-+
-+    char *stable_title = tree_moonmod_floor_titles[tree_moonmod_floor_count];
-+    memcpy(stable_title, title, std::strlen(title) + 1);
-+    GLID_INFO *root = &glid_info[glid_num];
-+    GLID_INFO *room = &glid_info[glid_num + 1];
-+    std::memset(root, 0, sizeof(*root));
-+    std::memset(room, 0, sizeof(*room));
-+    root->type = GLID_TYPE_ROOT;
-+    root->x = static_cast<s16>(root_x);
-+    root->y = static_cast<s16>(root_y);
-+    root->root.type = 0;
-+    root->root.shape = 0;
-+    root->root.show_mark = 0;
-+    room->type = GLID_TYPE_ROOM;
-+    room->x = static_cast<s16>(room_x);
-+    room->y = static_cast<s16>(room_y);
-+    room->room.floor_id = static_cast<s8>(floor_id);
-+    room->room.order = static_cast<s8>(source_info->order + 1);
-+    room->room.flag = DNGMAP_ROOM_FLAG_ROOM;
-+    room->room.unk_0 = source_info->unk_0;
-+    room->room.title = stable_title;
-+    room->room.practice_type = -1;
-+    room->room.tex_no = source_info->tex_no;
-+    room->room.selectable = true;
-+    for (int direction = 0; direction < GLID_DIR_NUM; ++direction) {
-+        room->room.link[direction] = -1;
-+    }
-+    room->room.link[kOpposite[selected_direction]] = static_cast<s16>(source_floor);
-+    room->room.key_room[0] = -1;
-+    room->room.key_room[1] = -1;
-+    room->room.key_room[2] = -1;
-+    room->room.key_room[3] = -1;
-+    source_info->link[selected_direction] = static_cast<s16>(floor_id);
-+
-+    glid_num += 2;
-+    if (glid_w <= room_x) {
-+        glid_w = static_cast<s16>(room_x + 1);
-+    }
-+    if (glid_h <= room_y) {
-+        glid_h = static_cast<s16>(room_y + 1);
-+    }
-+    tree_moonmod_floor_ids[tree_moonmod_floor_count] = floor_id;
-+    ++tree_moonmod_floor_count;
-+    RelationGlid();
-+    *out_floor_id = floor_id;
-+    if (error != NULL && error_size > 0) {
-+        error[0] = '\0';
-+    }
-+    return true;
-+}
-+
-+bool CDngFloorManager::IsMoonModFloor(int floor_id, const char *title) const {
-+    if (tree_dngmap != this || title == NULL) {
-+        return false;
-+    }
-+    for (int i = 0; i < tree_moonmod_floor_count; ++i) {
-+        if (tree_moonmod_floor_ids[i] != floor_id) {
-+            continue;
-+        }
-+        DNGMAP_ROOM_INFO *info = const_cast<CDngFloorManager *>(this)->GetDngMapFloorInfo(floor_id);
-+        return info != NULL && info->title != NULL && std::strcmp(info->title, title) == 0;
-+    }
-+    return false;
- }
- 
- GLID_INFO *CDngFloorManager::GetDngMapFloorGlidInfo(int floor_id) {
 diff --git a/ps2/src/editloop.cpp b/ps2/src/editloop.cpp
-index cb160188..dbdb59f0 100644
+index cb1601889..cc936622b 100644
 --- a/ps2/src/editloop.cpp
 +++ b/ps2/src/editloop.cpp
-@@ -50,6 +50,13 @@
- 
- void EditModeChgStep(CScene *scene);
- 
-+class CEditMap;
-+class mgCMemory;
-+void GameGrantGeoramaStockForTest(::CEditMap *map);
-+namespace moonmod {
-+void ApplyChronicleTwoGeorama(::CEditMap *map, ::mgCMemory *memory);
-+}
-+
- static const int kEventDataCallFlag = 8;
- 
- static const int kKeyOpenEvent = 0x96;
-@@ -2818,6 +2825,8 @@ int EditMapJump(int map_no) {
+@@ -2818,6 +2818,10 @@ int EditMapJump(int map_no) {
          }
  
          map->area_no = MainScene->now_map_no;
++#ifdef PORT
 +        moonmod::ApplyChronicleTwoGeorama(map, main_data);
 +        GameGrantGeoramaStockForTest(map);
++#endif
          map->ClearAllParts();
          used_quads = main_data->stack_used - used_before;
          used_kb = (used_quads * 0x10) / 0x400;
 diff --git a/ps2/src/event_func.cpp b/ps2/src/event_func.cpp
-index 394cb071..194859ff 100644
+index 394cb0715..cf8903d6e 100644
 --- a/ps2/src/event_func.cpp
 +++ b/ps2/src/event_func.cpp
-@@ -57,6 +57,7 @@
- #include "mg_texture.hpp"
- #include "mglib.hpp"
- #include "monster.hpp"
-+#include "moonmod/native_events.hpp"
- #include "movie.hpp"
- #include "nameregi.hpp"
- #include "nd_meswin.hpp"
-@@ -5243,6 +5244,7 @@ static int _DNG_SET_FLOOR_ID(RS_STACKDATA *stack, int argc) {
+@@ -5243,6 +5243,9 @@ static int _DNG_SET_FLOOR_ID(RS_STACKDATA *stack, int argc) {
          return false;
      }
  
++#ifdef PORT
 +    floor_id = moonmod::ChronicleTwoRequestedDungeonEntryFloor(floor_id);
++#endif
      dungeon->SetFloorID(floor_id);
      return true;
  }
-@@ -17492,12 +17494,27 @@ static int _SET_FLOOR_INFO(RS_STACKDATA *stack, int argc) {
+@@ -17492,12 +17495,31 @@ static int _SET_FLOOR_INFO(RS_STACKDATA *stack, int argc) {
          case 3:
              info->unk_a = GetStackInt(stack);
              break;
--        case 4:
--            info->spheda_clear = GetStackInt(stack);
++#ifdef PORT
 +        case 4: {
 +            const u16 previous = info->spheda_clear;
 +            info->spheda_clear = (u16) GetStackInt(stack);
-+#ifdef CT_PS2_TEXTURE_COPY
 +            if (previous == 0 && info->spheda_clear != 0) {
 +                moonmod::ChronicleTwoSphedaCompleted(dungeon_no, floor_no, info->spheda_clear);
 +            }
-+#endif
-             break;
--        case 5:
++            break;
 +        }
 +        case 5: {
 +            const u16 previous = info->flag;
-             info->flag |= (u16) GetStackInt(stack);
-+#ifdef CT_PS2_TEXTURE_COPY
-+            if ((previous & DNG_FLOOR_FLAG_SPHEDA_CLEAR) == 0 &&
-+                (info->flag & DNG_FLOOR_FLAG_SPHEDA_CLEAR) != 0) {
++            info->flag |= (u16) GetStackInt(stack);
++            if ((previous & DNG_FLOOR_FLAG_SPHEDA_CLEAR) == 0 && (info->flag & DNG_FLOOR_FLAG_SPHEDA_CLEAR) != 0) {
 +                moonmod::ChronicleTwoSphedaCompleted(dungeon_no, floor_no, info->spheda_clear);
 +            }
-+#endif
-             break;
++            break;
 +        }
++#else
+         case 4:
+             info->spheda_clear = GetStackInt(stack);
+             break;
+         case 5:
+             info->flag |= (u16) GetStackInt(stack);
+             break;
++#endif
          case 6:
              info->kill_count = GetStackInt(stack);
              break;
 diff --git a/ps2/src/gamedata.cpp b/ps2/src/gamedata.cpp
-index 6a87f812..a18b5230 100644
+index 6a87f8126..447406666 100644
 --- a/ps2/src/gamedata.cpp
 +++ b/ps2/src/gamedata.cpp
-@@ -480,21 +480,35 @@ CGameData GameItemDataManage;
+@@ -480,21 +480,33 @@ CGameData GameItemDataManage;
   * Common records for the master item catalog.
   *
   */
--static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX];
-+static constexpr int kMoonModItemCapacity = 32;
-+static constexpr int kMoonModWeaponCapacity = 32;
-+static constexpr int kMoonModItemNameSize = 96;
-+static constexpr int kCommonItemStorageCapacity = ITEM_COMMON_DATA_MAX + kMoonModItemCapacity + kMoonModWeaponCapacity;
-+
-+static CDataCommon local_com_itemdata[kCommonItemStorageCapacity];
++#ifdef PORT
++static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX + MOONMOD_ITEM_CAPACITY + MOONMOD_WEAPON_CAPACITY];
++#else
+ static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX];
++#endif
  
  /**
   *
   * Usable item records loaded from item data scripts.
   *
   */
--static CDataItem local_itemdata[162];
-+static CDataItem local_itemdata[162 + kMoonModItemCapacity];
-+
-+/**
-+ * Display names for data-only mod items. CDataCommon stores a borrowed pointer, so these buffers
-+ * stay at fixed addresses for the lifetime of the game process.
-+ */
-+static char local_moonmod_item_names[kMoonModItemCapacity][kMoonModItemNameSize];
-+static int  local_moonmod_item_count;
++#ifdef PORT
++static CDataItem local_itemdata[162 + MOONMOD_ITEM_CAPACITY];
++#else
+ static CDataItem local_itemdata[162];
++#endif
  
  /**
   *
   * Weapon records loaded from weapon data scripts.
   *
   */
--static CDataWeapon local_weapondata[116];
-+static CDataWeapon local_weapondata[116 + kMoonModWeaponCapacity];
-+static char local_moonmod_weapon_names[kMoonModWeaponCapacity][kMoonModItemNameSize];
-+static int  local_moonmod_weapon_count;
++#ifdef PORT
++static CDataWeapon local_weapondata[116 + MOONMOD_WEAPON_CAPACITY];
++#else
+ static CDataWeapon local_weapondata[116];
++#endif
  
  /**
   *
-@@ -616,6 +630,11 @@ void CGameData::Initialize() {
+@@ -616,6 +628,9 @@ void CGameData::Initialize() {
      robo_num = 0;
      fish_data = local_fishdata;
      fish_num = 0;
-+    memset(local_itemdatano_converttable, -1, sizeof(local_itemdatano_converttable));
-+    local_moonmod_item_count = 0;
-+    memset(local_moonmod_item_names, 0, sizeof(local_moonmod_item_names));
-+    local_moonmod_weapon_count = 0;
-+    memset(local_moonmod_weapon_names, 0, sizeof(local_moonmod_weapon_names));
++#ifdef PORT
++    ResetMoonModGameData();
++#endif
      InitItemMes(1, 1);
  }
  
-@@ -1264,6 +1283,215 @@ CDataCommon *CGameData::GetCommonData(int item_no) {
-     return common_data + index;
- }
- 
-+bool CGameData::RegisterMoonModItem(int template_item_no, const char *display_name, int max_num, int stack_num,
-+                                    int effect_flags, int effect_amount, int *out_item_no, char *error, size_t error_size) {
-+    auto fail = [error, error_size](const char *message) {
-+        if (error != NULL && error_size > 0) {
-+            std::snprintf(error, error_size, "%s", message);
-+        }
-+        return false;
-+    };
-+
-+    if (out_item_no != NULL) {
-+        *out_item_no = -1;
-+    }
-+    if (display_name == NULL || display_name[0] == '\0') {
-+        return fail("item name is required");
-+    }
-+    if (max_num <= 0 || max_num > 999 || stack_num <= 0 || stack_num > max_num) {
-+        return fail("item limits must satisfy 1 <= stack_num <= max_num <= 999");
-+    }
-+    const unsigned int cure_all_effects = ITEM_USE_FLAG_CURE_STOP | ITEM_USE_FLAG_CURE_POISON | ITEM_USE_FLAG_CURE_CURSE |
-+                                          ITEM_USE_FLAG_CURE_SLOW | ITEM_USE_FLAG_CURE_STONE | ITEM_USE_FLAG_CURE_DRY;
-+    const unsigned int allowed_effects = ITEM_USE_FLAG_RESTORE_HP | ITEM_USE_FLAG_ADD_POWER | cure_all_effects;
-+    const unsigned int requested_effects = static_cast<unsigned int>(effect_flags);
-+    const bool one_effect = requested_effects != 0 && (requested_effects & (requested_effects - 1)) == 0;
-+    if (effect_flags < 0 || (requested_effects & ~allowed_effects) != 0 ||
-+        (requested_effects != 0 && !one_effect && requested_effects != cure_all_effects)) {
-+        return fail("item effect override must select one supported native recovery/status effect or the complete cure-all set");
-+    }
-+    if ((requested_effects == ITEM_USE_FLAG_RESTORE_HP && (effect_amount < 1 || effect_amount > 32767)) ||
-+        (requested_effects != 0 && requested_effects != ITEM_USE_FLAG_RESTORE_HP && effect_amount != 0) ||
-+        (requested_effects == 0 && effect_amount != 0)) {
-+        return fail("item effect amount does not match the selected native effect");
-+    }
-+    if (out_item_no == NULL || common_data == NULL || item_data == NULL || common_num < 0 || item_num < 0 ||
-+        common_num >= kCommonItemStorageCapacity || item_num >= 162 + kMoonModItemCapacity) {
-+        return fail("item table capacity is exhausted or not initialized");
-+    }
-+    if (local_moonmod_item_count >= kMoonModItemCapacity) {
-+        return fail("MoonMod item capacity is exhausted (32 items)");
-+    }
-+
-+    CDataCommon *template_common = NULL;
-+    for (int i = 0; i < common_num; ++i) {
-+        if (common_data[i].item_no == template_item_no) {
-+            template_common = &common_data[i];
-+            break;
-+        }
-+    }
-+    if (template_common == NULL) {
-+        return fail("template item does not exist in the loaded game data");
-+    }
-+    if (ConvertUsedItemType(template_common->type) != USED_ITEM_TYPE_ITEM || template_common->list_no < 0 ||
-+        template_common->list_no >= item_num || (template_common->attribute & ITEM_ATTRIBUTE_USABLE) == 0) {
-+        return fail("template must be a usable item with a native item-data record");
-+    }
-+    if (std::strlen(display_name) >= kMoonModItemNameSize) {
-+        return fail("item name is longer than 95 bytes");
-+    }
-+
-+    int item_no = ITEM_NO_MAX - 1;
-+    while (item_no > 0 && local_itemdatano_converttable[item_no] >= 0) {
-+        --item_no;
-+    }
-+    if (item_no <= 0) {
-+        return fail("no free item numbers remain");
-+    }
-+
-+    const CDataItem template_item = item_data[template_common->list_no];
-+    CDataCommon *new_common = &common_data[common_num];
-+    CDataItem *new_item = &item_data[item_num];
-+    *new_common = *template_common;
-+    *new_item = template_item;
-+
-+    new_common->item_no = static_cast<s16>(item_no);
-+    new_common->list_no = static_cast<s16>(item_num);
-+    new_common->max_num = static_cast<u16>(max_num);
-+    new_common->stack_num = static_cast<s16>(stack_num);
-+    new_common->name = local_moonmod_item_names[local_moonmod_item_count];
-+    memcpy(local_moonmod_item_names[local_moonmod_item_count], display_name, std::strlen(display_name) + 1);
-+    if (effect_flags != 0) {
-+        new_item->use_flags = static_cast<u32>(effect_flags);
-+        new_item->value[0] = static_cast<s16>(effect_amount);
-+        new_item->value[1] = 0;
-+        new_item->value[2] = 0;
-+    }
-+
-+    local_itemdatano_converttable[item_no] = static_cast<short>(common_num);
-+    ++common_num;
-+    ++item_num;
-+    ++local_moonmod_item_count;
-+    if (item_no > max_item_no) {
-+        max_item_no = item_no;
-+    }
-+    *out_item_no = item_no;
-+    if (error != NULL && error_size > 0) {
-+        error[0] = '\0';
-+    }
-+    return true;
-+}
-+
-+bool CGameData::RegisterMoonModWeapon(int template_item_no, const char *display_name, int max_num, int stack_num,
-+                                      int attack, int durability_stat, int attack_cap, int durability_cap,
-+                                      int durability_capacity, int levelup_exp, const int *attributes,
-+                                      const int *attribute_caps, int *out_item_no, char *error, size_t error_size) {
-+    auto fail = [error, error_size](const char *message) {
-+        if (error != NULL && error_size > 0) {
-+            std::snprintf(error, error_size, "%s", message);
-+        }
-+        return false;
-+    };
-+
-+    if (out_item_no != NULL) {
-+        *out_item_no = -1;
-+    }
-+    if (display_name == NULL || display_name[0] == '\0') {
-+        return fail("weapon name is required");
-+    }
-+    if (max_num <= 0 || max_num > 999 || stack_num <= 0 || stack_num > max_num) {
-+        return fail("weapon limits must satisfy 1 <= stack_num <= max_num <= 999");
-+    }
-+    if (out_item_no == NULL || common_data == NULL || weapon_data == NULL || common_num < 0 || weapon_num < 0 ||
-+        common_num >= kCommonItemStorageCapacity || weapon_num >= 116 + kMoonModWeaponCapacity) {
-+        return fail("weapon table capacity is exhausted or not initialized");
-+    }
-+    if (local_moonmod_weapon_count >= kMoonModWeaponCapacity) {
-+        return fail("MoonMod weapon capacity is exhausted (32 weapons)");
-+    }
-+    if (std::strlen(display_name) >= kMoonModItemNameSize) {
-+        return fail("weapon name is longer than 95 bytes");
-+    }
-+    const int optional_values[] = {attack, durability_stat, attack_cap, durability_cap, durability_capacity, levelup_exp};
-+    for (int value : optional_values) {
-+        if (value < -1 || value > 32767) {
-+            return fail("weapon stat overrides must be -1 (unchanged) or from 0 to 32767");
-+        }
-+    }
-+    if ((attributes == NULL) != (attribute_caps == NULL)) {
-+        return fail("weapon attributes and attribute_caps must be supplied together");
-+    }
-+    if (attributes != NULL) {
-+        for (int index = 0; index < 8; ++index) {
-+            if (attributes[index] < 0 || attributes[index] > 32767 || attribute_caps[index] < 0 ||
-+                attribute_caps[index] > 32767) {
-+                return fail("weapon attribute values and caps must be from 0 to 32767");
-+            }
-+        }
-+    }
-+
-+    CDataCommon *template_common = NULL;
-+    for (int index = 0; index < common_num; ++index) {
-+        if (common_data[index].item_no == template_item_no) {
-+            template_common = &common_data[index];
-+            break;
-+        }
-+    }
-+    if (template_common == NULL) {
-+        return fail("template weapon does not exist in the loaded game data");
-+    }
-+    if (ConvertUsedItemType(template_common->type) != USED_ITEM_TYPE_WEAPON || template_common->list_no < 0 ||
-+        template_common->list_no >= weapon_num) {
-+        return fail("template must be a weapon with a native weapon-data record");
-+    }
-+
-+    int item_no = ITEM_NO_MAX - 1;
-+    while (item_no > 0 && local_itemdatano_converttable[item_no] >= 0) {
-+        --item_no;
-+    }
-+    if (item_no <= 0) {
-+        return fail("no free item numbers remain");
-+    }
-+
-+    const CDataWeapon template_weapon = weapon_data[template_common->list_no];
-+    CDataCommon *new_common = &common_data[common_num];
-+    CDataWeapon *new_weapon = &weapon_data[weapon_num];
-+    *new_common = *template_common;
-+    *new_weapon = template_weapon;
-+
-+    new_common->item_no = static_cast<s16>(item_no);
-+    new_common->list_no = static_cast<s16>(weapon_num);
-+    new_common->max_num = static_cast<u16>(max_num);
-+    new_common->stack_num = static_cast<s16>(stack_num);
-+    new_common->name = local_moonmod_weapon_names[local_moonmod_weapon_count];
-+    memcpy(local_moonmod_weapon_names[local_moonmod_weapon_count], display_name, std::strlen(display_name) + 1);
-+    if (attack >= 0) new_weapon->status[0] = static_cast<s16>(attack);
-+    if (durability_stat >= 0) new_weapon->status[1] = static_cast<s16>(durability_stat);
-+    if (attack_cap >= 0) new_weapon->status_max[0] = static_cast<s16>(attack_cap);
-+    if (durability_cap >= 0) new_weapon->status_max[1] = static_cast<s16>(durability_cap);
-+    if (durability_capacity >= 0) new_weapon->durability = static_cast<s16>(durability_capacity);
-+    if (levelup_exp >= 0) new_weapon->levelup_exp = static_cast<s16>(levelup_exp);
-+    if (attributes != NULL) {
-+        for (int index = 0; index < 8; ++index) {
-+            new_weapon->attribute[index] = static_cast<s16>(attributes[index]);
-+            new_weapon->attribute_max[index] = static_cast<s16>(attribute_caps[index]);
-+        }
-+    }
-+
-+    local_itemdatano_converttable[item_no] = static_cast<short>(common_num);
-+    ++common_num;
-+    ++weapon_num;
-+    ++local_moonmod_weapon_count;
-+    if (item_no > max_item_no) {
-+        max_item_no = item_no;
-+    }
-+    *out_item_no = item_no;
-+    if (error != NULL && error_size > 0) {
-+        error[0] = '\0';
-+    }
-+    return true;
-+}
-+
- CDataWeapon *CGameData::GetWeaponData(int item_no) {
-     CDataCommon *record;
-     short        list_no;
 diff --git a/ps2/src/inventmn.cpp b/ps2/src/inventmn.cpp
-index 795d4b6b..e360e675 100644
+index 795d4b6b7..ffd8a7411 100644
 --- a/ps2/src/inventmn.cpp
 +++ b/ps2/src/inventmn.cpp
-@@ -25,6 +25,9 @@
- #include "mg_math.hpp"
- #include "mg_texture.hpp"
- #include "mglib.hpp"
-+#ifdef CT_PS2_TEXTURE_COPY
-+#include "moonmod/native_events.hpp"
-+#endif
- #include "nd_meswin.hpp"
- #include "npccfg.hpp"
- #include "pal_timing.hpp"
-@@ -1935,6 +1938,27 @@ int CheckItemTable(int item_id, int *neta_ids) {
-     return 0;
- }
- 
-+CInventDataManage *MoonModGetNativeInventDataManage() {
-+    static CInventDataManage manager;
-+    static bool             loaded = false;
-+    alignas(16) static char recipe_file[0x7800];
-+    alignas(16) static u_long128 recipe_pool[0x4000];
-+
-+    if (!loaded) {
-+        loaded = true;
-+        int file_size = 0;
-+
-+        if (LoadFile2("menu/inv6.lst", recipe_file, &file_size, 0) == 0 && file_size > 0) {
-+            mgCMemory saved_stack = InventTeigiStack;
-+            InventTeigiStack.stSetBuffer(recipe_pool, 0x4000);
-+            manager.LoadAnalyzeInventFile(recipe_file, file_size);
-+            InventTeigiStack = saved_stack;
-+        }
-+    }
-+
-+    return &manager;
-+}
-+
- int CheckInventPhoto(int id, int kind) {
-     CInventUserData   *user;
-     USER_PICTURE_INFO *info;
-@@ -2978,6 +3002,16 @@ int CMenuInvent::IsCreateObject(int mode, int keys) {
+@@ -2978,6 +2978,9 @@ int CMenuInvent::IsCreateObject(int mode, int keys) {
                          if (0 < this->create_item_id) {
                              this->create_success = true;
                              InventUserDataPtr->SetCreateItemFlag(this->card_cursor, this->create_item_id);
-+                            INVENT_DATA_INFO *created = InventManagePt->GetInventDataInfoByItemID(this->create_item_id);
-+                            int               ideas[3] = {0, 0, 0};
-+                            if (created != NULL) {
-+                                ideas[0] = created->neta_id[0];
-+                                ideas[1] = created->neta_id[1];
-+                                ideas[2] = created->neta_id[2];
-+                            }
-+#ifdef CT_PS2_TEXTURE_COPY
-+                            moonmod::ChronicleTwoInventionCreated(this->create_item_id, ideas[0], ideas[1], ideas[2]);
++#ifdef PORT
++                            MoonModNotifyInventionCreated(this->create_item_id);
 +#endif
                          } else {
                              s32 recipe_index;
                              this->create_partial_match = false;
 diff --git a/ps2/src/mapselect.cpp b/ps2/src/mapselect.cpp
-index 858ea759..dc11df83 100644
+index 858ea7598..1f2eccd4e 100644
 --- a/ps2/src/mapselect.cpp
 +++ b/ps2/src/mapselect.cpp
-@@ -43,6 +43,16 @@ struct SaveEditLabels {
-  *
-  */
- static int MapNameNum;
-+#if defined(PORT)
-+static constexpr int MOONMOD_MAP_NAME_MAX = 64;
-+struct MoonModMapNameInfo {
-+    MAP_NAME_INFO info;
-+    char name[16];
-+    char title[128];
-+};
-+static MoonModMapNameInfo MoonModMapNames[MOONMOD_MAP_NAME_MAX];
-+static int MoonModMapNameNum;
-+#endif
- /**
-  *
-  * Points to map records in the map name storage arena.
-@@ -296,6 +306,11 @@ void LoadMapName(int language, u_long128 *buffer) {
+@@ -296,6 +296,11 @@ void LoadMapName(int language, u_long128 *buffer) {
   */
  static MAP_NAME_INFO *GetMapNameInfo(int map_no) {
  
-+#if defined(PORT)
-+    if (map_no >= MapNameNum && map_no - MapNameNum >= 0 && map_no - MapNameNum < MoonModMapNameNum) {
-+        return &MoonModMapNames[map_no - MapNameNum].info;
++#ifdef PORT
++    if (map_no >= MapNameNum) {
++        return GetMoonModMapNameInfo(map_no - MapNameNum);
 +    }
 +#endif
      if (map_no < 0 || map_no >= MapNameNum) {
          return NULL;
      }
-@@ -382,6 +397,74 @@ char *GetMapName(int map_no, char **title) {
-     return info->name;
- }
- 
-+int GetMapNameCount() {
-+    const int maximum = MAP_NAME_BUFF_SIZE * 16 / static_cast<int>(sizeof(MAP_NAME_INFO)) - 1;
-+    if (MapNameNum < 0 || MapNameNum > maximum) return 0;
-+#if defined(PORT)
-+    if (MapNameNum + MoonModMapNameNum > maximum + MOONMOD_MAP_NAME_MAX) return 0;
-+    return MapNameNum + MoonModMapNameNum;
-+#else
-+    return MapNameNum;
-+#endif
-+}
-+
-+int RegisterMoonModMapName(const char *name, const char *title) {
-+#if defined(PORT)
-+    if (name == NULL || title == NULL) return -1;
-+    const int name_length = strlen(name);
-+    const int title_length = strlen(title);
-+    if (name_length < 3 || name_length > 15 || title_length < 1 || title_length >= 128) return -1;
-+    for (int index = 0; index < name_length; ++index) {
-+        const unsigned char character = static_cast<unsigned char>(name[index]);
-+        const bool alpha_numeric = (character >= 'a' && character <= 'z') ||
-+                                  (character >= '0' && character <= '9');
-+        if (!alpha_numeric && character != '_' && character != '-') return -1;
-+    }
-+    for (int index = 0; index < MoonModMapNameNum; ++index) {
-+        MoonModMapNameInfo &entry = MoonModMapNames[index];
-+        if (strcmp(entry.name, name) != 0) continue;
-+        return strcmp(entry.title, title) == 0 ? MapNameNum + index : -1;
-+    }
-+    for (int index = 0; index < MapNameNum; ++index) {
-+        if (map_name[index].name != NULL && strcmp(map_name[index].name, name) == 0) return -1;
-+    }
-+    if (MoonModMapNameNum >= MOONMOD_MAP_NAME_MAX || GetMapNameCount() <= 0) return -1;
-+
-+    MoonModMapNameInfo &entry = MoonModMapNames[MoonModMapNameNum];
-+    memset(&entry, 0, sizeof(entry));
-+    strcpy(entry.name, name);
-+    strcpy(entry.title, title);
-+    entry.info.name = entry.name;
-+    entry.info.title = entry.title;
-+    entry.info.add_path = NULL;
-+    entry.info.type = MAP_TYPE_INTERIOR;
-+    entry.info.sel_type = MAP_SEL_SPECIAL;
-+    entry.info.snd_data_id = -1;
-+    entry.info.area_no = -1;
-+    return MapNameNum + MoonModMapNameNum++;
-+#else
-+    (void)name;
-+    (void)title;
-+    return -1;
-+#endif
-+}
-+
-+int IsMoonModMapName(int map_no) {
-+#if defined(PORT)
-+    return map_no >= MapNameNum && map_no - MapNameNum >= 0 && map_no - MapNameNum < MoonModMapNameNum;
-+#else
-+    (void)map_no;
-+    return 0;
-+#endif
-+}
-+
-+void ResetMoonModMapNamesForTests() {
-+#if defined(PORT)
-+    memset(MoonModMapNames, 0, sizeof(MoonModMapNames));
-+    MoonModMapNameNum = 0;
-+#endif
-+}
-+
- int SearchMapNo(char *name) {
-     struct {
-         int   no;
-@@ -396,8 +479,8 @@ int SearchMapNo(char *name) {
- 
-     search.no = 0;
- 
--    for (; search.no < MapNameNum; search.no++) {
--        MAP_NAME_INFO *info = &map_name[search.no];
-+    for (; search.no < GetMapNameCount(); search.no++) {
-+        MAP_NAME_INFO *info = GetMapNameInfo(search.no);
- 
-         if (info->name != NULL && strcmp(info->name, search.name) == 0) {
-             return search.no;
 diff --git a/ps2/src/monster.cpp b/ps2/src/monster.cpp
-index 56b6cff2..2f2ed2e4 100644
+index 56b6cff25..bab7e3e67 100644
 --- a/ps2/src/monster.cpp
 +++ b/ps2/src/monster.cpp
-@@ -47,6 +47,10 @@
- #include "swordeffect.hpp"
- #include "userdata.hpp"
- 
-+namespace moonmod {
-+float ApplyChronicleTwoCombatDamageFormula(float damage);
-+}
-+
- /**
-  *
-  * Holds one effect direction as four floats or one quadword.
-@@ -732,7 +736,39 @@ void CActiveMonster::Initialize() {
-     attrib = 0;
- }
- 
-+struct MOONMOD_MONSTER_VARIANT {
-+    int used;
-+    BASE_MONSTER_TBL definition;
-+};
-+
-+static MOONMOD_MONSTER_VARIANT moonmod_variants[32];
-+static unsigned int moonmod_monster_slot_generation[MONSTER_ACTIVE_MAX];
-+
-+unsigned int GetMoonModMonsterSlotGeneration(int slot) {
-+    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
-+        return 0;
-+    }
-+    return moonmod_monster_slot_generation[slot];
-+}
-+
-+unsigned int EnsureMoonModMonsterSlotGeneration(int slot) {
-+    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
-+        return 0;
-+    }
-+    if (moonmod_monster_slot_generation[slot] == 0) {
-+        moonmod_monster_slot_generation[slot] = 1;
-+    }
-+    return moonmod_monster_slot_generation[slot];
-+}
-+
- BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
-+
-+    for (int variant = 0; variant < 32; variant++) {
-+        if (moonmod_variants[variant].used && moonmod_variants[variant].definition.id == monster_id) {
-+            return &moonmod_variants[variant].definition;
-+        }
-+    }
-+
-     BASE_MONSTER_TBL *entry = base_monster_define;
- 
-     while (entry->name[0] != 0) {
-@@ -746,18 +782,76 @@ BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
-     return NULL;
- }
- 
-+bool RegisterMoonModMonsterVariant(int template_id, const char *display_name, int hp, int attack,
-+                                   int defense, int reward_exp, int reward_money,
-+                                   const char *model, const char *script, int *out_id) {
-+    BASE_MONSTER_TBL *template_definition = GetMonsterTable(template_id);
-+    if (template_definition == NULL || display_name == NULL || display_name[0] == '\0' ||
-+        model == NULL || model[0] == '\0' || strlen(model) >= sizeof(BASE_MONSTER_TBL::model) ||
-+        script == NULL || script[0] == '\0' || strlen(script) >= sizeof(BASE_MONSTER_TBL::script) || out_id == NULL) {
-+        return false;
-+    }
-+
-+    int slot = -1;
-+    for (int variant = 0; variant < 32; variant++) {
-+        if (!moonmod_variants[variant].used) {
-+            slot = variant;
-+            break;
-+        }
-+    }
-+    if (slot < 0) {
-+        return false;
-+    }
-+
-+    int native_id = 0x400 + slot;
-+    while (GetMonsterTable(native_id) != NULL) {
-+        native_id++;
-+    }
-+    memcpy(&moonmod_variants[slot].definition, template_definition, sizeof(BASE_MONSTER_TBL));
-+    moonmod_variants[slot].definition.id = native_id;
-+    memset(moonmod_variants[slot].definition.name, 0, sizeof(moonmod_variants[slot].definition.name));
-+    strncpy(moonmod_variants[slot].definition.name, display_name,
-+            sizeof(moonmod_variants[slot].definition.name) - 1);
-+    memset(moonmod_variants[slot].definition.model, 0, sizeof(moonmod_variants[slot].definition.model));
-+    memcpy(moonmod_variants[slot].definition.model, model, strlen(model));
-+    memset(moonmod_variants[slot].definition.script, 0, sizeof(moonmod_variants[slot].definition.script));
-+    memcpy(moonmod_variants[slot].definition.script, script, strlen(script));
-+    moonmod_variants[slot].definition.life = hp;
-+    moonmod_variants[slot].definition.attack = attack;
-+    moonmod_variants[slot].definition.defense = defense;
-+    moonmod_variants[slot].definition.reward_exp = reward_exp;
-+    moonmod_variants[slot].definition.reward_money = reward_money;
-+    moonmod_variants[slot].used = 1;
-+    *out_id = native_id;
-+    return true;
-+}
-+
-+void ResetMoonModMonsterVariants() {
-+    memset(moonmod_variants, 0, sizeof(moonmod_variants));
-+}
-+
- void CMonsterLocateInfo::SetPutFlag(int slot, int put) {
-+    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
-+        return;
-+    }
-+
-+    const u32 mask = 1u << slot;
-+    const bool was_put = (put_flag & mask) != 0;
-     if (put != 0) {
--        if (put_num < num) {
--            put_flag |= 1 << slot;
-+        if (!was_put && put_num < num) {
-+            put_flag |= mask;
-             put_num += 1;
-         }
--    } else if (put_num > 0) {
--        put_flag &= ~(1 << slot);
-+    } else if (was_put) {
-+        put_flag &= ~mask;
-         put_num -= 1;
-     }
- }
- 
-+#ifdef PORT
-+int MonsterActiveLimit = 5;
-+#endif
-+
- void CMonsterMan::Initialize(CScene *scene) {
-     mgCTextureManager *textures;
-     int                i;
-@@ -771,7 +865,11 @@ void CMonsterMan::Initialize(CScene *scene) {
-     textures = &mgTexManager;
-     this->scene = scene;
-     effect_man = FxScriptMan;
-+#ifdef PORT
-+    priority_limit = MonsterActiveLimit;
-+#else
-     priority_limit = 5;
-+#endif
- 
-     for (i = 0; i < MONSTER_ACTIVE_MAX; i++) {
-         active[i] = (CActiveMonster *) scene->GetCharacter(i + MONSTER_ACTIVE_MAX);
-@@ -987,17 +1085,7 @@ int CMonsterMan::GetMonsterNum(float limit) {
- }
- 
- BASE_MONSTER_TBL *CMonsterMan::GetReferPtr2(int monster_id) {
--    BASE_MONSTER_TBL *entry = base_monster_define;
--
--    while (entry->name[0] != 0) {
--        if (entry->id == monster_id) {
--            return entry;
--        }
--
--        entry++;
--    }
--
--    return NULL;
-+    return GetMonsterTable(monster_id);
- }
- 
- int CMonsterMan::SearchActiveMonsterBlock() {
-@@ -1155,6 +1243,11 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
-         return NULL;
-     }
- 
-+    moonmod_monster_slot_generation[slot]++;
-+    if (moonmod_monster_slot_generation[slot] == 0) {
-+        moonmod_monster_slot_generation[slot]++;
-+    }
-+
-     memory[slot].stReset();
-     locate.SetPutFlag(slot, true);
-     monster = active[slot];
-@@ -1255,6 +1348,58 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
-     return active[slot];
- }
- 
-+bool CMonsterMan::DespawnMoonModMonster(int slot, unsigned int generation) {
-+    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX || generation == 0 ||
-+        GetMoonModMonsterSlotGeneration(slot) != generation || active[slot] == NULL || scene == NULL) {
-+        return false;
-+    }
-+
-+    CActiveMonster *monster = active[slot];
-+    if (monster->state == ACTIVE_MONSTER_NONE || monster->catch_state == ACTION_CATCH_HELD) {
-+        return false;
-+    }
-+
-+    const int chara_id = slot + MONSTER_ACTIVE_MAX;
-+    CActionChara *player = static_cast<CActionChara *>(scene->GetCharacter(scene->player_chara));
-+    if (player != NULL && player->target_no == chara_id) {
-+        player->target_no = -1;
-+        player->lock_on = false;
-+    }
-+
-+    for (int other_slot = 0; other_slot < MONSTER_ACTIVE_MAX; ++other_slot) {
-+        CActiveMonster *other = active[other_slot];
-+        if (other != NULL && other_slot != slot && other->target_no == chara_id) {
-+            other->target_no = -1;
-+        }
-+    }
-+
-+    if (effect_man != NULL) {
-+        effect_man->ClearEffectFromChrid(chara_id);
-+    }
-+    ColPrimMan.Delete(chara_id);
-+
-+    if (monster->tbl != NULL && monster->tbl->boss != 0) {
-+        boss_max_life -= monster->max_life;
-+        if (boss_max_life < 0) {
-+            boss_max_life = 0;
-+        }
-+    }
-+
-+    locate.SetPutFlag(slot, false);
-+    monster->Initialize();
-+    monster->target_no = -1;
-+    monster->tbl = NULL;
-+    monster->base_tbl = NULL;
-+    monster->refer_no = -1;
-+    memory[slot].stReset();
-+
-+    moonmod_monster_slot_generation[slot]++;
-+    if (moonmod_monster_slot_generation[slot] == 0) {
-+        moonmod_monster_slot_generation[slot]++;
-+    }
-+    return true;
-+}
-+
- void CMonsterMan::DrawMiniMapSymbol(CMiniMapSymbol *symbol) {
-     CBattleCharaInfo *battle_info;
-     int               show_all;
-@@ -2258,6 +2403,8 @@ void CMonsterMan::CheckDamage() {
+@@ -2258,6 +2258,10 @@ void CMonsterMan::CheckDamage() {
                  damage *= 0.01f * (float) prim->param->critical_rate;
              }
  
++#ifdef PORT
 +            damage = moonmod::ApplyChronicleTwoCombatDamageFormula(damage);
++#endif
 +
              calcWeaponParamWhp(monster, prim);
  
              monster->life -= (int) damage;
-diff --git a/ps2/src/photo.cpp b/ps2/src/photo.cpp
-index 56129c38..91b57ae3 100644
---- a/ps2/src/photo.cpp
-+++ b/ps2/src/photo.cpp
-@@ -7,6 +7,9 @@
- 
- #include "font.hpp"
- #include "inventmn.hpp"
-+#ifdef CT_PS2_TEXTURE_COPY
-+#include "moonmod/native_events.hpp"
-+#endif
- #include "mainloop.hpp"
- #include "menucommon.hpp"
- #include "mg_drawprim.hpp"
-@@ -560,6 +563,13 @@ void SetTookPhotoData(USER_PICTURE_INFO *photo) {
-             ShowLevelUpCnt = 60;
-         }
-     }
-+
-+#ifdef CT_PS2_TEXTURE_COPY
-+    if (photo != NULL) {
-+        moonmod::ChronicleTwoPhotoTaken(photo->neta_id, photo->map_no, photo->npc_no, photo->monster_no,
-+                                        photo->used != 0);
-+    }
-+#endif
- }
- 
- void DrawTakePhotoSystem(int texture, CInventUserData *user_data) {
 diff --git a/ps2/src/runscript_opcodes.cpp b/ps2/src/runscript_opcodes.cpp
-index 10971407..998651df 100644
+index 109714078..29f401a50 100644
 --- a/ps2/src/runscript_opcodes.cpp
 +++ b/ps2/src/runscript_opcodes.cpp
-@@ -9,6 +9,13 @@
- #include <cstdlib>
- #include <cstring>
- 
-+#ifdef PORT
-+class CActiveMonster;
-+namespace moonmod {
-+void ChronicleTwoEnemyDefeated(::CActiveMonster *monster, const char *source);
-+}
-+#endif
-+
- #include "actionchara.hpp"
- #include "cameracontrol.hpp"
- #include "character.hpp"
-@@ -88,6 +95,9 @@ void CMonsterMan::RunScript(int index) {
+@@ -88,6 +88,9 @@ void CMonsterMan::RunScript(int index) {
          script = nowMonster->req_prog;
  
          if (script != -1) {
@@ -63082,186 +63633,30 @@ index 10971407..998651df 100644
              if (nowMonster->mons_script.check_program(script) != 0) {
                  nowMonster->mons_script.run(script);
                  nowMonster->now_prog = script;
-@@ -3199,7 +3209,13 @@ int _SET_DEAD_START(RS_STACKDATA *args, int argc) {
+@@ -3199,7 +3202,13 @@ int _SET_DEAD_START(RS_STACKDATA *args, int argc) {
          return 0;
      }
  
++#ifdef PORT
 +    const bool first_death_transition = nowMonster->state != ACTIVE_MONSTER_DEAD;
++#endif
      nowMonster->state = ACTIVE_MONSTER_DEAD;
 +#ifdef PORT
 +    if (first_death_transition) moonmod::ChronicleTwoEnemyDefeated(nowMonster, nullptr);
-+#else
-+    (void)first_death_transition;
 +#endif
      pallet = &nowMonster->script_pallet;
      pallet->duration = 0;
      pallet->elapsed = 0;
-diff --git a/ps2/src/savedatadungeon.cpp b/ps2/src/savedatadungeon.cpp
-index 04300fb4..b5328c61 100644
---- a/ps2/src/savedatadungeon.cpp
-+++ b/ps2/src/savedatadungeon.cpp
-@@ -10,14 +10,152 @@
-  * Number of saved floor records in each dungeon.
-  *
-  */
--static short limmit_table[7] = {9, 16, 25, 21, 23, 29, 39};
-+static constexpr short limmit_table[SAVE_DUNGEON_NUM] = {9, 16, 25, 21, 23, 29, 39};
-+
-+namespace {
-+struct MoonModFloorBinding {
-+    int dungeon = -1;
-+    int floor = -1;
-+    int record = -1;
-+};
-+
-+CSaveDataDungeon                         *moonmod_save_owner;
-+MOONMOD_DUNGEON_SAVE_RECORD              moonmod_saved_records[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
-+bool                                      moonmod_saved_record_used[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
-+MoonModFloorBinding                      moonmod_floor_bindings[MOONMOD_DUNGEON_SAVE_RECORD_MAX];
-+int                                       moonmod_floor_binding_count;
-+
-+void ClearMoonModDungeonSaveExtension(CSaveDataDungeon *owner) {
-+    moonmod_save_owner = owner;
-+    memset(moonmod_saved_records, 0, sizeof(moonmod_saved_records));
-+    memset(moonmod_saved_record_used, 0, sizeof(moonmod_saved_record_used));
-+    for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
-+        moonmod_floor_bindings[index] = {-1, -1, -1};
-+    }
-+    moonmod_floor_binding_count = 0;
-+}
- 
--DNG_FLOOR_SAVE *CSaveDataDungeon::GetFloorInfoPtr(int dungeon, int floor) {
--    if (dungeon < 0 || dungeon >= 7) {
-+int FindMoonModRecord(const char *stable_id) {
-+    for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
-+        if (moonmod_saved_record_used[index] && std::strcmp(moonmod_saved_records[index].id, stable_id) == 0) {
-+            return index;
-+        }
-+    }
-+    return -1;
-+}
-+} // namespace
-+
-+int GetSavedDungeonFloorCount(int dungeon) {
-+    if (dungeon < 0 || dungeon >= SAVE_DUNGEON_NUM) {
-+        return 0;
-+    }
-+    return limmit_table[dungeon];
-+}
-+
-+bool HasSavedDungeonFloorRecord(int dungeon, int floor) {
-+    return floor >= 0 && floor < GetSavedDungeonFloorCount(dungeon);
-+}
-+
-+bool RegisterMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor, const char *stable_id) {
-+    if (owner == NULL || dungeon < 0 || dungeon >= SAVE_DUNGEON_NUM || floor < 0 ||
-+        floor >= SAVE_DUNGEON_FLOOR_ID_MAX || stable_id == NULL || stable_id[0] == '\0' ||
-+        std::strlen(stable_id) >= MOONMOD_DUNGEON_SAVE_ID_SIZE) {
-+        return false;
-+    }
-+    if (moonmod_save_owner != owner) {
-+        ClearMoonModDungeonSaveExtension(owner);
-+    }
-+
-+    int record = FindMoonModRecord(stable_id);
-+    if (record < 0) {
-+        for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
-+            if (!moonmod_saved_record_used[index]) {
-+                record = index;
-+                moonmod_saved_record_used[index] = true;
-+                std::snprintf(moonmod_saved_records[index].id, sizeof(moonmod_saved_records[index].id), "%s", stable_id);
-+                break;
-+            }
-+        }
-+    }
-+    if (record < 0) {
-+        return false;
-+    }
-+
-+    for (int index = 0; index < moonmod_floor_binding_count; ++index) {
-+        MoonModFloorBinding &binding = moonmod_floor_bindings[index];
-+        if (binding.dungeon == dungeon && binding.floor == floor) {
-+            return binding.record == record;
-+        }
-+        if (binding.record == record) {
-+            binding.dungeon = dungeon;
-+            binding.floor = floor;
-+            return true;
-+        }
-+    }
-+    if (moonmod_floor_binding_count >= MOONMOD_DUNGEON_SAVE_RECORD_MAX) {
-+        return false;
-+    }
-+    moonmod_floor_bindings[moonmod_floor_binding_count++] = {dungeon, floor, record};
-+    return true;
-+}
-+
-+DNG_FLOOR_SAVE *GetMoonModDungeonSaveRecord(CSaveDataDungeon *owner, int dungeon, int floor) {
-+    if (owner == NULL || owner != moonmod_save_owner) {
-         return NULL;
-     }
-+    for (int index = 0; index < moonmod_floor_binding_count; ++index) {
-+        const MoonModFloorBinding &binding = moonmod_floor_bindings[index];
-+        if (binding.dungeon == dungeon && binding.floor == floor && binding.record >= 0 &&
-+            binding.record < MOONMOD_DUNGEON_SAVE_RECORD_MAX) {
-+            return &moonmod_saved_records[binding.record].data;
-+        }
-+    }
-+    return NULL;
-+}
-+
-+void ResetMoonModDungeonSaveExtension(CSaveDataDungeon *owner) { ClearMoonModDungeonSaveExtension(owner); }
- 
--    if (floor < 0 || floor >= limmit_table[dungeon]) {
-+bool ExportMoonModDungeonSaveExtension(const CSaveDataDungeon *owner, MOONMOD_DUNGEON_SAVE_EXTENSION *extension) {
-+    if (owner == NULL || extension == NULL) {
-+        return false;
-+    }
-+    memset(extension, 0, sizeof(*extension));
-+    memcpy(extension->magic, "MFDNGSV1", 8);
-+    extension->version = 1;
-+    if (owner != moonmod_save_owner) {
-+        return true;
-+    }
-+    for (int index = 0; index < MOONMOD_DUNGEON_SAVE_RECORD_MAX; ++index) {
-+        if (moonmod_saved_record_used[index]) {
-+            extension->records[extension->record_count++] = moonmod_saved_records[index];
-+        }
-+    }
-+    return true;
-+}
-+
-+bool ImportMoonModDungeonSaveExtension(CSaveDataDungeon *owner, const MOONMOD_DUNGEON_SAVE_EXTENSION *extension) {
-+    if (owner == NULL || extension == NULL || std::memcmp(extension->magic, "MFDNGSV1", 8) != 0 ||
-+        extension->version != 1 || extension->record_count > MOONMOD_DUNGEON_SAVE_RECORD_MAX) {
-+        return false;
-+    }
-+    ClearMoonModDungeonSaveExtension(owner);
-+    for (u32 source = 0; source < extension->record_count; ++source) {
-+        const MOONMOD_DUNGEON_SAVE_RECORD &entry = extension->records[source];
-+        if (entry.id[0] == '\0' || memchr(entry.id, '\0', sizeof(entry.id)) == NULL || FindMoonModRecord(entry.id) >= 0) {
-+            ClearMoonModDungeonSaveExtension(owner);
-+            return false;
-+        }
-+        moonmod_saved_records[source] = entry;
-+        moonmod_saved_record_used[source] = true;
-+    }
-+    return true;
-+}
-+
-+DNG_FLOOR_SAVE *CSaveDataDungeon::GetFloorInfoPtr(int dungeon, int floor) {
-+    if (DNG_FLOOR_SAVE *mod_floor = GetMoonModDungeonSaveRecord(this, dungeon, floor)) {
-+        return mod_floor;
-+    }
-+    if (!HasSavedDungeonFloorRecord(dungeon, floor)) {
-         return NULL;
-     }
- 
-@@ -33,6 +171,7 @@ DNG_FLOOR_SAVE *CSaveDataDungeon::GetFloorInfoPtr(int dungeon, int floor) {
+diff --git a/scripts/port/unit_copy.py b/scripts/port/unit_copy.py
+index ab460d467..64289cca6 100644
+--- a/scripts/port/unit_copy.py
++++ b/scripts/port/unit_copy.py
+@@ -41,6 +41,8 @@ def load_port_override(path: Path):
+ RETAIL_BRIDGES = {
+     "editctrl.cpp": [("ResetViewMode(CScene*)", "ResetViewMode", "PortRetailResetViewMode")],
+     "dng_main.cpp": [("ResetEyeView(CActionChara*)", "ResetEyeView", "PortRetailResetEyeView")],
++    "monster.cpp": [("GetMonsterTable(int)", "GetMonsterTable", "PortRetailGetMonsterTable")],
++    "photo.cpp": [("SetTookPhotoData(USER_PICTURE_INFO*)", "SetTookPhotoData", "PortRetailSetTookPhotoData")],
  }
  
- void CSaveDataDungeon::Initialize() {
-+    ResetMoonModDungeonSaveExtension(this);
-     memset(floor_info, 0, sizeof(floor_info));
  
-     for (int i = 0; i < 7; i++) {

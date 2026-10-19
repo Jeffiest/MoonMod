@@ -16,6 +16,10 @@ applying this patch to newer upstream source is not verified.
 | `apply-moonfactory.ps1` | Pins source revisions, checks both patches, and applies them. |
 | `verify-headless.ps1` | Builds and runs the Chronicle Two MoonMod native tests; optionally checks executable startup. |
 
+## How the patch is laid out
+
+MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmod/`, replacement functions as `PORT_OVERRIDE` copies in `port/src/`, and the declarations the port needs in `port/include/stubs/<unit>.hpp` and `port/include/moonmod/`. The edits under `ps2/` are capacity constants (`AUTOMAP_ROOM_MAX`, the save-data floor range, the item and weapon table sizes) and one-line hooks, all inside `#ifdef PORT`, so without `PORT` every `ps2/src` unit preprocesses to exactly the upstream text and the PS2 build is unchanged (checked unit by unit when the patch is refreshed).
+
 ## Install and play on Windows
 
 You need your own PAL Dark Chronicle disc image, PowerShell 7, Git, and the build prerequisites

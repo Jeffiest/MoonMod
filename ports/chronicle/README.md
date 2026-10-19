@@ -20,6 +20,10 @@ That commit pins Kazarov `611182d`, which lacks `a78762c` (TextureDesc logical s
 overrides (#187) need, so plain master does not build. `moonfactory-kazarov.patch` carries `a78762c` along with
 MoonFactory's own Kazarov changes, so a checkout with both patches builds.
 
+## How the patch is laid out
+
+MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmod/`, replacement functions as `PORT_OVERRIDE` copies in `port/src/<unit>_moonmod.cpp`, and the declarations the port needs in `port/include/stubs/<unit>.hpp` and `port/include/moonmod/`. The edits under `ps2/` are the capacity constants the structs need (`MONSTOR_SLOT_MAX`, `DNG_GRID`, `DNG_ROOM_MAX`, the Georama part capacity) and one-line hooks, all inside `#ifdef PORT`, so without `PORT` every `ps2/src` unit preprocesses to exactly the upstream text and the PS2 build is unchanged (checked unit by unit when the patch is refreshed).
+
 ## What you need
 
 - Your own copy of _Dark Cloud_ as a disc image (PAL recommended).
