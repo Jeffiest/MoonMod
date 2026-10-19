@@ -12,7 +12,7 @@ index 17ddf9963..bb4557e9d 100644
  # Kazarov's locks and run descriptors.
  /.kazarov/
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 13e8dd8d7..98952b7c8 100644
+index 13e8dd8d7..22cd79521 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -10,10 +10,24 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -40,7 +40,7 @@ index 13e8dd8d7..98952b7c8 100644
  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
  
-@@ -41,6 +55,17 @@ set(KZ_PORT_BUILD_TIM2 OFF CACHE BOOL "Build legacy TIM2 decoding into the nativ
+@@ -41,9 +55,43 @@ set(KZ_PORT_BUILD_TIM2 OFF CACHE BOOL "Build legacy TIM2 decoding into the nativ
  find_package(Python3 REQUIRED COMPONENTS Interpreter)
  kz_port_host_library(ct_host)
  
@@ -57,8 +57,67 @@ index 13e8dd8d7..98952b7c8 100644
 +
  # ps2/include is compiled through a mirror in the build tree with the fixups of scripts/port/header_fixups.py
  # applied. The mirror is written only where its content changes, so an unchanged header keeps its timestamp.
- set(PS2_INCLUDE_SRC ${CMAKE_SOURCE_DIR}/ps2/include)
-@@ -194,7 +219,7 @@ list(FILTER PORT_LIB_SOURCES EXCLUDE REGEX "/tests/|/main\\.cpp$")
+-set(PS2_INCLUDE_SRC ${CMAKE_SOURCE_DIR}/ps2/include)
++# The port's own edits to the game's code live in port/ps2patch as one unified diff per file,
++# applied to the build directory's copies: ps2/src and ps2/include stay exactly as the PS2 build
++# compiles them. Headers are patched into a staging tree that the fixups mirror below reads;
++# units are patched right before unit_copy.py strips them.
++set(PS2_PATCH_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ps2patch)
++set(PS2_PATCH_SCRIPT ${PS2_PATCH_DIR}/apply_ps2_patch.py)
++set(PS2_INCLUDE_UPSTREAM ${CMAKE_SOURCE_DIR}/ps2/include)
++set(PS2_INCLUDE_SRC ${CMAKE_BINARY_DIR}/ps2_include_patched)
++set(PS2_INCLUDE_PATCH_STAMP ${CMAKE_BINARY_DIR}/ps2_include_patched.stamp)
++file(GLOB_RECURSE PS2_INCLUDE_PATCHES CONFIGURE_DEPENDS ${PS2_PATCH_DIR}/include/*.diff)
++file(GLOB_RECURSE PS2_INCLUDE_UPSTREAM_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false ${PS2_INCLUDE_UPSTREAM}/*)
++execute_process(COMMAND ${Python3_EXECUTABLE} ${PS2_PATCH_SCRIPT} tree ${PS2_INCLUDE_UPSTREAM} ${PS2_PATCH_DIR}/include
++        ${PS2_INCLUDE_SRC} --stamp ${PS2_INCLUDE_PATCH_STAMP}
++    RESULT_VARIABLE ps2_patch_result OUTPUT_VARIABLE ps2_patch_output ERROR_VARIABLE ps2_patch_error)
++if(NOT ps2_patch_result EQUAL 0)
++    message(FATAL_ERROR "apply_ps2_patch.py failed (${ps2_patch_result}):
++${ps2_patch_output}${ps2_patch_error}")
++endif()
++add_custom_command(OUTPUT ${PS2_INCLUDE_PATCH_STAMP}
++    COMMAND ${Python3_EXECUTABLE} ${PS2_PATCH_SCRIPT} tree ${PS2_INCLUDE_UPSTREAM} ${PS2_PATCH_DIR}/include
++        ${PS2_INCLUDE_SRC} --stamp ${PS2_INCLUDE_PATCH_STAMP}
++    DEPENDS ${PS2_INCLUDE_UPSTREAM_FILES} ${PS2_INCLUDE_PATCHES} ${PS2_PATCH_SCRIPT}
++    COMMENT "Copying ps2/include with the port's patches applied"
++    VERBATIM)
+ set(PS2_INCLUDE_DIR ${CMAKE_BINARY_DIR}/ps2_include)
+ set(PS2_INCLUDE_STAMP ${CMAKE_BINARY_DIR}/ps2_include.stamp)
+ set(HEADER_FIXUPS_SCRIPT ${CMAKE_SOURCE_DIR}/scripts/port/header_fixups.py)
+@@ -67,7 +115,7 @@ endif()
+ # refreshed, so an edited ps2/include header reaches its dependents only on the second build.
+ add_custom_command(OUTPUT ${PS2_INCLUDE_STAMP}
+     COMMAND ${Python3_EXECUTABLE} ${HEADER_FIXUPS_SCRIPT} ${PS2_INCLUDE_SRC} ${PS2_INCLUDE_DIR} ${PS2_INCLUDE_STAMP}
+-    DEPENDS ${PS2_INCLUDE_FILES} ${HEADER_FIXUPS_SCRIPT} ${LONG64_SCRIPT}
++    DEPENDS ${PS2_INCLUDE_FILES} ${PS2_INCLUDE_PATCH_STAMP} ${HEADER_FIXUPS_SCRIPT} ${LONG64_SCRIPT}
+     BYPRODUCTS ${PS2_INCLUDE_MIRROR}
+     COMMENT "Mirroring ps2/include with the header fixups"
+     VERBATIM)
+@@ -118,10 +166,20 @@ foreach(unit IN LISTS PS2_SOURCES)
+         set(stubs "")
+         set(header "")
+     endif()
++    set(unit_source ${PS2_DIR}/${unit})
++    set(unit_patch ${PS2_PATCH_DIR}/src/${unit}.diff)
++    if(EXISTS ${unit_patch})
++        set(unit_source ${CMAKE_BINARY_DIR}/ps2_patched/${unit})
++        add_custom_command(OUTPUT ${unit_source}
++            COMMAND ${Python3_EXECUTABLE} ${PS2_PATCH_SCRIPT} file ${PS2_DIR}/${unit} ${unit_patch} ${unit_source}
++            DEPENDS ${PS2_DIR}/${unit} ${unit_patch} ${PS2_PATCH_SCRIPT}
++            COMMENT "Applying port/ps2patch/src/${unit}.diff"
++            VERBATIM)
++    endif()
+     add_custom_command(OUTPUT ${copy}
+         COMMAND ${Python3_EXECUTABLE} ${UNIT_COPY_SCRIPT} --port-override ${PORT_OVERRIDE_SCRIPT} --overrides ${split}
+-            ${stubs} ${port_override_defines} ${PS2_DIR}/${unit} ${copy}
+-        DEPENDS ${PS2_DIR}/${unit} ${split} ${PORT_OVERRIDE_SCRIPT} ${UNIT_COPY_SCRIPT} ${LONG64_SCRIPT} ${HEADER_FIXUPS_SCRIPT} ${header}
++            ${stubs} ${port_override_defines} ${unit_source} ${copy}
++        DEPENDS ${unit_source} ${split} ${PORT_OVERRIDE_SCRIPT} ${UNIT_COPY_SCRIPT} ${LONG64_SCRIPT} ${HEADER_FIXUPS_SCRIPT} ${header}
+         COMMENT "Removing overridden definitions from ps2/src/${unit}"
+         VERBATIM)
+     list(APPEND PS2_UNITS ${copy})
+@@ -194,7 +252,7 @@ list(FILTER PORT_LIB_SOURCES EXCLUDE REGEX "/tests/|/main\\.cpp$")
  kz_port_sce_sources(CT_SCE_SOURCES LIBS libvu0 libpad libmc sifdev sifrpc eekernel libcdvd libgraph libdma libpkt
      eekernel_threads libdev libmpeg libsdr modmsin sifdma)
  add_library(ct_port OBJECT ${PORT_LIB_SOURCES} ${CT_SCE_SOURCES})
@@ -67,7 +126,7 @@ index 13e8dd8d7..98952b7c8 100644
  add_dependencies(ct_port ps2_include)
  target_include_directories(ct_port PRIVATE ${PORT_DIR})
  # Datapack PNGs use the host's decoder with ordinary PNG colour formats.
-@@ -230,7 +255,8 @@ endif()
+@@ -230,7 +288,8 @@ endif()
  function(ct_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:ct_port> $<TARGET_OBJECTS:ct_host> $<TARGET_OBJECTS:ct_ps2>)
      add_dependencies(${target} ps2_include)
@@ -1405,6 +1464,864 @@ index 000000000..a344c917d
 +namespace moonmod {
 +void ChronicleTwoEnemyDefeated(::CActiveMonster *monster, const char *source);
 +}
+diff --git a/port/ps2patch/README.md b/port/ps2patch/README.md
+new file mode 100644
+index 000000000..0805b28e1
+--- /dev/null
++++ b/port/ps2patch/README.md
+@@ -0,0 +1,28 @@
++# port/ps2patch: the port's edits to the game's code, kept out of ps2/
++
++`ps2/src` and `ps2/include` are the game's code exactly as the PS2 build compiles it, and they stay that way: the
++PS2 build must keep matching the retail image byte for byte. The port compiles copies instead. `port_override.py`
++already strips the definitions `port/src` replaces from a copy of each unit; this directory holds the edits the
++port needs in the game's code itself, as one unified diff per file, applied to the build directory's copies
++first (`apply_ps2_patch.py`, driven from `port/CMakeLists.txt`, in front of the header fixups and unit copies the port already makes):
++
++| here | changes the copy of |
++|---|---|
++| `src/<unit>.cpp.diff` | `ps2/src/<unit>.cpp` (patched, then stripped, then compiled) |
++| `include/<header>.diff` | `ps2/include/<header>` (the whole include tree is copied to the build directory with these applied, and the port compiles against that copy) |
++
++A diff applies strictly: every context and removed line must match the original at the line the hunk names, or
++the build stops naming the hunk. When upstream changes a patched line, the patch is updated by hand, never fuzzed.
++
++What the patches hold, and why it cannot live in `port/src`:
++
++- **Capacities the structs need.** `AUTOMAP_ROOM_MAX` and the floor layout values, the save-data floor range, the weapon and item table sizes, the monster active limit. Every game unit is
++  compiled against these structs, so a `PORT_OVERRIDE` of one function cannot change them.
++- **One-line hooks inside functions too large or too static to copy** (`CMonsterMan::CheckDamage`, `CPullItem::Step`, `RunScript`, the static `_SET_FLOOR_INFO`), calling into the mod runtime in `port/src/moonmod/`.
++
++Everything else moved to `port/src` as `PORT_OVERRIDE` copies, `port/src/<unit>.cpp` and
++`port/include/stubs/<unit>.hpp`. To check the patches against the tree without building:
++
++    python port/ps2patch/apply_ps2_patch.py check ps2 port/ps2patch
++
++To refresh a diff after editing a build copy, diff the upstream file against the edited copy and save it here.
+diff --git a/port/ps2patch/apply_ps2_patch.py b/port/ps2patch/apply_ps2_patch.py
+new file mode 100644
+index 000000000..913665157
+--- /dev/null
++++ b/port/ps2patch/apply_ps2_patch.py
+@@ -0,0 +1,217 @@
++#!/usr/bin/env python3
++"""Apply the port's ps2/ patches to the build directory's copies of ps2/ files.
++
++ps2/src and ps2/include stay exactly as the PS2 build compiles them. What the port compiles is a
++copy: tools/kazarov's port_override.py already strips the definitions port/src replaces from a copy
++of each unit, and this script applies the port's own edits to the copy before that. The edits
++live here as unified diffs, one per file, named after the file they change:
++
++    port/ps2patch/src/dungeonmap.cpp.diff      -> ps2/src/dungeonmap.cpp
++    port/ps2patch/include/dun/gameloop.hpp.diff -> ps2/include/dun/gameloop.hpp
++
++A diff is applied strictly: every context and removed line must match the original exactly, at the
++line the hunk names, or the build stops with the hunk that failed. That is deliberate: when
++upstream changes a patched line, the patch has to be looked at, not fuzzed.
++
++    apply_ps2_patch.py file ORIGINAL PATCH OUT        one file (PATCH may not exist: OUT is a copy)
++    apply_ps2_patch.py tree SRC_DIR PATCH_DIR OUT_DIR --stamp STAMP
++                                                      copy SRC_DIR to OUT_DIR, patching the files
++                                                      PATCH_DIR has a diff for, then touch STAMP
++    apply_ps2_patch.py check SRC_DIR PATCH_DIR        apply every diff in memory, report, exit 1 on failure
++"""
++import argparse
++import os
++import pathlib
++import re
++import shutil
++import sys
++
++HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
++
++
++class PatchError(Exception):
++    pass
++
++
++def parse(patch_text):
++    """Hunks of a single-file unified diff: [(old_start, old_lines, new_lines)], lines without the
++    leading marker, keeping their line endings."""
++    hunks = []
++    lines = patch_text.splitlines(keepends=True)
++    i = 0
++    while i < len(lines):
++        m = HUNK.match(lines[i])
++        if not m:
++            i += 1
++            continue
++        old_start = int(m.group(1))
++        old_count = int(m.group(2)) if m.group(2) is not None else 1
++        new_count = int(m.group(4)) if m.group(4) is not None else 1
++        i += 1
++        old, new = [], []
++        while i < len(lines) and (len(old) < old_count or len(new) < new_count):
++            line = lines[i]
++            if line.startswith("\\"):  # "\ No newline at end of file"
++                target = old if old and not new else new
++                if old and old[-1].endswith("\n") and len(old) == old_count and new and len(new) == new_count:
++                    pass
++                i += 1
++                continue
++            tag, body = line[0], line[1:]
++            if tag == " ":
++                old.append(body)
++                new.append(body)
++            elif tag == "-":
++                old.append(body)
++            elif tag == "+":
++                new.append(body)
++            else:
++                raise PatchError(f"unexpected line in hunk: {line!r}")
++            i += 1
++        if len(old) != old_count or len(new) != new_count:
++            raise PatchError(f"hunk @@ -{old_start} has {len(old)}/{len(new)} lines, header says {old_count}/{new_count}")
++        hunks.append((old_start, old, new))
++    if not hunks:
++        raise PatchError("no hunks found")
++    return hunks
++
++
++def same(a, b):
++    return a.rstrip("\r\n") == b.rstrip("\r\n")
++
++
++def apply_text(original, patch_text, name):
++    src = original.splitlines(keepends=True)
++    out = []
++    pos = 0  # index into src of the next line not yet copied
++    for old_start, old, new in parse(patch_text):
++        start = old_start - 1
++        if old_start == 0 and not old:  # insertion into an empty file
++            start = 0
++        if start < pos:
++            raise PatchError(f"{name}: hunk @@ -{old_start} overlaps the previous hunk")
++        for k, line in enumerate(old):
++            if start + k >= len(src) or not same(src[start + k], line):
++                got = src[start + k].rstrip("\r\n") if start + k < len(src) else "<end of file>"
++                raise PatchError(f"{name}: hunk @@ -{old_start} does not match line {start + k + 1}:\n"
++                                 f"  patch expects: {line.rstrip(chr(10)).rstrip(chr(13))!r}\n  file has:      {got!r}")
++        out.extend(src[pos:start])
++        # keep the original file's line ending on inserted lines
++        eol = "\r\n" if src and src[0].endswith("\r\n") else "\n"
++        for line in new:
++            if not line.endswith("\n"):
++                out.append(line)
++            else:
++                out.append(line.rstrip("\r\n") + eol)
++        pos = start + len(old)
++    out.extend(src[pos:])
++    return "".join(out)
++
++
++def read(path):
++    with open(path, encoding="utf-8", errors="surrogateescape", newline="") as f:
++        return f.read()
++
++
++def write(path, text):
++    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
++    with open(path, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
++        f.write(text)
++
++
++def patch_for(patch_dir, rel):
++    p = pathlib.Path(patch_dir, rel + ".diff")
++    return p if p.is_file() else None
++
++
++def do_file(original, patch, out):
++    if patch and os.path.isfile(patch):
++        write(out, apply_text(read(original), read(patch), original))
++    else:
++        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
++        shutil.copyfile(original, out)
++
++
++def do_tree(src_dir, patch_dir, out_dir, stamp):
++    src_dir, out_dir = pathlib.Path(src_dir), pathlib.Path(out_dir)
++    wanted = set()
++    patched = 0
++    for path in src_dir.rglob("*"):
++        if not path.is_file():
++            continue
++        rel = path.relative_to(src_dir).as_posix()
++        out = out_dir / rel
++        wanted.add(out)
++        patch = patch_for(patch_dir, rel)
++        if patch:
++            text = apply_text(read(path), read(patch), rel)
++            if not out.is_file() or read(out) != text:
++                write(out, text)
++            patched += 1
++        else:
++            if not out.is_file() or out.stat().st_size != path.stat().st_size or read(out) != read(path):
++                out.parent.mkdir(parents=True, exist_ok=True)
++                shutil.copyfile(path, out)
++    # drop copies of files upstream no longer has
++    if out_dir.is_dir():
++        for path in out_dir.rglob("*"):
++            if path.is_file() and path not in wanted:
++                path.unlink()
++    # every diff must name a file that exists
++    for diff in pathlib.Path(patch_dir).rglob("*.diff"):
++        rel = diff.relative_to(patch_dir).as_posix()[: -len(".diff")]
++        if not (src_dir / rel).is_file():
++            raise PatchError(f"{diff}: ps2 file {rel} does not exist")
++    if stamp:
++        write(stamp, f"{patched} patched\n")
++    return patched
++
++
++def do_check(src_dir, patch_dir):
++    failures = 0
++    count = 0
++    for diff in sorted(pathlib.Path(patch_dir).rglob("*.diff")):
++        rel = diff.relative_to(patch_dir).as_posix()[: -len(".diff")]
++        count += 1
++        try:
++            apply_text(read(pathlib.Path(src_dir, rel)), read(diff), rel)
++            print(f"ok    {rel}")
++        except (PatchError, OSError) as e:
++            failures += 1
++            print(f"FAIL  {rel}: {e}")
++    print(f"{count} patches, {failures} failed")
++    return 1 if failures else 0
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    sub = ap.add_subparsers(dest="cmd", required=True)
++    f = sub.add_parser("file")
++    f.add_argument("original")
++    f.add_argument("patch")
++    f.add_argument("out")
++    t = sub.add_parser("tree")
++    t.add_argument("src_dir")
++    t.add_argument("patch_dir")
++    t.add_argument("out_dir")
++    t.add_argument("--stamp", default=None)
++    c = sub.add_parser("check")
++    c.add_argument("src_dir")
++    c.add_argument("patch_dir")
++    a = ap.parse_args()
++    try:
++        if a.cmd == "file":
++            do_file(a.original, a.patch, a.out)
++        elif a.cmd == "tree":
++            n = do_tree(a.src_dir, a.patch_dir, a.out_dir, a.stamp)
++            print(f"ps2 include tree: {n} files patched")
++        else:
++            return do_check(a.src_dir, a.patch_dir)
++    except PatchError as e:
++        print(f"apply_ps2_patch: {e}", file=sys.stderr)
++        return 1
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/port/ps2patch/include/automap.hpp.diff b/port/ps2patch/include/automap.hpp.diff
+new file mode 100644
+index 000000000..0e447eea9
+--- /dev/null
++++ b/port/ps2patch/include/automap.hpp.diff
+@@ -0,0 +1,43 @@
++--- a/ps2/include/automap.hpp
+++++ b/ps2/include/automap.hpp
++@@ -24,8 +24,26 @@
++ #define MINIMAP_INFO_NUM 18
++ /** Number of preset room layouts that a room script can hold. */
++ #define AUTOMAP_ROOM_INFO_MAX 64
++-/** Number of rooms that a generated floor can hold. */
++-#define AUTOMAP_ROOM_MAX 8
+++/** Floor grid side and room limit: retail 30 x 30 and 8 rooms; the PC port enlarges the room limit for mods. */
+++#ifdef PORT
+++#define DNG_GRID         30
+++#define AUTOMAP_ROOM_MAX 64
+++#define DNG_ROOM_MAX     AUTOMAP_ROOM_MAX
+++extern int DngLayoutRooms;   /**< Rooms to try to place, 2..DNG_ROOM_MAX. */
+++extern int DngLayoutArea;    /**< Side of the random floor grid, 8..DNG_GRID. */
+++extern int DngLayoutRoomMin; /**< Smallest room side, 2..6. */
+++extern int DngLayoutRoomMax; /**< Largest room side, DngLayoutRoomMin..6. */
+++#define DNG_BUILD_AREA      (DngLayoutArea > 0 ? DngLayoutArea : 14)
+++#define DNG_BUILD_ROOM_MIN  (DngLayoutRoomMax > 0 ? DngLayoutRoomMin : 3)
+++#define DNG_BUILD_ROOM_SPAN (DngLayoutRoomMax > 0 ? DngLayoutRoomMax - DngLayoutRoomMin + 1 : 2)
+++#else
+++#define DNG_GRID            30
+++#define AUTOMAP_ROOM_MAX    8
+++#define DNG_ROOM_MAX        AUTOMAP_ROOM_MAX
+++#define DNG_BUILD_AREA      14
+++#define DNG_BUILD_ROOM_MIN  3
+++#define DNG_BUILD_ROOM_SPAN 2
+++#endif
++ /** Number of random stones that a floor places. */
++ #define AUTOMAP_RANDOM_STONE_MAX 12
++ /** Frames that the healing point waits after healing before it can heal again. */
++@@ -701,7 +719,11 @@ public:
++     void UpdateNaviMap(float *pos, int depth);
++ };
++ 
+++#ifdef PORT
+++STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0 + (AUTOMAP_ROOM_MAX - 8) * sizeof(AUTOMAP_ROOM));
+++#else
++ STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0);
+++#endif
++ 
++ /**
++  *
+diff --git a/port/ps2patch/include/dng_event.hpp.diff b/port/ps2patch/include/dng_event.hpp.diff
+new file mode 100644
+index 000000000..8499f9437
+--- /dev/null
++++ b/port/ps2patch/include/dng_event.hpp.diff
+@@ -0,0 +1,10 @@
++--- a/ps2/include/dng_event.hpp
+++++ b/ps2/include/dng_event.hpp
++@@ -1027,3 +1027,7 @@ int CheckObjectPutArea(float *pos);
++  * @size 0x64
++  */
++ void CreatMonsterFloorInfo(char *script, int length);
+++
+++#ifdef PORT
+++#include "moonmod/dng_event_moonmod.hpp"
+++#endif
+diff --git a/port/ps2patch/include/dngfloor.hpp.diff b/port/ps2patch/include/dngfloor.hpp.diff
+new file mode 100644
+index 000000000..0a2d3fa1b
+--- /dev/null
++++ b/port/ps2patch/include/dngfloor.hpp.diff
+@@ -0,0 +1,15 @@
++--- a/ps2/include/dngfloor.hpp
+++++ b/ps2/include/dngfloor.hpp
++@@ -268,6 +268,12 @@ public:
++      */
++     void LoadDataTable(int dungeon, mgCMemory *memory);
++ 
+++#ifdef PORT
+++    bool RegisterMoonModFloor(int source_floor, const char *title, const char *stable_id, int *out_floor_id, char *error,
+++                              size_t error_size);
+++    bool IsMoonModFloor(int floor_id, const char *title) const;
+++#endif
+++
++     /**
++      *
++      * Gives the room cell standing for a floor, or NULL.
+diff --git a/port/ps2patch/include/gamedata.hpp.diff b/port/ps2patch/include/gamedata.hpp.diff
+new file mode 100644
+index 000000000..6e524f65a
+--- /dev/null
++++ b/port/ps2patch/include/gamedata.hpp.diff
+@@ -0,0 +1,18 @@
++--- a/ps2/include/gamedata.hpp
+++++ b/ps2/include/gamedata.hpp
++@@ -1448,6 +1448,15 @@ public:
++      */
++     int LoadData();
++ 
+++#ifdef PORT
+++    bool RegisterMoonModItem(int template_item_no, const char *display_name, int max_num, int stack_num,
+++                             int effect_flags, int effect_amount, int *out_item_no, char *error, size_t error_size);
+++    bool RegisterMoonModWeapon(int template_item_no, const char *display_name, int max_num, int stack_num,
+++                               int attack, int durability_stat, int attack_cap, int durability_cap,
+++                               int durability_capacity, int levelup_exp, const int *attributes,
+++                               const int *attribute_caps, int *out_item_no, char *error, size_t error_size);
+++#endif
+++
++     /**
++      *
++      * Reads the item name script of one language.
+diff --git a/port/ps2patch/include/mapselect.hpp.diff b/port/ps2patch/include/mapselect.hpp.diff
+new file mode 100644
+index 000000000..a7d538d24
+--- /dev/null
++++ b/port/ps2patch/include/mapselect.hpp.diff
+@@ -0,0 +1,10 @@
++--- a/ps2/include/mapselect.hpp
+++++ b/ps2/include/mapselect.hpp
++@@ -353,3 +353,7 @@ void LoadEventViewData(u_long128 *buffer, mgCMemory *stack);
++  * @size 0x170
++  */
++ void AtraMiriaOnOff(int mode, CCharacter2 *chara, int enable);
+++
+++#ifdef PORT
+++#include "moonmod/mapselect_moonmod.hpp"
+++#endif
+diff --git a/port/ps2patch/include/monster.hpp.diff b/port/ps2patch/include/monster.hpp.diff
+new file mode 100644
+index 000000000..c1db1c121
+--- /dev/null
++++ b/port/ps2patch/include/monster.hpp.diff
+@@ -0,0 +1,51 @@
++--- a/ps2/include/monster.hpp
+++++ b/ps2/include/monster.hpp
++@@ -37,6 +37,10 @@ enum MONSTER_MAN_SIZE {
++     MONSTER_SHARE_MAX = 128  /**< Variables that every monster's script shares. */
++ };
++ 
+++#ifdef PORT
+++extern int MonsterActiveLimit; /**< Maximum nearest monsters allowed in sight at once (1..MONSTER_ACTIVE_MAX). */
+++#endif
+++
++ /**
++  *
++  * Kinds of monster that the code singles out by number.
++@@ -577,6 +581,17 @@ public:
++      */
++     CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
++ 
+++#ifdef PORT
+++    /**
+++     * Removes a live mod-spawned monster without running the native kill, reward, or gate-drop path.
+++     *
+++     * @param slot Active monster slot.
+++     * @param generation Entity generation that must still own the slot.
+++     * @return true when the matching live monster was safely removed.
+++     */
+++    bool DespawnMoonModMonster(int slot, unsigned int generation);
+++#endif
+++
++     /**
++      *
++      * Draws the monsters on the mini-map.
++@@ -747,6 +762,19 @@ extern BASE_MONSTER_TBL base_monster_define[344];
++  */
++ BASE_MONSTER_TBL *GetMonsterTable(int id);
++ 
+++#ifdef PORT
+++/**
+++ * Registers a port-owned enemy definition by copying a native template and overriding safe
+++ * numeric fields. The variant reuses the template's model, script, drops, and other behavior.
+++ */
+++bool RegisterMoonModMonsterVariant(int template_id, const char *display_name, int hp, int attack,
+++                                   int defense, int reward_exp, int reward_money,
+++                                   const char *model, const char *script, int *out_id);
+++void ResetMoonModMonsterVariants();
+++unsigned int GetMoonModMonsterSlotGeneration(int slot);
+++unsigned int EnsureMoonModMonsterSlotGeneration(int slot);
+++#endif
+++
++ /**
++  *
++  * Gets the distance along a line from a point to the map, or the distance given when nothing is hit.
+diff --git a/port/ps2patch/include/savedatadungeon.hpp.diff b/port/ps2patch/include/savedatadungeon.hpp.diff
+new file mode 100644
+index 000000000..2c67efc7a
+--- /dev/null
++++ b/port/ps2patch/include/savedatadungeon.hpp.diff
+@@ -0,0 +1,10 @@
++--- a/ps2/include/savedatadungeon.hpp
+++++ b/ps2/include/savedatadungeon.hpp
++@@ -103,3 +103,7 @@ public:
++ 
++ STATIC_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
++ PORT_RECORD_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
+++
+++#ifdef PORT
+++#include "moonmod/savedatadungeon_moonmod.hpp"
+++#endif
+diff --git a/port/ps2patch/src/automap.cpp.diff b/port/ps2patch/src/automap.cpp.diff
+new file mode 100644
+index 000000000..660b41f6e
+--- /dev/null
++++ b/port/ps2patch/src/automap.cpp.diff
+@@ -0,0 +1,88 @@
++--- a/ps2/src/automap.cpp
+++++ b/ps2/src/automap.cpp
++@@ -846,6 +846,9 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
++     AUTOMAP_ROOM_INFO *info;
++ 
++     if (info_no == -1) {
+++#ifdef PORT
+++        int tries = 0;
+++#endif
++         do {
++             pick = iRand(room_info_num);
++ 
++@@ -853,9 +856,26 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
++                 pick = -1;
++             }
++ 
+++#ifdef PORT
+++            if (pick >= 0 && room_info[pick].rate < iRand(100)) {
+++                pick = -1;
+++            }
+++#else
++             if (room_info[pick].rate < iRand(100)) {
++                 pick = -1;
++             }
+++#endif
+++#ifdef PORT
+++            if (pick >= 0 && DngLayoutRoomMax > 0 && tries < 64) {
+++                int min_side = DNG_BUILD_ROOM_MIN;
+++                int max_side = DNG_BUILD_ROOM_MIN + DNG_BUILD_ROOM_SPAN - 1;
+++                if (room_info[pick].w < min_side || room_info[pick].w > max_side ||
+++                    room_info[pick].h < min_side || room_info[pick].h > max_side) {
+++                    pick = -1;
+++                }
+++            }
+++            tries++;
+++#endif
++         } while (pick == -1);
++ 
++         info_no = pick;
++@@ -1622,9 +1642,9 @@ void CAutoMapGen::CreatDoorRoom() {
++         return;
++     }
++ 
++-    int candidates[8];
+++    int candidates[AUTOMAP_ROOM_MAX];
++ 
++-    for (int i = 0; i < 8; i++) {
+++    for (int i = 0; i < AUTOMAP_ROOM_MAX; i++) {
++         candidates[i] = -1;
++     }
++ 
++@@ -2175,6 +2195,11 @@ void CAutoMapGen::RandomMapMainProc() {
++ 
++     rooms = 2;
++     goal = iRand(3) + 4;
+++#ifdef PORT
+++    if (DngLayoutRooms > 0) {
+++        goal = DngLayoutRooms;
+++    }
+++#endif
++     round = 0;
++ 
++     while (rooms < goal) {
++@@ -2318,14 +2343,24 @@ void CAutoMapGen::Build() {
++     }
++ 
++     if (mode & AUTOMAP_GEN_FIXED_START) {
+++#ifdef PORT
+++        grid_w = DngLayoutArea > 20 ? DngLayoutArea : 20;
+++        grid_h = DngLayoutArea > 16 ? DngLayoutArea : 16;
+++#else
++         grid_w = 20;
++         grid_h = 16;
+++#endif
++         RandomMapMainProc();
++         return;
++     }
++ 
+++#ifdef PORT
+++    grid_w = DNG_BUILD_AREA;
+++    grid_h = DNG_BUILD_AREA;
+++#else
++     grid_w = 14;
++     grid_h = 14;
+++#endif
++     RandomMapMainProc();
++     map = DngMainScene->GetMap(0);
++ 
+diff --git a/port/ps2patch/src/dng_event.cpp.diff b/port/ps2patch/src/dng_event.cpp.diff
+new file mode 100644
+index 000000000..bfc33a5a6
+--- /dev/null
++++ b/port/ps2patch/src/dng_event.cpp.diff
+@@ -0,0 +1,11 @@
++--- a/ps2/src/dng_event.cpp
+++++ b/ps2/src/dng_event.cpp
++@@ -2282,7 +2282,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
++         }
++     }
++ 
++-    for (room = 0; room < 8; room++) {
+++    for (room = 0; room < AUTOMAP_ROOM_MAX; room++) {
++         AutoMapGen.room[room].no_door = 0;
++     }
++ 
+diff --git a/port/ps2patch/src/dng_object.cpp.diff b/port/ps2patch/src/dng_object.cpp.diff
+new file mode 100644
+index 000000000..0c318b185
+--- /dev/null
++++ b/port/ps2patch/src/dng_object.cpp.diff
+@@ -0,0 +1,38 @@
++--- a/ps2/src/dng_object.cpp
+++++ b/ps2/src/dng_object.cpp
++@@ -1585,7 +1585,11 @@ void CPullItem::Step() {
++                     }
++ 
++                     MsgTaskMan.Print(item_message, 45, 8, 0);
+++#ifdef PORT
+++                    moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
+++#else
++                     DngUserData->GetItem(item_no, 1);
+++#endif
++                     state = PULL_ITEM_STATE_FREE;
++                 }
++             }
++@@ -1603,7 +1607,11 @@ void CPullItem::Step() {
++             } else {
++                 sprintf(key_message, dung_progtxt_gkey_get[LanguageCode], GetItemMessage(item_no));
++                 MsgTaskMan.Print(key_message, 90, 8, 0);
+++#ifdef PORT
+++                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
+++#else
++                 DngUserData->GetItem(item_no, 1);
+++#endif
++                 state = PULL_ITEM_STATE_GOT;
++                 get_delay = 60;
++                 bob_height = 30.0f;
++@@ -1622,7 +1630,11 @@ void CPullItem::Step() {
++             } else {
++                 sprintf(stolen_message, dung_progtxt_steal[LanguageCode], GetItemMessage(item_no));
++                 MsgTaskMan.Print(stolen_message, 90, 8, 0);
+++#ifdef PORT
+++                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
+++#else
++                 DngUserData->GetItem(item_no, 1);
+++#endif
++                 state = PULL_ITEM_STATE_GOT;
++                 get_delay = 60;
++                 bob_height = 30.0f;
+diff --git a/port/ps2patch/src/dngfloor.cpp.diff b/port/ps2patch/src/dngfloor.cpp.diff
+new file mode 100644
+index 000000000..66e498863
+--- /dev/null
++++ b/port/ps2patch/src/dngfloor.cpp.diff
+@@ -0,0 +1,31 @@
++--- a/ps2/src/dngfloor.cpp
+++++ b/ps2/src/dngfloor.cpp
++@@ -148,7 +148,11 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
++     int width = spiGetStackInt(stack++);
++     int height = spiGetStackInt(stack++);
++     int room_count = spiGetStackInt(stack);
+++#ifdef PORT
+++    u32 bytes = (room_count + MOONMOD_FLOOR_CELL_CAPACITY) * sizeof(GLID_INFO);
+++#else
++     u32 bytes = room_count * sizeof(GLID_INFO);
+++#endif
++     tree_dngmap->glid_w = width;
++     tree_dngmap->glid_h = height;
++     u32 blocks;
++@@ -159,9 +163,16 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
++         blocks = bytes >> 4;
++     }
++ 
+++#ifdef PORT
+++    tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count + MOONMOD_FLOOR_CELL_CAPACITY];
+++#else
++     tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count];
+++#endif
++     tree_dngmap->glid_num = room_count;
++     tree_glid_info = tree_dngmap->glid_info;
+++#ifdef PORT
+++    MoonModDngFloorMapInfo(tree_dngmap, room_count + MOONMOD_FLOOR_CELL_CAPACITY);
+++#endif
++     return 1;
++ }
++ 
+diff --git a/port/ps2patch/src/editloop.cpp.diff b/port/ps2patch/src/editloop.cpp.diff
+new file mode 100644
+index 000000000..1151cb046
+--- /dev/null
++++ b/port/ps2patch/src/editloop.cpp.diff
+@@ -0,0 +1,13 @@
++--- a/ps2/src/editloop.cpp
+++++ b/ps2/src/editloop.cpp
++@@ -2818,6 +2818,10 @@ int EditMapJump(int map_no) {
++         }
++ 
++         map->area_no = MainScene->now_map_no;
+++#ifdef PORT
+++        moonmod::ApplyChronicleTwoGeorama(map, main_data);
+++        GameGrantGeoramaStockForTest(map);
+++#endif
++         map->ClearAllParts();
++         used_quads = main_data->stack_used - used_before;
++         used_kb = (used_quads * 0x10) / 0x400;
+diff --git a/port/ps2patch/src/event_func.cpp.diff b/port/ps2patch/src/event_func.cpp.diff
+new file mode 100644
+index 000000000..dafa94542
+--- /dev/null
++++ b/port/ps2patch/src/event_func.cpp.diff
+@@ -0,0 +1,44 @@
++--- a/ps2/src/event_func.cpp
+++++ b/ps2/src/event_func.cpp
++@@ -5243,6 +5243,9 @@ static int _DNG_SET_FLOOR_ID(RS_STACKDATA *stack, int argc) {
++         return false;
++     }
++ 
+++#ifdef PORT
+++    floor_id = moonmod::ChronicleTwoRequestedDungeonEntryFloor(floor_id);
+++#endif
++     dungeon->SetFloorID(floor_id);
++     return true;
++ }
++@@ -17492,12 +17495,31 @@ static int _SET_FLOOR_INFO(RS_STACKDATA *stack, int argc) {
++         case 3:
++             info->unk_a = GetStackInt(stack);
++             break;
+++#ifdef PORT
+++        case 4: {
+++            const u16 previous = info->spheda_clear;
+++            info->spheda_clear = (u16) GetStackInt(stack);
+++            if (previous == 0 && info->spheda_clear != 0) {
+++                moonmod::ChronicleTwoSphedaCompleted(dungeon_no, floor_no, info->spheda_clear);
+++            }
+++            break;
+++        }
+++        case 5: {
+++            const u16 previous = info->flag;
+++            info->flag |= (u16) GetStackInt(stack);
+++            if ((previous & DNG_FLOOR_FLAG_SPHEDA_CLEAR) == 0 && (info->flag & DNG_FLOOR_FLAG_SPHEDA_CLEAR) != 0) {
+++                moonmod::ChronicleTwoSphedaCompleted(dungeon_no, floor_no, info->spheda_clear);
+++            }
+++            break;
+++        }
+++#else
++         case 4:
++             info->spheda_clear = GetStackInt(stack);
++             break;
++         case 5:
++             info->flag |= (u16) GetStackInt(stack);
++             break;
+++#endif
++         case 6:
++             info->kill_count = GetStackInt(stack);
++             break;
+diff --git a/port/ps2patch/src/gamedata.cpp.diff b/port/ps2patch/src/gamedata.cpp.diff
+new file mode 100644
+index 000000000..8cf1f53ac
+--- /dev/null
++++ b/port/ps2patch/src/gamedata.cpp.diff
+@@ -0,0 +1,46 @@
++--- a/ps2/src/gamedata.cpp
+++++ b/ps2/src/gamedata.cpp
++@@ -480,21 +480,33 @@ CGameData GameItemDataManage;
++  * Common records for the master item catalog.
++  *
++  */
+++#ifdef PORT
+++static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX + MOONMOD_ITEM_CAPACITY + MOONMOD_WEAPON_CAPACITY];
+++#else
++ static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX];
+++#endif
++ 
++ /**
++  *
++  * Usable item records loaded from item data scripts.
++  *
++  */
+++#ifdef PORT
+++static CDataItem local_itemdata[162 + MOONMOD_ITEM_CAPACITY];
+++#else
++ static CDataItem local_itemdata[162];
+++#endif
++ 
++ /**
++  *
++  * Weapon records loaded from weapon data scripts.
++  *
++  */
+++#ifdef PORT
+++static CDataWeapon local_weapondata[116 + MOONMOD_WEAPON_CAPACITY];
+++#else
++ static CDataWeapon local_weapondata[116];
+++#endif
++ 
++ /**
++  *
++@@ -616,6 +628,9 @@ void CGameData::Initialize() {
++     robo_num = 0;
++     fish_data = local_fishdata;
++     fish_num = 0;
+++#ifdef PORT
+++    ResetMoonModGameData();
+++#endif
++     InitItemMes(1, 1);
++ }
++ 
+diff --git a/port/ps2patch/src/inventmn.cpp.diff b/port/ps2patch/src/inventmn.cpp.diff
+new file mode 100644
+index 000000000..c876eb630
+--- /dev/null
++++ b/port/ps2patch/src/inventmn.cpp.diff
+@@ -0,0 +1,12 @@
++--- a/ps2/src/inventmn.cpp
+++++ b/ps2/src/inventmn.cpp
++@@ -2978,6 +2978,9 @@ int CMenuInvent::IsCreateObject(int mode, int keys) {
++                         if (0 < this->create_item_id) {
++                             this->create_success = true;
++                             InventUserDataPtr->SetCreateItemFlag(this->card_cursor, this->create_item_id);
+++#ifdef PORT
+++                            MoonModNotifyInventionCreated(this->create_item_id);
+++#endif
++                         } else {
++                             s32 recipe_index;
++                             this->create_partial_match = false;
+diff --git a/port/ps2patch/src/mapselect.cpp.diff b/port/ps2patch/src/mapselect.cpp.diff
+new file mode 100644
+index 000000000..07c73495f
+--- /dev/null
++++ b/port/ps2patch/src/mapselect.cpp.diff
+@@ -0,0 +1,14 @@
++--- a/ps2/src/mapselect.cpp
+++++ b/ps2/src/mapselect.cpp
++@@ -296,6 +296,11 @@ void LoadMapName(int language, u_long128 *buffer) {
++  */
++ static MAP_NAME_INFO *GetMapNameInfo(int map_no) {
++ 
+++#ifdef PORT
+++    if (map_no >= MapNameNum) {
+++        return GetMoonModMapNameInfo(map_no - MapNameNum);
+++    }
+++#endif
++     if (map_no < 0 || map_no >= MapNameNum) {
++         return NULL;
++     }
+diff --git a/port/ps2patch/src/monster.cpp.diff b/port/ps2patch/src/monster.cpp.diff
+new file mode 100644
+index 000000000..55fc4a07e
+--- /dev/null
++++ b/port/ps2patch/src/monster.cpp.diff
+@@ -0,0 +1,13 @@
++--- a/ps2/src/monster.cpp
+++++ b/ps2/src/monster.cpp
++@@ -2258,6 +2258,10 @@ void CMonsterMan::CheckDamage() {
++                 damage *= 0.01f * (float) prim->param->critical_rate;
++             }
++ 
+++#ifdef PORT
+++            damage = moonmod::ApplyChronicleTwoCombatDamageFormula(damage);
+++#endif
+++
++             calcWeaponParamWhp(monster, prim);
++ 
++             monster->life -= (int) damage;
+diff --git a/port/ps2patch/src/runscript_opcodes.cpp.diff b/port/ps2patch/src/runscript_opcodes.cpp.diff
+new file mode 100644
+index 000000000..2bb45930c
+--- /dev/null
++++ b/port/ps2patch/src/runscript_opcodes.cpp.diff
+@@ -0,0 +1,26 @@
++--- a/ps2/src/runscript_opcodes.cpp
+++++ b/ps2/src/runscript_opcodes.cpp
++@@ -88,6 +88,9 @@ void CMonsterMan::RunScript(int index) {
++         script = nowMonster->req_prog;
++ 
++         if (script != -1) {
+++#ifdef PORT
+++            if (script == MONSTER_PROG_DEAD) moonmod::ChronicleTwoEnemyDefeated(nowMonster, nullptr);
+++#endif
++             if (nowMonster->mons_script.check_program(script) != 0) {
++                 nowMonster->mons_script.run(script);
++                 nowMonster->now_prog = script;
++@@ -3199,7 +3202,13 @@ int _SET_DEAD_START(RS_STACKDATA *args, int argc) {
++         return 0;
++     }
++ 
+++#ifdef PORT
+++    const bool first_death_transition = nowMonster->state != ACTIVE_MONSTER_DEAD;
+++#endif
++     nowMonster->state = ACTIVE_MONSTER_DEAD;
+++#ifdef PORT
+++    if (first_death_transition) moonmod::ChronicleTwoEnemyDefeated(nowMonster, nullptr);
+++#endif
++     pallet = &nowMonster->script_pallet;
++     pallet->duration = 0;
++     pallet->elapsed = 0;
 diff --git a/port/src/automap.cpp b/port/src/automap.cpp
 index 4d5ea7f04..c39d7d140 100644
 --- a/port/src/automap.cpp
@@ -63118,535 +64035,6 @@ index 000000000..49047c98c
 +LUAI_FUNC int luaZ_fill (ZIO *z);
 +
 +#endif
-diff --git a/ps2/include/automap.hpp b/ps2/include/automap.hpp
-index 0fbbd2cf8..6bd625737 100644
---- a/ps2/include/automap.hpp
-+++ b/ps2/include/automap.hpp
-@@ -24,8 +24,26 @@
- #define MINIMAP_INFO_NUM 18
- /** Number of preset room layouts that a room script can hold. */
- #define AUTOMAP_ROOM_INFO_MAX 64
--/** Number of rooms that a generated floor can hold. */
--#define AUTOMAP_ROOM_MAX 8
-+/** Floor grid side and room limit: retail 30 x 30 and 8 rooms; the PC port enlarges the room limit for mods. */
-+#ifdef PORT
-+#define DNG_GRID         30
-+#define AUTOMAP_ROOM_MAX 64
-+#define DNG_ROOM_MAX     AUTOMAP_ROOM_MAX
-+extern int DngLayoutRooms;   /**< Rooms to try to place, 2..DNG_ROOM_MAX. */
-+extern int DngLayoutArea;    /**< Side of the random floor grid, 8..DNG_GRID. */
-+extern int DngLayoutRoomMin; /**< Smallest room side, 2..6. */
-+extern int DngLayoutRoomMax; /**< Largest room side, DngLayoutRoomMin..6. */
-+#define DNG_BUILD_AREA      (DngLayoutArea > 0 ? DngLayoutArea : 14)
-+#define DNG_BUILD_ROOM_MIN  (DngLayoutRoomMax > 0 ? DngLayoutRoomMin : 3)
-+#define DNG_BUILD_ROOM_SPAN (DngLayoutRoomMax > 0 ? DngLayoutRoomMax - DngLayoutRoomMin + 1 : 2)
-+#else
-+#define DNG_GRID            30
-+#define AUTOMAP_ROOM_MAX    8
-+#define DNG_ROOM_MAX        AUTOMAP_ROOM_MAX
-+#define DNG_BUILD_AREA      14
-+#define DNG_BUILD_ROOM_MIN  3
-+#define DNG_BUILD_ROOM_SPAN 2
-+#endif
- /** Number of random stones that a floor places. */
- #define AUTOMAP_RANDOM_STONE_MAX 12
- /** Frames that the healing point waits after healing before it can heal again. */
-@@ -701,7 +719,11 @@ public:
-     void UpdateNaviMap(float *pos, int depth);
- };
- 
-+#ifdef PORT
-+STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0 + (AUTOMAP_ROOM_MAX - 8) * sizeof(AUTOMAP_ROOM));
-+#else
- STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0);
-+#endif
- 
- /**
-  *
-diff --git a/ps2/include/dng_event.hpp b/ps2/include/dng_event.hpp
-index 6e8659f3d..37df9e47d 100644
---- a/ps2/include/dng_event.hpp
-+++ b/ps2/include/dng_event.hpp
-@@ -1027,3 +1027,7 @@ int CheckObjectPutArea(float *pos);
-  * @size 0x64
-  */
- void CreatMonsterFloorInfo(char *script, int length);
-+
-+#ifdef PORT
-+#include "moonmod/dng_event_moonmod.hpp"
-+#endif
-diff --git a/ps2/include/dngfloor.hpp b/ps2/include/dngfloor.hpp
-index fb0204c97..6e2d6dc13 100644
---- a/ps2/include/dngfloor.hpp
-+++ b/ps2/include/dngfloor.hpp
-@@ -268,6 +268,12 @@ public:
-      */
-     void LoadDataTable(int dungeon, mgCMemory *memory);
- 
-+#ifdef PORT
-+    bool RegisterMoonModFloor(int source_floor, const char *title, const char *stable_id, int *out_floor_id, char *error,
-+                              size_t error_size);
-+    bool IsMoonModFloor(int floor_id, const char *title) const;
-+#endif
-+
-     /**
-      *
-      * Gives the room cell standing for a floor, or NULL.
-diff --git a/ps2/include/gamedata.hpp b/ps2/include/gamedata.hpp
-index 674df2123..1ea60db27 100644
---- a/ps2/include/gamedata.hpp
-+++ b/ps2/include/gamedata.hpp
-@@ -1448,6 +1448,15 @@ public:
-      */
-     int LoadData();
- 
-+#ifdef PORT
-+    bool RegisterMoonModItem(int template_item_no, const char *display_name, int max_num, int stack_num,
-+                             int effect_flags, int effect_amount, int *out_item_no, char *error, size_t error_size);
-+    bool RegisterMoonModWeapon(int template_item_no, const char *display_name, int max_num, int stack_num,
-+                               int attack, int durability_stat, int attack_cap, int durability_cap,
-+                               int durability_capacity, int levelup_exp, const int *attributes,
-+                               const int *attribute_caps, int *out_item_no, char *error, size_t error_size);
-+#endif
-+
-     /**
-      *
-      * Reads the item name script of one language.
-diff --git a/ps2/include/mapselect.hpp b/ps2/include/mapselect.hpp
-index 7b738fbe6..1cd7ec54e 100644
---- a/ps2/include/mapselect.hpp
-+++ b/ps2/include/mapselect.hpp
-@@ -353,3 +353,7 @@ void LoadEventViewData(u_long128 *buffer, mgCMemory *stack);
-  * @size 0x170
-  */
- void AtraMiriaOnOff(int mode, CCharacter2 *chara, int enable);
-+
-+#ifdef PORT
-+#include "moonmod/mapselect_moonmod.hpp"
-+#endif
-diff --git a/ps2/include/monster.hpp b/ps2/include/monster.hpp
-index 6cdd516d2..026df1e56 100644
---- a/ps2/include/monster.hpp
-+++ b/ps2/include/monster.hpp
-@@ -37,6 +37,10 @@ enum MONSTER_MAN_SIZE {
-     MONSTER_SHARE_MAX = 128  /**< Variables that every monster's script shares. */
- };
- 
-+#ifdef PORT
-+extern int MonsterActiveLimit; /**< Maximum nearest monsters allowed in sight at once (1..MONSTER_ACTIVE_MAX). */
-+#endif
-+
- /**
-  *
-  * Kinds of monster that the code singles out by number.
-@@ -577,6 +581,17 @@ public:
-      */
-     CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
- 
-+#ifdef PORT
-+    /**
-+     * Removes a live mod-spawned monster without running the native kill, reward, or gate-drop path.
-+     *
-+     * @param slot Active monster slot.
-+     * @param generation Entity generation that must still own the slot.
-+     * @return true when the matching live monster was safely removed.
-+     */
-+    bool DespawnMoonModMonster(int slot, unsigned int generation);
-+#endif
-+
-     /**
-      *
-      * Draws the monsters on the mini-map.
-@@ -747,6 +762,19 @@ extern BASE_MONSTER_TBL base_monster_define[344];
-  */
- BASE_MONSTER_TBL *GetMonsterTable(int id);
- 
-+#ifdef PORT
-+/**
-+ * Registers a port-owned enemy definition by copying a native template and overriding safe
-+ * numeric fields. The variant reuses the template's model, script, drops, and other behavior.
-+ */
-+bool RegisterMoonModMonsterVariant(int template_id, const char *display_name, int hp, int attack,
-+                                   int defense, int reward_exp, int reward_money,
-+                                   const char *model, const char *script, int *out_id);
-+void ResetMoonModMonsterVariants();
-+unsigned int GetMoonModMonsterSlotGeneration(int slot);
-+unsigned int EnsureMoonModMonsterSlotGeneration(int slot);
-+#endif
-+
- /**
-  *
-  * Gets the distance along a line from a point to the map, or the distance given when nothing is hit.
-diff --git a/ps2/include/savedatadungeon.hpp b/ps2/include/savedatadungeon.hpp
-index bc3b6851b..be2c1f1a0 100644
---- a/ps2/include/savedatadungeon.hpp
-+++ b/ps2/include/savedatadungeon.hpp
-@@ -103,3 +103,7 @@ public:
- 
- STATIC_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
- PORT_RECORD_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
-+
-+#ifdef PORT
-+#include "moonmod/savedatadungeon_moonmod.hpp"
-+#endif
-diff --git a/ps2/src/automap.cpp b/ps2/src/automap.cpp
-index dadc6bcbb..e09154fdb 100644
---- a/ps2/src/automap.cpp
-+++ b/ps2/src/automap.cpp
-@@ -846,6 +846,9 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
-     AUTOMAP_ROOM_INFO *info;
- 
-     if (info_no == -1) {
-+#ifdef PORT
-+        int tries = 0;
-+#endif
-         do {
-             pick = iRand(room_info_num);
- 
-@@ -853,9 +856,26 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
-                 pick = -1;
-             }
- 
-+#ifdef PORT
-+            if (pick >= 0 && room_info[pick].rate < iRand(100)) {
-+                pick = -1;
-+            }
-+#else
-             if (room_info[pick].rate < iRand(100)) {
-                 pick = -1;
-             }
-+#endif
-+#ifdef PORT
-+            if (pick >= 0 && DngLayoutRoomMax > 0 && tries < 64) {
-+                int min_side = DNG_BUILD_ROOM_MIN;
-+                int max_side = DNG_BUILD_ROOM_MIN + DNG_BUILD_ROOM_SPAN - 1;
-+                if (room_info[pick].w < min_side || room_info[pick].w > max_side ||
-+                    room_info[pick].h < min_side || room_info[pick].h > max_side) {
-+                    pick = -1;
-+                }
-+            }
-+            tries++;
-+#endif
-         } while (pick == -1);
- 
-         info_no = pick;
-@@ -1622,9 +1642,9 @@ void CAutoMapGen::CreatDoorRoom() {
-         return;
-     }
- 
--    int candidates[8];
-+    int candidates[AUTOMAP_ROOM_MAX];
- 
--    for (int i = 0; i < 8; i++) {
-+    for (int i = 0; i < AUTOMAP_ROOM_MAX; i++) {
-         candidates[i] = -1;
-     }
- 
-@@ -2175,6 +2195,11 @@ void CAutoMapGen::RandomMapMainProc() {
- 
-     rooms = 2;
-     goal = iRand(3) + 4;
-+#ifdef PORT
-+    if (DngLayoutRooms > 0) {
-+        goal = DngLayoutRooms;
-+    }
-+#endif
-     round = 0;
- 
-     while (rooms < goal) {
-@@ -2318,14 +2343,24 @@ void CAutoMapGen::Build() {
-     }
- 
-     if (mode & AUTOMAP_GEN_FIXED_START) {
-+#ifdef PORT
-+        grid_w = DngLayoutArea > 20 ? DngLayoutArea : 20;
-+        grid_h = DngLayoutArea > 16 ? DngLayoutArea : 16;
-+#else
-         grid_w = 20;
-         grid_h = 16;
-+#endif
-         RandomMapMainProc();
-         return;
-     }
- 
-+#ifdef PORT
-+    grid_w = DNG_BUILD_AREA;
-+    grid_h = DNG_BUILD_AREA;
-+#else
-     grid_w = 14;
-     grid_h = 14;
-+#endif
-     RandomMapMainProc();
-     map = DngMainScene->GetMap(0);
- 
-diff --git a/ps2/src/dng_event.cpp b/ps2/src/dng_event.cpp
-index 45d42c885..d98132f52 100644
---- a/ps2/src/dng_event.cpp
-+++ b/ps2/src/dng_event.cpp
-@@ -2282,7 +2282,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
-         }
-     }
- 
--    for (room = 0; room < 8; room++) {
-+    for (room = 0; room < AUTOMAP_ROOM_MAX; room++) {
-         AutoMapGen.room[room].no_door = 0;
-     }
- 
-diff --git a/ps2/src/dng_object.cpp b/ps2/src/dng_object.cpp
-index 1c9312036..6faa7ea64 100644
---- a/ps2/src/dng_object.cpp
-+++ b/ps2/src/dng_object.cpp
-@@ -1585,7 +1585,11 @@ void CPullItem::Step() {
-                     }
- 
-                     MsgTaskMan.Print(item_message, 45, 8, 0);
-+#ifdef PORT
-+                    moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
-+#else
-                     DngUserData->GetItem(item_no, 1);
-+#endif
-                     state = PULL_ITEM_STATE_FREE;
-                 }
-             }
-@@ -1603,7 +1607,11 @@ void CPullItem::Step() {
-             } else {
-                 sprintf(key_message, dung_progtxt_gkey_get[LanguageCode], GetItemMessage(item_no));
-                 MsgTaskMan.Print(key_message, 90, 8, 0);
-+#ifdef PORT
-+                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
-+#else
-                 DngUserData->GetItem(item_no, 1);
-+#endif
-                 state = PULL_ITEM_STATE_GOT;
-                 get_delay = 60;
-                 bob_height = 30.0f;
-@@ -1622,7 +1630,11 @@ void CPullItem::Step() {
-             } else {
-                 sprintf(stolen_message, dung_progtxt_steal[LanguageCode], GetItemMessage(item_no));
-                 MsgTaskMan.Print(stolen_message, 90, 8, 0);
-+#ifdef PORT
-+                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
-+#else
-                 DngUserData->GetItem(item_no, 1);
-+#endif
-                 state = PULL_ITEM_STATE_GOT;
-                 get_delay = 60;
-                 bob_height = 30.0f;
-diff --git a/ps2/src/dngfloor.cpp b/ps2/src/dngfloor.cpp
-index 82033bb75..9a63de399 100644
---- a/ps2/src/dngfloor.cpp
-+++ b/ps2/src/dngfloor.cpp
-@@ -148,7 +148,11 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
-     int width = spiGetStackInt(stack++);
-     int height = spiGetStackInt(stack++);
-     int room_count = spiGetStackInt(stack);
-+#ifdef PORT
-+    u32 bytes = (room_count + MOONMOD_FLOOR_CELL_CAPACITY) * sizeof(GLID_INFO);
-+#else
-     u32 bytes = room_count * sizeof(GLID_INFO);
-+#endif
-     tree_dngmap->glid_w = width;
-     tree_dngmap->glid_h = height;
-     u32 blocks;
-@@ -159,9 +163,16 @@ static int _TREE_MAPINFO(SPI_STACK *stack, int argc) {
-         blocks = bytes >> 4;
-     }
- 
-+#ifdef PORT
-+    tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count + MOONMOD_FLOOR_CELL_CAPACITY];
-+#else
-     tree_dngmap->glid_info = new (tree_spi_stack->Alloc(blocks + 2)) GLID_INFO[room_count];
-+#endif
-     tree_dngmap->glid_num = room_count;
-     tree_glid_info = tree_dngmap->glid_info;
-+#ifdef PORT
-+    MoonModDngFloorMapInfo(tree_dngmap, room_count + MOONMOD_FLOOR_CELL_CAPACITY);
-+#endif
-     return 1;
- }
- 
-diff --git a/ps2/src/editloop.cpp b/ps2/src/editloop.cpp
-index cb1601889..cc936622b 100644
---- a/ps2/src/editloop.cpp
-+++ b/ps2/src/editloop.cpp
-@@ -2818,6 +2818,10 @@ int EditMapJump(int map_no) {
-         }
- 
-         map->area_no = MainScene->now_map_no;
-+#ifdef PORT
-+        moonmod::ApplyChronicleTwoGeorama(map, main_data);
-+        GameGrantGeoramaStockForTest(map);
-+#endif
-         map->ClearAllParts();
-         used_quads = main_data->stack_used - used_before;
-         used_kb = (used_quads * 0x10) / 0x400;
-diff --git a/ps2/src/event_func.cpp b/ps2/src/event_func.cpp
-index 394cb0715..cf8903d6e 100644
---- a/ps2/src/event_func.cpp
-+++ b/ps2/src/event_func.cpp
-@@ -5243,6 +5243,9 @@ static int _DNG_SET_FLOOR_ID(RS_STACKDATA *stack, int argc) {
-         return false;
-     }
- 
-+#ifdef PORT
-+    floor_id = moonmod::ChronicleTwoRequestedDungeonEntryFloor(floor_id);
-+#endif
-     dungeon->SetFloorID(floor_id);
-     return true;
- }
-@@ -17492,12 +17495,31 @@ static int _SET_FLOOR_INFO(RS_STACKDATA *stack, int argc) {
-         case 3:
-             info->unk_a = GetStackInt(stack);
-             break;
-+#ifdef PORT
-+        case 4: {
-+            const u16 previous = info->spheda_clear;
-+            info->spheda_clear = (u16) GetStackInt(stack);
-+            if (previous == 0 && info->spheda_clear != 0) {
-+                moonmod::ChronicleTwoSphedaCompleted(dungeon_no, floor_no, info->spheda_clear);
-+            }
-+            break;
-+        }
-+        case 5: {
-+            const u16 previous = info->flag;
-+            info->flag |= (u16) GetStackInt(stack);
-+            if ((previous & DNG_FLOOR_FLAG_SPHEDA_CLEAR) == 0 && (info->flag & DNG_FLOOR_FLAG_SPHEDA_CLEAR) != 0) {
-+                moonmod::ChronicleTwoSphedaCompleted(dungeon_no, floor_no, info->spheda_clear);
-+            }
-+            break;
-+        }
-+#else
-         case 4:
-             info->spheda_clear = GetStackInt(stack);
-             break;
-         case 5:
-             info->flag |= (u16) GetStackInt(stack);
-             break;
-+#endif
-         case 6:
-             info->kill_count = GetStackInt(stack);
-             break;
-diff --git a/ps2/src/gamedata.cpp b/ps2/src/gamedata.cpp
-index 6a87f8126..447406666 100644
---- a/ps2/src/gamedata.cpp
-+++ b/ps2/src/gamedata.cpp
-@@ -480,21 +480,33 @@ CGameData GameItemDataManage;
-  * Common records for the master item catalog.
-  *
-  */
-+#ifdef PORT
-+static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX + MOONMOD_ITEM_CAPACITY + MOONMOD_WEAPON_CAPACITY];
-+#else
- static CDataCommon local_com_itemdata[ITEM_COMMON_DATA_MAX];
-+#endif
- 
- /**
-  *
-  * Usable item records loaded from item data scripts.
-  *
-  */
-+#ifdef PORT
-+static CDataItem local_itemdata[162 + MOONMOD_ITEM_CAPACITY];
-+#else
- static CDataItem local_itemdata[162];
-+#endif
- 
- /**
-  *
-  * Weapon records loaded from weapon data scripts.
-  *
-  */
-+#ifdef PORT
-+static CDataWeapon local_weapondata[116 + MOONMOD_WEAPON_CAPACITY];
-+#else
- static CDataWeapon local_weapondata[116];
-+#endif
- 
- /**
-  *
-@@ -616,6 +628,9 @@ void CGameData::Initialize() {
-     robo_num = 0;
-     fish_data = local_fishdata;
-     fish_num = 0;
-+#ifdef PORT
-+    ResetMoonModGameData();
-+#endif
-     InitItemMes(1, 1);
- }
- 
-diff --git a/ps2/src/inventmn.cpp b/ps2/src/inventmn.cpp
-index 795d4b6b7..ffd8a7411 100644
---- a/ps2/src/inventmn.cpp
-+++ b/ps2/src/inventmn.cpp
-@@ -2978,6 +2978,9 @@ int CMenuInvent::IsCreateObject(int mode, int keys) {
-                         if (0 < this->create_item_id) {
-                             this->create_success = true;
-                             InventUserDataPtr->SetCreateItemFlag(this->card_cursor, this->create_item_id);
-+#ifdef PORT
-+                            MoonModNotifyInventionCreated(this->create_item_id);
-+#endif
-                         } else {
-                             s32 recipe_index;
-                             this->create_partial_match = false;
-diff --git a/ps2/src/mapselect.cpp b/ps2/src/mapselect.cpp
-index 858ea7598..1f2eccd4e 100644
---- a/ps2/src/mapselect.cpp
-+++ b/ps2/src/mapselect.cpp
-@@ -296,6 +296,11 @@ void LoadMapName(int language, u_long128 *buffer) {
-  */
- static MAP_NAME_INFO *GetMapNameInfo(int map_no) {
- 
-+#ifdef PORT
-+    if (map_no >= MapNameNum) {
-+        return GetMoonModMapNameInfo(map_no - MapNameNum);
-+    }
-+#endif
-     if (map_no < 0 || map_no >= MapNameNum) {
-         return NULL;
-     }
-diff --git a/ps2/src/monster.cpp b/ps2/src/monster.cpp
-index 56b6cff25..bab7e3e67 100644
---- a/ps2/src/monster.cpp
-+++ b/ps2/src/monster.cpp
-@@ -2258,6 +2258,10 @@ void CMonsterMan::CheckDamage() {
-                 damage *= 0.01f * (float) prim->param->critical_rate;
-             }
- 
-+#ifdef PORT
-+            damage = moonmod::ApplyChronicleTwoCombatDamageFormula(damage);
-+#endif
-+
-             calcWeaponParamWhp(monster, prim);
- 
-             monster->life -= (int) damage;
-diff --git a/ps2/src/runscript_opcodes.cpp b/ps2/src/runscript_opcodes.cpp
-index 109714078..29f401a50 100644
---- a/ps2/src/runscript_opcodes.cpp
-+++ b/ps2/src/runscript_opcodes.cpp
-@@ -88,6 +88,9 @@ void CMonsterMan::RunScript(int index) {
-         script = nowMonster->req_prog;
- 
-         if (script != -1) {
-+#ifdef PORT
-+            if (script == MONSTER_PROG_DEAD) moonmod::ChronicleTwoEnemyDefeated(nowMonster, nullptr);
-+#endif
-             if (nowMonster->mons_script.check_program(script) != 0) {
-                 nowMonster->mons_script.run(script);
-                 nowMonster->now_prog = script;
-@@ -3199,7 +3202,13 @@ int _SET_DEAD_START(RS_STACKDATA *args, int argc) {
-         return 0;
-     }
- 
-+#ifdef PORT
-+    const bool first_death_transition = nowMonster->state != ACTIVE_MONSTER_DEAD;
-+#endif
-     nowMonster->state = ACTIVE_MONSTER_DEAD;
-+#ifdef PORT
-+    if (first_death_transition) moonmod::ChronicleTwoEnemyDefeated(nowMonster, nullptr);
-+#endif
-     pallet = &nowMonster->script_pallet;
-     pallet->duration = 0;
-     pallet->elapsed = 0;
 diff --git a/scripts/port/unit_copy.py b/scripts/port/unit_copy.py
 index ab460d467..64289cca6 100644
 --- a/scripts/port/unit_copy.py

@@ -22,7 +22,7 @@ MoonFactory's own Kazarov changes, so a checkout with both patches builds.
 
 ## How the patch is laid out
 
-MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmod/`, replacement functions as `PORT_OVERRIDE` copies in `port/src/<unit>_moonmod.cpp`, and the declarations the port needs in `port/include/stubs/<unit>.hpp` and `port/include/moonmod/`. The edits under `ps2/` are the capacity constants the structs need (`MONSTOR_SLOT_MAX`, `DNG_GRID`, `DNG_ROOM_MAX`, the Georama part capacity) and one-line hooks, all inside `#ifdef PORT`, so without `PORT` every `ps2/src` unit preprocesses to exactly the upstream text and the PS2 build is unchanged (checked unit by unit when the patch is refreshed).
+MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmod/`, replacement functions as `PORT_OVERRIDE` copies in `port/src/<unit>_moonmod.cpp`, and the declarations the port needs in `port/include/stubs/<unit>.hpp` and `port/include/moonmod/`. The patch does not touch `ps2/src` or `ps2/include` at all. The few edits the game's code itself needs (the capacity constants the structs carry, such as `MONSTOR_SLOT_MAX`, `DNG_GRID`, `DNG_ROOM_MAX` and the Georama part capacity, and one-line hooks inside functions too large to copy) live in `port/ps2patch/` as one unified diff per file, which the port's build applies to its own build-directory copies of those files before compiling them (`port/ps2patch/README.md`). The PS2 build compiles the untouched sources.
 
 ## What you need
 
