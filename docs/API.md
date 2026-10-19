@@ -22,6 +22,7 @@ The first runtime slice implements the marked surfaces:
 | `game.audio.register/play/stop` | Register and play package audio with owner-scoped handles | Implemented on both ports through the native mixer; path, size, permission, voice, and unload limits are enforced |
 | `game.ui.register/remove` | Add or remove an owned action button in the in-game mod manager | Implemented on both ports; activation dispatches `ui.action` only to its owning mod |
 | `game.ui.navigate` | Open a loaded package and its Settings, Actions, Quests, Skills, or Journal tab | Implemented on Chronicle; validates destination package and tab |
+| `game.ui.sheet_set/sheet_clear/sheet_open` | Character page: a mod's sheet and skill tree as the native **Journal > Character** page | Implemented on Chronicle; unsupported on Chronicle Two |
 | `game.ui.notify` | Queue a bounded notice for the mod manager | Implemented on both ports |
 | `game.input.bind/unbind/state/consume/axis/context_push/context_pop/context_get/wheel_mode_set` | Mod-owned digital actions, processed stick/trigger axes, priority context stack, and Chronicle's scoped mouse-wheel routing | Actions and context frames are owner-scoped on both ports; all six gamepad axes report normalized values and connection status; wheel mode is Chronicle-only |
 | `moonmod.tasks` | Deferred work on a named game phase | Planned; event subscriptions are the current extension seam |
@@ -192,6 +193,43 @@ end)
 
 Actions appear in the selected mod's **Actions** tab in the MoonFactory manager. Confirm or click an action to deliver `ui.action` to that mod only. The event contains its local `id`, qualified id, label, and description. IDs accept 1-64 ASCII letters, digits, `.`, `_`, or `-`; labels are limited to 48 bytes and descriptions to 120 bytes without control characters. A mod may register 12 actions, with a 256-action manager limit. Both operations require `content.register`; an action can only be removed by its owner, and all owned actions are removed when the mod unloads. These are manager actions rather than arbitrary custom pages, widgets, or draw callbacks; those need further UI API and renderer work.
 
+### Character sheet: the Journal's Character page (Chronicle)
+
+```lua
+assert(game.ui.sheet_set({
+  title = "TOAN",                                   -- the banner: "JOURNAL: TOAN"
+  lines = {"Level 12   XP 340 / 812", "Skill points: 3"},
+  progress = 340 / 812, progress_label = "XP 340 / 812",
+  hint = "Cross trains the selected skill.",
+  trees = {"swordsman", "survivor", "explorer"}  -- the page shows the trees in this order
+}))
+assert(game.ui.sheet_open())   -- during play: opens the menu on the page
+assert(game.ui.sheet_clear())
+```
+
+A mod with a skill tree (`skills.register`) can give the player a native page for it: **Journal > Character** in
+the battle menu, drawn with the port's UI framework like the Chest Tracker. The player reaches it from the ring:
+**Journal > Mod Manager > Triangle > Character** (Triangle in the Mod Manager opens the native Journal list, where
+Character is the sixth category), or with a mod hotkey that calls `ui.sheet_open`. `title` is required (1-32 bytes)
+and `trees` names at most 32 trees. The left pane shows the sheet's
+`lines` (up to six, 48 bytes each), its `hint` (80 bytes, gold) and a progress bar when `progress` (0 to 1) is
+given, labelled `progress_label` (32 bytes); the right pane lists the mod's skill nodes one tree at a time, the
+trees in the order `trees` names them (local tree ids; unnamed trees follow)
+(Left/Right or L1/R1 change tree, Up/Down select, Circle goes back, the counter shows rank/max, a node whose prerequisites are
+unmet is dimmed and its description names the first missing one). Cross on a node delivers
+`skills.train_requested` with the node's qualified id to the owning mod, exactly as the Mod Manager's Skills tab
+does, and the mod's next `ui.notify` message is shown on the page. The page lists only while a loaded mod has set
+a sheet; the last sheet set wins when several mods have one. `ui.sheet_open` asks for the page from any mod
+during play and fails when no sheet is set. In a dungeon the menu opens on the page as soon as no action is
+running (the same point where Triangle would open it). In town the request is not acted on yet (the town menu has no hook for it), so
+use the ring path above. `ui.sheet_clear` takes the mod's sheet back; unloading the mod does too. All three require `game.write`.
+Chronicle Two has no Journal page yet, so these calls are unsupported there.
+
+The bundled **MoonMod Hub** binds this: **K** on the keyboard, or **L1+R1+R3** held together on a gamepad, calls
+`ui.sheet_open` (the page of `moonmod.rpg` or whichever mod set the last sheet). On an engine without the page, or
+when no sheet is set, it falls back to `ui.navigate` to the `moonmod.rpg` Skills tab, then its Actions tab, and
+shows a notice if neither opens. **J** opens the Dungeon+ journal tab.
+
 ### Cross-package Mod Manager navigation
 
 ```lua
@@ -287,7 +325,7 @@ assert(assert(game.skills.unlock({id = "combat.focus"})).rank == 2)
 assert(assert(game.skills.unlock({id = "combat.power"})).rank == 1)
 ```
 
-The shared runtime stores each mod's tree definitions and ranks in its protected per-mod save file. Tree registration is idempotent when the definition is unchanged; changing a registered tree requires a future migration/versioning API. Prerequisites must reference nodes in the same tree, must fit within their target node's maximum rank, and cannot form cycles. `skills.unlock` increases rank by one after prerequisite checks; `skills.set_rank` can set a validated rank or reset a node to zero. Registration requires `content.register`; reads require `game.read`; rank changes require `game.write`. A mod can register up to 32 trees and 128 nodes per tree, with ranks from 0 to 99. The optional `effects.enemy_damage_per_rank` field accepts a finite value from 0 to 1 and adds that percentage per rank to positive outgoing enemy damage. It stacks multiplicatively in stable mod/skill ID order after registered combat formulas, affects scripted `combat.damage` and native enemy-hit damage, and does not turn zero damage into a hit. Native game-specific skill UI integration remains open. The in-game manager's **Skills** tab displays each mod-owned node, tree name, rank, prerequisite availability, description, and supported enemy-damage effect summary, including saved data for disabled mods.
+The shared runtime stores each mod's tree definitions and ranks in its protected per-mod save file. Tree registration is idempotent when the definition is unchanged; changing a registered tree requires a future migration/versioning API. Prerequisites must reference nodes in the same tree, must fit within their target node's maximum rank, and cannot form cycles. `skills.unlock` increases rank by one after prerequisite checks; `skills.set_rank` can set a validated rank or reset a node to zero. Registration requires `content.register`; reads require `game.read`; rank changes require `game.write`. A mod can register up to 32 trees and 128 nodes per tree, with ranks from 0 to 99. The optional `effects.enemy_damage_per_rank` field accepts a finite value from 0 to 1 and adds that percentage per rank to positive outgoing enemy damage. It stacks multiplicatively in stable mod/skill ID order after registered combat formulas, affects scripted `combat.damage` and native enemy-hit damage, and does not turn zero damage into a hit. On Chronicle a mod can also show its tree on the native Journal > Character page (see *Character sheet* above). The in-game manager's **Skills** tab displays each mod-owned node, tree name, rank, prerequisite availability, description, and supported enemy-damage effect summary, including saved data for disabled mods.
 
 ### Shared input actions
 
@@ -312,7 +350,7 @@ Action IDs and non-default context IDs are automatically qualified with the regi
 | --- | --- |
 | `game.info` | Game/build/platform identity, feature flags, API compatibility |
 | `game.events` | Startup, tick phases, save/load, scene/map/floor transitions, pause/resume, shutdown |
-| `game.player` | Read/write character state, health, movement, equipment, animation, status effects |
+| `game.player` | Read/write character state, health, movement, equipment, animation, status effects; on Chronicle, owner-scoped player tuning and one-shot invincibility (`tuning_set/tuning_clear/invincible`, see *Player tuning*) |
 | `game.party` | Party roster, active character, formation, shared state, recruitment |
 | `game.economy` | Wallet reads, currency credit, and balance-checked spending |
 | `game.world` | Current world/map queries, time, weather, triggers, region state, travel and spawn points |
@@ -1060,6 +1098,40 @@ assert(game.player.status_remove({status = "power", character = "max"}))
 ```
 
 `player.get()` returns the active character id plus current and maximum HP and water. Chronicle also returns `character_id` (the native party slot) and the equipped `weapon` object when present. During an active dungeon it also returns the active player's native world `position` (`x`, `y`, `z`) in both games. `player.set({hp = integer, character = optional_id})` sets current HP exactly through the native HP update path; `player.set({max_hp = integer, character = optional_id}) changes Chronicle's maximum HP from 1 through 999 and clamps current and pending HP down if needed; player.set({water = integer, character = optional_id}) sets Chronicle's current water gauge within its native range and clears any pending gauge interpolation. Each call sets exactly one field. Attempts to set max_water, multiple fields together, or unknown fields are rejected. Chronicle Two does not support max_hp or water. This call can target a benched character without switching the active character. `player.heal` and `player.damage` accept integer amounts from 1 through 32767 and use the game's native health state, which clamps at maximum and zero HP. The optional `character` accepts `"active"` or a playable character id: Chronicle supports Toan, Xiao, Goro, Ruby, Ungaga, and Osmond; ChronicleTwo supports Max, Monica, and the ridepod. These calls can update a benched character without switching the active character. Omitting `character` targets the active character, including ChronicleTwo's transformed monster when its live gauge is available. `player.damage` changes HP only; it does not synthesize damage formulas or knockback. `player.status_add/remove` use native ailment/status rules: Chronicle accepts `freeze`, `stamina`, `poison`, `curse`, and `goo` for the active character; ChronicleTwo accepts `poison`, `slow`, `curse`, `stop`, `power`, `stone`, and `dry` for Max or Monica. ChronicleTwo requires `duration_frames` from 1 through 32767 when adding a timed status (`slow`, `stop`, `power`, or `stone`) and rejects a duration for untimed statuses. Native interactions can reject a status (for example, ChronicleTwo power wards off poison and slow). Unsupported player mutations remain unsupported.
+
+### Player tuning (Chronicle)
+
+```lua
+assert(game.player.tuning_set({run_speed = 1.24, attack_anim_speed = 1.18, invincible_bonus_frames = 24,
+                               recoil_scale = 0.5, gauge_refill = 1.0, thirst_drain = 0.64, durability_wear = 0.64,
+                               map_reveal = true, monster_reveal = true}))
+assert(game.player.invincible({frames = 90}))   -- one-shot, in a dungeon
+assert(game.player.tuning_clear())
+local supported = select(2, game.player.tuning_set({})) == nil   -- an empty table is valid: "no change"
+```
+
+`player.tuning_set` gives a mod one owner-scoped set of knobs on the dungeon player that the Lua formulas cannot
+reach. Every field is optional and a field left out means the retail value for that owner; each call replaces the
+owner's whole set, `player.tuning_clear` takes it back, and unloading the mod restores it. Several mods can hold
+tuning at once: multipliers multiply, `invincible_bonus_frames` add (capped at 120) and the reveal flags OR, and the
+combined multipliers are kept inside 0.25 to 4. The result carries the owner's `tuning` and the combined `effective`
+set. Fields, all validated (a bad field rejects the whole call with `invalid_argument` and changes nothing):
+
+| field | range | what it does in Chronicle |
+|---|---|---|
+| `run_speed` | 0.25 to 4 | multiplies the dungeon walk speed (1.45 per frame) and the dash speed (3.0) |
+| `attack_anim_speed` | 0.25 to 4 | plays the recovery of Toan's sword swings (combo actions 0x24 to 0x28, after each swing's last hit and sound frame) at this speed; the hit frames keep their one-frame steps because the game tests them in half-frame windows, so a bigger number shortens the time to the next swing rather than the swing itself. Other characters are unchanged |
+| `invincible_bonus_frames` | 0 to 120, integer | after a hit lands, the player stays invincible this many frames past the recoil |
+| `recoil_scale` | 0.25 to 4 | scales the recoil (stun) frames a hit sets (160 for a heavy hit, 80 light, 8 from traps), never below 1 |
+| `gauge_refill` | 0.25 to 4 | scales the action gauge's refill per frame |
+| `thirst_drain` | 0.25 to 4 | scales the water gauge drain per frame; `player.thirst_get`'s `drain_per_frame` includes it |
+| `durability_wear` | 0.25 to 4 | scales the weapon wear per hit, after the weapon's own halving or doubling flags |
+| `map_reveal` | boolean | the floor map draws every cell as if the Map item were held (the HUD shows the Map icon too) |
+| `monster_reveal` | boolean | monsters show on the map as if the Magical Crystal were held |
+
+`player.invincible({frames = 1..600})` sets the active player's native invincibility counter to at least `frames`
+during an active dungeon (it fails in town) and reports the counter and its previous value; it never shortens a
+longer run and counts down with the game. All three need `game.write`. Chronicle Two has no binding for them yet.
 
 ### Party queries
 

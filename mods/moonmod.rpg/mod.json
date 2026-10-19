@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.rpg",
+  "name": "RPG: Character Paths",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "A real character build. Kills give XP, levels give HP, damage, toughness and skill points. Toan spends them on three paths (Swordsman, Survivor, Explorer) in the Journal's Character page: crits, Riposte, Sword Dance, Second Wind, Battle Cry, weapon study, thirst and durability savings, Atla sense, treasure and XP bonuses. Weapon mastery, loot rolls and the DarkCloud-Expanded weapon abilities stay. Other characters level up and get their own paths later.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "optional_dependencies": ["moonmod.dungeon-plus"],
+  "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"],
+  "settings": [
+    {"id": "xp_rate", "name": "XP rate (%)", "type": "integer", "default": 100, "min": 25, "max": 300, "step": 25},
+    {"id": "xp_toasts", "name": "Show +XP after each kill", "type": "boolean", "default": true},
+    {"id": "weapon_loot_rolls", "name": "Weapons you pick up can roll bonus stats", "type": "boolean", "default": true},
+    {"id": "sword_dance_radius", "name": "Sword Dance radius", "type": "integer", "default": 180, "min": 100, "max": 400, "step": 20},
+    {"id": "sword_dance_key", "name": "Sword Dance keyboard key", "type": "choice", "default": "F4", "choices": ["F4", "F5", "F6", "F7", "F8", "F9", "Z", "X", "C"]},
+    {"id": "second_wind_key", "name": "Second Wind keyboard key", "type": "choice", "default": "F5", "choices": ["F4", "F5", "F6", "F7", "F8", "F9", "Z", "X", "C"]},
+    {"id": "battle_cry_key", "name": "Battle Cry keyboard key", "type": "choice", "default": "F6", "choices": ["F4", "F5", "F6", "F7", "F8", "F9", "Z", "X", "C"]}
+  ]
+}
