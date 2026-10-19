@@ -11,10 +11,10 @@ yourself from your own disc image; nothing from either game is included here.
 
 1. Build the port with the MoonFactory patch applied. Each port folder has the exact steps and pins the upstream
    commit its patch supports:
-   - [Chronicle (Dark Cloud)](ports/chronicle/README.md): clone Chronicle, run `ports\chroniclepply-moonfactory.ps1`,
+   - [Chronicle (Dark Cloud)](ports/chronicle/README.md): clone Chronicle, run `ports\chronicle\apply-moonfactory.ps1`,
      then Chronicle's own `build.bat windows-x64-release` and `run.bat`.
    - [Chronicle Two (Dark Chronicle)](ports/chronicle-two/README.md): clone ChronicleTwo, run
-     `ports\chronicle-twopply-moonfactory.ps1` (it applies the game patch and the required Kazarov input patch
+     `ports\chronicle-two\apply-moonfactory.ps1` (it applies the game patch and the required Kazarov input patch
      together), then build and run the same way.
 2. Put each mod in its own folder, named after the mod's id, in one of the two places the game searches:
    - `mods\<mod id>\` inside the game's save folder (the `--save` folder the port uses), or
@@ -59,7 +59,7 @@ a memory limit and an instruction budget per callback).
 1. **Start from the template.** From this repository:
 
    ```powershell
-   python .	ools\moonfactory.py new author.my-mod --output .\my-mod --target both
+   python .\tools\moonfactory.py new author.my-mod --output .\my-mod --target both
    ```
 
    This fills in the package identity and game targets without overwriting an existing folder. The template
