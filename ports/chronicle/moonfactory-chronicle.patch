@@ -210,10 +210,10 @@ index 00000000..8c2f7839
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..d26044f0
+index 00000000..76ba0d2f
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,118 @@
 +#pragma once
 +
 +#include <string>
@@ -254,6 +254,29 @@ index 00000000..d26044f0
 +float ApplyChronicleCombatDamageFormula(float damage, int weapon_id = -1, int native_model_id = -1,
 +                                        int character_id = -1, int target_hp = -1, int target_max_hp = -1);
 +void ResetChronicleCombatFormulasForTests();
++// Player tuning (player.tuning_set): every loaded owner's request combined, read by the dungeon loop.
++// Multipliers multiply across owners, invincible frames add (cap 120), the reveal flags OR.
++struct ChroniclePlayerTuning {
++    float run_speed = 1.0f;             // multiplies the dungeon walk and dash speed
++    float attack_anim_speed = 1.0f;     // multiplies the recovery tail of Toan's sword swings
++    int   invincible_bonus_frames = 0;  // invincibility kept after a hit, past the recoil frames
++    float recoil_scale = 1.0f;          // scales the recoil (stun) frames a hit sets
++    float gauge_refill = 1.0f;          // scales the action gauge refill per frame
++    float thirst_drain = 1.0f;          // scales the water drain per frame
++    float durability_wear = 1.0f;       // scales weapon wear per hit
++    bool  map_reveal = false;           // the floor map acts as if the Map item were held
++    bool  monster_reveal = false;       // monsters show on the map as if the Magical Crystal were held
++};
++const ChroniclePlayerTuning &ChroniclePlayerTuningGet();
++void ClearChroniclePlayerTuning(std::string_view owner);
++void ResetChroniclePlayerTuningForTests();
++// Plain getters for the PS2 sources, which forward-declare them under PORT.
++float ChroniclePlayerGaugeRefillScale();
++float ChroniclePlayerThirstDrainScale();
++float ChroniclePlayerDurabilityWearScale();
++float ChroniclePlayerAttackAnimSpeed();
++bool ChroniclePlayerMapReveal();
++bool ChroniclePlayerMonsterReveal();
 +void ChronicleMonsterDefeated(::CMonstorUnit *unit, int slot, bool scripted);
 +void ChronicleNativeItemPickedUp(int item_no, int count, int character = -1, int slot = -1);
 +void ResetChronicleItemsForTests();
@@ -653,10 +676,10 @@ index 00000000..da69f15d
 +} // namespace moonmod
 diff --git a/port/include/moonmod/manager_ui.hpp b/port/include/moonmod/manager_ui.hpp
 new file mode 100644
-index 00000000..4c03eba3
+index 00000000..18487513
 --- /dev/null
 +++ b/port/include/moonmod/manager_ui.hpp
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,120 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -737,6 +760,8 @@ index 00000000..4c03eba3
 +std::vector<std::string> GameToastLines();
 +// True once after a mod opened a manager page outside the menu (the menu must open to show it).
 +bool TakeManagerMenuOpenRequest();
++// The same, without consuming it: the host checks it can open the menu first.
++bool PeekManagerMenuOpenRequest();
 +// True once after a page a mod opened during play (hotkey) was closed: the host menu closes too.
 +bool TakeManagerHostCloseRequest();
 +void           AdvanceManagerUi();
@@ -753,6 +778,26 @@ index 00000000..4c03eba3
 +ApiCallResult ManagerSkills(std::string_view owner_id);
 +bool ActivateManagerAction(std::string_view owner_id, std::string_view local_id);
 +bool NavigateManager(std::string_view mod_id, std::string_view tab, std::string &error);
++
++// A mod's character sheet: the header of the Journal's Character page, beside that mod's skill tree.
++struct CharacterSheet {
++    std::string              owner_id;
++    std::string              title;          // the banner, "JOURNAL: <title>"
++    std::vector<std::string> lines;          // up to six short lines (level, XP, points...)
++    std::string              progress_label; // text on the progress bar, if any
++    double                   progress = -1.0; // 0..1 draws a bar; below 0 draws none
++    std::string              hint;           // one line under the lines (what to do next)
++    std::vector<std::string> trees;          // local tree ids in the order the page shows them (others follow)
++};
++bool SetCharacterSheet(std::string_view owner_id, CharacterSheet sheet, std::string &error);
++bool ClearCharacterSheet(std::string_view owner_id);
++// The sheet the Journal shows: the last one set whose mod is still loaded, or null.
++const CharacterSheet *ActiveCharacterSheet();
++// Asks the owning mod to train one skill node (publishes skills.train_requested).
++bool RequestSkillTraining(std::string_view owner_id, std::string_view skill_id);
++// A mod asks for the Journal's Character page: opens the menu during play, then that page.
++void RequestCharacterPageOpen();
++bool TakeCharacterPageOpenRequest();
 +
 +} // namespace moonmod
 diff --git a/port/include/moonmod/manifest.hpp b/port/include/moonmod/manifest.hpp
@@ -1202,7 +1247,7 @@ index 00000000..6e5acc5a
 +
 +} // namespace moonmod
 diff --git a/port/lang/de_de.json b/port/lang/de_de.json
-index 655661c3..9bb496dc 100644
+index 655661c3..88cfa98f 100644
 --- a/port/lang/de_de.json
 +++ b/port/lang/de_de.json
 @@ -7,6 +7,8 @@
@@ -1229,8 +1274,27 @@ index 655661c3..9bb496dc 100644
      "options.game.time_speed.label": "Zeitgeschwindigkeit",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Schnell",
+@@ -336,9 +346,16 @@
+     "tracker.progress": "Fortschritt: %1%",
+     "tracker.area_total": "Gebiet Gesamt",
+     "tracker.controls": "{up} / {down} Wählen   {cross} / {square} Filtern   {circle} Zurück",
++    "manual.category.character": "Charakter",
++    "character.title": "LOGBUCH: %1",
++    "character.status": "STATUS",
++    "character.tree": "< %1 >",
++    "character.no_skills": "Noch keine Fähigkeiten",
++    "character.needs": "Benötigt %1 %2",
++    "character.controls": "{up} / {down} Wählen   {left} / {right} Pfad   {cross} Lernen   {circle} Zurück",
+     "tracker.town.0": "Dorf Nolun",
+     "tracker.town.1": "Dorf Matataki",
+     "tracker.town.2": "Queens",
+     "tracker.town.3": "Muska Lacka",
+     "tracker.town.4": "Gelbe Tropfen"
+-}
+\ No newline at end of file
++}
 diff --git a/port/lang/es_es.json b/port/lang/es_es.json
-index a5b32732..c3bc45ce 100644
+index a5b32732..ba90cca3 100644
 --- a/port/lang/es_es.json
 +++ b/port/lang/es_es.json
 @@ -7,6 +7,8 @@
@@ -1257,8 +1321,27 @@ index a5b32732..c3bc45ce 100644
      "options.game.time_speed.label": "Velocidad del tiempo",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rápido",
+@@ -336,9 +346,16 @@
+     "tracker.progress": "Progreso: %1%",
+     "tracker.area_total": "Total de zona",
+     "tracker.controls": "{up} / {down} Elegir   {cross} / {square} Filtrar   {circle} Volver",
++    "manual.category.character": "Personaje",
++    "character.title": "DIARIO: %1",
++    "character.status": "ESTADO",
++    "character.tree": "< %1 >",
++    "character.no_skills": "Aún sin habilidades",
++    "character.needs": "Requiere %1 %2",
++    "character.controls": "{up} / {down} Elegir   {left} / {right} Vía   {cross} Aprender   {circle} Volver",
+     "tracker.town.0": "Aldea Norune",
+     "tracker.town.1": "Aldea Matataki",
+     "tracker.town.2": "Queens",
+     "tracker.town.3": "Muska Lacka",
+     "tracker.town.4": "Gotas Amarillas"
+-}
+\ No newline at end of file
++}
 diff --git a/port/lang/fr_fr.json b/port/lang/fr_fr.json
-index f06cd5f0..ccf6dbb4 100644
+index f06cd5f0..59b417ba 100644
 --- a/port/lang/fr_fr.json
 +++ b/port/lang/fr_fr.json
 @@ -7,6 +7,8 @@
@@ -1285,8 +1368,27 @@ index f06cd5f0..ccf6dbb4 100644
      "options.game.time_speed.label": "Vitesse du temps",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rapide",
+@@ -336,9 +346,16 @@
+     "tracker.progress": "Progression : %1%",
+     "tracker.area_total": "Total de zone",
+     "tracker.controls": "{up} / {down} Choisir   {cross} / {square} Filtrer   {circle} Retour",
++    "manual.category.character": "Personnage",
++    "character.title": "JOURNAL : %1",
++    "character.status": "ÉTAT",
++    "character.tree": "< %1 >",
++    "character.no_skills": "Pas encore de compétences",
++    "character.needs": "Requiert %1 %2",
++    "character.controls": "{up} / {down} Choisir   {left} / {right} Voie   {cross} Apprendre   {circle} Retour",
+     "tracker.town.0": "Village Nolun",
+     "tracker.town.1": "Village Matataki",
+     "tracker.town.2": "Queens",
+     "tracker.town.3": "Muska Lacka",
+     "tracker.town.4": "Gouttes Jaunes"
+-}
+\ No newline at end of file
++}
 diff --git a/port/lang/it_it.json b/port/lang/it_it.json
-index 12b02b34..ee32e35a 100644
+index 12b02b34..79fd5868 100644
 --- a/port/lang/it_it.json
 +++ b/port/lang/it_it.json
 @@ -7,6 +7,8 @@
@@ -1313,12 +1415,32 @@ index 12b02b34..ee32e35a 100644
      "options.game.time_speed.label": "Velocità del tempo",
      "options.game.time_speed.choice.0": "Normale",
      "options.game.time_speed.choice.1": "Veloce",
+@@ -336,9 +346,16 @@
+     "tracker.progress": "Progresso: %1%",
+     "tracker.area_total": "Totale area",
+     "tracker.controls": "{up} / {down} Seleziona   {cross} / {square} Filtra   {circle} Indietro",
++    "manual.category.character": "Personaggio",
++    "character.title": "REGISTRO: %1",
++    "character.status": "STATO",
++    "character.tree": "< %1 >",
++    "character.no_skills": "Nessuna abilità ancora",
++    "character.needs": "Richiede %1 %2",
++    "character.controls": "{up} / {down} Seleziona   {left} / {right} Via   {cross} Apprendi   {circle} Indietro",
+     "tracker.town.0": "Villaggio Nolun",
+     "tracker.town.1": "Villaggio Matataki",
+     "tracker.town.2": "Queens",
+     "tracker.town.3": "Muska Lacka",
+     "tracker.town.4": "Gocce Gialle"
+-}
+\ No newline at end of file
++}
 diff --git a/port/src/battlemenu/main_ring.cpp b/port/src/battlemenu/main_ring.cpp
-index 8bfa0c19..7ca2d77a 100644
+index 8bfa0c19..34a3b935 100644
 --- a/port/src/battlemenu/main_ring.cpp
 +++ b/port/src/battlemenu/main_ring.cpp
-@@ -1,6 +1,8 @@
+@@ -1,6 +1,9 @@
  #include "battlemenu/internal.hpp"
++#include "menu_journal_character.hpp"
  #include "save_slots.hpp"
  #include "savedata.hpp"
 +#include "moonmod/manager_ui.hpp"
@@ -1326,7 +1448,7 @@ index 8bfa0c19..7ca2d77a 100644
  #include "ui_framework/lang.hpp"
  
  namespace {
-@@ -41,6 +43,19 @@ constexpr int kHelpBoxWidth = 276;
+@@ -41,6 +44,19 @@ constexpr int kHelpBoxWidth = 276;
   */
  constexpr float kCaptionToMessageRatio = 1.32f;
  
@@ -1346,7 +1468,7 @@ index 8bfa0c19..7ca2d77a 100644
  /**
   * Whether the Quit Game confirmation modal is currently open.
   */
-@@ -76,6 +91,23 @@ UI::Cursor saveload_cursor;
+@@ -76,6 +92,23 @@ UI::Cursor saveload_cursor;
   */
  bool ingame_load_active = false;
  
@@ -1370,7 +1492,7 @@ index 8bfa0c19..7ca2d77a 100644
  /**
   * Whether an in-game save load has completed and awaits a town reload.
   */
-@@ -229,7 +261,7 @@ void DrawBtlMenuBar() {
+@@ -229,7 +262,7 @@ void DrawBtlMenuBar() {
          if (icons[i] >= 0) {
              setbilinear(0);
              MenuTextureReload(BtlMenuReadBlock);
@@ -1379,7 +1501,7 @@ index 8bfa0c19..7ca2d77a 100644
              DrawMainMenuIcon(x, y, icons[i], selected, brightness, icon_alpha);
          }
      }
-@@ -248,7 +280,7 @@ void DrawBattleMainOverlay() {
+@@ -248,7 +281,7 @@ void DrawBattleMainOverlay() {
      const int       sel_icon = icons[MenuSelect[1]];
      MENU_ICON_INFO *info     = GetMenuIconInfo(sel_icon);
  
@@ -1388,7 +1510,7 @@ index 8bfa0c19..7ca2d77a 100644
                        UI::ColorWhite, UI::Alignment::Left, true, kCaptionToMessageRatio);
      int width = cap_lbl.GetWidth() + 0x52;
      if (info != nullptr && width < (info->label_width + 0x4A)) {
-@@ -411,6 +443,15 @@ PORT_OVERRIDE void BattleMenuDraw() {
+@@ -411,6 +444,15 @@ PORT_OVERRIDE void BattleMenuDraw() {
  
      DrawMenu2DSprite(&frame, MenuDispRc, MenuDispRc, bright, bright, bright, 0x80);
  
@@ -1404,7 +1526,7 @@ index 8bfa0c19..7ca2d77a 100644
      switch (BattleMenuFlag) {
          case BTLMENU_STATE_MAIN:
              DrawBattleMain();
-@@ -493,7 +534,7 @@ PORT_OVERRIDE void BattleMenuDraw() {
+@@ -493,7 +535,7 @@ PORT_OVERRIDE void BattleMenuDraw() {
          BtlHelpWinAlpha > 0 && !quit_confirm_active && !saveload_modal_active) {
          std::string title;
          std::string desc;
@@ -1413,11 +1535,19 @@ index 8bfa0c19..7ca2d77a 100644
  
          const int box_x = (HelpWinHead[0] > 0) ? static_cast<int>(HelpWinHead[0]) : (640 - kHelpBoxWidth - 20);
          UI::HelpBox::DrawTitled(box_x, 452, kHelpBoxWidth, text_x, title, desc, BtlHelpWinAlpha);
-@@ -529,6 +570,28 @@ PORT_OVERRIDE void BattleMenuDraw() {
+@@ -529,6 +571,36 @@ PORT_OVERRIDE void BattleMenuDraw() {
  }
  
  PORT_OVERRIDE int BattleMenuSelect() {
 +    if (moonmod::ManagerOpen()) {
++        if (moonmod::TakeCharacterPageOpenRequest()) {
++            // A mod's hotkey asked for the Journal's Character page: open the native Journal on it, with
++            // the ring on the Journal icon (dungeon ring 6, town ring 7) as a hand-picked Journal would be.
++            MenuSelect[1] = BtlMenuMode == 0 ? 6 : 7;
++            JournalCharacter::RequestPendingOpen();
++            OpenNativeManualsFromManager();
++            return 1;
++        }
 +        if (GamePad.Down(PAD_TRIANGLE) != 0) {
 +            OpenNativeManualsFromManager();
 +            return 1;
@@ -1442,7 +1572,7 @@ index 8bfa0c19..7ca2d77a 100644
      if (MenuWarningMsgFlag != 0) {
          if (GamePad.Down(PAD_CIRCLE | PAD_CROSS) != 0) {
              MenuWarningMsgFlag = 0;
-@@ -668,10 +731,10 @@ PORT_OVERRIDE int BattleMenuSelect() {
+@@ -668,10 +740,10 @@ PORT_OVERRIDE int BattleMenuSelect() {
                  ComMenuSePlay(MENU_SOUND_CONFIRM);
                  return 1;
              case BTLMENU_PAGE_MANUAL: {
@@ -1457,7 +1587,7 @@ index 8bfa0c19..7ca2d77a 100644
              }
              case BTLMENU_PAGE_QUIT:
                  quit_confirm_active = true;
-@@ -707,4 +770,4 @@ bool TakeBattleMenuLoadRequest() {
+@@ -707,4 +779,4 @@ bool TakeBattleMenuLoadRequest() {
      }
      ingame_load_pending = false;
      return true;
@@ -1996,18 +2126,19 @@ index 9af344c9..74df4b91 100644
  
          topStatusInfo(rogoY3, itemNowSel, UserStatus->cur_floor);
 diff --git a/port/src/dun/movechara.cpp b/port/src/dun/movechara.cpp
-index 8ec72e26..56e6b245 100644
+index 8ec72e26..6c115b65 100644
 --- a/port/src/dun/movechara.cpp
 +++ b/port/src/dun/movechara.cpp
-@@ -58,6 +58,7 @@
+@@ -58,6 +58,8 @@
  #include "menu_save.hpp"
  #include "menuitemstep.hpp"
  #include "mglib.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/manager_ui.hpp"
  #include "monstorunit.hpp"
  #include "motionmodel.hpp"
  #include "nowload.hpp"
-@@ -145,7 +146,7 @@ extern ENEMY_LIFE_GAGE EnemyLifeGage;
+@@ -145,7 +147,7 @@ extern ENEMY_LIFE_GAGE EnemyLifeGage;
  extern GAME_ENV GameEnv;
  extern CRandomItem MainRandomItem;
  extern s32 MonstorNameOff;
@@ -2016,7 +2147,7 @@ index 8ec72e26..56e6b245 100644
  extern CHitPointMark MyHitPointMark[16];
  extern CCharacter NewChangeFx;
  extern s32 NewChangeFxFlag;
-@@ -190,6 +191,9 @@ extern s32 targetCursorShiftRot;
+@@ -190,6 +192,9 @@ extern s32 targetCursorShiftRot;
  static s32 quickChangeLockOn = -1;
  static s32 quickChangeShiftNo;
  static s32 quickChangeShiftRot;
@@ -2026,7 +2157,7 @@ index 8ec72e26..56e6b245 100644
  extern s32 tryalExit;
  extern sceVu0FVECTOR velo2;
  extern sceVu0FVECTOR veloOld;
-@@ -226,11 +230,24 @@ void DeleteItemModel(int slot) {
+@@ -226,11 +231,24 @@ void DeleteItemModel(int slot) {
  
  } // namespace
  
@@ -2051,7 +2182,39 @@ index 8ec72e26..56e6b245 100644
      float                move_z;
      float                move_x;
      float                ly;
-@@ -1003,7 +1020,8 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -350,6 +368,8 @@ PORT_OVERRIDE void DunMoveChara() {
+                         run_speed = 1.45f;
+                     }
+ 
++                    run_speed *= moonmod::ChroniclePlayerTuningGet().run_speed; // MoonMod player.tuning_set
++
+                     velo__2[0] = move_x * run_speed;
+                     velo__2[2] = move_z * run_speed;
+                 }
+@@ -372,6 +392,11 @@ PORT_OVERRIDE void DunMoveChara() {
+                     UserStatus->water_drain_disable = 0;
+                 }
+ 
++                // A mod asked for the menu (a hotkey): open it as Triangle would, once no action is running.
++                const bool menu_requested = moonmod::PeekManagerMenuOpenRequest() && BtActStatus.action_on == 0;
++                if (menu_requested) {
++                    moonmod::TakeManagerMenuOpenRequest();
++                }
+                 if (UserStatus->overflow_flag != 0) {
+                     UserStatus->overflow_flag = false;
+                     gameTask = GAME_TASK_MENU_OPEN;
+@@ -381,8 +406,8 @@ PORT_OVERRIDE void DunMoveChara() {
+                     iventInfo = DNG_EVENT_NONE;
+                     rogoSwitch2 = 0;
+                     SndSePlay(MENU_SOUND_CONFIRM, -1, 0);
+-                } else if (GamePad.Down(PAD_TRIANGLE) != 0) {
+-                    int ok = 0;
++                } else if (GamePad.Down(PAD_TRIANGLE) != 0 || menu_requested) {
++                    int ok = menu_requested ? 1 : 0;
+ 
+                     if (move_x == 0.0f && move_z == 0.0f && BtActStatus.action_on == 0) {
+                         ok = 1;
+@@ -1003,7 +1028,8 @@ PORT_OVERRIDE void DunMoveChara() {
                                              }
                                              BtBySpeedFlag = 0;
  
@@ -2061,7 +2224,7 @@ index 8ec72e26..56e6b245 100644
                                                  if (DebugStatus[5] == 0) {
                                                      BtBySpeedFlag = 1;
                                                  }
-@@ -1033,7 +1051,11 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1033,7 +1059,11 @@ PORT_OVERRIDE void DunMoveChara() {
                                                  }
                                              }
  
@@ -2074,7 +2237,7 @@ index 8ec72e26..56e6b245 100644
                                                  int  used;
                                                  s16 *slots = UserStatus->active_item;
  
-@@ -1332,7 +1354,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1332,7 +1362,7 @@ PORT_OVERRIDE void DunMoveChara() {
                                                                      }
                                                                  }
  
@@ -2083,7 +2246,7 @@ index 8ec72e26..56e6b245 100644
                                                                      if (NowDngMap->boxes[entry_no].used != 0) {
                                                                          collision = NowDngMap->box_collision_model;
  
-@@ -1396,24 +1418,24 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1396,24 +1426,24 @@ PORT_OVERRIDE void DunMoveChara() {
                                                                  bound.min[2] = pos[2] - 20.0f;
                                                                  colPolyNum = 0;
  
@@ -2113,7 +2276,7 @@ index 8ec72e26..56e6b245 100644
                                                                              int base = parts_no == -1 ? 0 : NowDngMap->parts[parts_no].collision_turn;
  
                                                                              turn = dir;
-@@ -1437,7 +1459,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1437,7 +1467,7 @@ PORT_OVERRIDE void DunMoveChara() {
                                                                      }
                                                                  }
  
@@ -2122,7 +2285,7 @@ index 8ec72e26..56e6b245 100644
                                                                      if (NowDngMap->boxes[i].used != 0) {
                                                                          collision = NowDngMap->box_collision_model;
  
-@@ -1612,7 +1634,9 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1612,7 +1642,9 @@ PORT_OVERRIDE void DunMoveChara() {
                                                                  NowCamera__3->SetAngle(atan2f(look[2][0], look[2][2]) - PI_D);
                                                              }
  
@@ -2133,7 +2296,7 @@ index 8ec72e26..56e6b245 100644
                                                                  oldCameraAngle = NowCamera__3->GetAngle();
                                                                  oldCameraHeight = NowCamera__3->GetHeight();
                                                                  NowCamera__3->FollowOff();
-@@ -1645,6 +1669,36 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1645,6 +1677,36 @@ PORT_OVERRIDE void DunMoveChara() {
                                                                  }
  
                                                                  CharaFrame->SetPosition(pos[0], pos[1], pos[2]);
@@ -2170,7 +2333,7 @@ index 8ec72e26..56e6b245 100644
                                                                  sceVu0CopyVector(follow, pos);
                                                                  follow[0] += 7.0f * ref_off[0];
                                                                  follow[1] += BtActStatus.camera_shake_offset + (6.0f + (2.0f * ref_off[1] + reference[1]));
-@@ -1817,13 +1871,31 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1817,13 +1879,31 @@ PORT_OVERRIDE void DunMoveChara() {
                      break;
                  case BT_REQUEST_ENTRANCE_WINDOW:
                      BtEventInfo.request = BT_REQUEST_NONE;
@@ -2205,7 +2368,7 @@ index 8ec72e26..56e6b245 100644
                      break;
                  case BT_REQUEST_GO_DUNGEON:
                      BtEventInfo.request = BT_REQUEST_NONE;
-@@ -1887,7 +1959,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1887,7 +1967,7 @@ PORT_OVERRIDE void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -2214,7 +2377,7 @@ index 8ec72e26..56e6b245 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1909,7 +1981,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1909,7 +1989,7 @@ PORT_OVERRIDE void DunMoveChara() {
                  unit_now->model_count = 0;
                  unit_now->current_monster = 0;
  
@@ -2223,7 +2386,7 @@ index 8ec72e26..56e6b245 100644
                      unit_now->script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -1934,7 +2006,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -1934,7 +2014,7 @@ PORT_OVERRIDE void DunMoveChara() {
                  MainMonstorUnit.model_count = 0;
                  MainMonstorUnit.current_monster = 0;
  
@@ -2232,7 +2395,7 @@ index 8ec72e26..56e6b245 100644
                      MainMonstorUnit.script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -2068,7 +2140,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -2068,7 +2148,7 @@ PORT_OVERRIDE void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -2241,7 +2404,7 @@ index 8ec72e26..56e6b245 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -2088,7 +2160,7 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -2088,7 +2168,7 @@ PORT_OVERRIDE void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -2250,7 +2413,21 @@ index 8ec72e26..56e6b245 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -2479,7 +2551,9 @@ PORT_OVERRIDE void DunMoveChara() {
+@@ -2361,7 +2441,12 @@ PORT_OVERRIDE void DunMoveChara() {
+ 
+                 SetBattleStyle(selectMapNo, 0);
+ 
+-                if (GamePad.Down(PAD_TRIANGLE) != 0) {
++                // A mod asked for the menu (a hotkey): open it as Triangle would, once no action is running.
++                const bool eye_menu_requested = moonmod::PeekManagerMenuOpenRequest() && BtActStatus.action_on == 0;
++                if (eye_menu_requested) {
++                    moonmod::TakeManagerMenuOpenRequest();
++                }
++                if (GamePad.Down(PAD_TRIANGLE) != 0 || eye_menu_requested) {
+                     int ok = 1;
+ 
+                     if (BtActStatus.action_on != 0) {
+@@ -2479,7 +2564,9 @@ PORT_OVERRIDE void DunMoveChara() {
                          leaving = 1;
                      }
  
@@ -2261,8 +2438,51 @@ index 8ec72e26..56e6b245 100644
                          sceVu0FVECTOR chara_rot;
  
                          CharaMainHandViewFlag = 0;
+@@ -3031,6 +3118,25 @@ static void HitBlowVelocity(int hit_no, float *velocity) {
+     velocity[2] = away_z / length;
+ }
+ 
++// MoonMod player.tuning_set: scale the recoil a hit just set and keep invincibility past it.
++static void MoonModTuneHitFrames() {
++    const moonmod::ChroniclePlayerTuning &tuning = moonmod::ChroniclePlayerTuningGet();
++
++    if (tuning.recoil_scale != 1.0f && BtActStatus.recoil_frames > 0) {
++        int scaled = (int) std::lround((float) BtActStatus.recoil_frames * tuning.recoil_scale);
++
++        BtActStatus.recoil_frames = scaled < 1 ? 1 : scaled;
++    }
++
++    if (tuning.invincible_bonus_frames > 0) {
++        int until = BtActStatus.recoil_frames + tuning.invincible_bonus_frames;
++
++        if (BtActStatus.invincible_frames < until) {
++            BtActStatus.invincible_frames = until;
++        }
++    }
++}
++
+ PORT_OVERRIDE int BtCheckDamageProc() {
+     sceVu0FVECTOR pos;
+     sceVu0FVECTOR from;
+@@ -3297,6 +3403,7 @@ PORT_OVERRIDE int BtCheckDamageProc() {
+                     driveNoInterpolate = 1;
+                     lockOnTargetFlag = 0;
+                     BtActStatus.recoil_frames = 0xA0;
++                    MoonModTuneHitFrames();
+                 }
+             }
+ 
+@@ -3386,6 +3493,8 @@ PORT_OVERRIDE int BtCheckDamageProc() {
+                     } else {
+                         setUnitAmbientAnime(80.0f, 1.0f, 255.0f, 0.0f, 0.0f);
+                     }
++
++                    MoonModTuneHitFrames();
+                 }
+             }
+         }
 diff --git a/port/src/dungeonmap.cpp b/port/src/dungeonmap.cpp
-index 56c0f07e..f33ec3b2 100644
+index 56c0f07e..cd41aac4 100644
 --- a/port/src/dungeonmap.cpp
 +++ b/port/src/dungeonmap.cpp
 @@ -6,6 +6,8 @@
@@ -2563,7 +2783,7 @@ index 56c0f07e..f33ec3b2 100644
              this->cells[cell_no].camera_dist = dist;
  
              if (this->cells[cell_no].parts_no == MAP_PARTS_NONE) {
-@@ -609,3 +672,410 @@ PORT_OVERRIDE void CDungeonMap::DrawAtraBoll(float *pos) {
+@@ -609,3 +672,419 @@ PORT_OVERRIDE void CDungeonMap::DrawAtraBoll(float *pos) {
          }
      }
  }
@@ -2828,6 +3048,15 @@ index 56c0f07e..f33ec3b2 100644
 +
 +    if (DebugStatus[3] != 0) {
 +        BtEquipMap = 1;
++        BtEquipMasuisyou = 1;
++    }
++
++    // MoonMod player.tuning_set: map_reveal and monster_reveal act as the Map and the Magical Crystal.
++    if (moonmod::ChroniclePlayerMapReveal()) {
++        BtEquipMap = 1;
++    }
++
++    if (moonmod::ChroniclePlayerMonsterReveal()) {
 +        BtEquipMasuisyou = 1;
 +    }
 +
@@ -4133,6 +4362,474 @@ index cc341f43..ca9f1013 100644
 +    labels[5].Set("DUNGEON+ TIER "+std::to_string(tier)+"   {square}/{triangle} TIER"); labels[5].Draw(110,52);
 +}
 +}
+diff --git a/port/src/menu_journal_character.cpp b/port/src/menu_journal_character.cpp
+new file mode 100644
+index 00000000..9a9ef6c8
+--- /dev/null
++++ b/port/src/menu_journal_character.cpp
+@@ -0,0 +1,307 @@
++#include "menu_journal_character.hpp"
++
++#include <algorithm>
++#include <cctype>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "gamepad.hpp"
++#include "localize.hpp"
++#include "menu_draw.hpp"
++#include "menuetc.hpp"
++#include "moonmod/manager_ui.hpp"
++#include "snd.hpp"
++#include "ui_framework.hpp"
++
++#define PAD_GLYPH_UP     "{up}"
++#define PAD_GLYPH_DOWN   "{down}"
++#define PAD_GLYPH_LEFT   "{left}"
++#define PAD_GLYPH_RIGHT  "{right}"
++#define PAD_GLYPH_CROSS  "{cross}"
++#define PAD_GLYPH_CIRCLE "{circle}"
++
++namespace JournalCharacter {
++
++namespace {
++
++constexpr int   kRowStartY   = 156;
++constexpr int   kRowSpacing  = 25;
++constexpr int   kVisibleRows = 6;
++constexpr int   kLeftPaneX   = 92;
++constexpr int   kDividerX    = 258;
++constexpr int   kRightPaneX  = 274;
++constexpr int   kRightPaneW  = 268;
++constexpr int   kNodeX       = kRightPaneX + 40; // room for the hand between the divider and the titles
++constexpr int   kCursorX     = kRightPaneX - 4;  // the hand sits right of the divider, clear of the status text
++constexpr int   kCountX      = 458;
++constexpr int   kScrollX     = 554;
++constexpr int   kDescLines   = 2;
++constexpr float kHeaderScale = 0.92f;
++constexpr float kBodyScale   = 0.84f;
++constexpr float kSmallScale  = 0.76f;
++
++struct Tree {
++    std::string                id;
++    std::string                title;
++    std::vector<moonmod::Json> nodes;
++};
++
++int           s_tree    = 0;
++int           s_node    = 0;
++int           s_first   = 0;
++bool          s_pending = false;
++UI::Cursor    s_cursor;
++UI::Brackets  s_brackets;
++UI::ScrollBar s_scrollbar;
++
++// The sheet's skill nodes grouped by tree, in the order the mod registered them.
++std::vector<Tree> Trees(const moonmod::CharacterSheet &sheet) {
++    std::vector<Tree> trees;
++    const moonmod::ApiCallResult listed = moonmod::ManagerSkills(sheet.owner_id);
++    if (listed.status != moonmod::ApiCallStatus::Ok || !listed.value.is_object() ||
++        !listed.value.contains("skills") || !listed.value["skills"].is_array()) {
++        return trees;
++    }
++    for (const moonmod::Json &node : listed.value["skills"]) {
++        const std::string tree_id = node.value("tree_id", std::string{});
++        auto tree = std::ranges::find(trees, tree_id, &Tree::id);
++        if (tree == trees.end()) {
++            trees.push_back({tree_id, node.value("tree_title", std::string{}), {}});
++            tree = trees.end() - 1;
++        }
++        tree->nodes.push_back(node);
++    }
++    // The sheet's own order first; trees it does not name keep the runtime's order after them.
++    std::vector<Tree> ordered;
++    for (const std::string &wanted : sheet.trees) {
++        auto tree = std::ranges::find(trees, wanted, &Tree::id);
++        if (tree != trees.end()) {
++            ordered.push_back(std::move(*tree));
++            trees.erase(tree);
++        }
++    }
++    for (Tree &rest : trees) ordered.push_back(std::move(rest));
++    return ordered;
++}
++
++void Clamp(const std::vector<Tree> &trees) {
++    if (trees.empty()) {
++        s_tree = s_node = s_first = 0;
++        return;
++    }
++    s_tree = std::clamp(s_tree, 0, static_cast<int>(trees.size()) - 1);
++    const int count = static_cast<int>(trees[static_cast<std::size_t>(s_tree)].nodes.size());
++    s_node = count > 0 ? std::clamp(s_node, 0, count - 1) : 0;
++    if (s_node < s_first) s_first = s_node;
++    if (s_node >= s_first + kVisibleRows) s_first = s_node - kVisibleRows + 1;
++    s_first = std::max(0, std::min(s_first, std::max(0, count - kVisibleRows)));
++}
++
++// "Needs Keen Edge 2" from the first unmet prerequisite, named by that node's own title.
++std::string Prerequisites(const moonmod::Json &node, const std::vector<Tree> &trees) {
++    if (!node.contains("prerequisites") || !node["prerequisites"].is_array()) return {};
++    for (const moonmod::Json &requirement : node["prerequisites"]) {
++        if (requirement.value("met", true)) continue;
++        const std::string id = requirement.value("id", std::string{});
++        std::string       name;
++        for (const Tree &tree : trees) {
++            for (const moonmod::Json &other : tree.nodes) {
++                if (other.value("id", std::string{}) == id) name = other.value("title", std::string{});
++            }
++        }
++        if (name.empty()) {
++            name = id;
++            const auto dot = name.rfind('.');
++            if (dot != std::string::npos) name.erase(0, dot + 1);
++            std::ranges::replace(name, '_', ' ');
++            if (!name.empty()) name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
++        }
++        return LocalizeFormat(LocalizeText("character.needs", "Needs %1 %2"),
++                              {name, std::to_string(requirement.value("required_rank", 1))});
++    }
++    return {};
++}
++
++} // namespace
++
++bool Available() { return moonmod::ActiveCharacterSheet() != nullptr; }
++
++void Open() {
++    s_tree = s_node = s_first = 0;
++    s_cursor.SnapTo(static_cast<float>(kCursorX), static_cast<float>(kRowStartY - 2));
++}
++
++void RequestPendingOpen() { s_pending = true; }
++
++bool TakePendingOpen() {
++    const bool pending = s_pending;
++    s_pending = false;
++    return pending;
++}
++
++bool HandleKey() {
++    if (GamePad.Down(PAD_CIRCLE)) {
++        ComMenuSePlay(MENU_SOUND_REFUSE);
++        return true;
++    }
++    const moonmod::CharacterSheet *sheet = moonmod::ActiveCharacterSheet();
++    if (sheet == nullptr) return true;
++    const std::vector<Tree> trees = Trees(*sheet);
++    Clamp(trees);
++    if (trees.empty()) return false;
++
++    const int tree_count = static_cast<int>(trees.size());
++    const int count = static_cast<int>(trees[static_cast<std::size_t>(s_tree)].nodes.size());
++    bool      moved = false;
++    if (GamePad.Down(PAD_UP) && count > 0) {
++        s_node = (s_node + count - 1) % count;
++        moved  = true;
++    }
++    if (GamePad.Down(PAD_DOWN) && count > 0) {
++        s_node = (s_node + 1) % count;
++        moved  = true;
++    }
++    if (GamePad.Down(PAD_LEFT | PAD_L1)) {
++        s_tree = (s_tree + tree_count - 1) % tree_count;
++        s_node = s_first = 0;
++        moved = true;
++    }
++    if (GamePad.Down(PAD_RIGHT | PAD_R1)) {
++        s_tree = (s_tree + 1) % tree_count;
++        s_node = s_first = 0;
++        moved = true;
++    }
++    if (moved) ComMenuSePlay(MENU_SOUND_CURSOR);
++    Clamp(trees);
++    s_scrollbar.Update(moved);
++
++    if (GamePad.Down(PAD_CROSS) && count > 0) {
++        const moonmod::Json &node = trees[static_cast<std::size_t>(s_tree)].nodes[static_cast<std::size_t>(s_node)];
++        if (moonmod::RequestSkillTraining(sheet->owner_id, node.value("id", std::string{}))) {
++            ComMenuSePlay(MENU_SOUND_CONFIRM);
++        } else {
++            ComMenuSePlay(MENU_SOUND_REFUSE);
++        }
++    }
++    return false;
++}
++
++void Draw() {
++    const moonmod::CharacterSheet *sheet = moonmod::ActiveCharacterSheet();
++    if (sheet == nullptr) return;
++    const std::vector<Tree> trees = Trees(*sheet);
++    Clamp(trees);
++
++    // 1. Paper window and its banner, as the Chest Tracker has them.
++    UI::TrackerWindow::DrawPaper(64, 91, 512, 262, 0x80);
++    UI::TrackerWindow::DrawStoneBanner(UI::Rect(150, 74, 340, 28), 0x80, 0x80,
++                                       LocalizeFormat(LocalizeText("character.title", "JOURNAL: %1"), {sheet->title}));
++    UI::Divider::DrawVertical(kDividerX, 132, 338, 0x80);
++    UI::Divider::DrawHorizontal(84, kDividerX - 10, 285, 0x80);
++    UI::Divider::DrawHorizontal(kRightPaneX, 542, 306, 0x80);
++    MenuTextureReload(0x1A);
++
++    // 2. Left pane: the sheet's lines, its hint, and its progress bar.
++    UI::Label(LocalizeText("character.status", "STATUS"), UI::ColorYellow, UI::Alignment::Left, true, kHeaderScale)
++        .Draw(kLeftPaneX, 132, 0x80);
++    int y = kRowStartY;
++    for (const std::string &line : sheet->lines) {
++        UI::Label(line, UI::ColorWhite, UI::Alignment::Left, true, kBodyScale).Draw(kLeftPaneX, y, 0x80);
++        y += 22;
++    }
++    if (!sheet->hint.empty()) {
++        UI::Label(sheet->hint, UI::ColorGold, UI::Alignment::Left, true, kSmallScale)
++            .DrawWrapped(kLeftPaneX, 288, 156, 15, 0x80);
++    }
++    if (sheet->progress >= 0.0) {
++        UI::ProgressBarStyle bar_style{};
++        bar_style.text_scale = kSmallScale;
++        UI::ProgressBar::Draw(UI::Rect(kLeftPaneX, 325, 156, 20), static_cast<float>(sheet->progress),
++                              sheet->progress_label, bar_style, 0x80);
++    }
++
++    // 3. Right pane: the selected tree's name with arrows, then its nodes.
++    const int         tree_count = static_cast<int>(trees.size());
++    const std::string tree_title = tree_count > 0 ? trees[static_cast<std::size_t>(s_tree)].title
++                                                  : LocalizeText("character.no_skills", "No skills yet");
++    const std::string heading =
++        tree_count > 1 ? LocalizeFormat(LocalizeText("character.tree", "< %1 >"), {tree_title}) : tree_title;
++    UI::Label(heading, UI::ColorYellow, UI::Alignment::Center, true, kHeaderScale)
++        .Draw(kRightPaneX + kRightPaneW / 2, 132, 0x80);
++
++    const int count = tree_count > 0 ? static_cast<int>(trees[static_cast<std::size_t>(s_tree)].nodes.size()) : 0;
++    for (int row = 0; row < kVisibleRows && s_first + row < count; ++row) {
++        const int            index    = s_first + row;
++        const moonmod::Json &node     = trees[static_cast<std::size_t>(s_tree)].nodes[static_cast<std::size_t>(index)];
++        const int            row_y    = kRowStartY + row * kRowSpacing;
++        const bool           selected = index == s_node;
++        const int            rank     = node.value("rank", 0);
++        const int            max_rank = node.value("max_rank", 1);
++        const bool           open     = node.value("prerequisites_met", true);
++        const u32            color    = selected ? UI::ColorYellow : UI::ColorWhite;
++        const int            alpha    = selected ? 0x80 : (open ? 0x70 : 0x48);
++        UI::Label(node.value("title", std::string{}), color, UI::Alignment::Left, true, kBodyScale)
++            .Draw(kNodeX, row_y, alpha);
++        UI::DrawCounter(kCountX, row_y, rank, max_rank, kBodyScale, alpha);
++    }
++    if (count > kVisibleRows) {
++        s_scrollbar.Draw(kScrollX, kRowStartY, kVisibleRows * kRowSpacing - 3, count, kVisibleRows, s_first, 0x80);
++    }
++
++    // 4. The selected node's description under the list, with the prerequisite it still needs.
++    if (count > 0) {
++        const moonmod::Json &node = trees[static_cast<std::size_t>(s_tree)].nodes[static_cast<std::size_t>(s_node)];
++        std::string          description = node.value("description", std::string{});
++        const std::string    needs       = Prerequisites(node, trees);
++        if (!needs.empty()) description += (description.empty() ? "" : "  ") + needs;
++        // At most two lines fit between the list and the window's edge; a longer text ends in "...".
++        std::vector<std::string> wrapped = UI::WrapText(description, kRightPaneW, kSmallScale);
++        if (static_cast<int>(wrapped.size()) > kDescLines) {
++            wrapped.resize(static_cast<std::size_t>(kDescLines));
++            wrapped.back() += "...";
++        }
++        for (std::size_t line = 0; line < wrapped.size(); ++line) {
++            UI::Label(wrapped[line], needs.empty() ? UI::ColorWhite : UI::ColorGold, UI::Alignment::Left, true, kSmallScale)
++                .Draw(kRightPaneX, 312 + static_cast<int>(line) * 16, 0x80);
++        }
++    }
++
++    // 5. The mod's latest notice (training results), the controls bar, and the cursor.
++    MenuTextureReload(0x1A);
++    const moonmod::ManagerUiState &state = moonmod::ManagerState();
++    if (state.notice_frames > 0 && !state.notice.empty()) {
++        UI::Label(state.notice, UI::ColorGold, UI::Alignment::Center, true, kSmallScale).Draw(320, 372, 0x80);
++    }
++    const std::string controls = LocalizeText(
++        "character.controls",
++        PAD_GLYPH_UP " / " PAD_GLYPH_DOWN " Select   "
++        PAD_GLYPH_LEFT " / " PAD_GLYPH_RIGHT " Path   "
++        PAD_GLYPH_CROSS " Train   "
++        PAD_GLYPH_CIRCLE " Return");
++    UI::Label(controls, UI::ColorWhite, UI::Alignment::Center).Draw(320, 418, 0x80);
++
++    if (count > 0) {
++        const int sel_y = kRowStartY + (s_node - s_first) * kRowSpacing;
++        s_brackets.Draw(UI::Rect(kNodeX - 2, sel_y - 1, kRightPaneW - 26, 22), 0x80);
++        s_cursor.SetTarget(static_cast<float>(kCursorX), static_cast<float>(sel_y - 2));
++        s_cursor.Draw(0x80);
++    }
++}
++
++void AppendStrings(std::vector<std::pair<std::string, std::string>> &out) {
++    const std::pair<const char *, const char *> kEntries[] = {
++        {"character.title",     "JOURNAL: %1"},
++        {"character.status",    "STATUS"},
++        {"character.tree",      "< %1 >"},
++        {"character.no_skills", "No skills yet"},
++        {"character.needs",     "Needs %1 %2"},
++        {"character.controls",  PAD_GLYPH_UP " / " PAD_GLYPH_DOWN " Select   "
++                                PAD_GLYPH_LEFT " / " PAD_GLYPH_RIGHT " Path   "
++                                PAD_GLYPH_CROSS " Train   "
++                                PAD_GLYPH_CIRCLE " Return"},
++    };
++    for (const auto &[key, value] : kEntries) out.emplace_back(key, value);
++}
++
++} // namespace JournalCharacter
+diff --git a/port/src/menu_journal_character.hpp b/port/src/menu_journal_character.hpp
+new file mode 100644
+index 00000000..c48e531b
+--- /dev/null
++++ b/port/src/menu_journal_character.hpp
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include <string>
++#include <utility>
++#include <vector>
++
++// The Journal's Character page: a mod's character sheet (moonmod::CharacterSheet) beside its skill
++// tree, drawn with the UI framework like the Chest Tracker. Cross asks the mod to train the selected
++// node; the mod answers with its own notices.
++namespace JournalCharacter {
++
++/// Whether a loaded mod has set a character sheet, so the Journal lists the page.
++bool Available();
++
++/// Resets the selection and snaps the cursor when the page opens from the Journal menu.
++void Open();
++
++/// Asks the Journal to open straight on this page once its menu has loaded (a mod's hotkey).
++void RequestPendingOpen();
++
++/// True once after RequestPendingOpen; the Journal menu consumes it when it reaches its category list.
++bool TakePendingOpen();
++
++/// Handles the pad while the page is active. Returns true when the player went back to the Journal menu.
++bool HandleKey();
++
++/// Draws the page.
++void Draw();
++
++/// Appends the page's localization keys and default English strings to `out`.
++void AppendStrings(std::vector<std::pair<std::string, std::string>> &out);
++
++} // namespace JournalCharacter
+diff --git a/port/src/menu_manual.cpp b/port/src/menu_manual.cpp
+index d63f7c2c..87bf9cac 100644
+--- a/port/src/menu_manual.cpp
++++ b/port/src/menu_manual.cpp
+@@ -22,6 +22,7 @@
+ #include "localize.hpp"
+ #include "memcard.hpp"
+ #include "menu_draw.hpp"
++#include "menu_journal_character.hpp"
+ #include "menu_journal_chest.hpp"
+ #include "menuetc.hpp"
+ #include "mglib.hpp"
+@@ -32,7 +33,8 @@
+ #include "ui_framework.hpp"
+ #include "userstatus.hpp"
+ 
+-#define MANUAL_MODE_TRACKER 100
++#define MANUAL_MODE_TRACKER   100
++#define MANUAL_MODE_CHARACTER 101
+ 
+ extern int       SetManualMsgBuffer();
+ extern void      ExitManualMenu();
+@@ -117,18 +119,21 @@ void DrawCategoryMenu() {
+     const int     alpha   = (ManualMenu.selection_level == -1) ? 0x40 : 0x80;
+     constexpr int spacing = 28;
+ 
+-    UI::TrackerWindow::Draw(135, 85, 220, 170, alpha, UI::BLUE_STONE_MENU);
++    const bool character = JournalCharacter::Available();
++    const int  count     = character ? 6 : 5;
++    UI::TrackerWindow::Draw(135, 85, 220, character ? 198 : 170, alpha, UI::BLUE_STONE_MENU);
+     MenuTextureReload(0x1A);
+ 
+-    const std::string categories[5] = {
++    const std::string categories[6] = {
+         LocalizeText("manual.category.georama",        "Georama"),
+         LocalizeText("manual.category.dungeon",        "Dungeon"),
+         LocalizeText("manual.category.weapon",         "Weapon"),
+         LocalizeText("manual.category.savings",        "Savings/Other"),
+-        LocalizeText("manual.category.miracle_chests", "Miracle Chests")
++        LocalizeText("manual.category.miracle_chests", "Miracle Chests"),
++        LocalizeText("manual.category.character",      "Character")
+     };
+ 
+-    for (int i = 0; i < 5; i++) {
++    for (int i = 0; i < count; i++) {
+         const u32 color = (i == ManualMenu.category && ManualMenu.selection_level == -2)
+                           ? UI::ColorYellow
+                           : UI::ColorWhite;
+@@ -160,6 +165,12 @@ PORT_OVERRIDE int MenuManualKey() {
+                 char*       target_buffer = reinterpret_cast<char*>(ManualMenu.common_message_buffer) + 0x48;
+                 std::strcpy(target_buffer, new_list);
+                 ManualMenu.mode = MANUAL_MODE_SELECT;
++                if (JournalCharacter::TakePendingOpen() && JournalCharacter::Available()) {
++                    ManualMenu.selection_level = -2;
++                    ManualMenu.category        = 5;
++                    ManualMenu.mode            = MANUAL_MODE_CHARACTER;
++                    JournalCharacter::Open();
++                }
+             }
+             break;
+ 
+@@ -176,7 +187,7 @@ PORT_OVERRIDE int MenuManualKey() {
+             int *selection = nullptr;
+ 
+             if (ManualMenu.selection_level == -2) {
+-                maximum   = 4;
++                maximum   = JournalCharacter::Available() ? 5 : 4;
+                 selection = &ManualMenu.category;
+             } else if (ManualMenu.selection_level == -1) {
+                 constexpr int kEntryMax[] = {4, 4, 3, 2};
+@@ -219,6 +230,9 @@ PORT_OVERRIDE int MenuManualKey() {
+                     if (ManualMenu.category == 4) {
+                         ManualMenu.mode = MANUAL_MODE_TRACKER;
+                         JournalChest::Open();
++                    } else if (ManualMenu.category == 5) {
++                        ManualMenu.mode = MANUAL_MODE_CHARACTER;
++                        JournalCharacter::Open();
+                     } else {
+                         ManualMenu.selection_level++;
+                         CommonMenuMes3.cursor_row = 0;
+@@ -252,6 +266,13 @@ PORT_OVERRIDE int MenuManualKey() {
+             }
+             break;
+ 
++        case MANUAL_MODE_CHARACTER:
++            if (JournalCharacter::HandleKey()) {
++                ManualMenu.mode = MANUAL_MODE_SELECT;
++                if (ManualMenu.category > 4 && !JournalCharacter::Available()) ManualMenu.category = 0;
++            }
++            break;
++
+         case MANUAL_MODE_READING:
+             CommonMenuMes3.cursor_row = -1;
+             ManualMsg->cursor_row     = -1;
+@@ -320,6 +341,10 @@ PORT_OVERRIDE void MenuManualDraw() {
+         JournalChest::Draw();
+         return;
+     }
++    if (ManualMenu.mode == MANUAL_MODE_CHARACTER) {
++        JournalCharacter::Draw();
++        return;
++    }
+ 
+     if (ManualMenu.mode >= MANUAL_MODE_OPENING && ManualMenu.mode < MANUAL_MODE_COUNT && ManualMenu.images_ready != 0) {
+         MenuTextureReload(ManualMenu.image_texture_block);
+@@ -373,7 +398,9 @@ std::vector<std::pair<std::string, std::string>> UI::JournalStrings() {
+         {"manual.category.weapon",         "Weapon"        },
+         {"manual.category.savings",        "Savings/Other" },
+         {"manual.category.miracle_chests", "Miracle Chests"},
++        {"manual.category.character",      "Character"     },
+     };
+     JournalChest::AppendStrings(out);
++    JournalCharacter::AppendStrings(out);
+     return out;
+ }
+\ No newline at end of file
 diff --git a/port/src/menu_misc.cpp b/port/src/menu_misc.cpp
 index f5e2c440..d7431577 100644
 --- a/port/src/menu_misc.cpp
@@ -5628,10 +6325,10 @@ index 5e4e17ed..4f573899 100644
          if (drawn && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..d9fb1a59
+index 00000000..412b9780
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,483 @@
+@@ -0,0 +1,493 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5655,6 +6352,9 @@ index 00000000..d9fb1a59
 +    {"player.status_remove", "player", "status_remove", "simulation", "game.write", "Remove a mod-owned or supported status effect."},
 +    {"player.thirst_get", "player", "thirst_get", "any", "game.read", "Read the active character's water gauge, capacity, and native thirst drain rate in Chronicle."},
 +    {"player.thirst_set", "player", "thirst_set", "simulation", "game.write", "Set or restore the active or named character's water gauge with native cap clamping in Chronicle."},
++    {"player.tuning_set", "player", "tuning_set", "simulation", "game.write", "Set this mod's Chronicle player tuning: run speed, swing recovery speed, hit invincibility and recoil, gauge refill, thirst drain, weapon wear, map and monster reveal; restored when the mod unloads."},
++    {"player.tuning_clear", "player", "tuning_clear", "simulation", "game.write", "Take back this mod's Chronicle player tuning."},
++    {"player.invincible", "player", "invincible", "simulation", "game.write", "Give the active Chronicle player one-shot invincibility frames in a dungeon."},
 +    {"player.ridepod_get", "player", "ridepod_get", "any", "game.read", "Read the ridepod's energy, core capacity, defence, voice state, and fitted parts in Chronicle Two."},
 +    {"player.ridepod_set", "player", "ridepod_set", "simulation", "game.write", "Adjust the ridepod's energy, capacity, shield kits, voice state, or fitted parts in Chronicle Two."},
 +    {"player.transform_get", "player", "transform_get", "any", "game.read", "Read Monica's monster badge levels, experience, unlock state, and active form in Chronicle Two."},
@@ -5843,6 +6543,9 @@ index 00000000..d9fb1a59
 +    {"ui.remove", "ui", "remove", "content", "content.register", "Remove an owned MoonFactory manager button."},
 +    {"ui.navigate", "ui", "navigate", "content", "content.register", "Open a loaded package and one of its tabs in the MoonFactory manager."},
 +    {"ui.notify", "ui", "notify", "any", "game.write", "Show a bounded notice in the mod manager."},
++    {"ui.sheet_set", "ui", "sheet_set", "any", "game.write", "Set this mod's character sheet: the header of the Journal's Character page beside its skill tree."},
++    {"ui.sheet_clear", "ui", "sheet_clear", "any", "game.write", "Take back this mod's character sheet."},
++    {"ui.sheet_open", "ui", "sheet_open", "any", "game.write", "Open the Journal's Character page during play."},
 +    {"physics.query", "physics", "query", "simulation", "game.read", "Find live monster actor origins inside a sphere; this does not test collision geometry."},
 +    {"physics.velocity_get", "physics", "velocity_get", "simulation", "game.read", "Read velocity from a stable entity handle."},
 +    {"physics.velocity_set", "physics", "velocity_set", "simulation", "game.write", "Set velocity through the simulation adapter."},
@@ -5944,7 +6647,8 @@ index 00000000..d9fb1a59
 +           path == "localization.register" || path == "localization.get" || path == "resources.load" ||
 +           path == "resources.resolve" || path == "resources.release" || path == "resources.override" ||
 +           path == "resources.unoverride" || path == "ui.register" ||
-+           path == "ui.open_skills" || path == "ui.remove" || path == "ui.navigate" || path == "ui.notify" || path == "commands.register" ||
++           path == "ui.open_skills" || path == "ui.remove" || path == "ui.navigate" || path == "ui.notify" ||
++           path == "ui.sheet_set" || path == "ui.sheet_clear" || path == "ui.sheet_open" || path == "commands.register" ||
 +           path == "commands.execute" || path == "commands.unregister" ||
 +           path == "scripts.register_function" || path == "scripts.list_functions" || path == "scripts.call_function" ||
 +           path == "scripts.unregister_function" || path == "scripts.list_hooks" || path == "scripts.call" ||
@@ -5974,6 +6678,9 @@ index 00000000..d9fb1a59
 +            }
 +        } else if (operation.operation == "thirst_get" || operation.operation == "thirst_set") {
 +            return "Chronicle Two has no per-character water gauge; its thirst ailment is exposed through player.status_add/remove.";
++        } else if (operation.operation == "tuning_set" || operation.operation == "tuning_clear" ||
++                   operation.operation == "invincible") {
++            return "Chronicle Two has no player tuning or invincibility binding yet; these operations are bound only in Chronicle.";
 +        }
 +    }
 +    if (operation.domain == "locations") {
@@ -6651,10 +7358,10 @@ index 00000000..f92408e6
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..665b9d2f
+index 00000000..4d342bbd
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9500 @@
+@@ -0,0 +1,9639 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
@@ -6759,6 +7466,28 @@ index 00000000..665b9d2f
 +std::map<std::string, std::array<int, 4>> g_floor_modifiers;
 +std::vector<std::pair<std::string, std::array<double, 4>>> g_population_requests;
 +std::vector<std::pair<std::string, std::array<float, 2>>> g_town_camera_requests;
++std::vector<std::pair<std::string, ChroniclePlayerTuning>> g_player_tuning_requests;
++ChroniclePlayerTuning g_player_tuning;
++void RefreshPlayerTuning() {
++    ChroniclePlayerTuning combined;
++    for (const auto &[owner, tuning] : g_player_tuning_requests) {
++        combined.run_speed *= tuning.run_speed;
++        combined.attack_anim_speed *= tuning.attack_anim_speed;
++        combined.invincible_bonus_frames = std::min(120, combined.invincible_bonus_frames + tuning.invincible_bonus_frames);
++        combined.recoil_scale *= tuning.recoil_scale;
++        combined.gauge_refill *= tuning.gauge_refill;
++        combined.thirst_drain *= tuning.thirst_drain;
++        combined.durability_wear *= tuning.durability_wear;
++        combined.map_reveal = combined.map_reveal || tuning.map_reveal;
++        combined.monster_reveal = combined.monster_reveal || tuning.monster_reveal;
++    }
++    // The combination stays inside the range one call may ask for.
++    for (float *scale : {&combined.run_speed, &combined.attack_anim_speed, &combined.recoil_scale,
++                         &combined.gauge_refill, &combined.thirst_drain, &combined.durability_wear}) {
++        *scale = std::clamp(*scale, 0.25f, 4.0f);
++    }
++    g_player_tuning = combined;
++}
 +std::vector<std::pair<std::string, int>> g_wheel_mode_requests;
 +int g_town_character = CHARA_TOAN;
 +int g_town_loaded_character = CHARA_TOAN;
@@ -8209,7 +8938,7 @@ index 00000000..665b9d2f
 +        if ((NowWeaponHave->flags & 0x8) != 0) drain *= 0.8f;
 +        if ((NowWeaponHave->flags & 0x10) != 0) drain *= 2.0f;
 +    }
-+    return drain;
++    return drain * g_player_tuning.thirst_drain;
 +}
 +
 +Json ChronicleThirstPayload(const CDngStatusData &status, int character_id, float previous, float current,
@@ -14050,6 +14779,99 @@ index 00000000..665b9d2f
 +    return {ApiCallStatus::Ok, {{"enabled", true}, {"height", height}, {"back", back}}, {}};
 +}
 +
++Json PlayerTuningJson(const ChroniclePlayerTuning &tuning) {
++    return {{"run_speed", tuning.run_speed},
++            {"attack_anim_speed", tuning.attack_anim_speed},
++            {"invincible_bonus_frames", tuning.invincible_bonus_frames},
++            {"recoil_scale", tuning.recoil_scale},
++            {"gauge_refill", tuning.gauge_refill},
++            {"thirst_drain", tuning.thirst_drain},
++            {"durability_wear", tuning.durability_wear},
++            {"map_reveal", tuning.map_reveal},
++            {"monster_reveal", tuning.monster_reveal}};
++}
++
++// player.tuning_set: one owner-scoped request; fields left out mean retail for that owner.
++ApiCallResult SetPlayerTuning(std::string_view owner, const Json &args) {
++    if (owner.empty() || !args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected a tuning object: run_speed, attack_anim_speed, recoil_scale, gauge_refill, thirst_drain, "
++                       "durability_wear (0.25 to 4), invincible_bonus_frames (0 to 120), map_reveal, monster_reveal (booleans)");
++    }
++    const Json &definition = args[0];
++    ChroniclePlayerTuning tuning;
++    for (auto field = definition.begin(); field != definition.end(); ++field) {
++        const std::string &key = field.key();
++        const Json &value = field.value();
++        float *multiplier = nullptr;
++        if (key == "run_speed") multiplier = &tuning.run_speed;
++        else if (key == "attack_anim_speed") multiplier = &tuning.attack_anim_speed;
++        else if (key == "recoil_scale") multiplier = &tuning.recoil_scale;
++        else if (key == "gauge_refill") multiplier = &tuning.gauge_refill;
++        else if (key == "thirst_drain") multiplier = &tuning.thirst_drain;
++        else if (key == "durability_wear") multiplier = &tuning.durability_wear;
++        if (multiplier != nullptr) {
++            if (!value.is_number()) return Invalid(key + " must be a number from 0.25 to 4");
++            const float scale = value.get<float>();
++            if (!std::isfinite(scale) || scale < 0.25f || scale > 4.0f) return Invalid(key + " must be a number from 0.25 to 4");
++            *multiplier = scale;
++            continue;
++        }
++        if (key == "invincible_bonus_frames") {
++            if (!value.is_number()) return Invalid("invincible_bonus_frames must be an integer from 0 to 120");
++            const double frames = value.get<double>();
++            if (!std::isfinite(frames) || frames != std::floor(frames) || frames < 0.0 || frames > 120.0) {
++                return Invalid("invincible_bonus_frames must be an integer from 0 to 120");
++            }
++            tuning.invincible_bonus_frames = static_cast<int>(frames);
++            continue;
++        }
++        if (key == "map_reveal" || key == "monster_reveal") {
++            if (!value.is_boolean()) return Invalid(key + " must be a boolean");
++            (key == "map_reveal" ? tuning.map_reveal : tuning.monster_reveal) = value.get<bool>();
++            continue;
++        }
++        return Invalid("player.tuning_set received an unsupported field: " + key);
++    }
++    const auto existing = std::ranges::find(g_player_tuning_requests, owner,
++                                             [](const auto &entry) -> std::string_view { return entry.first; });
++    if (existing == g_player_tuning_requests.end() && g_player_tuning_requests.size() >= 64) {
++        return Failed("player tuning already has the maximum number of owners");
++    }
++    std::erase_if(g_player_tuning_requests, [owner](const auto &entry) { return entry.first == owner; });
++    g_player_tuning_requests.push_back({std::string(owner), tuning});
++    RefreshPlayerTuning();
++    return {ApiCallStatus::Ok,
++            {{"owner", std::string(owner)}, {"status", "set"}, {"tuning", PlayerTuningJson(tuning)},
++             {"effective", PlayerTuningJson(g_player_tuning)}},
++            {}};
++}
++
++ApiCallResult ClearPlayerTuning(std::string_view owner, const Json &args) {
++    if (!args.is_array() || !args.empty()) return Invalid("player.tuning_clear takes no arguments");
++    const bool cleared = std::erase_if(g_player_tuning_requests, [owner](const auto &entry) { return entry.first == owner; }) != 0;
++    RefreshPlayerTuning();
++    return {ApiCallStatus::Ok, {{"cleared", cleared}, {"effective", PlayerTuningJson(g_player_tuning)}}, {}};
++}
++
++// player.invincible: one-shot invincibility frames on the active player, never shortening a longer run.
++ApiCallResult SetPlayerInvincible(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid("expected {frames = 1..600}");
++    const Json &definition = args[0];
++    for (auto field = definition.begin(); field != definition.end(); ++field) {
++        if (field.key() != "frames") return Invalid("player.invincible received an unsupported field: " + field.key());
++    }
++    const auto frames_field = definition.find("frames");
++    if (frames_field == definition.end() || !frames_field->is_number()) return Invalid("frames must be an integer from 1 to 600");
++    const double frames = frames_field->get<double>();
++    if (!std::isfinite(frames) || frames != std::floor(frames) || frames < 1.0 || frames > 600.0) {
++        return Invalid("frames must be an integer from 1 to 600");
++    }
++    if (mode != GAME_MODE_DUNGEON) return Failed("player.invincible needs an active dungeon");
++    const int previous = BtActStatus.invincible_frames;
++    if (BtActStatus.invincible_frames < static_cast<int>(frames)) BtActStatus.invincible_frames = static_cast<int>(frames);
++    return {ApiCallStatus::Ok, {{"frames", BtActStatus.invincible_frames}, {"previous", previous}}, {}};
++}
++
 +ApiCallResult UnbindInputAction(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected {id = local_action_id}");
@@ -15341,6 +16163,9 @@ index 00000000..665b9d2f
 +    if (operation.path == "player.set") return SetPlayer(args);
 +    if (operation.path == "player.thirst_get") return GetThirst(args);
 +    if (operation.path == "player.thirst_set") return SetThirst(args);
++    if (operation.path == "player.tuning_set") return SetPlayerTuning(mod_id, args);
++    if (operation.path == "player.tuning_clear") return ClearPlayerTuning(mod_id, args);
++    if (operation.path == "player.invincible") return SetPlayerInvincible(args);
 +    if (operation.path == "player.status_add") return AddPlayerStatus(args);
 +    if (operation.path == "player.status_remove") return RemovePlayerStatus(args);
 +    if (operation.path == "party.list") {
@@ -15927,12 +16752,32 @@ index 00000000..665b9d2f
 +    g_combat_damage_formulas.Clear();
 +}
 +
++const ChroniclePlayerTuning &ChroniclePlayerTuningGet() { return g_player_tuning; }
++
++void ClearChroniclePlayerTuning(std::string_view owner) {
++    std::erase_if(g_player_tuning_requests, [owner](const auto &entry) { return entry.first == owner; });
++    RefreshPlayerTuning();
++}
++
++void ResetChroniclePlayerTuningForTests() {
++    g_player_tuning_requests.clear();
++    RefreshPlayerTuning();
++}
++
++float ChroniclePlayerGaugeRefillScale() { return g_player_tuning.gauge_refill; }
++float ChroniclePlayerThirstDrainScale() { return g_player_tuning.thirst_drain; }
++float ChroniclePlayerDurabilityWearScale() { return g_player_tuning.durability_wear; }
++float ChroniclePlayerAttackAnimSpeed() { return g_player_tuning.attack_anim_speed; }
++bool ChroniclePlayerMapReveal() { return g_player_tuning.map_reveal; }
++bool ChroniclePlayerMonsterReveal() { return g_player_tuning.monster_reveal; }
++
 +void ConfigureChronicleApi(RuntimeConfig &config) {
 +    config.current_language = CurrentLanguageTag;
 +    config.world_location_reader = ReadWorldLocationForEvents;
 +    for (const char *path : {"player.get", "player.set", "player.heal", "player.damage", "party.list", "party.active", "party.set_active", "party.town_active", "party.town_set_active",
 +                             "save.slot_id",
 +                             "player.status_add", "player.status_remove", "player.thirst_get", "player.thirst_set",
++                             "player.tuning_set", "player.tuning_clear", "player.invincible",
 +                             "characters.list", "characters.get", "world.get", "world.transition", "world.set_time",
 +                             "world.story_flag_get", "world.story_flag_set", "world.map_flag_get", "world.map_flag_set",
 +                             "world.story_value_get", "world.story_value_set",
@@ -16025,6 +16870,7 @@ index 00000000..665b9d2f
 +        std::erase_if(g_enemy_survival_requests, [mod_id](const auto &entry) { return entry.first == mod_id; });
 +        RestoreEnemySurvivalRequest();
 +        std::erase_if(g_town_camera_requests, [mod_id](const auto &entry) { return entry.first == mod_id; });
++        ClearChroniclePlayerTuning(mod_id);
 +        RestoreChronicleModelReplacements(mod_id);
 +        RestoreMonsterScalesByOwner(mod_id);
 +        DespawnOwnedChronicleActors(mod_id);
@@ -16157,10 +17003,10 @@ index 00000000..665b9d2f
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..1a846e0e
+index 00000000..9eff394f
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3512 @@
+@@ -0,0 +1,3584 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
@@ -17296,6 +18142,64 @@ index 00000000..1a846e0e
 +        return {ApiCallStatus::Ok,
 +                {{"queued", true}, {"manager_open", ManagerOpen()}, {"duration_frames", duration}},
 +                {}};
++    }
++
++    ApiCallResult SetCharacterSheetUi(const Json &arguments) {
++        if (!arguments.is_array() || arguments.size() != 1 || !arguments[0].is_object() ||
++            !HasOnlyFields(arguments[0], {"title", "lines", "progress", "progress_label", "hint", "trees"})) {
++            return {ApiCallStatus::InvalidArgument, nullptr,
++                    "expected a character sheet object with title and optional lines, progress, progress_label, hint, trees"};
++        }
++        const Json &sheet = arguments[0];
++        CharacterSheet record;
++        const auto title = sheet.find("title");
++        if (title == sheet.end() || !title->is_string()) {
++            return {ApiCallStatus::InvalidArgument, nullptr, "title must be a string"};
++        }
++        record.title = title->get<std::string>();
++        if (const auto lines = sheet.find("lines"); lines != sheet.end()) {
++            if (!lines->is_array()) return {ApiCallStatus::InvalidArgument, nullptr, "lines must be an array of strings"};
++            for (const Json &line : *lines) {
++                if (!line.is_string()) return {ApiCallStatus::InvalidArgument, nullptr, "lines must be an array of strings"};
++                record.lines.push_back(line.get<std::string>());
++            }
++        }
++        if (const auto progress = sheet.find("progress"); progress != sheet.end()) {
++            if (!progress->is_number()) return {ApiCallStatus::InvalidArgument, nullptr, "progress must be a number from 0 to 1"};
++            const double value = progress->get<double>();
++            if (!(value >= 0.0 && value <= 1.0)) return {ApiCallStatus::InvalidArgument, nullptr, "progress must be a number from 0 to 1"};
++            record.progress = value;
++        }
++        if (const auto label = sheet.find("progress_label"); label != sheet.end()) {
++            if (!label->is_string()) return {ApiCallStatus::InvalidArgument, nullptr, "progress_label must be a string"};
++            record.progress_label = label->get<std::string>();
++        }
++        if (const auto hint = sheet.find("hint"); hint != sheet.end()) {
++            if (!hint->is_string()) return {ApiCallStatus::InvalidArgument, nullptr, "hint must be a string"};
++            record.hint = hint->get<std::string>();
++        }
++        if (const auto trees = sheet.find("trees"); trees != sheet.end()) {
++            if (!trees->is_array()) return {ApiCallStatus::InvalidArgument, nullptr, "trees must be an array of tree ids"};
++            for (const Json &tree : *trees) {
++                if (!tree.is_string()) return {ApiCallStatus::InvalidArgument, nullptr, "trees must be an array of tree ids"};
++                record.trees.push_back(manifest.id + ":" + tree.get<std::string>());
++            }
++        }
++        for (const std::string *text : {&record.title, &record.progress_label, &record.hint}) {
++            if (std::ranges::any_of(*text, [](unsigned char c) { return c < 0x20; })) {
++                return {ApiCallStatus::InvalidArgument, nullptr, "sheet text cannot contain control characters"};
++            }
++        }
++        for (const std::string &line : record.lines) {
++            if (std::ranges::any_of(line, [](unsigned char c) { return c < 0x20; })) {
++                return {ApiCallStatus::InvalidArgument, nullptr, "sheet text cannot contain control characters"};
++            }
++        }
++        std::string error;
++        if (!SetCharacterSheet(manifest.id, std::move(record), error)) {
++            return {ApiCallStatus::InvalidArgument, nullptr, std::move(error)};
++        }
++        return {ApiCallStatus::Ok, {{"owner", manifest.id}, {"status", "set"}}, {}};
 +    }
 +
 +    ApiCallResult NavigateUi(const Json &arguments) {
@@ -18456,6 +19360,19 @@ index 00000000..1a846e0e
 +            return {ApiCallStatus::Ok,{{"opened",true}}, {}};
 +        }
 +        if (path == "ui.notify") return NotifyUi(arguments);
++        if (path == "ui.sheet_set") return SetCharacterSheetUi(arguments);
++        if (path == "ui.sheet_clear") {
++            if (!arguments.is_array() || !arguments.empty()) return {ApiCallStatus::InvalidArgument, nullptr, "sheet_clear takes no arguments"};
++            return {ApiCallStatus::Ok, {{"cleared", ClearCharacterSheet(manifest.id)}}, {}};
++        }
++        if (path == "ui.sheet_open") {
++            if (!arguments.is_array() || !arguments.empty()) return {ApiCallStatus::InvalidArgument, nullptr, "sheet_open takes no arguments"};
++            if (ActiveCharacterSheet() == nullptr) {
++                return {ApiCallStatus::Failed, nullptr, "no loaded mod has set a character sheet"};
++            }
++            RequestCharacterPageOpen();
++            return {ApiCallStatus::Ok, {{"opened", true}}, {}};
++        }
 +        if (path == "commands.execute") return ExecuteCommand(arguments);
 +        if (path == "commands.unregister") return UnregisterCommand(arguments);
 +        if (path == "scripts.list_functions") return ListScriptFunctions(arguments);
@@ -19586,6 +20503,7 @@ index 00000000..1a846e0e
 +    }
 +    RemoveNativeResourceOverridesByOwner(self.manifest.id);
 +    RemoveManagerActions(self.manifest.id);
++    ClearCharacterSheet(self.manifest.id);
 +    std::string error;
 +    if (!self.FlushStorage(error)) self.Log("error", error);
 +    lua_close(self.state);
@@ -19719,13 +20637,14 @@ index 00000000..286d8dce
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manager_ui.cpp b/port/src/moonmod/manager_ui.cpp
 new file mode 100644
-index 00000000..95e8a90e
+index 00000000..c6d23422
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
-@@ -0,0 +1,901 @@
+@@ -0,0 +1,965 @@
 +#include "moonmod/manager_ui.hpp"
 +
 +#include <algorithm>
++#include <cstdio>
 +#include <iterator>
 +#include <map>
 +#include <ranges>
@@ -20138,6 +21057,69 @@ index 00000000..95e8a90e
 +bool TakeManagerMenuOpenRequest() {
 +    const bool requested = g_menu_open_request && g_state.open;
 +    g_menu_open_request = false;
++    return requested;
++}
++
++bool PeekManagerMenuOpenRequest() { return g_menu_open_request && g_state.open; }
++
++namespace {
++std::vector<CharacterSheet> g_sheets;
++bool g_character_page_request = false;
++} // namespace
++
++bool SetCharacterSheet(std::string_view owner_id, CharacterSheet sheet, std::string &error) {
++    if (owner_id.empty()) { error = "a character sheet needs an owner"; return false; }
++    if (sheet.title.empty() || sheet.title.size() > 32) { error = "title must be 1-32 bytes"; return false; }
++    if (sheet.lines.size() > 6) { error = "at most six lines"; return false; }
++    for (const std::string &line : sheet.lines) {
++        if (line.size() > 48) { error = "each line must be at most 48 bytes"; return false; }
++    }
++    if (sheet.progress_label.size() > 32) { error = "progress_label must be at most 32 bytes"; return false; }
++    if (sheet.hint.size() > 80) { error = "hint must be at most 80 bytes"; return false; }
++    if (sheet.trees.size() > 32) { error = "at most 32 tree ids"; return false; }
++    for (const std::string &tree : sheet.trees) {
++        if (tree.empty() || tree.size() > 64) { error = "each tree id must be 1-64 bytes"; return false; }
++    }
++    if (sheet.progress > 1.0) sheet.progress = 1.0;
++    sheet.owner_id = std::string(owner_id);
++    std::erase_if(g_sheets, [&](const CharacterSheet &existing) { return existing.owner_id == owner_id; });
++    g_sheets.push_back(std::move(sheet));
++    return true;
++}
++
++bool ClearCharacterSheet(std::string_view owner_id) {
++    return std::erase_if(g_sheets, [&](const CharacterSheet &existing) { return existing.owner_id == owner_id; }) != 0;
++}
++
++const CharacterSheet *ActiveCharacterSheet() {
++    const auto mods = SharedRuntime().Mods();
++    for (auto it = g_sheets.rbegin(); it != g_sheets.rend(); ++it) {
++        const auto record = std::ranges::find(mods, it->owner_id, &ModRecord::id);
++        if (record != mods.end() && record->enabled && record->state == ModState::Loaded) return &*it;
++    }
++    return nullptr;
++}
++
++bool RequestSkillTraining(std::string_view owner_id, std::string_view skill_id) {
++    std::string local(skill_id);
++    const std::string prefix = std::string(owner_id) + ":";
++    if (local.starts_with(prefix)) local.erase(0, prefix.size());
++    return ActivateManagerAction(owner_id, "train_" + local) ||
++           SharedRuntime().PublishToMod(owner_id, "skills.train_requested", {{"id", std::string(skill_id)}});
++}
++
++void RequestCharacterPageOpen() {
++    g_character_page_request = true;
++    if (!g_state.open) {
++        OpenManager();
++        g_menu_open_request = true;
++        g_opened_in_play = true;
++    }
++}
++
++bool TakeCharacterPageOpenRequest() {
++    const bool requested = g_character_page_request;
++    g_character_page_request = false;
 +    return requested;
 +}
 +
@@ -24820,10 +25802,10 @@ index f3b3c051..dfc0bcda 100644
          int mode;
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
-index 00000000..c03cdc38
+index 00000000..1752a302
 --- /dev/null
 +++ b/port/src/tests/moonmod_api_test.cpp
-@@ -0,0 +1,1610 @@
+@@ -0,0 +1,1735 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -24843,6 +25825,9 @@ index 00000000..c03cdc38
 +#include "moonmod/native_resource_overrides.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/runtime.hpp"
++#include "btactstatus.hpp"
++#include "dun/gameloop.hpp"
++#include "main.hpp"
 +#include "language.h"
 +#include "mainselect.hpp"
 +#include "dataalloc.hpp"
@@ -25948,7 +26933,8 @@ index 00000000..c03cdc38
 +  ["skills.unlock"] = true, ["skills.set_rank"] = true,
 +  ["debug.profile"] = true,
 +  ["ui.navigate"] = true,
-+  ["ui.open_skills"] = true
++  ["ui.open_skills"] = true,
++  ["ui.sheet_set"] = true, ["ui.sheet_clear"] = true, ["ui.sheet_open"] = true
 +}
 +local dispatched = 0
 +for _, operation in ipairs(catalog) do
@@ -26434,6 +27420,127 @@ index 00000000..c03cdc38
 +    moonmod::CloseManager();
 +}
 +
++extern s32 mode;
++
++TEST(MoonModApi, ChroniclePlayerTuningValidatesCombinesAndRestoresOnUnload) {
++    using moonmod::ApiCallStatus;
++    using moonmod::Json;
++    moonmod::ResetChroniclePlayerTuningForTests();
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    moonmod::ConfigureChronicleApi(config);
++    const moonmod::ApiOperationSpec *set = moonmod::FindApiOperation("player.tuning_set");
++    const moonmod::ApiOperationSpec *clear = moonmod::FindApiOperation("player.tuning_clear");
++    const moonmod::ApiOperationSpec *invincible = moonmod::FindApiOperation("player.invincible");
++    ASSERT_NE(set, nullptr);
++    ASSERT_NE(clear, nullptr);
++    ASSERT_NE(invincible, nullptr);
++    for (const char *path : {"player.tuning_set", "player.tuning_clear", "player.invincible"}) {
++        const auto capability = std::ranges::find(config.api_capabilities, path, &moonmod::ApiCapability::path);
++        ASSERT_NE(capability, config.api_capabilities.end()) << path;
++        EXPECT_TRUE(capability->supported) << path;
++        EXPECT_FALSE(moonmod::IsCoreApiOperation(path)) << path;
++    }
++    auto call = [&](const moonmod::ApiOperationSpec *operation, std::string_view owner, const Json &args) {
++        return config.api_handler(owner, *operation, args);
++    };
++    const moonmod::ChroniclePlayerTuning &tuning = moonmod::ChroniclePlayerTuningGet();
++    EXPECT_FLOAT_EQ(tuning.run_speed, 1.0f);
++    EXPECT_FALSE(tuning.map_reveal);
++
++    const Json full = Json::array({Json{{"run_speed", 1.24}, {"attack_anim_speed", 1.18}, {"invincible_bonus_frames", 24},
++                                        {"recoil_scale", 0.5}, {"gauge_refill", 1.0}, {"thirst_drain", 0.64},
++                                        {"durability_wear", 0.64}, {"map_reveal", true}, {"monster_reveal", true}}});
++    moonmod::ApiCallResult result = call(set, "test.rpg", full);
++    ASSERT_EQ(result.status, ApiCallStatus::Ok) << result.message;
++    EXPECT_EQ(result.value["owner"], "test.rpg");
++    EXPECT_EQ(result.value["status"], "set");
++    EXPECT_NEAR(result.value["effective"]["run_speed"].get<double>(), 1.24, 1e-5);
++    EXPECT_FLOAT_EQ(tuning.run_speed, 1.24f);
++    EXPECT_FLOAT_EQ(tuning.attack_anim_speed, 1.18f);
++    EXPECT_EQ(tuning.invincible_bonus_frames, 24);
++    EXPECT_FLOAT_EQ(tuning.recoil_scale, 0.5f);
++    EXPECT_FLOAT_EQ(tuning.gauge_refill, 1.0f);
++    EXPECT_FLOAT_EQ(tuning.thirst_drain, 0.64f);
++    EXPECT_FLOAT_EQ(tuning.durability_wear, 0.64f);
++    EXPECT_TRUE(tuning.map_reveal);
++    EXPECT_TRUE(tuning.monster_reveal);
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerThirstDrainScale(), 0.64f);
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerDurabilityWearScale(), 0.64f);
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerGaugeRefillScale(), 1.0f);
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerAttackAnimSpeed(), 1.18f);
++    EXPECT_TRUE(moonmod::ChroniclePlayerMapReveal());
++    EXPECT_TRUE(moonmod::ChroniclePlayerMonsterReveal());
++
++    // Ranges and types: multipliers 0.25..4, frames integer 0..120, flags boolean, no unknown fields.
++    for (const Json &bad : {Json{{"run_speed", 4.5}}, Json{{"run_speed", 0.1}}, Json{{"thirst_drain", "slow"}},
++                            Json{{"invincible_bonus_frames", 121}}, Json{{"invincible_bonus_frames", -1}},
++                            Json{{"invincible_bonus_frames", 2.5}}, Json{{"map_reveal", 1}},
++                            Json{{"monster_reveal", "yes"}}, Json{{"colour", "red"}}}) {
++        const moonmod::ApiCallResult rejected = call(set, "test.rpg", Json::array({bad}));
++        EXPECT_EQ(rejected.status, ApiCallStatus::InvalidArgument) << bad.dump();
++        EXPECT_FALSE(rejected.message.empty()) << bad.dump();
++    }
++    EXPECT_EQ(call(set, "test.rpg", Json::array({1})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(call(set, "test.rpg", Json::array()).status, ApiCallStatus::InvalidArgument);
++    EXPECT_FLOAT_EQ(tuning.run_speed, 1.24f); // a rejected call leaves the owner's tuning alone
++
++    // An empty table is valid (the mod's support probe) and means retail values for that owner.
++    EXPECT_EQ(call(set, "test.other", Json::array({Json::object()})).status, ApiCallStatus::Ok);
++    EXPECT_FLOAT_EQ(tuning.run_speed, 1.24f);
++
++    // Owners combine: multipliers multiply, bonus frames add, flags OR.
++    ASSERT_EQ(call(set, "test.other", Json::array({Json{{"run_speed", 2.0}, {"invincible_bonus_frames", 10},
++                                                         {"monster_reveal", false}}})).status, ApiCallStatus::Ok);
++    EXPECT_NEAR(tuning.run_speed, 2.48f, 1e-5f);
++    EXPECT_EQ(tuning.invincible_bonus_frames, 34);
++    EXPECT_TRUE(tuning.monster_reveal);
++    EXPECT_FLOAT_EQ(tuning.recoil_scale, 0.5f);
++
++    // Unloading an owner restores its share; a later set by the same owner replaces, not stacks.
++    ASSERT_TRUE(config.api_owner_unloaded);
++    config.api_owner_unloaded("test.rpg");
++    EXPECT_FLOAT_EQ(tuning.run_speed, 2.0f);
++    EXPECT_EQ(tuning.invincible_bonus_frames, 10);
++    EXPECT_FALSE(tuning.map_reveal);
++    EXPECT_FALSE(tuning.monster_reveal);
++    EXPECT_FLOAT_EQ(tuning.recoil_scale, 1.0f);
++    ASSERT_EQ(call(set, "test.other", Json::array({Json{{"run_speed", 1.5}}})).status, ApiCallStatus::Ok);
++    EXPECT_FLOAT_EQ(tuning.run_speed, 1.5f);
++    EXPECT_EQ(tuning.invincible_bonus_frames, 0);
++
++    result = call(clear, "test.other", Json::array());
++    ASSERT_EQ(result.status, ApiCallStatus::Ok) << result.message;
++    EXPECT_TRUE(result.value["cleared"].get<bool>());
++    EXPECT_FLOAT_EQ(tuning.run_speed, 1.0f);
++    EXPECT_FALSE(call(clear, "test.other", Json::array()).value["cleared"].get<bool>());
++    EXPECT_EQ(call(clear, "test.other", Json::array({1})).status, ApiCallStatus::InvalidArgument);
++
++    // player.invincible: dungeon only, 1..600 frames, never shortens a longer run.
++    const s32 previous_mode = mode;
++    const int previous_frames = BtActStatus.invincible_frames;
++    mode = -1;
++    EXPECT_EQ(call(invincible, "test.rpg", Json::array({Json{{"frames", 90}}})).status, ApiCallStatus::Failed);
++    mode = GAME_MODE_DUNGEON;
++    BtActStatus.invincible_frames = 0;
++    result = call(invincible, "test.rpg", Json::array({Json{{"frames", 90}}}));
++    ASSERT_EQ(result.status, ApiCallStatus::Ok) << result.message;
++    EXPECT_EQ(BtActStatus.invincible_frames, 90);
++    EXPECT_EQ(result.value["frames"].get<int>(), 90);
++    EXPECT_EQ(result.value["previous"].get<int>(), 0);
++    result = call(invincible, "test.rpg", Json::array({Json{{"frames", 30}}}));
++    ASSERT_EQ(result.status, ApiCallStatus::Ok) << result.message;
++    EXPECT_EQ(BtActStatus.invincible_frames, 90);
++    for (const Json &bad : {Json{{"frames", 0}}, Json{{"frames", 601}}, Json{{"frames", "90"}}, Json{{"frames", 1.5}},
++                            Json::object(), Json{{"frames", 10}, {"owner", "x"}}}) {
++        EXPECT_EQ(call(invincible, "test.rpg", Json::array({bad})).status, ApiCallStatus::InvalidArgument) << bad.dump();
++    }
++    EXPECT_EQ(call(invincible, "test.rpg", Json::array()).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(BtActStatus.invincible_frames, 90);
++    mode = previous_mode;
++    BtActStatus.invincible_frames = previous_frames;
++    moonmod::ResetChroniclePlayerTuningForTests();
++}
 diff --git a/port/src/tests/moonmod_audio_api_test.cpp b/port/src/tests/moonmod_audio_api_test.cpp
 new file mode 100644
 index 00000000..b29dfad4
@@ -31209,10 +32316,10 @@ index 00000000..9c12042d
 +}
 diff --git a/port/src/tests/moonmod_manager_ui_test.cpp b/port/src/tests/moonmod_manager_ui_test.cpp
 new file mode 100644
-index 00000000..47a8eb15
+index 00000000..d554fd3c
 --- /dev/null
 +++ b/port/src/tests/moonmod_manager_ui_test.cpp
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,348 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -31487,6 +32594,79 @@ index 00000000..47a8eb15
 +    EXPECT_EQ(profile.at("settings").at("test.settings-ui").at("mode").get<std::string>(), "hard");
 +    moonmod::SharedRuntime().Stop();
 +    EXPECT_TRUE(moonmod::ManagerActions("test.settings-ui").empty());
++}
++
++TEST(MoonModManagerUi, CharacterSheetFromLuaFeedsTheJournalPage) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    TempRoot root;
++    const fs::path package = root.path / "mods" / "test.sheet";
++    Write(package / "mod.json", R"json({
++      "schema_version":1,"id":"test.sheet","name":"Sheet Probe","version":"1.0.0",
++      "framework_api":1,"games":["chronicle"],"entry":"main.lua","permissions":["content.register","game.read","game.write"]
++    })json");
++    Write(package / "main.lua", R"lua(
++assert(game.skills.register({
++  id = "sword", title = "SWORDSMAN",
++  skills = {
++    {id = "keen_edge", title = "Keen Edge", description = "+3% damage per rank.", max_rank = 5},
++    {id = "quick_blade", title = "Quick Blade", description = "Faster swings.", max_rank = 3,
++     prerequisites = {{id = "keen_edge", rank = 1}}}
++  }
++}))
++local set = assert(game.ui.sheet_set({title = "TOAN", lines = {"Level 3", "XP 40 / 128"}, progress = 0.3125,
++                                      progress_label = "XP 40 / 128", hint = "2 skill points to spend", trees = {"sword"}}))
++assert(set.owner == "test.sheet" and set.status == "set")
++local bad, bad_error = game.ui.sheet_set({title = "TOAN", progress = 2})
++assert(bad == nil and bad_error.code == "invalid_argument")
++local unknown, unknown_error = game.ui.sheet_set({title = "TOAN", colour = "red"})
++assert(unknown == nil and unknown_error.code == "invalid_argument")
++moonmod.on("skills.train_requested", function(event)
++  moonmod.log("info", "TRAIN:" .. tostring(event.id))
++  if event.id == "test.sheet:sword.keen_edge" then assert(game.skills.set_rank({id = "sword.keen_edge", rank = 1})) end
++end)
++)lua");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.sheet":true},"settings":{}})json");
++
++    std::vector<std::string> logs;
++    moonmod::RuntimeConfig   config;
++    config.game_id = "chronicle";
++    config.game_name = "Chronicle";
++    config.mod_directories = {root.path / "mods"};
++    config.save_root = root.path / "save";
++    config.log = [&](std::string_view, std::string_view, std::string_view message) { logs.emplace_back(message); };
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(config, error)) << error;
++    ASSERT_EQ(moonmod::SharedRuntime().Mods().size(), 1u);
++    ASSERT_EQ(moonmod::SharedRuntime().Mods()[0].state, moonmod::ModState::Loaded);
++
++    const moonmod::CharacterSheet *sheet = moonmod::ActiveCharacterSheet();
++    ASSERT_NE(sheet, nullptr);
++    EXPECT_EQ(sheet->owner_id, "test.sheet");
++    EXPECT_EQ(sheet->title, "TOAN");
++    ASSERT_EQ(sheet->lines.size(), 2u);
++    EXPECT_EQ(sheet->lines[1], "XP 40 / 128");
++    EXPECT_DOUBLE_EQ(sheet->progress, 0.3125);
++    EXPECT_EQ(sheet->hint, "2 skill points to spend");
++    ASSERT_EQ(sheet->trees.size(), 1u);
++    EXPECT_EQ(sheet->trees[0], "test.sheet:sword");
++
++    // Cross on a node reaches the mod as skills.train_requested, and the mod's rank change shows in the listing.
++    ASSERT_TRUE(moonmod::RequestSkillTraining("test.sheet", "test.sheet:sword.keen_edge"));
++    for (int i = 0; i < 4; ++i) moonmod::SharedRuntime().Pump();
++    EXPECT_TRUE(std::ranges::any_of(logs, [](const std::string &message) {
++        return message.find("TRAIN:test.sheet:sword.keen_edge") != std::string::npos;
++    }));
++    const moonmod::ApiCallResult skills = moonmod::ManagerSkills("test.sheet");
++    ASSERT_EQ(skills.status, moonmod::ApiCallStatus::Ok) << skills.message;
++    ASSERT_EQ(skills.value["skills"].size(), 2u);
++    EXPECT_EQ(skills.value["skills"][0].value("rank", 0), 1);
++    EXPECT_TRUE(skills.value["skills"][1].value("prerequisites_met", false));
++
++    // A stopped runtime shows no sheet.
++    moonmod::SharedRuntime().Stop();
++    EXPECT_EQ(moonmod::ActiveCharacterSheet(), nullptr);
 +}
 diff --git a/port/src/tests/moonmod_native_plugin_fixture.c b/port/src/tests/moonmod_native_plugin_fixture.c
 new file mode 100644
@@ -67566,22 +68746,25 @@ index 608b6687..0d406f13 100644
          map->boxes[i].lid_angle = 0;
          map->boxes[i].trap_no = 0;
 diff --git a/ps2/src/dngstatusdata.cpp b/ps2/src/dngstatusdata.cpp
-index 0dfbed61..fdb3e27e 100644
+index 0dfbed61..c4542db4 100644
 --- a/ps2/src/dngstatusdata.cpp
 +++ b/ps2/src/dngstatusdata.cpp
-@@ -3,6 +3,11 @@
+@@ -3,6 +3,14 @@
  #pragma name_counter 781
  
  #include "dngstatusdata.hpp"
 +#ifdef PORT
 +#include <algorithm>
 +#include <cmath>
-+namespace moonmod { float ApplyChroniclePlayerDamageFormula(float, int, int); }
++namespace moonmod {
++float ApplyChroniclePlayerDamageFormula(float, int, int);
++float ChroniclePlayerThirstDrainScale();
++} // namespace moonmod
 +#endif
  
  #include "dun/gameloop.hpp"
  #include "dungeonparts.hpp"
-@@ -262,6 +267,12 @@ int CDngStatusData::CheckItemGet(int item_id) {
+@@ -262,6 +270,12 @@ int CDngStatusData::CheckItemGet(int item_id) {
  
  /* @ 0x1BDED0 (0xC0 bytes) -- CheckWeaponUser__14CDngStatusDataFi */
  int CDngStatusData::CheckWeaponUser(int weapon_id) {
@@ -67594,7 +68777,7 @@ index 0dfbed61..fdb3e27e 100644
      int result = -1;
      int valid;
  
-@@ -428,7 +439,11 @@ int CDngStatusData::GetItem(int item_id, int qty) {
+@@ -428,7 +442,11 @@ int CDngStatusData::GetItem(int item_id, int qty) {
  
      if (!(valid = item_id < ITEM_WEAPON_START)) {
          printf("get weapon!! %d\n", item_id);
@@ -67607,7 +68790,7 @@ index 0dfbed61..fdb3e27e 100644
  
          int jj;
  
-@@ -528,6 +543,18 @@ void CUserStatus::AddDrink(int chara_no, s16 amount, float ratio) {
+@@ -528,6 +546,18 @@ void CUserStatus::AddDrink(int chara_no, s16 amount, float ratio) {
  /* Same instant/interpolated split as AddDrink, for HP. */
  /* @ 0x1BE710 (0x180 bytes) -- AddNowLife__11CUserStatusFisf */
  void CUserStatus::AddNowLife(int chara_no, s16 amount, float ratio) {
@@ -67626,11 +68809,22 @@ index 0dfbed61..fdb3e27e 100644
      int valid;
  
      if (this->life_step[chara_no] != 0) {
+@@ -659,6 +689,10 @@ void CUserStatus::Step(int mode) {
+                 drain *= 2.0f;
+             }
+ 
++#ifdef PORT
++            drain *= moonmod::ChroniclePlayerThirstDrainScale(); // MoonMod player.tuning_set
++#endif
++
+             if (mode == 0) {
+                 this->water_now[this->cur_chara] -= drain;
+             }
 diff --git a/ps2/src/dun/gameloop.cpp b/ps2/src/dun/gameloop.cpp
-index a7722cee..52dd9daf 100644
+index a7722cee..e6c8dc6c 100644
 --- a/ps2/src/dun/gameloop.cpp
 +++ b/ps2/src/dun/gameloop.cpp
-@@ -125,6 +125,13 @@
+@@ -125,6 +125,15 @@
  #include "weaponelement.hpp"
  #include "wind.hpp"
  
@@ -67638,13 +68832,15 @@ index a7722cee..52dd9daf 100644
 +namespace moonmod {
 +bool ChronicleLoadMonsterModelForMod(CMonstorUnit *unit, int native_model_no, int *out_slot);
 +bool TakeManagerMenuOpenRequest();
++float ChroniclePlayerGaugeRefillScale();
++float ChroniclePlayerAttackAnimSpeed();
 +}
 +#endif
 +
  /**
   * Defines the life gauge that the locked-on enemy draws above itself.
   */
-@@ -555,7 +562,11 @@ CMainItemModel mainItemModel;
+@@ -555,7 +564,11 @@ CMainItemModel mainItemModel;
  CActiveItemPack activeItem;
  
  /* How square on to the player each monster of the floor stands. */
@@ -67656,7 +68852,7 @@ index a7722cee..52dd9daf 100644
  
  /* The damage numbers the dungeon draws. */
  CHitValue HitValue[32];
-@@ -610,7 +621,7 @@ CDataAlloc2<1> BtStartLogoBuffer(-1);
+@@ -610,7 +623,7 @@ CDataAlloc2<1> BtStartLogoBuffer(-1);
  CDataAlloc2<1> MonstorModelBuffer(-1);
  
  /* Script working memory, one block per monster on the floor. */
@@ -67665,7 +68861,7 @@ index a7722cee..52dd9daf 100644
  
  /* The buffers the dungeon's item cache and battle scripts run out of. */
  CDataAlloc2<1> BtItemCashArea[6];
-@@ -1456,7 +1467,7 @@ void GameInit() {
+@@ -1456,7 +1469,7 @@ void GameInit() {
          SetDataBuffer(&BtItemCashArea[i], 2501);
      }
  
@@ -67674,7 +68870,7 @@ index a7722cee..52dd9daf 100644
          SetDataBuffer(&MonstorScriptBuffer[i], 1875);
      }
  
-@@ -1570,7 +1581,7 @@ void GameInit() {
+@@ -1570,7 +1583,7 @@ void GameInit() {
      MainMonstorUnit.model_count = 0;
      MainMonstorUnit.current_monster = 0;
  
@@ -67683,7 +68879,7 @@ index a7722cee..52dd9daf 100644
          MainMonstorUnit.script[i] = &MonstorScriptBuffer[i];
      }
  
-@@ -4071,7 +4082,7 @@ void MoveChara() {
+@@ -4071,7 +4084,7 @@ void MoveChara() {
                                                                      }
                                                                  }
  
@@ -67692,7 +68888,7 @@ index a7722cee..52dd9daf 100644
                                                                      if (NowDngMap->boxes[entry_no].used != 0) {
                                                                          collision = NowDngMap->box_collision_model;
  
-@@ -4135,24 +4146,24 @@ void MoveChara() {
+@@ -4135,24 +4148,24 @@ void MoveChara() {
                                                                  bound.min[2] = pos[2] - 20.0f;
                                                                  colPolyNum = 0;
  
@@ -67722,7 +68918,7 @@ index a7722cee..52dd9daf 100644
                                                                              int base = parts_no == -1 ? 0 : NowDngMap->parts[parts_no].collision_turn;
  
                                                                              turn = dir;
-@@ -4176,7 +4187,7 @@ void MoveChara() {
+@@ -4176,7 +4189,7 @@ void MoveChara() {
                                                                      }
                                                                  }
  
@@ -67731,7 +68927,7 @@ index a7722cee..52dd9daf 100644
                                                                      if (NowDngMap->boxes[i].used != 0) {
                                                                          collision = NowDngMap->box_collision_model;
  
-@@ -4620,7 +4631,7 @@ void MoveChara() {
+@@ -4620,7 +4633,7 @@ void MoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -67740,7 +68936,7 @@ index a7722cee..52dd9daf 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -4642,7 +4653,7 @@ void MoveChara() {
+@@ -4642,7 +4655,7 @@ void MoveChara() {
                  unit_now->model_count = 0;
                  unit_now->current_monster = 0;
  
@@ -67749,7 +68945,7 @@ index a7722cee..52dd9daf 100644
                      unit_now->script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -4667,7 +4678,7 @@ void MoveChara() {
+@@ -4667,7 +4680,7 @@ void MoveChara() {
                  MainMonstorUnit.model_count = 0;
                  MainMonstorUnit.current_monster = 0;
  
@@ -67758,7 +68954,7 @@ index a7722cee..52dd9daf 100644
                      MainMonstorUnit.script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -4801,7 +4812,7 @@ void MoveChara() {
+@@ -4801,7 +4814,7 @@ void MoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -67767,7 +68963,7 @@ index a7722cee..52dd9daf 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -4821,7 +4832,7 @@ void MoveChara() {
+@@ -4821,7 +4834,7 @@ void MoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -67776,7 +68972,7 @@ index a7722cee..52dd9daf 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -5155,7 +5166,11 @@ void MoveChara() {
+@@ -5155,7 +5168,11 @@ void MoveChara() {
  
                  SetBattleStyle(selectMapNo, 0);
  
@@ -67788,7 +68984,75 @@ index a7722cee..52dd9daf 100644
                      int ok = 1;
  
                      if (BtActStatus.action_on != 0) {
-@@ -6337,12 +6352,12 @@ void BtCleatRandomMap() {
+@@ -5780,6 +5797,47 @@ void MoveChara() {
+     motionDrive();
+ }
+ 
++#ifdef PORT
++/* MoonMod player.tuning_set attack_anim_speed: Toan's sword swings (actions 0x24-0x28) play their
++ * recovery, the part after the swing's last hit and sound frame, at the tuned speed. The hit frames
++ * keep their one-frame steps, since ToanKey_Play tests them in half-frame windows, and the boost
++ * lands short of the motion's end so the end window (end - 1 .. end) is still met. */
++static void MoonModTuneSwingMotion() {
++    static int   boosted = 0;
++    const float  scale = moonmod::ChroniclePlayerAttackAnimSpeed();
++    float        speed = -1.0f;
++
++    if (scale != 1.0f && UserStatus->cur_chara == CHARA_TOAN && BtActStatus.action_on == 1 &&
++        BtActStatus.action_no >= 0x24 && BtActStatus.action_no <= 0x28 &&
++        BtActStatus.motion_no == BtActStatus.action_no && CharaMain.motion_type.motion_info != NULL) {
++        static const float last_window[5] = {828.0f, 835.0f, 844.0f, 854.0f, 868.0f};
++        const float        time = CharaMain.motion_type.state.time;
++        const float        end = (float) CharaMain.motion_type.motion_info[BtActStatus.motion_no].end;
++        const float        tail = last_window[BtActStatus.action_no - 0x24];
++
++        if (time > tail && time < end - 2.0f) {
++            speed = (end - 1.5f) - time;
++
++            if (speed > scale) {
++                speed = scale;
++            }
++
++            if (speed < 0.25f) {
++                speed = -1.0f;
++            }
++        }
++    }
++
++    if (speed > 0.0f) {
++        CharaMain.motion_speed = speed;
++        boosted = 1;
++    } else if (boosted != 0) {
++        CharaMain.motion_speed = -1.0f;
++        boosted = 0;
++    }
++}
++#endif
++
+ void motionDrive() {
+     sceVu0FVECTOR pos;
+     sceVu0FVECTOR rotation;
+@@ -5873,6 +5931,9 @@ void motionDrive() {
+             CharaMain.motion_type.state.look_at = false;
+         }
+ 
++#ifdef PORT
++        MoonModTuneSwingMotion();
++#endif
+         CharaMain.Step();
+ 
+         if (chara == CHARA_XIAO) {
+@@ -6156,6 +6217,9 @@ void motionDrive() {
+             gain *= 1.5f;
+         }
+ 
++#ifdef PORT
++        gain *= moonmod::ChroniclePlayerGaugeRefillScale(); // MoonMod player.tuning_set
++#endif
+         BtActStatus.action_gauge += gain;
+ 
+         if (!((int) BtActStatus.action_gauge < 100)) {
+@@ -6337,12 +6401,12 @@ void BtCleatRandomMap() {
  
      map = NowDngMap;
  
@@ -67803,7 +69067,7 @@ index a7722cee..52dd9daf 100644
          map->boxes[i].used = 0;
          map->boxes[i].lid_angle = 0.0f;
          map->boxes[i].trap_no = 0;
-@@ -6406,12 +6421,12 @@ void BtCleatRandomMap() {
+@@ -6406,12 +6470,12 @@ void BtCleatRandomMap() {
          slot->chara_done = -1;
      }
  
@@ -67818,7 +69082,7 @@ index a7722cee..52dd9daf 100644
          UraDungeonMap.boxes[j].used = 0;
          UraDungeonMap.boxes[j].lid_angle = 0.0f;
          UraDungeonMap.boxes[j].trap_no = 0;
-@@ -6504,7 +6519,7 @@ void BtLoadMonstor(int ura) {
+@@ -6504,7 +6568,7 @@ void BtLoadMonstor(int ura) {
      unit->model_count = 0;
      unit->current_monster = 0;
  
@@ -67827,7 +69091,7 @@ index a7722cee..52dd9daf 100644
          unit->script[slot] = &MonstorScriptBuffer[slot];
      }
  
-@@ -6552,6 +6567,24 @@ void BtLoadMonstor(int ura) {
+@@ -6552,6 +6616,24 @@ void BtLoadMonstor(int ura) {
      MemoryMapDump();
  }
  
@@ -67852,7 +69116,7 @@ index a7722cee..52dd9daf 100644
  void EquipReAttach(CCharacter *equipment, int held_out) {
      CFrame *hand;
  
-@@ -8543,10 +8576,10 @@ void autoCamTrial() {
+@@ -8543,10 +8625,10 @@ void autoCamTrial() {
          int     i;
          int     j;
  
@@ -67866,7 +69130,7 @@ index a7722cee..52dd9daf 100644
  
                  if (parts_no == -1) {
                      frame = NULL;
-@@ -8554,7 +8587,7 @@ void autoCamTrial() {
+@@ -8554,7 +8636,7 @@ void autoCamTrial() {
                      frame = map->parts[parts_no].camera_collision;
                  }
  
@@ -67875,7 +69139,7 @@ index a7722cee..52dd9daf 100644
  
                  if (frame == NULL) {
                      continue;
-@@ -8564,7 +8597,7 @@ void autoCamTrial() {
+@@ -8564,7 +8646,7 @@ void autoCamTrial() {
                      continue;
                  }
  
@@ -67884,7 +69148,7 @@ index a7722cee..52dd9daf 100644
  
                  turn += parts_no == -1 ? 0 : map->parts[parts_no].camera_collision_turn;
  
-@@ -9021,9 +9054,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -9021,9 +9103,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      CUserStatus  *status = UserStatus;
      sceVu0FVECTOR at;
      sceVu0FVECTOR towards;
@@ -67897,7 +69161,7 @@ index a7722cee..52dd9daf 100644
      float         away;
      float         rate;
      int           place;
-@@ -9044,7 +9077,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -9044,7 +9126,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      sceVu0FVECTOR forward = {0.0f, 0.0f, 1.0f, 1.0f};
      sceVu0FMATRIX unit;
      sceVu0FMATRIX turn;
@@ -67906,7 +69170,7 @@ index a7722cee..52dd9daf 100644
      int           screen[4];
  
      sceVu0UnitMatrix(unit);
-@@ -9055,11 +9088,11 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -9055,11 +9137,11 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      count = 0;
      sceVu0CopyVector(at, CharaFrame->position);
  
@@ -67920,7 +69184,7 @@ index a7722cee..52dd9daf 100644
          int on;
  
          MonstorPicupInner[i] = 0.0f;
-@@ -9074,9 +9107,21 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -9074,9 +9156,21 @@ int SetNearLockOnTarget(int from, int nearest_only) {
              continue;
          }
  
@@ -67942,7 +69206,7 @@ index a7722cee..52dd9daf 100644
  
          if (on == 0) {
              continue;
-@@ -9120,7 +9165,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -9120,7 +9214,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      // statement stands, which is ahead of the loop that clears order[].
      place = 0;
  
@@ -70848,6 +72112,33 @@ index 4517bb72..0431cabc 100644
      for (plot = 0; plot < 24; plot++) {
          if (georama_no < 0 || georama_no >= 6) {
              source = &empty_part;
+diff --git a/ps2/src/hitvalue.cpp b/ps2/src/hitvalue.cpp
+index a308ef52..338d7aaa 100644
+--- a/ps2/src/hitvalue.cpp
++++ b/ps2/src/hitvalue.cpp
+@@ -21,6 +21,12 @@
+ #include "texture.hpp"
+ #include "userstatus.hpp"
+ 
++#ifdef PORT
++namespace moonmod {
++float ChroniclePlayerDurabilityWearScale();
++} // namespace moonmod
++#endif
++
+ /**
+  * Each character's default weapon.
+  */
+@@ -61,6 +67,9 @@ int BattleSubWeaponDmg(float amount, int kind) {
+     float wear = 1.5f - 0.01f * NowWeaponHave->endurance;
+     float old_durability = weapon->durability_f;
+     wear *= amount;
++#ifdef PORT
++    wear *= moonmod::ChroniclePlayerDurabilityWearScale(); // MoonMod player.tuning_set
++#endif
+     wear += 0.1f * kind;
+     weapon->durability_f = old_durability - wear;
+ 
 diff --git a/ps2/src/itemdata.cpp b/ps2/src/itemdata.cpp
 index 6fb05dd9..60f508a0 100644
 --- a/ps2/src/itemdata.cpp
