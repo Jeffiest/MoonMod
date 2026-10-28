@@ -39,6 +39,7 @@ function F.new(opts)
     pending_jump = nil,
     bind_context = {}, contexts = {}, blocked = nil,
     floor_label = nil, hud_icons = {}, overrides = {},
+    toast_icons = {},
     atla = {},
     ranks = {},
     slot_id = {slot_id = 1, slot_generation = 7},
@@ -127,7 +128,11 @@ function F.new(opts)
 
   local game = {}
   game.ui = wrap("ui", {
-    notify = function(a) S.toasts[#S.toasts + 1] = a.message; return {queued = true} end,
+    notify = function(a)
+      assert(a.duration_frames == 300, "notices show for five seconds: " .. tostring(a.duration_frames))
+      assert(a.icon == nil or a.icon == "curse" or S.overrides[a.icon], "notice icon: " .. tostring(a.icon))
+      S.toasts[#S.toasts + 1] = a.message; S.toast_icons[#S.toasts] = a.icon; return {queued = true}
+    end,
     register = function(a) S.actions = S.actions or {}; S.actions[#S.actions + 1] = a.id; assert(#S.actions <= 12, "more than 12 actions"); assert(#a.label <= 48 and #a.description <= 120, "action text too long: " .. a.id); return {id = a.id} end,
     sheet_set = function(a)
       assert(a.title and #a.title <= 32, "sheet title")

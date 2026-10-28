@@ -433,6 +433,23 @@ index 8b8bbb67..af0aab94 100644
  
  /**
   * Gives the goods list one item shop sells from.
+diff --git a/port/include/game/shot_freefuncs.hpp b/port/include/game/shot_freefuncs.hpp
+index 179c407e..3c3fe736 100644
+--- a/port/include/game/shot_freefuncs.hpp
++++ b/port/include/game/shot_freefuncs.hpp
+@@ -127,6 +127,12 @@ void BtSetStatusErr(int status);
+  */
+ void BtStatusErrDraw(int y);
+ 
++/**
++ * Draws the mod notice on screen (ui.notify) in the dungeon message window, unless the game's own message has its
++ * place (native_busy), when the notice waits; a notice counts down only while it is drawn.
++ */
++void DrawModNotice(bool native_busy);
++
+ /**
+  * Draws one item into the reserved slot area.
+  */
 diff --git a/port/include/game/title/titleloop.hpp b/port/include/game/title/titleloop.hpp
 index d670cc61..fdb6fbe9 100644
 --- a/port/include/game/title/titleloop.hpp
@@ -1308,10 +1325,10 @@ index 00000000..f96e5318
 +void MoonModRequestQuickItemUse();
 diff --git a/port/include/moonmod/manager_ui.hpp b/port/include/moonmod/manager_ui.hpp
 new file mode 100644
-index 00000000..b560675c
+index 00000000..3cda6e5d
 --- /dev/null
 +++ b/port/include/moonmod/manager_ui.hpp
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,127 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -1387,9 +1404,14 @@ index 00000000..b560675c
 +void           CloseManager();
 +bool           ManagerOpen();
 +void           SetManagerNativeMenuContext(bool enabled);
-+void           ShowManagerNotice(std::string message, int duration_frames);
-+// Notices still on screen over gameplay, oldest first.
++// `icon` (ui.notify's) is a native status badge name or a png game path, drawn beside the notice in a dungeon.
++void           ShowManagerNotice(std::string message, int duration_frames, std::string icon = {});
++// The notice on screen over gameplay: notices queue and show one at a time, each for its own frames.
 +std::vector<std::string> GameToastLines();
++// The notice on screen and its icon; false when there is none.
++bool CurrentGameNotice(std::string &text, std::string &icon);
++// Says the notice was on screen this frame: a notice only counts down while something draws it.
++void MarkGameNoticeShown();
 +// True once after a mod opened a manager page outside the menu (the menu must open to show it).
 +bool TakeManagerMenuOpenRequest();
 +// The same, without consuming it: the host checks it can open the menu first.
@@ -2526,7 +2548,7 @@ index 88bbacba..0ce12bf7 100644
 +
  } // namespace dc::app
 diff --git a/port/src/app/presentation.cpp b/port/src/app/presentation.cpp
-index c4048c90..c1dd9735 100644
+index c4048c90..7f7f0aca 100644
 --- a/port/src/app/presentation.cpp
 +++ b/port/src/app/presentation.cpp
 @@ -7,10 +7,13 @@
@@ -2553,7 +2575,7 @@ index c4048c90..c1dd9735 100644
  struct FpsOverlay {
      bool                on = false;
      OverlayRate         frames;
-@@ -329,16 +335,58 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
+@@ -329,16 +335,59 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
  // Recorded again only when the text or the window's mapping changed. Always drawn in the overlay's
  // own 5x7 font, so the badge looks the same on every screen: the game's message font is only
  // loaded inside a mode, which made a second, different-looking badge for the intro and loading.
@@ -2574,6 +2596,7 @@ index c4048c90..c1dd9735 100644
 +    std::vector<std::string> toasts;
 +    if (!moonmod::ManagerOpen() && !in_hud) {
 +        toasts = moonmod::GameToastLines();
++        if (!toasts.empty()) moonmod::MarkGameNoticeShown();
 +    }
 +    if (lines.empty() && toasts.empty()) {
          return nullptr;
@@ -3411,7 +3434,7 @@ index f708584c..485d43ad 100644
  
              if (water <= 0.0f) {
 diff --git a/port/src/game/dun/gameloop.cpp b/port/src/game/dun/gameloop.cpp
-index 0e33bf79..eb746b12 100644
+index 0e33bf79..8b57eb90 100644
 --- a/port/src/game/dun/gameloop.cpp
 +++ b/port/src/game/dun/gameloop.cpp
 @@ -93,6 +93,7 @@
@@ -3559,7 +3582,17 @@ index 0e33bf79..eb746b12 100644
          }
  
          topStatusInfo(rogoY3, itemNowSel, UserStatus->cur_floor);
-@@ -2805,6 +2857,9 @@ void motionDrive() {
+@@ -2686,6 +2738,9 @@ void DunMainDraw() {
+         }
+     }
+ 
++    // MoonMod: a mod's notice (ui.notify) in the same window, when the game's own message is not using it.
++    DrawModNotice(DngMessMan.hide_timer > 0 || DngMessMan.enabled == 0 || DngMessMan.message != -1 || BtEventMode != 0);
++
+     if (BtEventMode != 0) {
+         if (DebugStatus[4] != 0) {
+             TexManager.ReloadTexture(Vif1Packet, 0xC);
+@@ -2805,6 +2860,9 @@ void motionDrive() {
              CharaMain.motion_type.state.look_at = false;
          }
  
@@ -3569,7 +3602,7 @@ index 0e33bf79..eb746b12 100644
          CharaMain.Step();
  
          if (chara == CHARA_XIAO) {
-@@ -3050,6 +3105,7 @@ void motionDrive() {
+@@ -3050,6 +3108,7 @@ void motionDrive() {
              gain *= 1.5f;
          }
  
@@ -3577,7 +3610,7 @@ index 0e33bf79..eb746b12 100644
          BtActStatus.action_gauge += gain;
  
          if (!(static_cast<int>(BtActStatus.action_gauge) < 100)) {
-@@ -3273,7 +3329,7 @@ void BtLoadMonstor(int ura) {
+@@ -3273,7 +3332,7 @@ void BtLoadMonstor(int ura) {
      unit->model_count = 0;
      unit->current_monster = 0;
  
@@ -3586,7 +3619,7 @@ index 0e33bf79..eb746b12 100644
          unit->script[slot] = &MonstorScriptBuffer[slot];
      }
  
-@@ -5080,10 +5136,10 @@ void autoCamTrial() {
+@@ -5080,10 +5139,10 @@ void autoCamTrial() {
              }
          }
      } else {
@@ -3600,7 +3633,7 @@ index 0e33bf79..eb746b12 100644
                  s32          parts_no = cell->parts_no;
                  CFrame      *frame = parts_no == -1 ? nullptr : map->parts[parts_no].camera_collision;
  
-@@ -5506,9 +5562,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5506,9 +5565,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      CUserStatus  *status = UserStatus;
      sceVu0FVECTOR at;
      sceVu0FVECTOR towards;
@@ -3613,7 +3646,7 @@ index 0e33bf79..eb746b12 100644
      float         rate = CharaRangeRate(status);
  
      CharaFrame->GetRotation(at);
-@@ -5516,7 +5572,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5516,7 +5575,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      sceVu0FVECTOR forward = {0.0f, 0.0f, 1.0f, 1.0f};
      sceVu0FMATRIX unit;
      sceVu0FMATRIX turn;
@@ -3622,7 +3655,7 @@ index 0e33bf79..eb746b12 100644
      int           screen[4];
  
      sceVu0UnitMatrix(unit);
-@@ -5532,7 +5588,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5532,7 +5591,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
          monster = -1;
      }
  
@@ -7295,7 +7328,7 @@ index 65af951a..d32264b7 100644
      {300,  150 },
      {300,  150 },
 diff --git a/port/src/game/shot_freefuncs.cpp b/port/src/game/shot_freefuncs.cpp
-index 73f3aac2..85a858cc 100644
+index 73f3aac2..81986e0e 100644
 --- a/port/src/game/shot_freefuncs.cpp
 +++ b/port/src/game/shot_freefuncs.cpp
 @@ -7,6 +7,7 @@
@@ -7306,7 +7339,7 @@ index 73f3aac2..85a858cc 100644
  #include <format>
  #include <numbers>
  #include <print>
-@@ -40,6 +41,12 @@
+@@ -40,6 +41,13 @@
  #include "snd.hpp"
  #include "texture.hpp"
  #include "userstatus.hpp"
@@ -7314,12 +7347,13 @@ index 73f3aac2..85a858cc 100644
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/item_icon_override.hpp"
 +#include "moonmod/manager_ui.hpp"
++#include "text/gametext.hpp"
 +#include "ui/framework.hpp"
 +#include "monstorunit.hpp"
  
  namespace dc::game {
  
-@@ -52,7 +59,6 @@ namespace {
+@@ -52,7 +60,6 @@ namespace {
  /**
   * Number of floors in each dungeon.
   */
@@ -7327,7 +7361,7 @@ index 73f3aac2..85a858cc 100644
  
  /**
   * Number of ripple slots on the water.
-@@ -135,9 +141,9 @@ int CheckHealingWater() {
+@@ -135,9 +142,9 @@ int CheckHealingWater() {
  
      sceVu0CopyVector(position, CharaMain.pos);
  
@@ -7340,7 +7374,7 @@ index 73f3aac2..85a858cc 100644
  
              if (parts_no != -1) {
                  CDungeonParts *part = &NowDngMap->parts[parts_no];
-@@ -197,7 +203,7 @@ int CheckHealZone() {
+@@ -197,7 +204,7 @@ int CheckHealZone() {
  
      const int column = static_cast<int>((80.0f + position[0]) / 160.0f);
      const int row = static_cast<int>((80.0f + position[2]) / 160.0f);
@@ -7349,7 +7383,7 @@ index 73f3aac2..85a858cc 100644
  
      if (parts_no == MAP_PARTS_NONE) {
          return 0;
-@@ -367,7 +373,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -367,7 +374,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
  
      sceVu0CopyVector(player, CharaMain.pos);
  
@@ -7358,7 +7392,7 @@ index 73f3aac2..85a858cc 100644
          if (NowMonstorUnit->monster[monster_no].state == -1) {
              continue;
          }
-@@ -381,7 +387,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -381,7 +388,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
      }
  
      if (map_no != 5) {
@@ -7367,7 +7401,7 @@ index 73f3aac2..85a858cc 100644
  
          if (UserStatus->cur_floor < floors - 1) {
              BtBattleMusic_Excg(nearest, &bgm_volume, &ambient_volume);
-@@ -624,6 +630,53 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -624,6 +631,37 @@ void topStatusInfo(int y, int selected_item, int floor) {
          set2DSprite(Vif1Packet, icons, CRect_i_(full_drops * 0x12 + 0x33, y + 0x22, 0x10, 0x14), CRect_i_((3 - static_cast<int>(static_cast<float>(leftover) / 2.5f)) * 16, 0x48, 0x10, 0x14), 0x50);
      }
  
@@ -7392,8 +7426,8 @@ index 73f3aac2..85a858cc 100644
 +        bar_y += 12;
 +    }
 +
-+    // Mod HUD text (render.layer_register) under the bars, and mod notices under that in the game's help window,
-+    // both in the game's own lettering. The presenter leaves both out while a dungeon draws them here.
++    // Mod HUD text (render.layer_register) under the bars, in the game's own lettering; the presenter leaves it out
++    // while a dungeon draws it here. Mod notices have the message window (DrawModNotice).
 +    constexpr float kModTextScale = ui::metrics::kScaleSmall;
 +    constexpr int   kModTextRow = 18;
 +    int             text_y = bar_y + 2;
@@ -7401,27 +7435,11 @@ index 73f3aac2..85a858cc 100644
 +        ui::Label(line, ui::ColorWhite, ui::Alignment::Left, true, kModTextScale).Draw(0x30, text_y);
 +        text_y += kModTextRow;
 +    }
-+    std::vector<std::string> notice_rows;
-+    constexpr int            kNoticeWidth = 400;
-+    for (const std::string &notice : moonmod::GameToastLines()) {
-+        for (std::string &row : ui::WrapText(notice, kNoticeWidth - 24, kModTextScale)) notice_rows.push_back(std::move(row));
-+    }
-+    constexpr std::size_t kNoticeRows = 8; // the newest rows, when several long notices stack up
-+    if (notice_rows.size() > kNoticeRows) notice_rows.erase(notice_rows.begin(), notice_rows.end() - kNoticeRows);
-+    if (!notice_rows.empty()) {
-+        const int box_y = text_y + 6;
-+        ui::HelpBox::Draw(0x20, box_y, kNoticeWidth, static_cast<int>(notice_rows.size()) * kModTextRow + 14);
-+        int row_y = box_y + 7;
-+        for (const std::string &row : notice_rows) {
-+            ui::Label(row, ui::ColorWhite, ui::Alignment::Left, true, kModTextScale).Draw(0x2C, row_y);
-+            row_y += kModTextRow;
-+        }
-+    }
 +
      static float popupYRate = -PI;
      popupYRate += 0.20943952f;
  
-@@ -682,7 +735,28 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -682,7 +720,28 @@ void topStatusInfo(int y, int selected_item, int floor) {
  
      int last_floor = maxFloorTbl__3[georama];
  
@@ -7451,7 +7469,7 @@ index 73f3aac2..85a858cc 100644
          set2DSprite(Vif1Packet, frame, CRect_i_(0x23C, y + 0x12, 0x26, 0x11), CRect_i_(0x78, 0x9E, 0x26, 0x12));
      } else {
          const int x = floor + 1 >= 10 ? 0x245 : 0x23F;
-@@ -696,6 +770,29 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -696,6 +755,29 @@ void topStatusInfo(int y, int selected_item, int floor) {
          set2DSprite(Vif1Packet, frame, CRect_i_(x + 9, number_y, 0xE, 0x11), CRect_i_((floor + 1) % 10 * 12, 0x9E, 0xC, 0x12));
      }
  
@@ -7481,7 +7499,93 @@ index 73f3aac2..85a858cc 100644
      selected_item *= 40;
      set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0xFC, y, 0x10, 0x10), CRect_i_(0x4A, 0x48, 0x10, 0x10));
      set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0x113, y, 0x10, 0x10), CRect_i_(0x5A, 0x48, 0x10, 0x10));
-@@ -872,6 +969,12 @@ void BtMapJumpCashClear() {
+@@ -832,6 +914,85 @@ void BtSetStatusErr(int status) {
+     }
+ }
+ 
++namespace {
++
++// Up to three lines of at most `columns` characters, broken between words; a longer notice ends in "...".
++std::string WrapNotice(std::string_view text, std::size_t columns, std::string_view indent) {
++    std::vector<std::string> lines(1);
++    std::size_t              at = 0;
++    while (at < text.size()) {
++        std::size_t end = text.find(' ', at);
++        if (end == std::string_view::npos) end = text.size();
++        const std::string_view word = text.substr(at, end - at);
++        at = end + 1;
++        if (word.empty()) continue;
++        if (!lines.back().empty() && lines.back().size() + 1 + word.size() > columns) lines.emplace_back();
++        if (!lines.back().empty()) lines.back() += ' ';
++        lines.back() += word;
++    }
++    constexpr std::size_t kRows = 3;
++    if (lines.size() > kRows) {
++        lines.resize(kRows);
++        lines.back() = lines.back().substr(0, columns - 3) + "...";
++    }
++    std::string out;
++    for (const std::string &line : lines) {
++        if (!out.empty()) out += '\n';
++        out += indent;
++        out += line;
++    }
++    return out;
++}
++
++} // namespace
++
++void DrawModNotice(bool native_busy) {
++    std::string text;
++    std::string icon;
++    if (!moonmod::CurrentGameNotice(text, icon)) return;
++    if (native_busy) return; // the game's own message has the window's place; this one waits its turn
++    moonmod::MarkGameNoticeShown();
++    // The game's dungeon message window (DngMes1's settings), holding a mod's notice for its frames.
++    static dc::text::GameText notice;
++    static std::string        shown;
++    static bool               configured = false;
++    if (!configured) {
++        configured = true;
++        notice.KeepGameRandom(true);
++        game::ClsMes &mes = notice.Mes();
++        mes.page_arrow = false;
++        mes.stay_frame = true;
++        mes.char_height = 22;
++        mes.style = MES_EDGE_NONE;
++    }
++    constexpr std::array<std::string_view, 5> kBadges = {"freeze", "stamina", "poison", "curse", "goo"};
++    const auto badge = std::ranges::find(kBadges, icon);
++    CTexture  *image = badge == kBadges.end() && !icon.empty() ? HudImageTexture(icon.c_str()) : nullptr;
++    const bool has_icon = badge != kBadges.end() || image != nullptr;
++    const std::string wrapped = WrapNotice(text, has_icon ? 21 : 24, has_icon ? "    " : "");
++    if (wrapped != shown) {
++        shown = wrapped;
++        notice.Set(wrapped);
++    }
++    game::ClsMes &mes = notice.Mes();
++    mes.text_x = 0x136;
++    mes.text_y = 0x154;
++    mes.auto_pos = MES_POS_BOTTOM_RIGHT;
++    mes.DrawMesWin();
++    // The icon sits in the text's indent, centred on its lines (win_x and win_y follow the window's grow animation).
++    const int icon_x = mes.text_x + 2;
++    const int icon_mid = mes.text_y + mes.text_height / 2;
++    if (badge != kBadges.end()) {
++        constexpr std::array<std::array<int, 2>, 5> badge_cells = {{{1, 0}, {0, 1}, {1, 1}, {1, 2}, {0, 2}}};
++        const auto &cell = badge_cells[badge - kBadges.begin()];
++        CTexture   *icons = TexManager.GetTexture(const_cast<char *>("itempack"), -1);
++        set2DSprite(Vif1Packet, icons, CRect_i_(icon_x, icon_mid - 11, 38, 22),
++                    CRect_i_(cell[0] * 62 + 132, cell[1] * 36 + 84, 62, 36));
++    } else if (image != nullptr) {
++        set2DSprite(Vif1Packet, image, CRect_i_(icon_x + 4, icon_mid - 15, 30, 30), CRect_i_(0, 0, 32, 32));
++    }
++}
++
+ void BtStatusErrDraw(int y) {
+     CTexture                                   *texture = TexManager.GetTexture("itempack", -1);
+     constexpr std::array<int, 5>                status_flags = {AILMENT_FREEZE, AILMENT_STAMINA, AILMENT_POISON, AILMENT_CURSE, AILMENT_GOO};
+@@ -872,6 +1033,12 @@ void BtMapJumpCashClear() {
  }
  
  int BtMapJumpLoad(char *map_name) {
@@ -7494,7 +7598,7 @@ index 73f3aac2..85a858cc 100644
      int mes_size = 0;
  
      CUserStatus *status = UserStatus;
-@@ -1029,3 +1132,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
+@@ -1029,3 +1196,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
  }
  
  } // namespace dc::game
@@ -20226,15 +20330,16 @@ index 00000000..12ea4260
 +dc::game::CTexture *HudImageTexture(const char *game_path);
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..7244d8bf
+index 00000000..372ebac7
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3587 @@
+@@ -0,0 +1,3602 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
 +
 +#include <algorithm>
++#include <array>
 +#include <cmath>
 +#include <cstdint>
 +#include <cstdio>
@@ -21364,7 +21469,21 @@ index 00000000..7244d8bf
 +            }
 +            duration = static_cast<int>(requested_duration);
 +        }
-+        ShowManagerNotice(message, duration);
++        // An icon for the dungeon's message window: a native status badge, or a png this mod registered.
++        std::string icon;
++        if (const auto icon_field = query.find("icon"); icon_field != query.end()) {
++            static constexpr std::array<std::string_view, 5> kBadges = {"freeze", "stamina", "poison", "curse", "goo"};
++            if (!icon_field->is_string()) {
++                return {ApiCallStatus::InvalidArgument, nullptr, "icon must be a status badge name or a png game path"};
++            }
++            icon = icon_field->get<std::string>();
++            if (std::ranges::find(kBadges, icon) == kBadges.end() &&
++                !(icon.ends_with(".png") && NativeResourceOverrideOwnedBy(manifest.id, icon))) {
++                return {ApiCallStatus::InvalidArgument, nullptr,
++                        "icon must be freeze, stamina, poison, curse, goo, or a png game path this mod registered"};
++            }
++        }
++        ShowManagerNotice(message, duration, std::move(icon));
 +        return {ApiCallStatus::Ok,
 +                {{"queued", true}, {"manager_open", ManagerOpen()}, {"duration_frames", duration}},
 +                {}};
@@ -23863,10 +23982,10 @@ index 00000000..286d8dce
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manager_ui.cpp b/port/src/moonmod/manager_ui.cpp
 new file mode 100644
-index 00000000..4df22ced
+index 00000000..35f9485d
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
-@@ -0,0 +1,976 @@
+@@ -0,0 +1,988 @@
 +#include "moonmod/manager_ui.hpp"
 +
 +#include <algorithm>
@@ -24270,8 +24389,10 @@ index 00000000..4df22ced
 +struct GameToast {
 +    std::string text;
 +    int frames = 0;
++    std::string icon;
 +};
-+std::vector<GameToast> g_game_toasts;
++std::vector<GameToast> g_game_toasts; // a queue: only the first is on screen and counts down
++bool                   g_game_notice_shown = false;
 +// Set when a mod opens a manager page during play: the dungeon loop opens its menu, where the manager draws.
 +bool g_menu_open_request = false;
 +// Top edges of the native-trust modal's Confirm and Cancel buttons, as last drawn.
@@ -24359,25 +24480,35 @@ index 00000000..4df22ced
 +    return requested;
 +}
 +
-+void ShowManagerNotice(std::string message, int duration_frames) {
++void ShowManagerNotice(std::string message, int duration_frames, std::string icon) {
 +    const int frames = std::clamp(duration_frames, 1, 3600);
 +    std::erase_if(g_game_toasts, [&message](const GameToast &toast) { return toast.text == message; });
-+    g_game_toasts.push_back({message, std::max(frames, 180)});
++    g_game_toasts.push_back({message, std::max(frames, 180), std::move(icon)});
 +    if (g_game_toasts.size() > 4) g_game_toasts.erase(g_game_toasts.begin());
 +    g_state.notice = std::move(message);
 +    g_state.notice_frames = frames;
 +}
 +
 +std::vector<std::string> GameToastLines() {
-+    std::vector<std::string> lines;
-+    for (const GameToast &toast : g_game_toasts) lines.push_back(toast.text);
-+    return lines;
++    if (g_game_toasts.empty()) return {};
++    return {g_game_toasts.front().text};
 +}
++
++bool CurrentGameNotice(std::string &text, std::string &icon) {
++    if (g_game_toasts.empty()) return false;
++    text = g_game_toasts.front().text;
++    icon = g_game_toasts.front().icon;
++    return true;
++}
++
++void MarkGameNoticeShown() { g_game_notice_shown = true; }
 +
 +void AdvanceManagerUi() {
 +    if (g_state.notice_frames > 0 && --g_state.notice_frames == 0) g_state.notice.clear();
-+    for (GameToast &toast : g_game_toasts) --toast.frames;
-+    std::erase_if(g_game_toasts, [](const GameToast &toast) { return toast.frames <= 0; });
++    if (!g_game_toasts.empty() && g_game_notice_shown && --g_game_toasts.front().frames <= 0) {
++        g_game_toasts.erase(g_game_toasts.begin());
++    }
++    g_game_notice_shown = false;
 +}
 +
 +const ModRecord *ManagerSelectedMod() {
@@ -37619,10 +37750,10 @@ index 00000000..b6ea477a
 +}
 diff --git a/port/src/tests/moonmod_manager_ui_test.cpp b/port/src/tests/moonmod_manager_ui_test.cpp
 new file mode 100644
-index 00000000..950199d1
+index 00000000..456e68cc
 --- /dev/null
 +++ b/port/src/tests/moonmod_manager_ui_test.cpp
-@@ -0,0 +1,350 @@
+@@ -0,0 +1,387 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -37972,6 +38103,43 @@ index 00000000..950199d1
 +    // A stopped runtime shows no sheet.
 +    moonmod::SharedRuntime().Stop();
 +    EXPECT_EQ(moonmod::ActiveCharacterSheet(), nullptr);
++}
++
++TEST(MoonModManagerUi, GameNoticesQueueAndCountDownOnlyWhileShown) {
++    // Drain anything an earlier test left.
++    std::string text;
++    std::string icon;
++    for (int frame = 0; frame < 20000 && moonmod::CurrentGameNotice(text, icon); ++frame) {
++        moonmod::MarkGameNoticeShown();
++        moonmod::AdvanceManagerUi();
++    }
++    ASSERT_FALSE(moonmod::CurrentGameNotice(text, icon));
++
++    moonmod::ShowManagerNotice("Next floor is cursed.", 300, "curse");
++    moonmod::ShowManagerNotice("Miracle cache!", 300);
++    ASSERT_TRUE(moonmod::CurrentGameNotice(text, icon));
++    EXPECT_EQ(text, "Next floor is cursed.");
++    EXPECT_EQ(icon, "curse");
++    EXPECT_EQ(moonmod::GameToastLines(), std::vector<std::string>{"Next floor is cursed."});
++
++    // Not drawn (a menu is open, the stairs are still being walked): it waits.
++    for (int frame = 0; frame < 400; ++frame) moonmod::AdvanceManagerUi();
++    ASSERT_TRUE(moonmod::CurrentGameNotice(text, icon));
++    EXPECT_EQ(text, "Next floor is cursed.");
++
++    // Drawn for its 300 frames, it goes, and the next one takes its place.
++    for (int frame = 0; frame < 300; ++frame) {
++        moonmod::MarkGameNoticeShown();
++        moonmod::AdvanceManagerUi();
++    }
++    ASSERT_TRUE(moonmod::CurrentGameNotice(text, icon));
++    EXPECT_EQ(text, "Miracle cache!");
++    EXPECT_TRUE(icon.empty());
++    for (int frame = 0; frame < 300; ++frame) {
++        moonmod::MarkGameNoticeShown();
++        moonmod::AdvanceManagerUi();
++    }
++    EXPECT_FALSE(moonmod::CurrentGameNotice(text, icon));
 +}
 diff --git a/port/src/tests/moonmod_mods_directory_test.cpp b/port/src/tests/moonmod_mods_directory_test.cpp
 new file mode 100644

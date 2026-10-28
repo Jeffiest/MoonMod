@@ -81,7 +81,7 @@ check((S.items["chronicle:item:177"] or 0) == 2, "starter kit given in the fresh
 check(S.monsters[1].exp == 36, "ABS x6 on floor I", S.monsters[1].exp)
 check(S.floor_label == "1-1" and S.floor_number == 1 and not S.layers.gauntlet and next(S.hud_icons) == nil,
       "the floor plate reads 1-1 and the card B1, no text line", S.floor_label)
-local intros = 0; for _, t in ipairs(S.toasts) do if t:find("^DIVINE BEAST CAVE I  %(depth") then intros = intros + 1 end end
+local intros = 0; for _, t in ipairs(S.toasts) do if t:find("^Divine Beast Cave 1%-1") then intros = intros + 1 end end
 check(intros == 1, "the floor intro shows once, though the floor is built after it is reported", intros)
 check(S.sheet and S.sheet.title == "MOON GAUNTLET", "Journal page set")
 local stock = 0; for _, n in pairs(S.storage.run.stock) do stock = stock + n end
@@ -89,6 +89,7 @@ check(stock == 1, "Atla pickup gave a Diorama tile", stock)
 S.monsters[1].alive = true; S.kill(S.monsters[1]); S.tick(2)
 S.input_pressed["curse_key"] = true; S.tick(1)
 check(S.storage.run.next_cursed == true, "G toggles the Cursed Gate")
+check(S.last_toast():find("^Next floor is cursed") and S.toast_icons[#S.toasts] == "curse", "with a short notice and the Curse badge", S.last_toast())
 check(S.hud_icons.curse and S.hud_icons.curse.blink and not S.hud_icons.cache, "a waiting curse blinks its badge")
 S.exit_gate(); run_floor(S, {sweep = true})
 run = S.storage.run
@@ -104,7 +105,8 @@ S.monsters[2].alive = true; S.monsters[2].exp = 40; S.kill(S.monsters[2]); S.tic
 check(S.weapons[ally][0].abs + S.weapons[ally][0].level * 1000 > before, "benched ally's weapon gained shared ABS")
 -- an undrafted, knocked-out character cannot be switched to; a drafted one bounces back
 S.exit_gate(); run_floor(S)
-check(S.find_toast("MIRACLE CACHE"), "cursed floor paid a Miracle cache on exit")
+local cache_at; for i, t in ipairs(S.toasts) do if t:find("^Miracle cache!") then cache_at = i end end
+check(cache_at and S.toast_icons[cache_at] == "moonmod/roguelike/hud/cache.png", "cursed floor paid a Miracle cache on exit, with the chest")
 S.input_pressed["curse_key"] = true; S.tick(1)
 check(S.storage.run.next_cursed == false and S.last_toast():find("Warden"), "the Warden floor cannot be cursed")
 S.exit_gate(); S.tick(20)
@@ -130,6 +132,10 @@ check(S.page().lines[#S.page().lines]:find("CONQUERED"), "title screen shows the
 check(S.tuning == nil and S.floor_label == nil and next(S.hud_icons) == nil and S.sheet == nil, "run effects, HUD and Journal page cleared")
 local won = S.storage.meta.shards
 check(won >= 30, "Moon Shards banked", won)
+
+-- every notice of the run fits the message window: three lines of about 24 characters
+local longest = ""; for _, t in ipairs(S.toasts) do if #t > #longest then longest = t end end
+check(#longest <= 72, "every notice fits three lines of the message window", #longest .. ": " .. longest)
 
 -- 2. Norune Eternal from the title screen ----------------------------------------------------------
 print("Scenario 2: Norune Eternal on the title screen")
@@ -246,11 +252,11 @@ S9.select("character")
 S9.select("start")
 S9.tick(120)
 check(S9.active == "xiao" and not S9.find_toast("not drafted"), "the run opens as Xiao with no draft bounce", S9.active)
-check(not S9.find_toast("off the Gauntlet route"), "the dungeon entrance is not called off route")
+check(not S9.find_toast("Off the Gauntlet route"), "the dungeon entrance is not called off route")
 finish_biome(S9)
 check(S9.dungeon == 1 and S9.active == "xiao" and not S9.find_toast("not drafted"), "the next biome opens as Xiao too",
       tostring(S9.dungeon) .. " " .. S9.active)
-check(not S9.find_toast("off the Gauntlet route") and not S9.storage.run.suspended, "and its entrance is not off route either")
+check(not S9.find_toast("Off the Gauntlet route") and not S9.storage.run.suspended, "and its entrance is not off route either")
 
 -- 9. One weapon each: take the found one, an outsider's weapon, a broken weapon ends the run ------------
 print("Scenario 9: one weapon each, and a broken weapon ends the run")

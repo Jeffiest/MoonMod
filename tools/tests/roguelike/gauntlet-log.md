@@ -2,6 +2,17 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — Run messages in the game's message window
+
+Engine: mod notices (`ui.notify`) queue and pop up one at a time in the dungeon's own message window (bottom right,
+the system message frame and font), each for its duration, counting down only while shown, and waiting while the
+game's own message has the window. `ui.notify` takes an optional `icon` (a status badge or a registered png). The
+Gauntlet's messages are rewritten short (three lines at most, checked by the harness), each five seconds, with the
+Curse badge or the cache chest where they fit. Checked in the game: the opening ("Divine Beast Cave 1-1. Ruby sets
+out."), the Cursed Gate with its badge, the chest icon, and the window gone after five seconds. New engine test
+`MoonModManagerUi.GameNoticesQueueAndCountDownOnlyWhileShown`; the full suite has the baseline's 7 failures (803
+pass). `test_runs.lua` 90/90, `test_standalone.lua` 38/38.
+
 ## 2026-10-28 — The Gauntlet's HUD in the game's own art
 
 The run's HUD text line is gone. Engine: `render.hud_icon_set` (a native status badge at half size, or a mod png)

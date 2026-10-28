@@ -53,7 +53,17 @@ local function setting(id, fallback)
   return value
 end
 local function clamp(v, lo, hi) v = tonumber(v) or lo; return math.max(lo, math.min(hi, v)) end
-local function toast(message, frames) try(game.ui.notify, {message = tostring(message):sub(1, 196), duration_frames = frames or 240}) end
+-- A notice pops up in the game's message window for five seconds; `icon` is a status badge or a registered png.
+local NOTICE_FRAMES = 300
+local function toast(message, icon)
+  local notice = {message = tostring(message):sub(1, 196), duration_frames = NOTICE_FRAMES}
+  if icon then
+    notice.icon = icon
+    if call(game.ui.notify, notice) then return end
+    notice.icon = nil -- an engine without notice icons
+  end
+  try(game.ui.notify, notice)
+end
 local function title(id) return (tostring(id):gsub("^%l", string.upper)) end
 local function pick(list) if type(list) == "table" and #list > 0 then return list[math.random(#list)] end end
 local function contains(list, value) for _, v in ipairs(list or {}) do if v == value then return true end end; return false end
@@ -389,7 +399,7 @@ local function give_tiles(n, why)
     run.stock[id] = (tonumber(run.stock[id]) or 0) + 1
     got[#got + 1] = TILE[id].title
   end
-  toast((why and (why .. ": ") or "") .. "Diorama tile" .. (n > 1 and "s " or " ") .. table.concat(got, ", ") .. "  (Journal > Character)", 300)
+  toast((why and (why .. ": ") or "") .. "+" .. n .. " Diorama tile" .. (n > 1 and "s" or "") .. " (" .. table.concat(got, ", ") .. ").")
 end
 
 local function earn_shards(n)
@@ -402,9 +412,9 @@ local function bless(why)
   local open = {}
   for _, id in ipairs(BLESSING_IDS) do if not contains(run.blessings, id) then open[#open + 1] = id end end
   local id = pick(open)
-  if not id then earn_shards(2); toast((why or "Blessing") .. ": every blessing held, +2 Moon Shards"); return end
+  if not id then earn_shards(2); toast("Every blessing held: +2 Moon Shards."); return end
   run.blessings[#run.blessings + 1] = id
-  toast((why and (why .. "  -  ") or "") .. "BLESSING: " .. BLESSINGS[id].name .. " (" .. BLESSINGS[id].text .. ")", 360)
+  toast("Blessing: " .. BLESSINGS[id].name .. ". " .. BLESSINGS[id].text:gsub("^%l", string.upper) .. ".")
 end
 
 local function pay(amount)
@@ -421,7 +431,7 @@ local function miracle_cache()
   local a = try(game.items.give, {id = "chronicle:item:" .. gem, count = 1})
   local b = try(game.items.give, {id = "chronicle:item:" .. attach, count = 1})
   local n = ((a and (a.added or 0) > 0) and 1 or 0) + ((b and (b.added or 0) > 0) and 1 or 0)
-  toast("MIRACLE CACHE: " .. n .. " treasure" .. (n == 1 and "" or "s") .. " added to your bag" .. (n < 2 and " (bag full?)" or ""), 300)
+  toast("Miracle cache! " .. n .. " treasure" .. (n == 1 and "" or "s") .. " added to the bag." .. (n < 2 and " Is it full?" or ""), HUD_CACHE_IMAGE)
 end
 
 -- Weapons ------------------------------------------------------------------------------------------------
@@ -494,7 +504,7 @@ local function share_abs(amount, active)
       local added = try(game.weapons.abs_add, {id = w.id, character = c, slot = w.slot, amount = math.min(32767, share)})
       if added and (added.abs or 0) >= (added.abs_max or math.huge) then
         local up = try(game.weapons.upgrade, selector)
-        if up and up.upgraded then toast(title(c) .. "'s weapon leveled up from the shared ABS", 180) end
+        if up and up.upgraded then toast(title(c) .. "'s weapon leveled up.") end
       end
     end
   end
@@ -752,8 +762,8 @@ local function first_floor_setup()
   cache_weapons()
   prepare_floor_rules()
   push_diorama_ranks()
-  toast("THE GAUNTLET OPENS: " .. #run.biomes .. " biome" .. (#run.biomes == 1 and "" or "s") .. ", " .. title(start) ..
-      (#run.drafted > 1 and (" and " .. title(run.drafted[2])) or "") .. (#notes > 0 and ("  (" .. table.concat(notes, "; ") .. ")") or ""), 480)
+  toast(biome_def(1).name .. " 1-1. " .. title(start) .. (#run.drafted > 1 and (" and " .. title(run.drafted[2]) .. " set") or " sets") .. " out.")
+  if #notes > 0 then toast(table.concat(notes, ". ") .. ".") end
 end
 
 local function end_run(outcome)
@@ -798,11 +808,11 @@ local function draft_ally(why)
   local others = {}
   for _, c in ipairs(CHARACTERS) do if not contains(run.drafted, c) then others[#others + 1] = c end end
   local ally = pick(others)
-  if not ally then earn_shards(2); toast(why .. ": no one left to draft, +2 Moon Shards"); return end
+  if not ally then earn_shards(2); toast("No one left to draft: +2 Moon Shards."); return end
   run.drafted[#run.drafted + 1] = ally
   try(game.player.set, {hp = max_hp_of(ally), character = ally})
   run.weapons[ally] = equipped_weapon(ally)
-  toast(why .. ": " .. title(ally):upper() .. " JOINS THE RUN", 360)
+  toast(why .. ": " .. title(ally) .. " joins the run!")
 end
 
 local function complete_floor(prev)
@@ -831,12 +841,12 @@ local function warden_cleared()
   local last = run.pos >= #run.biomes
   if last then
     run.phase = "victory"
-    toast("THE LAST WARDEN FALLS. The Gauntlet is conquered.", 360)
+    toast("The last Warden falls. The Gauntlet is conquered!")
     queue_transition("end", 300, "victory")
   else
     local next_biome = BIOMES[run.biomes[run.pos + 1]]
     run.awaiting = run.pos + 1
-    toast("WARDEN FELLED. On to " .. next_biome.name .. " in 5 seconds" .. (run.heirloom_charges > 0 and "  (Heirloom charge ready: Actions)" or ""), 360)
+    toast("Warden felled! On to " .. next_biome.name .. "." .. (run.heirloom_charges > 0 and " An Heirloom charge is ready." or ""))
     queue_transition(ROUTE[run.biomes[run.pos + 1]].floors[1].id, 300, "next biome")
   end
   save_run()
@@ -869,7 +879,7 @@ local function enter_floor(world)
   if not expected then
     run.suspended = true
     floor = {token = world.token, biome = 0, slot = 0, scaled = {}}
-    toast("This floor is off the Gauntlet route: run effects are paused until you return to it.", 360)
+    toast("Off the Gauntlet route: the run is paused here.")
     save_run()
     refresh()
     return
@@ -889,22 +899,21 @@ local function enter_floor(world)
   if advanced then run.next_cursed = false end
   meta.best_depth = math.max(meta.best_depth, run.depth)
   local b = biome_def(pos)
-  local intro = string.format("%s %s  (depth %d/%d)", b.name:upper(), FLOOR_LABEL[hit.slot], run.depth, total_floors())
-  if floor.back then intro = intro .. "  VAULT: tougher, richer, a blessing when you leave" end
+  local intro = hit.slot == WARDEN_SLOT and (b.name .. " Warden. The key holder guards the gate.") or
+      string.format("%s %d-%d.", b.name, pos, hit.slot)
+  if floor.back then intro = intro .. " A Vault: tougher, richer." end
   if floor.cursed then
     local list = {}
-    for _, c in ipairs(floor.curses) do list[#list + 1] = CURSES[c].name .. " (" .. CURSES[c].text .. ")" end
-    intro = intro .. "  CURSED: " .. table.concat(list, ", ")
+    for _, c in ipairs(floor.curses) do list[#list + 1] = CURSES[c].name end
+    intro = intro .. " Cursed: " .. table.concat(list, ", ") .. "."
   end
-  if hit.slot == WARDEN_SLOT then intro = intro .. "  The gate-key holder is the Warden." end
-  if advanced and hit.slot == 2 and eternal("gaffer") > 0 then intro = intro .. "  Gaffer's Wagon is here (Actions)." end
+  if advanced and hit.slot == 2 and eternal("gaffer") > 0 then intro = intro .. " Gaffer's Wagon is here." end
   -- Re-entering the dungeon (the launch, the next biome) loads Toan: switch back quietly, so the draft
   -- check has nothing to bounce.
   local p = try(game.player.get)
   local keep = run.leader or run.drafted[1]
   if p and p.character ~= keep then try(game.party.set_active, {id = keep}) end
-  if first then first_floor_setup() end
-  toast(intro, 420)
+  if first then first_floor_setup() else toast(intro, floor.cursed and "curse" or nil) end
   if advanced and hit.slot == 2 and (pos == 1 or pos == 3) then draft_ally("GOLDEN ATLA") end
   if advanced and hit.slot == 1 then cache_weapons() end
   save_meta()
@@ -955,7 +964,7 @@ local function scale_enemies(roster)
           if warden then
             floor.warden, floor.warden_max = handle, request.max_hp
             try(game.entities.scale_set, {entity = handle, scale = 1.8})
-            toast("THE WARDEN OF " .. biome_def(floor.biome).name:upper() .. " AWAKENS", 300)
+            toast("The Warden awakens!")
           end
         end
       end
@@ -1046,14 +1055,14 @@ local function confirm_choice()
   local c, k, t = choice.character, choice.keep, choice.take
   if choice.pick == 2 then
     local ok, err = call(game.weapons.equip, {id = t.id, character = c, slot = t.slot})
-    if not ok then toast("Cannot change weapons right now (" .. errmsg(err) .. "). Try again in a moment.", 180); return end
+    if not ok then toast("Can't change weapons right now. Try again in a moment."); return end
     k, t = t, k
   end
   local s = absorb(c, k, c, t)
   run.weapons[c] = {id = k.id, slot = k.slot}
   save_run()
-  toast(string.format("%s %s the %s weapon and absorbs the other: ATK %d, MAG %d, END %d", title(c), choice.pick == 2 and "takes" or "keeps",
-      choice.pick == 2 and "found" or "held", s.attack, s.magic, s.endurance), 300)
+  toast(string.format("%s %s the %s weapon. ATK %d, MAG %d, END %d.", title(c), choice.pick == 2 and "takes" or "keeps",
+      choice.pick == 2 and "found" or "held", s.attack, s.magic, s.endurance))
   close_choice()
 end
 
@@ -1079,7 +1088,7 @@ moonmod.on("game.item_picked_up", function(e)
     local gained = level_up(selector, levels)
     local attached = insert_attachments(selector, math.random(100) <= 35 and 2 or 1)
     if gained > 0 or attached > 0 then
-      toast(string.format("Found weapon: +%d level%s, %d attachment%s", gained, gained == 1 and "" or "s", attached, attached == 1 and "" or "s"), 240)
+      toast(string.format("Found weapon: +%d level%s, %d attachment%s.", gained, gained == 1 and "" or "s", attached, attached == 1 and "" or "s"))
     end
   end
   local found = weapon_info(e.id, character, e.slot)
@@ -1090,8 +1099,7 @@ moonmod.on("game.item_picked_up", function(e)
     local into = w and w.id and weapon_info(w.id, p.character, w.slot)
     if not into then return end
     local s = absorb(p.character, into, character, found)
-    toast(string.format("A weapon for %s, who is not in this run: absorbed into %s's. ATK %d, MAG %d, END %d", title(character),
-        title(p.character), s.attack, s.magic, s.endurance), 300)
+    toast(string.format("%s's weapon was absorbed into %s's. ATK %d, MAG %d.", title(character), title(p.character), s.attack, s.magic))
     return
   end
   local held = equipped_weapon(character)
@@ -1107,7 +1115,7 @@ local function check_break(p)
   if not (BROKEN[tonumber(w.item_no) or 0] or (tonumber(w.durability) or 1) <= 0) then return end
   run.broken = true
   save_run()
-  toast(title(p.character) .. "'s weapon broke. The run is over.", 360)
+  toast(title(p.character) .. "'s weapon broke! The run is over.")
   queue_transition("end", 180, "weapon broke")
 end
 
@@ -1138,7 +1146,7 @@ local function enforce_draft(p)
   bounce_at = frame + 120
   for _, c in ipairs(run.drafted) do
     if try(game.party.set_active, {id = c}) then
-      toast(title(p.character) .. " is not drafted for this run. Back to " .. title(c) .. ".", 240)
+      toast(title(p.character) .. " is not drafted. Back to " .. title(c) .. ".")
       return
     end
   end
@@ -1146,11 +1154,11 @@ end
 
 -- Cursed Gate toggle -------------------------------------------------------------------------------------
 local function toggle_curse()
-  if not on_route() then toast("Toggle the Cursed Gate on a Gauntlet floor."); return end
-  if run.slot == WARDEN_SLOT - 1 then toast("The next floor is the Warden's: it cannot be cursed."); return end
+  if not on_route() then toast("The Cursed Gate works on Gauntlet floors."); return end
+  if run.slot == WARDEN_SLOT - 1 then toast("The Warden's floor can't be cursed.", "curse"); return end
   run.next_cursed = not run.next_cursed
-  toast(run.next_cursed and "CURSED GATE: the next floor is cursed (tougher, two curses) and pays a Miracle cache." or
-        "Cursed Gate closed: the next floor is normal.", 300)
+  if run.next_cursed then toast("Next floor is cursed. Survive it for a Miracle cache.", "curse")
+  else toast("The curse is lifted. The next floor is normal.") end
   save_run()
   refresh()
 end
@@ -1187,7 +1195,7 @@ local function pump_transition()
   t.at = frame + 90
   if t.tries >= 20 then
     pending_transition = nil
-    toast("Could not move the run on (" .. errmsg(err) .. "). Take the floor exit to leave the Gauntlet.", 480)
+    toast("The run could not move on. Take the exit to leave.")
   end
 end
 
@@ -1242,7 +1250,7 @@ moonmod.on("game.tick", function(e)
     if alive and floor.seen > 0 and alive == 0 then
       floor.swept = true
       if floor.slot == WARDEN_SLOT and not floor.warden then warden_cleared()
-      else toast("Floor swept: an extra Diorama tile when you take the exit.", 240) end
+      else toast("Floor swept! An extra Diorama tile awaits.") end
     end
   end
 end)
@@ -1260,7 +1268,7 @@ moonmod.on("skills.train_requested", function(event)
     run.stock[node] = run.stock[node] - 1
     run.diorama[node] = placed(node) + 1
     try(game.skills.set_rank, {id = node_id("diorama", node), rank = run.diorama[node]})
-    toast(TILE[node].title .. " placed (" .. placed_total() .. "/" .. plots() .. "). " .. TILE[node].description, 300)
+    toast(TILE[node].title .. " placed (" .. placed_total() .. "/" .. plots() .. "). " .. TILE[node].description)
     save_run()
     refresh()
   elseif tree == "eternal" and ETERNAL_NODE[node] then
@@ -1273,7 +1281,7 @@ moonmod.on("skills.train_requested", function(event)
     meta.eternal[node] = rank + 1
     save_meta()
     try(game.skills.set_rank, {id = node_id("eternal", node), rank = rank + 1})
-    toast(n.title .. " " .. (rank + 1) .. "/" .. n.max_rank .. " unlocked  (" .. meta.shards .. " Moon Shards left)", 300)
+    toast(n.title .. " " .. (rank + 1) .. "/" .. n.max_rank .. " unlocked. " .. meta.shards .. " Moon Shards left.")
     refresh()
   end
 end)
@@ -1303,7 +1311,7 @@ local function gaffer(items, price)
     local got = try(game.items.give, {id = "chronicle:item:" .. it[1], count = it[2]})
     n = n + (got and got.added or 0)
   end
-  toast("Gaffer: \"Pleasure doing business!\"  " .. n .. " item" .. (n == 1 and "" or "s") .. " for " .. price .. " Gilda", 240)
+  toast("Gaffer: \"Pleasure doing business!\" " .. n .. " item" .. (n == 1 and "" or "s") .. " for " .. price .. " Gilda.")
 end
 
 
@@ -1322,7 +1330,7 @@ local function bank_heirloom()
   meta.heirloom = h
   run.heirloom_charges = run.heirloom_charges - 1
   save_meta(); save_run()
-  toast(string.format("HEIRLOOM banked: +%d attack, +%d magic, +%d endurance, +%d speed for every new run's weapon", h.attack, h.magic, h.endurance, h.speed), 420)
+  toast(string.format("Heirloom banked: +%d attack, +%d magic for every new run.", h.attack, h.magic))
 end
 
 moonmod.on("ui.action", function(a)
@@ -1334,9 +1342,8 @@ moonmod.on("ui.action", function(a)
     if not run then toast(string.format("No run. Moon Shards %d. Start one from the title menu: Dark Genie's Gauntlet.", meta.shards)); return end
     local b = biome_def(run.pos)
     local curses = floor and floor.cursed and names_of(floor.curses, CURSES) or "none"
-    toast(string.format("%s %s | depth %d/%d | %s | curses: %s | Diorama %d/%d | blessings %d | kills %d | +%d shards",
-        b and b.name or "?", FLOOR_LABEL[run.slot] or "-", run.depth, total_floors(), run.suspended and "OFF ROUTE" or run.phase,
-        curses, placed_total(), plots(), #run.blessings, run.kills, run.shards), 600)
+    toast(string.format("%s %d-%d, depth %d/%d. Curses: %s. Diorama %d/%d, %d blessings, +%d shards.",
+        b and b.name or "?", run.pos, run.slot, run.depth, total_floors(), curses, placed_total(), plots(), #run.blessings, run.shards))
   elseif a.id == "curse" then toggle_curse()
   elseif a.id == "heirloom" then bank_heirloom()
   elseif a.id == "gaffer_repair" then gaffer({{ITEM.repair, 2}}, 300)
@@ -1349,8 +1356,8 @@ moonmod.on("ui.action", function(a)
     toast("Diorama cleared: every tile is back in stock.")
   elseif a.id == "records" then
     local h = meta.heirloom
-    toast(string.format("Moon Shards %d | runs %d, wins %d, deaths %d, retreats %d | best depth %d | Heirloom: %s", meta.shards, meta.runs, meta.wins,
-        meta.deaths, meta.retreats, meta.best_depth, h and string.format("+%d atk +%d mag", h.attack or 0, h.magic or 0) or "none"), 600)
+    toast(string.format("Moon Shards %d. Runs %d, wins %d. Best depth %d. Heirloom: %s.", meta.shards, meta.runs, meta.wins,
+        meta.best_depth, h and string.format("+%d atk +%d mag", h.attack or 0, h.magic or 0) or "none"))
   elseif a.id == "page" then
     update_sheet()
     local ok, err = call(game.ui.sheet_open)

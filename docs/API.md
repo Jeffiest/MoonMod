@@ -172,7 +172,7 @@ Mods can register WAV, FLAC, or Ogg Vorbis files under `resources/audio/`, then 
 local notice = assert(game.ui.notify({message = "New content is ready", duration_frames = 240}))
 ```
 
-The notice is queued for the manager's status line and stays there for the requested number of game frames (1-3600, default 240). Messages are limited to 200 bytes. It also draws over gameplay as a small line under the HUD, newest at the bottom, for the same duration; the manager's status line shows it too if the manager is open, or when the player opens it before the duration expires. `ui.notify` requires `game.write`.
+The notice is queued for the manager's status line and stays there for the requested number of game frames (1-3600, default 240). Messages are limited to 200 bytes. Over gameplay, notices queue and pop up one at a time, each for its duration (180 frames at least), counting down only while it is on screen. In a Chronicle dungeon each pops up in the game's own message window at the bottom right, wrapped to three lines (a longer one ends in "..."), and waits while the game's own message has the window. Elsewhere it is an overlay line. An optional `icon` (Chronicle) draws in the window beside the text: `"freeze"`, `"stamina"`, `"poison"`, `"curse"` or `"goo"` for the game's status badges, or a png game path the mod registered with `resources.override`. The manager's status line shows the notice too if the manager is open, or when the player opens it before the duration expires. `ui.notify` requires `game.write`.
 
 ### Shared mod-manager actions
 
