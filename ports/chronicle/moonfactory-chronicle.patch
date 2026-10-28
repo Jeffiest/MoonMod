@@ -13,10 +13,10 @@ index c211b224..0252005a 100644
  # Reference assembly, split from the disc by splat and never committed: one
  # tree per release, ps2/asm/ntsc and ps2/asm/pal.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 5a0b2fc1..b1d63b05 100644
+index 5a0b2fc1..3e4a63e7 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
-@@ -9,6 +9,18 @@ if(NOT CMAKE_CXX_COMPILER)
+@@ -9,6 +9,32 @@ if(NOT CMAKE_CXX_COMPILER)
      set(CMAKE_CXX_COMPILER clang++)
  endif()
  enable_language(CXX)
@@ -32,10 +32,24 @@ index 5a0b2fc1..b1d63b05 100644
 +    endif()
 +endif()
 +enable_language(C)
++
++# MoonMod's files are made for one Chronicle commit; pasted over another they may not build.
++set(MOONMOD_CHRONICLE_COMMIT 9418a5506e2a08e7739aa68d70841df6bc516201)
++find_package(Git QUIET)
++if(GIT_FOUND)
++    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
++        OUTPUT_VARIABLE moonmod_chronicle_head OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
++        RESULT_VARIABLE moonmod_git_result)
++    if(moonmod_git_result EQUAL 0 AND NOT moonmod_chronicle_head STREQUAL MOONMOD_CHRONICLE_COMMIT)
++        message(WARNING "MoonMod is made for Chronicle ${MOONMOD_CHRONICLE_COMMIT}, but this checkout is at "
++            "${moonmod_chronicle_head}. Run 'git checkout ${MOONMOD_CHRONICLE_COMMIT}' and paste the MoonMod files "
++            "again, or use the MoonMod release made for this commit.")
++    endif()
++endif()
  
  set(CMAKE_CXX_STANDARD 26)
  set(CMAKE_CXX_STANDARD_REQUIRED ON)
-@@ -18,6 +30,8 @@ if(NINTENDO_SWITCH)
+@@ -18,6 +44,8 @@ if(NINTENDO_SWITCH)
  else()
      set(CMAKE_CXX_EXTENSIONS OFF)
  endif()
@@ -44,7 +58,7 @@ index 5a0b2fc1..b1d63b05 100644
  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
  # darkcloud is position-independent (DC_LINK_OPTIONS below).
  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-@@ -40,6 +54,17 @@ endif()
+@@ -40,6 +68,17 @@ endif()
  
  # Python runs the port override script from the Kazarov submodule.
  find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -62,7 +76,7 @@ index 5a0b2fc1..b1d63b05 100644
  # Flatpak builds have no network: their single-file libraries are staged in audio_decoders/ and stb_truetype/; others fetch them.
  set(KZ_PORT_VENDOR_DIRS ${CMAKE_SOURCE_DIR}/audio_decoders ${CMAKE_SOURCE_DIR}/stb_truetype)
  # The Flatpak also stages each library Kazarov's FetchContent_Declare downloads, in flatpak-deps/<name>
-@@ -168,6 +193,7 @@ if(NINTENDO_SWITCH)
+@@ -168,6 +207,7 @@ if(NINTENDO_SWITCH)
      dc_switch_port(dc_port)
  endif()
  target_link_libraries(dc_port PRIVATE dc_options SDL3::SDL3 Vulkan::Vulkan nlohmann_json::nlohmann_json fastgltf::fastgltf kz_port_headers)
@@ -70,7 +84,7 @@ index 5a0b2fc1..b1d63b05 100644
  # port/src, the generated headers, dcdata's header-only core and the stb directories: captionfont.cpp
  # rasterizes with stb_truetype and platform/png_image.cpp decodes with stb_image, which Kazarov stages
  # (or fetches) for dc_host.
-@@ -182,6 +208,7 @@ function(dc_port_includes target)
+@@ -182,6 +222,7 @@ function(dc_port_includes target)
  endfunction()
  dc_port_includes(dc_port)
  dc_port_includes(dc_ps2)
@@ -78,7 +92,7 @@ index 5a0b2fc1..b1d63b05 100644
  # The game's headers trip a few warnings that only describe how MWCC's source
  # was written, not a problem in the port.
  target_compile_options(dc_port PRIVATE -Wall -Wno-mismatched-tags -Wno-unused-label
-@@ -212,7 +239,8 @@ endif()
+@@ -212,7 +253,8 @@ endif()
  
  function(dc_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:dc_port> $<TARGET_OBJECTS:dc_ps2>)
@@ -1463,6 +1477,40 @@ index 00000000..00c145b0
 +bool                      IsValidModId(std::string_view id);
 +std::string               SettingTypeName(SettingType type);
 +std::string               SettingValueText(const SettingDefinition &setting, const Json &value);
++
++} // namespace moonmod
+diff --git a/port/include/moonmod/mods_directory.hpp b/port/include/moonmod/mods_directory.hpp
+new file mode 100644
+index 00000000..8985cdf7
+--- /dev/null
++++ b/port/include/moonmod/mods_directory.hpp
+@@ -0,0 +1,28 @@
++#pragma once
++
++#include <filesystem>
++#include <system_error>
++
++namespace moonmod {
++
++// The one folder mods are read from (one, so a package never shows up twice):
++// - mods/ in the Chronicle checkout the game was built in, the folder holding kazarov.conf above the executable.
++//   The MoonMod release adds it there;
++// - otherwise mods/ beside the executable, for a build copied somewhere else;
++// - otherwise <save>/mods.
++inline std::filesystem::path ModsDirectory(const std::filesystem::path &executable_dir,
++                                           const std::filesystem::path &save_root) {
++    namespace fs = std::filesystem;
++    std::error_code error;
++    for (fs::path dir = executable_dir; !dir.empty(); dir = dir.parent_path()) {
++        if (fs::is_regular_file(dir / "kazarov.conf", error)) {
++            if (fs::is_directory(dir / "mods", error)) return dir / "mods";
++            break;
++        }
++        if (dir == dir.parent_path()) break;
++    }
++    if (!executable_dir.empty() && fs::is_directory(executable_dir / "mods", error)) return executable_dir / "mods";
++    return save_root / "mods";
++}
 +
 +} // namespace moonmod
 diff --git a/port/include/moonmod/monstorunit_moonmod.hpp b/port/include/moonmod/monstorunit_moonmod.hpp
@@ -7820,21 +7868,22 @@ index 3e618695..2a3fdad4 100644
 +
  } // namespace dc::localize
 diff --git a/port/src/main.cpp b/port/src/main.cpp
-index 43dfe76a..9d14abe7 100644
+index 43dfe76a..4d9260b3 100644
 --- a/port/src/main.cpp
 +++ b/port/src/main.cpp
-@@ -41,6 +41,10 @@
+@@ -41,6 +41,11 @@
  #include "langset.hpp"
  #include "localize/localize.hpp"
  #include "menu_save.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/manager_ui.hpp"
++#include "moonmod/mods_directory.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
 +#include "moonmod/runtime.hpp"
  #include "nowload.hpp"
  #include "options/menu_option.hpp"
  #include "platform/audio.hpp"
-@@ -86,6 +90,7 @@ struct Options {
+@@ -86,6 +91,7 @@ struct Options {
      int          display_per_tick = 0;
      const char  *jump = nullptr;
      const char  *give = nullptr;
@@ -7842,7 +7891,7 @@ index 43dfe76a..9d14abe7 100644
      bool         fast_load = false;
      bool         show_fps = false;
      bool         screenshot_fps = false;
-@@ -116,6 +121,7 @@ float g_switch_render_scale = 0.0f;
+@@ -116,6 +122,7 @@ float g_switch_render_scale = 0.0f;
                   "          [--display-per-tick N]"
  #endif
                   " [--show-fps] [--jump MODE[:MAP]] [--fast-load]\n"
@@ -7850,7 +7899,7 @@ index 43dfe76a..9d14abe7 100644
                   "          [--give ITEM,...]\n"
                   "  --data DIR         extracted game data or its sibling data.zip (default: DC_DATA,\n"
                   "                     then ./data, then data/ beside the executable)\n"
-@@ -149,7 +155,8 @@ float g_switch_render_scale = 0.0f;
+@@ -149,7 +156,8 @@ float g_switch_render_scale = 0.0f;
                   "                     skipping the warm-up (DC_JUMP); see docs/PC.md\n"
                   "  --fast-load        loading-screen holds and fades of a few ticks (DC_FAST_LOAD=1)\n"
                   "  --give ITEM,...    give the party these item and weapon numbers when a town or dungeon\n"
@@ -7860,7 +7909,7 @@ index 43dfe76a..9d14abe7 100644
                   program);
  #ifdef __SWITCH__
      std::fprintf(stderr, "  --switch-core-affinity separate|auto  pin game and render to separate cores "
-@@ -199,6 +206,8 @@ Options ParseOptions(int argc, const char **argv) {
+@@ -199,6 +207,8 @@ Options ParseOptions(int argc, const char **argv) {
              options.jump = value();
          } else if (arg == "--give") {
              options.give = value();
@@ -7869,7 +7918,7 @@ index 43dfe76a..9d14abe7 100644
          } else if (arg == "--fast-load") {
              options.fast_load = true;
          } else if (arg == "--export-text") {
-@@ -358,6 +367,24 @@ void PumpHost() {
+@@ -358,6 +368,24 @@ void PumpHost() {
      InputScriptApply(GameFrameCount());
  }
  
@@ -7894,7 +7943,7 @@ index 43dfe76a..9d14abe7 100644
  void LoadInputScript(const char *path) {
  #ifdef _WIN32
      std::string environment;
-@@ -569,11 +596,16 @@ int Run(int argc, const char **argv) {
+@@ -569,11 +597,16 @@ int Run(int argc, const char **argv) {
          std::fprintf(stderr, "bad --give: %s\n", options.give);
          std::exit(kExitUsage);
      }
@@ -7912,7 +7961,7 @@ index 43dfe76a..9d14abe7 100644
      const char *fast_load = std::getenv("DC_FAST_LOAD");
      GameSetFastLoad(options.fast_load || (fast_load != nullptr && *fast_load != '\0' && *fast_load != '0'));
      RequireData();
-@@ -653,6 +685,7 @@ int Run(int argc, const char **argv) {
+@@ -653,6 +686,7 @@ int Run(int argc, const char **argv) {
          SwitchConfigureThreads();
      }
  #endif
@@ -7920,7 +7969,7 @@ index 43dfe76a..9d14abe7 100644
      gfx::SetAnisotropy(config.anisotropy);
  #ifdef __ANDROID__
      gfx::SetRenderScale(config.render_scale);
-@@ -670,6 +703,24 @@ int Run(int argc, const char **argv) {
+@@ -670,6 +704,26 @@ int Run(int argc, const char **argv) {
      const char *bounded_headless = std::getenv("DC_HEADLESS_BOUNDED");
      ClockSetUnbounded(options.headless && (bounded_headless == nullptr || std::string_view(bounded_headless) != "1"));
      ClockAddPumpHook(PumpHost);
@@ -7928,9 +7977,11 @@ index 43dfe76a..9d14abe7 100644
 +    moonmod_config.game_id = "chronicle";
 +    moonmod_config.game_name = "Chronicle";
 +    moonmod_config.framework_api = 1;
-+    // Use one authoritative package directory. Scanning beside the executable as well caused
-+    // stale bundled examples and older package copies to appear as duplicate local mods.
-+    moonmod_config.mod_directories = {PathsSaveRoot() / "mods"};
++    // One authoritative package directory: scanning several made older package copies show up as duplicate mods.
++    moonmod_config.mod_directories = {moonmod::ModsDirectory(PathsExecutable().parent_path(), PathsSaveRoot())};
++    const std::u8string mods_folder = moonmod_config.mod_directories.front().u8string();
++    std::fprintf(stderr, "moonmod: mods folder %.*s\n", static_cast<int>(mods_folder.size()),
++                 reinterpret_cast<const char *>(mods_folder.data()));
 +    moonmod_config.save_root = PathsSaveRoot();
 +    moonmod::ConfigureChronicleApi(moonmod_config);
 +    moonmod_config.log = [](std::string_view level, std::string_view mod, std::string_view message) {
@@ -7945,7 +7996,7 @@ index 43dfe76a..9d14abe7 100644
      GameSetFrameBudget(options.frames);
      GameSetPerfLog(options.perf_log);
      if (options.perf_log) {
-@@ -705,7 +756,9 @@ int Run(int argc, const char **argv) {
+@@ -705,7 +759,9 @@ int Run(int argc, const char **argv) {
      ConfigRemoveChangeHook(GameOptionsChanged);
      ConfigRemoveChangeHook(ConfigDisplayChanged);
      ConfigRemoveChangeHook(ApplyConfigChange);
@@ -24805,10 +24856,10 @@ index 00000000..8252bc57
 +} // namespace moonmod
 diff --git a/port/src/moonmod/mod_model.cpp b/port/src/moonmod/mod_model.cpp
 new file mode 100644
-index 00000000..118c6d24
+index 00000000..320cc3cc
 --- /dev/null
 +++ b/port/src/moonmod/mod_model.cpp
-@@ -0,0 +1,1218 @@
+@@ -0,0 +1,1219 @@
 +// Mod framework phase 1b: 3D model dump and replacement (Windows fork).
 +//
 +//   DC_DUMP_MODELS=1 (run_win.ps1 -DumpModels)   writes mods/_dump/models/<texture>__<N>v.obj for every model built
@@ -24846,6 +24897,7 @@ index 00000000..118c6d24
 +#include <vector>
 +
 +#include "render/draw3d.hpp"
++#include "moonmod/mods_directory.hpp"
 +#include "moonmod/runtime.hpp"
 +#include "platform/paths.hpp"
 +
@@ -24940,7 +24992,7 @@ index 00000000..118c6d24
 +    g.inited = true;
 +    const char *dump = std::getenv("DC_DUMP_MODELS");
 +    g.dump = dump != nullptr && dump[0] != '0';
-+    g.root = PathsSaveRoot() / "mods";
++    g.root = moonmod::ModsDirectory(PathsExecutable().parent_path(), PathsSaveRoot());
 +    std::error_code error;
 +    if (!fs::is_directory(g.root, error)) {
 +        return;
@@ -29122,7 +29174,7 @@ index 0ccbba78..166c88c8 100644
      }
 diff --git a/port/src/options/mod_manager_ui.cpp b/port/src/options/mod_manager_ui.cpp
 new file mode 100644
-index 00000000..7db8da5d
+index 00000000..af8d9afb
 --- /dev/null
 +++ b/port/src/options/mod_manager_ui.cpp
 @@ -0,0 +1,450 @@
@@ -29373,8 +29425,8 @@ index 00000000..7db8da5d
 +    ui::Divider::DrawHorizontal(54, 234, 136, alpha);
 +
 +    if (mods.empty()) {
-+        Wrapped("No local mods found. Create a package folder in save/mods with a mod.json and a Lua entry "
-+                "script; see the MoonFactory examples.",
++        Wrapped("No mods found. Put each mod in its own folder in the mods folder of your Chronicle folder, "
++                "then restart the game.",
 +                56, 148, 176, 20, 8, alpha);
 +    } else if (journal_tab) {
 +        const int end = std::min(int(journal_quests.size()), state.first_journal_quest + kManagerVisibleMods);
@@ -37423,6 +37475,77 @@ index 00000000..950199d1
 +    // A stopped runtime shows no sheet.
 +    moonmod::SharedRuntime().Stop();
 +    EXPECT_EQ(moonmod::ActiveCharacterSheet(), nullptr);
++}
+diff --git a/port/src/tests/moonmod_mods_directory_test.cpp b/port/src/tests/moonmod_mods_directory_test.cpp
+new file mode 100644
+index 00000000..2b8d22f8
+--- /dev/null
++++ b/port/src/tests/moonmod_mods_directory_test.cpp
+@@ -0,0 +1,65 @@
++#include <gtest/gtest.h>
++
++#include <filesystem>
++#include <fstream>
++#include <random>
++#include <string>
++
++#include "moonmod/mods_directory.hpp"
++
++namespace fs = std::filesystem;
++
++namespace {
++
++struct TempTree {
++    fs::path root;
++    TempTree() {
++        root = fs::temp_directory_path() / ("moonmod-mods-dir-" + std::to_string(std::random_device{}()));
++        fs::create_directories(root);
++    }
++    ~TempTree() {
++        std::error_code error;
++        fs::remove_all(root, error);
++    }
++    fs::path Dir(const fs::path &relative) const {
++        fs::create_directories(root / relative);
++        return root / relative;
++    }
++    void File(const fs::path &relative) const {
++        fs::create_directories((root / relative).parent_path());
++        std::ofstream(root / relative) << "";
++    }
++};
++
++} // namespace
++
++TEST(MoonModModsDirectory, CheckoutModsFolderWins) {
++    TempTree tree;
++    tree.File("Chronicle/kazarov.conf");
++    const fs::path mods = tree.Dir("Chronicle/mods");
++    const fs::path exe = tree.Dir("Chronicle/port/build/pc-release");
++    tree.Dir("Chronicle/port/build/pc-release/mods");
++    EXPECT_EQ(moonmod::ModsDirectory(exe, tree.root / "Chronicle/port/run/save"), mods);
++}
++
++TEST(MoonModModsDirectory, CheckoutWithoutModsFallsBackToSave) {
++    TempTree tree;
++    tree.File("Chronicle/kazarov.conf");
++    const fs::path exe = tree.Dir("Chronicle/port/build/pc-release");
++    const fs::path save = tree.root / "Chronicle/port/run/save";
++    EXPECT_EQ(moonmod::ModsDirectory(exe, save), save / "mods");
++}
++
++TEST(MoonModModsDirectory, CopiedBuildUsesModsBesideExecutable) {
++    TempTree tree;
++    const fs::path exe = tree.Dir("Games/DarkCloud");
++    const fs::path mods = tree.Dir("Games/DarkCloud/mods");
++    EXPECT_EQ(moonmod::ModsDirectory(exe, tree.root / "save"), mods);
++}
++
++TEST(MoonModModsDirectory, OtherwiseSaveMods) {
++    TempTree tree;
++    const fs::path exe = tree.Dir("Games/DarkCloud");
++    EXPECT_EQ(moonmod::ModsDirectory(exe, tree.root / "save"), tree.root / "save" / "mods");
++    EXPECT_EQ(moonmod::ModsDirectory({}, tree.root / "save"), tree.root / "save" / "mods");
 +}
 diff --git a/port/src/tests/moonmod_native_plugin_fixture.c b/port/src/tests/moonmod_native_plugin_fixture.c
 new file mode 100644

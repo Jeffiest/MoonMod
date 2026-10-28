@@ -1,4 +1,5 @@
 # Build and temporary files
+/dist/
 /build*/
 /test-saves/
 /artifacts/retail-georama-*

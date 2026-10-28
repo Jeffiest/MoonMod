@@ -1,13 +1,19 @@
 # MoonFactory for Chronicle (Dark Cloud PC port)
 
-MoonFactory runs inside the Chronicle PC port, so it ships as a patch to the Chronicle source rather than as a
-separate download. You build the game yourself from your own disc; nothing from the game is included here.
+MoonFactory runs inside the Chronicle PC port, so it ships as changes to the Chronicle source. You build the game
+yourself from your own disc; nothing from the game is included here.
+
+A **MoonMod release** is a folder named after the Chronicle commit it is made for, such as `MoonMod-9418a550`.
+It holds the Chronicle files MoonMod changes, already patched, at the same paths as in Chronicle, plus a `mods`
+folder. Copy it over a Chronicle checkout at that commit, replace the files, and build. A new MoonMod version
+normally means Chronicle moved and MoonMod was reworked for it.
 
 | File | What it is |
 | :--- | :--- |
 | `moonfactory-chronicle.patch` | All MoonFactory changes to Chronicle: the Lua and native-plugin runtime, the game adapter, the in-game Mod Manager, mod title modes and sandbox sessions, the engine changes it needs (256 monster slots, 48 x 48 floor grid, 64 rooms) and its tests. Includes Lua 5.5.1 (MIT, `port/third_party/lua-5.5.1/LUA-LICENSE.txt`). |
 | `moonfactory-kazarov.patch` | The changes MoonFactory needs in the Kazarov renderer submodule (`tools/kazarov`): named input bindings for mods and the window hooks they use. |
 | `apply-moonfactory.ps1` | Checks out the matching Chronicle commit and applies both patches. |
+| `CHRONICLE_COMMIT` | The Chronicle commit the patches are made against, and so the MoonMod version. |
 
 The patch is made against Chronicle commit `9418a5506e2a08e7739aa68d70841df6bc516201` ("Lift map parts by
 retail's depth-scaled height at each point"), the master after `d3666bcb` forked the game into `port/src/game`.
@@ -41,7 +47,28 @@ Upstream's native autosave (on each town and dungeon floor) is kept; it writes n
 - Your own copy of _Dark Cloud_ as a disc image (PAL recommended).
 - Git, and everything Chronicle's own README lists for a Windows build.
 
-## Steps (Windows, PowerShell)
+## Install a release (Windows, PowerShell)
+
+1. Download `MoonMod-<commit>.zip` from the repository's GitHub releases and unzip it.
+2. Get Chronicle at that commit (the full hash is in `MoonMod-README.txt` inside the zip):
+
+   ```powershell
+   git clone --recurse-submodules https://github.com/TheMoonPeople/Chronicle.git
+   cd Chronicle
+   git checkout 9418a5506e2a08e7739aa68d70841df6bc516201
+   git submodule update --init --recursive
+   ```
+
+3. Copy everything inside the `MoonMod-<commit>` folder into the `Chronicle` folder and choose **Replace the files
+   in the destination**. This also adds `Chronicle\mods` with the bundled mods.
+4. Put your disc image in `rom\pal`, then `.\build.bat windows-x64-release` and `.\run.bat windows-x64-release`
+   (steps 2 and 3 below). If the build warns that MoonMod is made for another Chronicle commit, the checkout is
+   not at the release's commit.
+
+To go back to plain Chronicle, run `git checkout -- .` in `Chronicle` and in `Chronicle\tools\kazarov`, and delete
+the new files `git status` lists.
+
+## Build from the patch (Windows, PowerShell)
 
 1. Get Chronicle at the matching commit and apply the patch:
 
@@ -73,10 +100,32 @@ Upstream's native autosave (on each town and dungeon floor) is kept; it writes n
 
 ## Adding mods
 
-- Put each mod in its own folder under `mods\` in the save folder (or next to the game's `.exe`). A mod folder
-  holds `mod.json` and its Lua entry script; see `examples/` and `mods/` in this repository.
+- Put each mod in its own folder in `Chronicle\mods` (the release creates it). A mod folder holds `mod.json` and
+  its Lua entry script; see `examples/` and `mods/` in this repository.
+- The game reads mods from one folder only, so a package never shows up twice: `mods` in the Chronicle checkout it
+  was built in (found by walking up from the executable to the folder holding `kazarov.conf`); if there is none,
+  `mods` beside the executable; otherwise `mods` in the save folder (`port\run\save\mods` with `run.bat`). The
+  game's log names the folder it uses (`moonmod: mods folder ...`).
 - New mods start disabled. Turn them on in **Options -> Game -> Mod Manager**. Lua changes need only a restart.
 - Native (DLL) mods also need to be marked trusted in the Mod Manager before they load.
+
+## Making a release
+
+A release is made for one Chronicle commit, and its version is that commit's first 8 characters.
+
+1. Refresh the patches against the new Chronicle `master` commit and test them, as for any port change. In a
+   Chronicle checkout with the patches applied, regenerate the game patch with
+   `git add -A && git diff --cached --abbrev=8 HEAD > moonfactory-chronicle.patch`.
+2. Put the new full commit hash in `CHRONICLE_COMMIT` and in `set(MOONMOD_CHRONICLE_COMMIT ...)` in the patch
+   (`port/CMakeLists.txt`); `make_release.py` refuses to run when the two differ.
+3. Build the folder and zip with `python tools/make_release.py` (add `--chronicle <path>` to copy from a local
+   clone instead of GitHub). They land in `dist/`. Or run **Actions > release > Run workflow** on GitHub, which
+   builds them and publishes the GitHub release `MoonMod-<commit>`. Pushes to `main` that touch the port, the mods
+   or the script also build them, as a workflow artifact only.
+
+The script applies both patches to a fresh checkout of that commit, copies every file they add or change, and
+adds `mods/` with each bundled mod plus `MoonMod-README.txt` (install steps and the file list). It stops if a patch
+deletes or renames a file, because a pasted folder cannot do that.
 
 ## Current limits
 

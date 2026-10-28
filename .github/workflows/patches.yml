@@ -15,7 +15,7 @@ jobs:
         include:
           - port: chronicle
             repo: TheMoonPeople/Chronicle
-            base: 6ec3b808dd8a9b15704cbce29e40be84591954ce
+            base: ''   # read from ports/chronicle/CHRONICLE_COMMIT
             patch: moonfactory-chronicle.patch
           - port: chronicle-two
             repo: TheMoonPeople/ChronicleTwo
@@ -23,10 +23,12 @@ jobs:
             patch: moonfactory-chronicle-two.patch
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch ${{ matrix.repo }} at ${{ matrix.base }}
+      - name: Fetch ${{ matrix.repo }}
         run: |
+          base="${{ matrix.base }}"
+          if [ -z "$base" ]; then base=$(cat "ports/${{ matrix.port }}/CHRONICLE_COMMIT"); fi
           git clone --quiet https://github.com/${{ matrix.repo }}.git upstream
-          git -C upstream checkout --quiet ${{ matrix.base }}
+          git -C upstream checkout --quiet "$base"
           git -C upstream submodule update --quiet --init --recursive
       - name: Apply the game patch
         run: git -C upstream apply --check --whitespace=nowarn "$GITHUB_WORKSPACE/ports/${{ matrix.port }}/${{ matrix.patch }}"
