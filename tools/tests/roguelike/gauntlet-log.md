@@ -19,7 +19,8 @@ through DBC I-III; the test copy of the mod also logged its toasts and floor gen
 Also **fixed:** every floor intro showed twice. The floor's seed changes when it is built, so the mod counted a
 second arrival; the second sighting of the same floor within 2 s is now the same arrival.
 
-Noticed: the HUD line covers the native HP readout (with `NEXT CURSED` it hides all of 90/90). Moves made with
+Noticed: the HUD line covered the native HP readout (with `NEXT CURSED` it hid all of 90/90); fixed in the engine
+(mod lines now start under the life, weapon and water block). Moves made with
 `world.transition` inside a biome (the test mod's, not a player's) pass the dungeon entrance and pay no floor rewards.
 
 ## 2026-10-28 — G3 reworked: one weapon each, a broken weapon ends the run
