@@ -32,8 +32,19 @@ Mod Manager's Actions tab has Run Status, the Cursed Gate, Sacrifice, Heirloom, 
 
 Start Run resets the game's save data in memory, as a new game does, and starts a *sandbox session*. That session
 belongs to no save slot and never saves: it never reaches a town or the save screen. When the run ends, the in-memory
-save is thrown away again. Your story saves are never read or written. Mods that keep progress per save slot (RPG,
-Ascension) see no slot during a run.
+save is thrown away again. Your story saves are never read or written.
+
+### Its own game
+
+A run is a standalone game mode: the other gameplay mods sit it out. When a run starts, RPG: Character Paths,
+Ascension and Dungeon+ set every damage bonus they added back to x1, take back their HUD bars, player tuning and
+Character page, and ignore the run's kills, pickups, chests and floors. They level nothing, count no stats and store
+nothing. Dungeon+ also puts back the native floor layout, monster and chest counts, enemy get-up chance and enemy AI,
+and rolls no tiers, mutators, bounties or champions. They pick your story game back up when the run ends.
+
+Two things still carry over: Dungeon+'s Expanded Data weapon balance (the engine restores a weapon definition only
+when the mod that changed it unloads) and its kill-count trophies (the engine advances those from every enemy defeat).
+Turn Dungeon+ off in the manager for a fully native weapon table.
 
 The Gauntlet's own progress is this mod's storage (`<save>/moonmod/...`): Moon Shards, Norune Eternal, the Heirloom,
 the starting character and records. It is kept across runs, restarts and story saves. A run itself is not resumable.
@@ -123,6 +134,9 @@ Checked here, without the game's data:
 - `tools/tests/roguelike/test_runs.lua` (Lua 5.4+, or the vendored 5.5) plays whole runs against a fake adapter: a
   five-biome win, Norune Eternal purchases, unlocks on the next run, Shatter, Sacrifice, drafting, a retreat, a
   defeat, Abandon, an off-route floor, quitting mid-run, a reload, and an engine without title modes. 62 checks.
+- `tools/tests/roguelike/test_standalone.lua` loads RPG, Ascension and Dungeon+ against a recording stub, starts a
+  session in the middle of a story game and also loads each mod mid-run. It checks that every bonus goes to x1, that
+  the run's events reach no game call and store nothing, and that everything comes back after. 38 checks.
 
 Not run: the game itself, which needs your disc image and a GPU. These need a pass in the game:
 
@@ -136,6 +150,5 @@ Not run: the game itself, which needs your disc image and a GPU. These need a pa
   2/5/10/13, Shipwreck and Sun & Moon Temple 2/5/11/14, Moon Sea 2/5/10/12).
 - How much one hit wears a weapon. Raise *Shatter at durability* if a weapon ever breaks outright.
 
-With RPG: Character Paths also enabled, both mods set the Journal's Character page and the last one wins. Turn off
-*Show the run on Journal > Character* and use this mod's Skills tab if they fight over it. With Dungeon+, its tier and
-champion scaling stacks on top of the Gauntlet's; Dungeon+ tiers are best left at 0 for run floors.
+RPG, Ascension and Dungeon+ sit runs out (see *Its own game* above), so their pages, bonuses and floor rules do not
+mix with the Gauntlet's.

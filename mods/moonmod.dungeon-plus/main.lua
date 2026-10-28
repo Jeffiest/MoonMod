@@ -10,6 +10,15 @@ local function try(fn, ...)
   return nil
 end
 local function toast(message, frames) try(game.ui.notify, {message = message:sub(1, 190), duration_frames = frames or 240}) end
+
+-- Sandbox modes (Dark Genie's Gauntlet) are their own game: during one, every handler below sits out.
+local in_sandbox = false
+local function on(name, handler)
+  moonmod.on(name, function(...)
+    if not in_sandbox then return handler(...) end
+    if name == "ui.action" then toast("Dungeon+ sits out Dark Genie's Gauntlet runs") end
+  end)
+end
 local function setting(id, fallback)
   local value = moonmod.settings.get(id)
   if type(value) ~= type(fallback) then return fallback end
@@ -55,10 +64,14 @@ local function enemy_name(key)
 end
 
 -- Harder AI: five enemy scripts whose get-up chance is raised to 45%.
-for _, name in ipairs({"e01a.stb", "e118a.stb", "e119a.stb", "e124a.stb", "e50a.stb"}) do
-  local ok, err = game.resources.override({path = "resources/dun/monstor/" .. name, game_path = "dun/monstor/" .. name})
-  if not ok then moonmod.log("warn", "Harder AI " .. name .. ": " .. tostring(type(err) == "table" and err.message or err)) end
+local HARDER_AI = {"e01a.stb", "e118a.stb", "e119a.stb", "e124a.stb", "e50a.stb"}
+local function apply_harder_ai()
+  for _, name in ipairs(HARDER_AI) do
+    local ok, err = game.resources.override({path = "resources/dun/monstor/" .. name, game_path = "dun/monstor/" .. name})
+    if not ok then moonmod.log("warn", "Harder AI " .. name .. ": " .. tostring(type(err) == "table" and err.message or err)) end
+  end
 end
+apply_harder_ai()
 
 -- Tiers -----------------------------------------------------------------------------------------------
 local function tiers() local t = moonmod.storage.get("floor_tiers"); return type(t) == "table" and t or {} end
@@ -84,7 +97,7 @@ local function apply_generation(tier)
   try(game.dungeons.set_population, {monsters_per_room = {min = mmin, max = mmax}, chests_per_room = {min = cmin, max = cmax}})
   try(game.dungeons.set_enemy_survival, {chance_percent = clamp(setting("enemy_revive_chance", 25) * preset().revive, 0, 100)})
 end
-moonmod.on("game.dungeon.generating", function(e) apply_generation(tier_of(e.dungeon_id, e.floor_id)) end)
+on("game.dungeon.generating", function(e) apply_generation(tier_of(e.dungeon_id, e.floor_id)) end)
 
 -- Square / Triangle (or [ ]) on the floor list change that floor's tier.
 assert(game.input.bind({id = "tier_down", keys = {"[", "E", "Gamepad:x"}}))
@@ -374,7 +387,7 @@ end
 
 -- Kills: bestiary, streaks, bounty, tier bonus -------------------------------------------------------
 local counted = {}
-moonmod.on("game.enemy_defeated", function(e)
+on("game.enemy_defeated", function(e)
   if e.entity then
     if counted[e.entity] then return end
     counted[e.entity] = true
@@ -437,7 +450,7 @@ end)
 
 -- Periodic work: one handler. Input every frame, floor bookkeeping every 15, enemy speeds every 30.
 local badges_published = false
-moonmod.on("game.tick", function(e)
+on("game.tick", function(e)
   frame = e and e.frame or frame + 1
   step_selected_tier()
   if frame % 15 ~= 0 then return end
@@ -475,7 +488,7 @@ for _, a in ipairs({
   {"default_up", "Default Tier for New Floors", "Cycle the tier used by floors you have not set (0-5)"},
   {"claim", "Deliver Clear Rewards", "Hand out gems and slayers that were waiting for inventory space"}
 }) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
-moonmod.on("ui.action", function(a)
+on("ui.action", function(a)
   if a.id == "status" then
     if not floor then toast("Not in a dungeon"); return end
     local b = floor.bounty
@@ -515,9 +528,30 @@ try(game.scripts.register_function, {id = "current_tier", description = "Current
   return {tier = floor and floor.tier or 0, mutator = floor and floor.mutator or ""}
 end)
 
-moonmod.on("settings.changed", function() apply_generation(floor and floor.tier or default_tier()) end)
+on("settings.changed", function() apply_generation(floor and floor.tier or default_tier()) end)
+
+-- Sandbox sessions: native layout, population and enemy AI, no mutator, bounty, streak or champions for the
+-- run; tiers and mutators come back afterwards. The Expanded Data weapon and price edits stay (the engine only
+-- restores a weapon definition when this mod unloads).
+local function set_sandbox(now)
+  if now == in_sandbox then return end
+  in_sandbox = now
+  floor, streak = nil, 0
+  apply_mutator_formulas(nil)
+  if now then
+    try(game.dungeons.set_layout, {}); try(game.dungeons.set_population, {}); try(game.dungeons.set_enemy_survival, {})
+    for _, name in ipairs(HARDER_AI) do try(game.resources.unoverride, {game_path = "dun/monstor/" .. name}) end
+  else
+    apply_harder_ai()
+    apply_generation(default_tier())
+  end
+end
+moonmod.on("game.session.started", function() set_sandbox(true) end)
+moonmod.on("game.session.ended", function() set_sandbox(false) end)
 apply_mutator_formulas(nil)
 apply_generation(default_tier())
+local session = try(game.session.get)
+set_sandbox(type(session) == "table" and session.kind == "sandbox")
 
 -- Weapon table edits from the legacy Expanded Data package (DarkCloud-Expanded, BSD-2-Clause).
 local LEGACY_WEAPON_BALANCE = {
@@ -793,8 +827,8 @@ local function update_daily_shops(day)
 end
 
 -- Shops: check the daily stock on arrival somewhere new and every 10 seconds, not every frame.
-moonmod.on("game.world.location_changed", function() last_shop_day = nil end)
-moonmod.on("game.tick", function(e)
+on("game.world.location_changed", function() last_shop_day = nil end)
+on("game.tick", function(e)
   if (e and e.frame or 0) % 600 ~= 0 and last_shop_day ~= nil then return end
   if (e and e.frame or 0) % 30 ~= 0 then return end
   local world = try(game.world.get)

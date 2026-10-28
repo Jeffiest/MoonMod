@@ -1429,6 +1429,9 @@ end)
   `loaded_save` or `developer_jump`. The save data is reset again on the way to the title. The title then opens on the
   mode's screen, and `game.title.opened` follows.
 - `session.get()` returns `{kind = "title" | "story" | "sandbox", owner, mode}`.
+- Other mods keep running during a session. A gameplay mod that should not touch another mod's game mode sits it out
+  itself: it checks `session.get` at load, and on `game.session.started` it sets its formulas to x1, clears its
+  tuning, bars and sheet, and ignores events until `game.session.ended`. RPG, Ascension and Dungeon+ do this.
 - `world.transition` to another registered floor, in the same dungeon or another one, keeps the session going, and
   the session's area follows the dungeon it enters.
 

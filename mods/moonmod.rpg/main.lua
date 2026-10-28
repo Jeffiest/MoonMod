@@ -38,6 +38,15 @@ local function toast(message, frames) try(game.ui.notify, {message = message, du
 local function title(id) return id:sub(1, 1):upper() .. id:sub(2) end
 local function errmsg(err) return type(err) == "table" and err.message or tostring(err) end
 
+-- Sandbox modes (Dark Genie's Gauntlet) are their own game: during one, every handler below sits out.
+local in_sandbox = false
+local function on(name, handler)
+  moonmod.on(name, function(...)
+    if not in_sandbox then return handler(...) end
+    if name == "ui.action" then toast("RPG sits out Dark Genie's Gauntlet runs") end
+  end)
+end
+
 -- Engine support: player tuning (run speed, swing speed, invincibility...) arrives with engine Phase 2.
 local TUNING = false
 do
@@ -230,13 +239,16 @@ local function update_formulas()
     try(game.combat.register_formula, {id = "mastery", operation = "multiply", value = 1 + bonus, priority = 52, weapon_id = mastery_weapon})
   end
 end
-for _, model in ipairs(UNDEAD) do
-  try(game.combat.register_formula, {id = "cross_hinder_" .. model, operation = "multiply", value = 2, priority = 40,
-      weapon_id = WEAPON.cross_hinder, native_model_id = model})
+local function register_weapon_formulas()
+  for _, model in ipairs(UNDEAD) do
+    try(game.combat.register_formula, {id = "cross_hinder_" .. model, operation = "multiply", value = 2, priority = 40,
+        weapon_id = WEAPON.cross_hinder, native_model_id = model})
+  end
+  try(game.combat.register_formula, {id = "mobius_ring", operation = "ramp_multiply", value = 1.6, rate_per_second = 0.025,
+      reset_after_frames = 360, priority = 45, weapon_id = WEAPON.mobius_ring})
+  try(game.combat.register_player_formula, {id = "agas_sword", operation = "add", value = -15, priority = 60, weapon_id = WEAPON.agas_sword})
 end
-try(game.combat.register_formula, {id = "mobius_ring", operation = "ramp_multiply", value = 1.6, rate_per_second = 0.025,
-    reset_after_frames = 360, priority = 45, weapon_id = WEAPON.mobius_ring})
-try(game.combat.register_player_formula, {id = "agas_sword", operation = "add", value = -15, priority = 60, weapon_id = WEAPON.agas_sword})
+register_weapon_formulas()
 
 -- HUD: XP bar labelled with the level, the Focus bar once a power is learned; the Journal's sheet.
 local hud = {}
@@ -348,7 +360,7 @@ local function gain_xp(id, amount, quiet)
   end
 end
 
-moonmod.on("game.enemy_defeated", function(event)
+on("game.enemy_defeated", function(event)
   load_slot()
   if not slot or not active then return end
   local hp = type(event.enemy_max_hp) == "number" and event.enemy_max_hp or 0
@@ -386,7 +398,7 @@ moonmod.on("game.enemy_defeated", function(event)
 end)
 
 -- Training: Cross on a node in the Journal's Character page (or the Mod Manager's Skills tab) -------
-moonmod.on("skills.train_requested", function(event)
+on("skills.train_requested", function(event)
   load_slot()
   local id = type(event.id) == "string" and event.id or ""
   local skill = id:sub(#ID + 2)
@@ -463,7 +475,7 @@ local function cast(button, player)
 end
 
 -- After a hit: Riposte is spent, the Expanded weapon effects fire -------------------------------------
-moonmod.on("game.enemy_hit", function(event)
+on("game.enemy_hit", function(event)
   if type(event.damage) ~= "number" or event.damage <= 0 then return end
   if riposte_until > frame then riposte_until = 0; update_formulas() end
   local item, roll = event.native_weapon_id, math.random()
@@ -476,7 +488,7 @@ moonmod.on("game.enemy_hit", function(event)
 end)
 
 -- Weapon loot rolls ------------------------------------------------------------------------------------
-moonmod.on("game.item_picked_up", function(event)
+on("game.item_picked_up", function(event)
   if event.kind ~= "weapon" or setting("weapon_loot_rolls", true) == false then return end
   local item, owner, where = tonumber(event.native_item_no), event.character, tonumber(event.slot)
   if type(owner) == "number" then owner = CHARACTERS[owner + 1] end  -- the event gives 0-5; instances use ids
@@ -500,7 +512,7 @@ moonmod.on("game.item_picked_up", function(event)
 end)
 
 -- Lucky Find: a chest may also hold a supply item --------------------------------------------------------
-moonmod.on("game.chest.opened", function()
+on("game.chest.opened", function()
   local lucky = rank("explorer.lucky_find")
   if lucky <= 0 or math.random() >= 0.10 * lucky then return end
   local pick = nil
@@ -519,7 +531,7 @@ moonmod.on("game.chest.opened", function()
 end)
 
 -- Camel: part of each sip of water lost comes back --------------------------------------------------------
-moonmod.on("game.player.thirst_changed", function(event)
+on("game.player.thirst_changed", function(event)
   if event.source ~= "native" or type(event.previous_water) ~= "number" or type(event.water) ~= "number" then return end
   local lost = event.previous_water - event.water
   local share = 0.12 * rank("survivor.camel")
@@ -568,13 +580,13 @@ local function sense_atla(player)
   if best then toast(string.format("Atla Sense: %d units, %s", math.floor(best), atla_direction(bx, bz)), 240)
   else toast("Atla Sense: no Atla left on this floor", 180) end
 end
-moonmod.on("game.world.location_changed", function(event)
+on("game.world.location_changed", function(event)
   if event and event.context == "dungeon" and rank("explorer.atla_sense") > 0 then atla_next = frame + 180 end
 end)
 
 -- Per frame: powers; every 10 frames: Focus, Riposte, durability, HUD and the sheet -----------------------
 local durability_key, durability_last, last_hp, last_hp_char = nil, nil, nil, nil
-moonmod.on("game.tick", function(event)
+on("game.tick", function(event)
   frame = event and event.frame or frame + 1
   if slot and active then
     local hold = game.input.state({id = "power_hold"})
@@ -644,7 +656,7 @@ for _, action in ipairs({
   {"respec", "Reset Toan's Skills", "Refund every point (100 Gilda per level)"},
   {"test_levels", "Grant test levels", "Testing: give the active character 5 levels of XP"}
 }) do try(game.ui.register, {id = action[1], label = action[2], description = action[3]}) end
-moonmod.on("ui.action", function(action)
+on("ui.action", function(action)
   load_slot()
   if action.id == "open" then
     local opened, err = call(game.ui.sheet_open)
@@ -688,6 +700,30 @@ moonmod.on("ui.action", function(action)
   end
 end)
 
-moonmod.on("settings.changed", function() update_formulas() end)
-load_slot()
+on("settings.changed", function() update_formulas() end)
+
+-- Sandbox sessions: drop every bonus, tuning knob and HUD element for the run (formulas cannot be removed,
+-- so each one is replaced with x1), keep nothing under "unsaved", and pick the save back up afterwards.
+local function stand_down()
+  local neutral = {"level", "crit", "variance", "mastery", "mobius_ring"}
+  for _, model in ipairs(UNDEAD) do neutral[#neutral + 1] = "cross_hinder_" .. model end
+  for _, id in ipairs(neutral) do try(game.combat.register_formula, {id = id, operation = "multiply", value = 1}) end
+  for _, id in ipairs({"toughness", "agas_sword"}) do try(game.combat.register_player_formula, {id = id, operation = "multiply", value = 1}) end
+  try(game.player.tuning_clear)
+  try(game.render.bar_remove, {id = "xp"}); try(game.render.bar_remove, {id = "focus"}); try(game.ui.sheet_clear)
+  slot_key, slot, active, hud, tuning_key, mastery_weapon = nil, nil, nil, {}, nil, nil
+  focus, cooldown = 100, {square = 0, triangle = 0, circle = 0}
+  cry_until, riposte_until, dance_until, dance_next, atla_next = 0, 0, 0, 0, 0
+  durability_key, durability_last, last_hp, last_hp_char = nil, nil, nil, nil
+end
+local function set_sandbox(now)
+  if now == in_sandbox then return end
+  in_sandbox = now
+  if now then stand_down() else register_weapon_formulas(); load_slot() end
+end
+moonmod.on("game.session.started", function() set_sandbox(true) end)
+moonmod.on("game.session.ended", function() set_sandbox(false) end)
+local session = try(game.session.get)
+set_sandbox(type(session) == "table" and session.kind == "sandbox")
+if not in_sandbox then load_slot() end
 moonmod.log("info", "RPG: Character Paths ready" .. (TUNING and " (engine tuning on)" or " (engine tuning not available yet: Quick Blade, Sure Footing, Evasion, Fleet Foot, Keen Eyes wait)"))

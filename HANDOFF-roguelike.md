@@ -11,7 +11,7 @@ drafted allies, and Moon Shards that buy Norune Eternal unlocks. A run belongs t
 | `mods/moonmod.roguelike/` | The Lua mod (`main.lua`), its manifest, and its player guide (`README.md`). The guide also maps the design doc to what was built and lists the API limits. |
 | `ports/chronicle/moonfactory-chronicle.patch` | Refreshed engine patch. It adds **title modes and sandbox sessions** (`title.*`, `session.*`, `game.title.*` and `game.session.*` events) on top of the existing MoonFactory patch. Apply it with `ports/chronicle/apply-moonfactory.ps1` to Chronicle `6ec3b808`. |
 | `docs/API.md` | The section "Chronicle title modes and sandbox sessions" documents the new API. |
-| `tools/tests/roguelike/` | Lua harness: a fake adapter plus 62 checks that play whole runs. Run it with `lua tools/tests/roguelike/test_runs.lua` (Lua 5.4+). |
+| `tools/tests/roguelike/` | Lua harness: a fake adapter plus 62 checks that play whole runs (`lua tools/tests/roguelike/test_runs.lua`, Lua 5.4+), and 38 checks that RPG, Ascension and Dungeon+ sit runs out (`test_standalone.lua`). |
 | `mods/moonmod.hub/` | Two new quick links to the Gauntlet. |
 
 The engine code inside the patch (in a Chronicle checkout):
@@ -44,6 +44,16 @@ The engine code inside the patch (in a Chronicle checkout):
    if it is reached before the Warden dies.
 4. The source floors in `BIOMES` (`main.lua`) hold no scripted events.
 5. Weapon wear per hit against the *Shatter at durability* setting (default 3).
+
+## Standalone runs
+
+RPG, Ascension and Dungeon+ stand down for a sandbox session. Each wraps its handlers in a local `on` that does nothing
+while `in_sandbox` is set. On `game.session.started` each sets its formulas to x1 (the registry cannot remove one),
+clears its tuning, bars and sheet, and drops its slot state, so nothing is kept under `"unsaved"`. Dungeon+ also resets
+layout, population and enemy survival and removes its Harder AI overrides. On `game.session.ended` they re-register
+and reload the slot. A mod loaded mid-run checks `session.get` at load. Still shared: Dungeon+'s weapon definitions
+and its engine-advanced kill trophies. A fully airtight version would be an engine rule, for example: during a
+sandbox session only the owner's (and opted-in mods') formulas, tuning, overrides and gameplay events apply.
 
 ## Known limits and next ideas
 

@@ -24,6 +24,15 @@ local function setting(id, fallback)
 end
 local function toast(message, frames) try(game.ui.notify, {message = message, duration_frames = frames or 240}) end
 local function title(id) return id:sub(1, 1):upper() .. id:sub(2) end
+
+-- Sandbox modes (Dark Genie's Gauntlet) are their own game: during one, every handler below sits out.
+local in_sandbox = false
+local function on(name, handler)
+  moonmod.on(name, function(...)
+    if not in_sandbox then return handler(...) end
+    if name == "ui.action" then toast("Ascension sits out Dark Genie's Gauntlet runs") end
+  end)
+end
 local function must(value, err, what)
   if value == nil then error(what .. ": " .. tostring(type(err) == "table" and err.message or err), 0) end
   return value
@@ -186,13 +195,16 @@ local function update_formulas()
     try(game.combat.register_formula, {id = "mastery", operation = "multiply", value = 1 + bonus, priority = 52, weapon_id = mastery_weapon})
   end
 end
-for _, model in ipairs(UNDEAD) do
-  try(game.combat.register_formula, {id = "cross_hinder_" .. model, operation = "multiply", value = 2, priority = 40,
-      weapon_id = WEAPON.cross_hinder, native_model_id = model})
+local function register_weapon_formulas()
+  for _, model in ipairs(UNDEAD) do
+    try(game.combat.register_formula, {id = "cross_hinder_" .. model, operation = "multiply", value = 2, priority = 40,
+        weapon_id = WEAPON.cross_hinder, native_model_id = model})
+  end
+  try(game.combat.register_formula, {id = "mobius_ring", operation = "ramp_multiply", value = 1.6, rate_per_second = 0.025,
+      reset_after_frames = 360, priority = 45, weapon_id = WEAPON.mobius_ring})
+  try(game.combat.register_player_formula, {id = "agas_sword", operation = "add", value = -15, priority = 60, weapon_id = WEAPON.agas_sword})
 end
-try(game.combat.register_formula, {id = "mobius_ring", operation = "ramp_multiply", value = 1.6, rate_per_second = 0.025,
-    reset_after_frames = 360, priority = 45, weapon_id = WEAPON.mobius_ring})
-try(game.combat.register_player_formula, {id = "agas_sword", operation = "add", value = -15, priority = 60, weapon_id = WEAPON.agas_sword})
+register_weapon_formulas()
 
 -- Loading a save slot and switching characters -----------------------------------------------------
 local function load_slot()
@@ -253,7 +265,7 @@ local function gain_xp(id, amount, quiet)
   end
 end
 
-moonmod.on("game.enemy_defeated", function(event)
+on("game.enemy_defeated", function(event)
   load_slot()
   if not slot or not active then return end
   local hp = type(event.enemy_max_hp) == "number" and event.enemy_max_hp or 0
@@ -284,7 +296,7 @@ moonmod.on("game.enemy_defeated", function(event)
 end)
 
 -- Skills: Cross in the Skills tab trains the active character -----------------------------------------
-moonmod.on("skills.train_requested", function(event)
+on("skills.train_requested", function(event)
   load_slot()
   local id = type(event.id) == "string" and event.id or ""
   local skill = id:sub(#ID + 2):gsub("^asc_", "")
@@ -345,7 +357,7 @@ local function cast(button, player)
 end
 
 -- Siphon and the Expanded weapon effects after a hit --------------------------------------------------
-moonmod.on("game.enemy_hit", function(event)
+on("game.enemy_hit", function(event)
   if type(event.damage) ~= "number" or event.damage <= 0 then return end
   local siphon = rank("might.siphon")
   if siphon > 0 then try(game.player.heal, {amount = math.max(1, math.floor(event.damage * 0.02 * siphon + 0.5))}) end
@@ -359,7 +371,7 @@ moonmod.on("game.enemy_hit", function(event)
 end)
 
 -- Weapon loot rolls ----------------------------------------------------------------------------------
-moonmod.on("game.item_picked_up", function(event)
+on("game.item_picked_up", function(event)
   if event.kind ~= "weapon" or setting("weapon_loot_rolls", true) == false then return end
   local item, owner, where = tonumber(event.native_item_no), event.character, tonumber(event.slot)
   if type(owner) == "number" then owner = CHARACTERS[owner + 1] end  -- the event gives 0-5; instances use ids
@@ -383,7 +395,7 @@ moonmod.on("game.item_picked_up", function(event)
 end)
 
 -- Thirst refund (Sturdy) -------------------------------------------------------------------------------
-moonmod.on("game.player.thirst_changed", function(event)
+on("game.player.thirst_changed", function(event)
   if event.source ~= "native" or type(event.previous_water) ~= "number" or type(event.water) ~= "number" then return end
   local lost = event.previous_water - event.water
   local share = setting("water_refund", 20) / 100
@@ -392,7 +404,7 @@ end)
 
 -- Per frame: powers input; every 10 frames: Focus, regeneration, durability, HUD ----------------------
 local durability_key, durability_last = nil, nil
-moonmod.on("game.tick", function(event)
+on("game.tick", function(event)
   frame = event and event.frame or frame + 1
   if slot and active then
     local hold = game.input.state({id = "power_hold"})
@@ -453,7 +465,7 @@ for _, action in ipairs({
   {"mastery", "Equipped Weapon Mastery", "Kills with the equipped weapon and its mastery bonus"},
   {"respec", "Reset Active Character's Skills", "Refund every point (100 Gilda per level)"}
 }) do try(game.ui.register, {id = action[1], label = action[2], description = action[3]}) end
-moonmod.on("ui.action", function(action)
+on("ui.action", function(action)
   load_slot()
   if not slot then toast("Load a game first"); return end
   if action.id == "progress" then
@@ -479,6 +491,28 @@ moonmod.on("ui.action", function(action)
   end
 end)
 
-moonmod.on("settings.changed", function() update_formulas() end)
-load_slot()
+on("settings.changed", function() update_formulas() end)
+
+-- Sandbox sessions: drop every bonus and HUD element for the run (formulas cannot be removed, so each one
+-- is replaced with x1), keep nothing under "unsaved", and pick the save back up afterwards.
+local function stand_down()
+  local neutral = {"level", "crit", "variance", "executioner", "mastery", "mobius_ring"}
+  for _, model in ipairs(UNDEAD) do neutral[#neutral + 1] = "cross_hinder_" .. model end
+  for _, id in ipairs(neutral) do try(game.combat.register_formula, {id = id, operation = "multiply", value = 1}) end
+  for _, id in ipairs({"toughness", "agas_sword"}) do try(game.combat.register_player_formula, {id = id, operation = "multiply", value = 1}) end
+  try(game.render.bar_remove, {id = "xp"}); try(game.render.bar_remove, {id = "focus"})
+  slot_key, slot, active, hud, mastery_weapon = nil, nil, nil, {}, nil
+  focus, cooldown, berserk_until, last_stand_on = 100, {square = 0, triangle = 0, circle = 0}, 0, false
+  durability_key, durability_last = nil, nil
+end
+local function set_sandbox(now)
+  if now == in_sandbox then return end
+  in_sandbox = now
+  if now then stand_down() else register_weapon_formulas(); load_slot() end
+end
+moonmod.on("game.session.started", function() set_sandbox(true) end)
+moonmod.on("game.session.ended", function() set_sandbox(false) end)
+local session = try(game.session.get)
+set_sandbox(type(session) == "table" and session.kind == "sandbox")
+if not in_sandbox then load_slot() end
 moonmod.log("info", "Ascension 3 ready")
