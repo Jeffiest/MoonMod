@@ -9,10 +9,11 @@ drafted allies, and Moon Shards that buy Norune Eternal unlocks. A run belongs t
 | Path | What |
 | --- | --- |
 | `mods/moonmod.roguelike/` | The Lua mod (`main.lua`), its manifest, and its player guide (`README.md`). The guide also maps the design doc to what was built and lists the API limits. |
-| `ports/chronicle/moonfactory-chronicle.patch` | Refreshed engine patch. It adds **title modes and sandbox sessions** (`title.*`, `session.*`, `game.title.*` and `game.session.*` events) on top of the existing MoonFactory patch. Apply it with `ports/chronicle/apply-moonfactory.ps1` to Chronicle `6ec3b808`. |
+| `ports/chronicle/moonfactory-chronicle.patch` | Refreshed engine patch. It adds **title modes and sandbox sessions** (`title.*`, `session.*`, `game.title.*` and `game.session.*` events) on top of the existing MoonFactory patch. Apply it with `ports/chronicle/apply-moonfactory.ps1` to Chronicle `9418a550` (the master after the game was forked into `port/src/game`; see `ports/chronicle/README.md`). |
 | `docs/API.md` | The section "Chronicle title modes and sandbox sessions" documents the new API. |
 | `tools/tests/roguelike/` | Lua harness: a fake adapter plus 62 checks that play whole runs (`lua tools/tests/roguelike/test_runs.lua`, Lua 5.4+), and 38 checks that RPG, Ascension and Dungeon+ sit runs out (`test_standalone.lua`). |
 | `mods/moonmod.hub/` | Two new quick links to the Gauntlet. |
+| `GAUNTLET.md`, `tools/tests/roguelike/gauntlet-log.md` | The stage-gate loop (G0–G7) for verifying the mode in the game, and its log of passes. |
 
 The engine code inside the patch (in a Chronicle checkout):
 
@@ -20,9 +21,9 @@ The engine code inside the patch (in a Chronicle checkout):
 | --- | --- |
 | `port/include/moonmod/title_modes.hpp`, `port/src/moonmod/title_modes.cpp` | Registry, screen state, session state. |
 | `port/src/moonmod/chronicle_adapter.cpp` | `session.start` and `session.finish`, party setup (`StartPendingChronicleSandbox`), the exit redirect (`RedirectChronicleSandboxMapJump`), `cur_georama` on each dungeon entry, `save.slot_id` nil during a session. |
-| `port/src/title/titleloop.cpp` | Extra title rows, mode screen steps 40 and 41, drawing with `UI::Label` and `UI::Window`, `TitlePortReopenMode`. |
-| `port/src/gameloop.cpp` | `StartSandboxGame` (title result 10), the redirect in `GameFollowMapJump`, the end of a session on a battle-menu load or a developer jump. |
-| `port/src/dun/movechara.cpp` | A game over is noted as a defeat. |
+| `port/src/game/title/titleloop.cpp`, `port/src/title/title_menu.cpp` | The mode rows (between OPTION and EXIT, through `title::menu`), mode screen steps 40 and 41 drawn with `ui::Label` and `ui::Window`, `TitlePortReopenMode`. |
+| `port/src/app/gameloop.cpp` | `StartSandboxGame` (title result 10), the redirect in `GameFollowMapJump`, the end of a session on a battle-menu load or a developer jump. |
+| `port/src/game/dun/movechara.cpp` | A game over is noted as a defeat. |
 | `port/src/tests/moonmod_title_modes_test.cpp` | Engine tests. |
 | `port/src/tests/moonmod_roguelike_package_test.cpp` | Loads this mod through the real Lua runtime (it expects the MoonFactory checkout beside Chronicle, named `MoonFactory`). |
 

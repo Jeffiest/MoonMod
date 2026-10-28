@@ -10,7 +10,7 @@ from this version on). On an older engine the mod loads, logs that the engine ha
 ## Playing
 
 1. Enable **Dark Genie's Gauntlet** in the Mod Manager (Options > Game > Mod Manager) and restart the game.
-2. On the title menu, under NEW GAME, LOAD and OPTION, choose **Dark Genie's Gauntlet**. The title screen turns into the
+2. On the title menu, between OPTION and EXIT, choose **Dark Genie's Gauntlet**. The title screen turns into the
    Gauntlet's own:
    - **Start Run**: a fresh game begins on the first floor of Divine Beast Cave.
    - **Starting Character**: who starts the run. Cross cycles through all six.
@@ -88,11 +88,11 @@ A win earns about 45 Moon Shards, and a run that falls in the third biome about 
 and sandbox sessions* in [docs/API.md](../../docs/API.md).
 
 - `port/src/moonmod/title_modes.cpp` holds the registry, the mode screen's state and the session state.
-- `port/src/title/titleloop.cpp` draws the extra title rows and the mode screen with the game's UI framework: a stone
+- `port/src/game/title/titleloop.cpp` and `port/src/title/title_menu.cpp` draw the extra title rows and the mode screen with the game's UI framework: a stone
   plate, the game font and the title's pointing hand.
-- `port/src/gameloop.cpp` starts a session as a new game without the story. It also sends a session's exits back to
+- `port/src/app/gameloop.cpp` starts a session as a new game without the story. It also sends a session's exits back to
   the title (`GameFollowMapJump`), resetting the save on the way.
-- `port/src/dun/movechara.cpp` marks a game over as a defeat.
+- `port/src/game/dun/movechara.cpp` marks a game over as a defeat.
 
 **Mod.** At load the mod uses `dungeons.register` to append four floors to each of dungeons 0-4: native floors 15-18
 in Divine Beast Cave, 17-20 in Wise Owl Forest, and so on. Each floor copies the enemy layout of a mid-dungeon floor
@@ -140,7 +140,7 @@ Checked here, without the game's data:
 
 Not run: the game itself, which needs your disc image and a GPU. These need a pass in the game:
 
-- **How the screens look.** The title rows under OPTION, the copyright banner moved down under them, the mode screen's
+- **How the screens look.** The title rows between OPTION and EXIT, the copyright banner moved down under them, the mode screen's
   layout, and how well the text reads on both PAL (480) and NTSC (448).
 - **Starting straight into a dungeon from a fresh save.** `cur_georama` and party setup are covered by tests. What the
   native dungeon entrance does with no story progress is not.

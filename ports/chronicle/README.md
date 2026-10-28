@@ -9,20 +9,32 @@ separate download. You build the game yourself from your own disc; nothing from 
 | `moonfactory-kazarov.patch` | The changes MoonFactory needs in the Kazarov renderer submodule (`tools/kazarov`): named input bindings for mods and the window hooks they use. |
 | `apply-moonfactory.ps1` | Checks out the matching Chronicle commit and applies both patches. |
 
-The patch is made against Chronicle commit `6ec3b808dd8a9b15704cbce29e40be84591954ce` ("Dialog and Quest
-framework (#198)"), the master that has the player menu framework (#189), mouse menus (#194) and the
-dialog/quest framework (#198). It may not apply to later Chronicle commits until it is refreshed.
+The patch is made against Chronicle commit `9418a5506e2a08e7739aa68d70841df6bc516201` ("Lift map parts by
+retail's depth-scaled height at each point"), the master after `d3666bcb` forked the game into `port/src/game`.
+It may not apply to later Chronicle commits until it is refreshed. The Kazarov patch is made against the Kazarov
+commit that master pins, `b619d1a`.
 
-The Mod Manager is drawn with that menu framework (`UI::` windows, labels, tab plate, cursor and brackets,
+The Mod Manager is drawn with the game's UI framework (`ui::` windows, labels, tab plate, cursor and brackets,
 scroll and progress bars, confirm modal), so it matches the game's other menus and takes the same mouse input.
-
-That commit pins Kazarov `611182d`, which lacks `a78762c` (TextureDesc logical size) that Chronicle's texture
-overrides (#187) need, so plain master does not build. `moonfactory-kazarov.patch` carries `a78762c` along with
-MoonFactory's own Kazarov changes, so a checkout with both patches builds.
 
 ## How the patch is laid out
 
-MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmod/`, replacement functions as `PORT_OVERRIDE` copies in `port/src/<unit>_moonmod.cpp`, and the declarations the port needs in `port/include/stubs/<unit>.hpp` and `port/include/moonmod/`. The patch does not touch `ps2/src` or `ps2/include` at all. The few edits the game's code itself needs (the capacity constants the structs carry, such as `MONSTOR_SLOT_MAX`, `DNG_GRID`, `DNG_ROOM_MAX` and the Georama part capacity, and one-line hooks inside functions too large to copy) live in `port/ps2patch/` as one unified diff per file, which the port's build applies to its own build-directory copies of those files before compiling them (`port/ps2patch/README.md`). The PS2 build compiles the untouched sources.
+Since `d3666bcb` the port compiles its own fork of the game (`port/src/game`, `port/include/game`, namespace
+`dc::game`) and `ps2/` is only the byte-matching decomp, so the patch edits the game's code in place:
+
+- `port/src/moonmod/` and `port/include/moonmod/`: the runtime, the Lua and native-plugin hosts, the Chronicle
+  adapter, title modes and sandbox sessions, and the game-side helpers (`*_moonmod.cpp`, `dungeonmap_layout.cpp`,
+  `exit_room.cpp`, `mod_model.cpp`, `mod_texture.cpp`, `item_icon_override.cpp`). `moonmod/game_hooks.hpp`
+  declares the hooks the game's units call.
+- `port/src/game/` and `port/include/game/`: the capacity changes (`MONSTOR_SLOT_MAX` 256, `DNG_GRID` 48,
+  `DNG_ROOM_MAX` 64, 64 chests, 384 events, 56 Georama plots, 32 weapon slots after retail's, items 377-408) and
+  the hook calls, marked with a comment where they sit.
+- `port/src/title/title_menu.*`: a row on the title menu for each mod title mode, between OPTION and EXIT.
+- `port/src/options/`, `port/src/ui/journal_character.*`, `port/src/battlemenu/main_ring.cpp`: the Mod Manager,
+  its Options row and ring slot, and the Journal's Character page.
+- `port/src/tests/moonmod_*_test.cpp`: the tests. `darkcloud_tests --gtest_filter='MoonMod*'` runs them.
+
+Upstream's native autosave (on each town and dungeon floor) is kept; it writes nothing during a sandbox session.
 
 ## What you need
 
@@ -42,14 +54,15 @@ MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmo
 
    ```powershell
    cd Chronicle
-   git checkout 6ec3b808dd8a9b15704cbce29e40be84591954ce
+   git checkout 9418a5506e2a08e7739aa68d70841df6bc516201
    git apply --whitespace=nowarn ..\MoonMod\ports\chronicle\moonfactory-chronicle.patch
    git -C tools\kazarov apply --whitespace=nowarn ..\..\..\MoonMod\ports\chronicle\moonfactory-kazarov.patch
    ```
 
 2. Put your disc image where Chronicle expects it, for example `rom/pal/Dark Cloud (PAL).iso`.
 
-3. Build and run with Chronicle's own scripts:
+3. Build and run with Chronicle's own scripts (the first build downloads Chronicle's pinned Windows toolchain,
+   Rust and FFmpeg included, into `.kazarov/windows`):
 
    ```powershell
    .\build.bat windows-x64-release

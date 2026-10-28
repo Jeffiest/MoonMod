@@ -1,19 +1,3 @@
-diff --git a/include/gfx/gfx.hpp b/include/gfx/gfx.hpp
-index be41539..9987369 100644
---- a/include/gfx/gfx.hpp
-+++ b/include/gfx/gfx.hpp
-@@ -164,6 +164,11 @@ struct TextureDesc {
-     uint32_t      mip_levels = 1;
-     // False for 24-bit sources: the draw's TEXA state supplies alpha when the texture is sampled.
-     bool has_alpha = true;
-+    // The size the texture is addressed at, in texels, when its image has more pixels than that: draws give u, v in
-+    // these texels and the image is sampled across them, so a redrawn texture with four times the pixels takes the
-+    // same draws. 0 for the image's own width or height.
-+    uint32_t logical_width = 0;
-+    uint32_t logical_height = 0;
- };
- 
- struct TextureInfo {
 diff --git a/include/platform/arena.hpp b/include/platform/arena.hpp
 index a78be3f..15ba765 100644
 --- a/include/platform/arena.hpp
@@ -30,10 +14,10 @@ index a78be3f..15ba765 100644
  void ArenaRequireOneAbove4GiB(const void *const *bases, std::size_t count);
  
 diff --git a/include/platform/input.hpp b/include/platform/input.hpp
-index 80161e8..b78ff3b 100644
+index 3a686a9..09ec1d1 100644
 --- a/include/platform/input.hpp
 +++ b/include/platform/input.hpp
-@@ -44,6 +44,8 @@ struct InputPadState {
+@@ -53,6 +53,8 @@ struct InputPadState {
      std::uint8_t  left_y = kInputAxisCentre;
      std::uint8_t  right_x = kInputAxisCentre;
      std::uint8_t  right_y = kInputAxisCentre;
@@ -42,7 +26,7 @@ index 80161e8..b78ff3b 100644
      // D-pad bits the left-stick keys add only while the game is not reading the left stick: the
      // screens that read the d-pad alone (the developer menu, the dungeon loader).
      std::uint16_t stick_dpad = 0;
-@@ -157,6 +159,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
+@@ -166,6 +168,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
  // The stick byte the game's AxisCalibration reads as deflection * 128, deflection in [-1, 1]: the
  // dead zone is stepped over, so any motion moves the game.
  std::uint8_t InputStickByte(float deflection);
@@ -51,7 +35,7 @@ index 80161e8..b78ff3b 100644
  
  // Rebinds one action ("cross", "up", "lx-", "rx", ...) to the names given: SDL key names, Mouse1 to
  // Mouse5 (left, right, middle, X1, X2), and for the whole-axis actions lx ly rx ry MouseX or MouseY
-@@ -164,6 +168,15 @@ std::uint8_t InputStickByte(float deflection);
+@@ -173,6 +177,15 @@ std::uint8_t InputStickByte(float deflection);
  // the camera's own. Returns false if the action or a name is unknown or does not fit the action.
  bool InputBindKeys(std::string_view action, std::span<const std::string_view> keys);
  
@@ -67,7 +51,7 @@ index 80161e8..b78ff3b 100644
  // Restores the default bindings and mouse settings.
  void InputResetBindings();
  
-@@ -184,6 +197,10 @@ struct InputMenuMouse {
+@@ -193,6 +206,10 @@ struct InputMenuMouse {
  // longer press pad 0's bound buttons or turn its stick. Capture works as ever.
  void InputSetMenuMouse(bool on);
  
@@ -79,10 +63,10 @@ index 80161e8..b78ff3b 100644
  
  // Whether movement keys may also navigate D-pad-only screens (on by default).
 diff --git a/include/platform/window.hpp b/include/platform/window.hpp
-index 23f33a8..367e994 100644
+index 0dc8a9c..e51ee5e 100644
 --- a/include/platform/window.hpp
 +++ b/include/platform/window.hpp
-@@ -76,6 +76,7 @@ bool WindowCurrentMode(WindowMode &mode);
+@@ -73,6 +73,7 @@ bool WindowCurrentMode(WindowMode &mode);
  // Whether the window entered or left fullscreen or changed size since the last call, as an SDL
  // change that finished late does.
  bool        WindowTakeModeEvent();
@@ -90,26 +74,11 @@ index 23f33a8..367e994 100644
  void        WindowShutdown();
  SDL_Window *WindowHandle();
  // The window's size in the units mouse motion is measured in; false with no window.
-diff --git a/src/cpp/gfx/resources.cpp b/src/cpp/gfx/resources.cpp
-index 916e5ab..a2c6e1c 100644
---- a/src/cpp/gfx/resources.cpp
-+++ b/src/cpp/gfx/resources.cpp
-@@ -548,8 +548,8 @@ TextureHandle CreateTexture(const TextureDesc &desc) {
-     texture.shares_main_depth = false;
-     texture.display_sized_shared = false;
-     texture.frame = false;
--    texture.logical_width = desc.width;
--    texture.logical_height = desc.height;
-+    texture.logical_width = desc.logical_width != 0 ? desc.logical_width : desc.width;
-+    texture.logical_height = desc.logical_height != 0 ? desc.logical_height : desc.height;
-     texture.last_draw_use = 0;
-     texture.image = CreateImage(desc.width, desc.height, desc.mip_levels, VulkanFormat(desc.format),
-                                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
 diff --git a/src/cpp/platform/arena.cpp b/src/cpp/platform/arena.cpp
-index 0717e5a..b197230 100644
+index 2990abc..6accebc 100644
 --- a/src/cpp/platform/arena.cpp
 +++ b/src/cpp/platform/arena.cpp
-@@ -77,6 +77,19 @@ bool ArenaContains(const void *pointer) {
+@@ -78,6 +78,19 @@ bool ArenaContains(const void *pointer) {
      return MapHolds(g_blocks, address) || MapHolds(g_retired, address);
  }
  
@@ -130,19 +99,20 @@ index 0717e5a..b197230 100644
  #ifndef NDEBUG
      for (std::size_t i = 0; i < count; i++) {
 diff --git a/src/cpp/platform/input.cpp b/src/cpp/platform/input.cpp
-index 4d303b4..17a6489 100644
+index 3562cb8..2b65043 100644
 --- a/src/cpp/platform/input.cpp
 +++ b/src/cpp/platform/input.cpp
-@@ -8,6 +8,7 @@
+@@ -7,6 +7,8 @@
+ #include <cctype>
  #include <charconv>
  #include <cmath>
- #include <cstdio>
++#include <cstdio>
 +#include <map>
  #include <cstdlib>
- #include <limits>
+ #include <memory>
  #include <numbers>
-@@ -26,6 +27,11 @@
- #endif
+@@ -24,6 +26,11 @@
+ #include "platform/touchpad.hpp"
  #include "platform/window.hpp"
  
 +std::uint8_t InputTriggerByte(int raw_value) {
@@ -153,17 +123,18 @@ index 4d303b4..17a6489 100644
  namespace {
  
  enum class ActionKind {
-@@ -196,6 +202,9 @@ InputMouseLook      g_mouse_look;
- InputMouseLookTotal g_mouse_look_total;
- bool                g_mouse_zoom = false;
- float               g_scripted_wheel = 0.0f;
-+float                                                    g_routed_wheel = 0.0f;
-+int                                                      g_wheel_mode = 2; // 0 Left/Right, 1 Up/Down, 2 native camera zoom
-+std::uint16_t                                            g_wheel_press = 0;
- std::int64_t        g_last_latch_tick = -1;
- std::int64_t        g_latch_serial = 0;
- std::int64_t        g_stick_read_serial = -1;
-@@ -225,6 +234,9 @@ bool             g_touch_tap_shown = false;
+@@ -210,6 +217,10 @@ InputMouseLook                                               g_mouse_look;
+ InputMouseLookTotal                                          g_mouse_look_total;
+ bool                                                         g_mouse_zoom = false;
+ float                                                        g_scripted_wheel = 0.0f;
++float                                                        g_routed_wheel = 0.0f;
++// 0 Left/Right, 1 Up/Down, 2 native camera zoom.
++int                                                          g_wheel_mode = 2;
++std::uint16_t                                                g_wheel_press = 0;
+ std::int64_t                                                 g_last_latch_tick = -1;
+ std::int64_t                                                 g_latch_serial = 0;
+ std::int64_t                                                 g_stick_read_serial = -1;
+@@ -249,6 +260,9 @@ bool             g_touch_tap_shown = false;
  // buttons, the script's keys) were held at the last poll, for their press edges.
  std::array<int, kHostActionCount>  g_host_presses{};
  std::array<bool, kHostActionCount> g_host_polled{};
@@ -173,24 +144,16 @@ index 4d303b4..17a6489 100644
  
  std::string Lower(std::string_view text) {
      std::string lower(text);
-@@ -412,10 +424,14 @@ void ReadGamepad(SDL_Gamepad *gamepad, InputPadState &state) {
-             state.buttons |= GamepadButtonPad(type, button);
+@@ -535,6 +549,8 @@ void ReadGamepad(SDL_Gamepad *gamepad, InputPadState &state) {
+             state.buttons |= pressed;
          }
      }
--    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kTriggerThreshold) {
-+    const Sint16 left_trigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
-+    const Sint16 right_trigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
-+    state.left_trigger = InputTriggerByte(left_trigger);
-+    state.right_trigger = InputTriggerByte(right_trigger);
-+    if (left_trigger > kTriggerThreshold) {
++    state.left_trigger = InputTriggerByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
++    state.right_trigger = InputTriggerByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
+     if (PadDefault(kInputL2) && TriggerHeld(gamepad, 0)) {
          state.buttons |= kInputL2;
      }
--    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kTriggerThreshold) {
-+    if (right_trigger > kTriggerThreshold) {
-         state.buttons |= kInputR2;
-     }
-     Sint16 axes[4] = {SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX),
-@@ -516,6 +532,9 @@ InputKeyboardMouse LiveKeyboardMouse() {
+@@ -641,6 +657,9 @@ InputKeyboardMouse LiveKeyboardMouse() {
  void Compose(int pad) {
      g_state[pad] = pad == 0 ? InputApplyKeyboardMouse(g_device[pad], LiveKeyboardMouse()) : g_device[pad];
      InputPadState &state = g_state[pad];
@@ -200,8 +163,8 @@ index 4d303b4..17a6489 100644
      if (pad == 0 && g_look_left && !Deflected(state.left_x) && !Deflected(state.left_y)) {
          state.left_x = state.right_x;
          state.left_y = state.right_y;
-@@ -609,6 +628,41 @@ bool HostPolledHeld(std::size_t host) {
-     return false;
+@@ -761,6 +780,42 @@ bool HostPolledHeld(std::size_t host) {
+     return std::ranges::any_of(PadSources(kFirstHostAction + host, g_pad_type), GamepadSourceHeld);
  }
  
 +bool ModActionHeldInternal(std::string_view action) {
@@ -217,7 +180,8 @@ index 4d303b4..17a6489 100644
 +                if (((MouseButtons() | g_scripted.mouse_buttons) & (1u << (source.code - 1))) != 0) return true;
 +                break;
 +            case Source::GamepadButton:
-+                if (GamepadButtonHeld(source.code)) return true;
++            case Source::GamepadTrigger:
++                if (GamepadSourceHeld(source)) return true;
 +                break;
 +            case Source::MouseAxis:
 +                break;
@@ -242,15 +206,15 @@ index 4d303b4..17a6489 100644
  bool MouseAxisBound(int code) {
      return std::ranges::any_of(g_bindings, [&](const std::vector<Source> &sources) {
          return std::ranges::any_of(sources, [&](const Source &source) {
-@@ -871,6 +925,7 @@ void InputPoll() {
-     InputSetTouchOverlay(TouchOverlayState());
- #endif
+@@ -1085,6 +1140,7 @@ void InputPoll() {
+     }
+     ReadTouchpad(g_slots[0].gamepad);
      PollHostActions();
 +    PollModActions();
  }
  
  void InputHandleEvent(const SDL_Event &event) {
-@@ -984,6 +1039,8 @@ void InputHandleEvent(const SDL_Event &event) {
+@@ -1148,6 +1204,8 @@ void InputHandleEvent(const SDL_Event &event) {
              g_mouse_look.zoom = 0.0f;
              g_mouse_look.zoom_reset = false;
              g_scripted_wheel = 0.0f;
@@ -259,7 +223,7 @@ index 4d303b4..17a6489 100644
              g_host_presses[kZoomResetHost] = 0;
              g_menu_dx = 0.0f;
              g_menu_dy = 0.0f;
-@@ -991,6 +1048,7 @@ void InputHandleEvent(const SDL_Event &event) {
+@@ -1155,6 +1213,7 @@ void InputHandleEvent(const SDL_Event &event) {
          default:
              break;
      }
@@ -267,7 +231,7 @@ index 4d303b4..17a6489 100644
  }
  
  void InputLatchPad(int pad) {
-@@ -1036,9 +1094,22 @@ void InputLatchPad(int pad) {
+@@ -1204,9 +1263,22 @@ void InputLatchPad(int pad) {
      // Menus take the live wheel themselves. Everything else drains it each pad read, including
      // disabled zoom and loads, so it cannot be played back when gameplay next owns the camera.
      float wheel = g_menu_mouse ? 0.0f : MouseTakeWheel() + std::exchange(g_scripted_wheel, 0.0f);
@@ -291,7 +255,7 @@ index 4d303b4..17a6489 100644
          static_cast<double>(ticks) <= kMouseLookMaxGapSeconds * ClockTickRate()) {
          g_mouse_look.zoom = std::isfinite(wheel) ? wheel : 0.0f;
          g_mouse_look.zoom_reset = reset;
-@@ -1064,12 +1135,22 @@ void InputSetMenuMouse(bool on) {
+@@ -1232,12 +1304,22 @@ void InputSetMenuMouse(bool on) {
      g_mouse_look.zoom = 0.0f;
      g_mouse_look.zoom_reset = false;
      g_scripted_wheel = 0.0f;
@@ -314,7 +278,7 @@ index 4d303b4..17a6489 100644
  void InputSetMenuNavigation(bool on) {
      g_menu_navigation = on;
  }
-@@ -1359,6 +1440,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
+@@ -1550,6 +1632,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
      return false;
  }
  
@@ -371,7 +335,7 @@ index 4d303b4..17a6489 100644
  std::span<const InputActionInfo> InputActions() {
      static const std::vector<InputActionInfo> actions = [] {
          std::vector<InputActionInfo> list;
-@@ -1574,6 +1705,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
+@@ -1844,6 +1976,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
      g_scripted = held;
      g_scripted_wheel = held.mouse_wheel;
      PollHostActions();
@@ -380,10 +344,10 @@ index 4d303b4..17a6489 100644
  
  static bool g_movement_locked = false;
 diff --git a/src/cpp/platform/window.cpp b/src/cpp/platform/window.cpp
-index ee3b0de..156d030 100644
+index 386fdcc..ef2f89e 100644
 --- a/src/cpp/platform/window.cpp
 +++ b/src/cpp/platform/window.cpp
-@@ -176,6 +176,13 @@ bool WindowTakeModeEvent() {
+@@ -230,6 +230,13 @@ bool WindowTakeModeEvent() {
      return std::exchange(g_mode_event, false);
  }
  
@@ -395,59 +359,5 @@ index ee3b0de..156d030 100644
 +}
 +
  void WindowShutdown() {
-     SDL_DestroyWindow(g_window);
-     g_window = nullptr;
-diff --git a/src/cpp/tests/gfx_misc_test.cpp b/src/cpp/tests/gfx_misc_test.cpp
-index 3d49744..f7f1e65 100644
---- a/src/cpp/tests/gfx_misc_test.cpp
-+++ b/src/cpp/tests/gfx_misc_test.cpp
-@@ -180,3 +180,49 @@ TEST(GfxMisc, TextureReusingFrameTargetKeepsTexelCoordinates) {
-     EXPECT_TRUE(fixture.PixelNear(270, 210, 255, 255, 255));
-     EXPECT_FALSE(gfx::GetTextureInfo(texture)->frame_target);
- }
-+
-+TEST(GfxMisc, TextureWithMorePixelsThanItsLogicalSizeIsAddressedInLogicalTexels) {
-+    GfxFixture fixture(1280, 960);
-+    gfx::SetFrameLayout({gfx::AspectMode::Fill, 1.0f});
-+
-+    // An 8x2 image the draws address as 4x1: each logical texel is a 2x2 block of pixels.
-+    gfx::TextureDesc desc;
-+    desc.width = 8;
-+    desc.height = 2;
-+    desc.logical_width = 4;
-+    desc.logical_height = 1;
-+    gfx::TextureHandle texture = gfx::CreateTexture(desc);
-+    ASSERT_NE(texture, gfx::kNullTexture);
-+    auto info = gfx::GetTextureInfo(texture);
-+    ASSERT_TRUE(info.has_value());
-+    EXPECT_EQ(info->width, 4u);
-+    EXPECT_EQ(info->height, 1u);
-+    EXPECT_EQ(info->pixel_width, 8u);
-+    EXPECT_EQ(info->pixel_height, 2u);
-+
-+    uint32_t colors[] = {Rgba(255, 0, 0), Rgba(0, 255, 0), Rgba(0, 0, 255), Rgba(255, 255, 255)};
-+    uint32_t texels[16];
-+    for (int y = 0; y < 2; y++) {
-+        for (int x = 0; x < 8; x++) {
-+            texels[y * 8 + x] = colors[x / 2];
-+        }
-+    }
-+    ASSERT_TRUE(gfx::UpdateTexture(texture, 0, 0, 0, 8, 2, texels));
-+    fixture.Frame({0, 0, 0, 0x80}, [&] {
-+        gfx::TextureBinding binding;
-+        binding.texture = texture;
-+        binding.filter = gfx::Filter::Nearest;
-+        auto quad = Quad(100, 100, 40, 10, {0x80, 0x80, 0x80, 0x80}, 0, 0, 4, 1);
-+        gfx::Draw2D(gfx::Primitive::Quads, quad, binding, gfx::DrawState{});
-+    });
-+    EXPECT_TRUE(fixture.PixelNear(210, 210, 255, 0, 0));
-+    EXPECT_TRUE(fixture.PixelNear(230, 210, 0, 255, 0));
-+    EXPECT_TRUE(fixture.PixelNear(250, 210, 0, 0, 255));
-+    EXPECT_TRUE(fixture.PixelNear(270, 210, 255, 255, 255));
-+
-+    // Left at 0, the logical size is the image's.
-+    gfx::TextureHandle plain = gfx::CreateTexture({4, 4, gfx::TextureFormat::Rgba8, 1, true});
-+    ASSERT_NE(plain, gfx::kNullTexture);
-+    EXPECT_EQ(gfx::GetTextureInfo(plain)->width, 4u);
-+    EXPECT_EQ(gfx::GetTextureInfo(plain)->pixel_width, 4u);
-+}
+ #ifdef SDL_PLATFORM_IOS
+     SDL_RemoveEventWatch(Lifecycle, nullptr);
