@@ -517,7 +517,7 @@ function F.new(opts)
     S.emit("game.title.selected", {mode = "gauntlet", entry = entry})
     if S.session_request then
       local r = S.session_request; S.session_request = nil
-      S.fresh_save(r.party_size, r.character)
+      S.fresh_save(r.party_size, "toan") -- the native dungeon start always loads Toan
       S.session = {owner = "moonmod.roguelike", mode = S.open_mode}
       S.open_mode = nil
       S.context = "loading"

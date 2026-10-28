@@ -225,6 +225,15 @@ end
 S8.reveal_all(); S8.tick(30)
 check(S8.dungeon > 0 and S8.monsters[1].max_hp < 40, "a late biome rolled first has weaker enemies", tostring(S8.dungeon) .. " hp " .. S8.monsters[1].max_hp)
 
+-- 8. A starting character other than Toan ---------------------------------------------------------
+print("Scenario 8: Xiao starts the run")
+local S9 = boot()
+S9.open_title_mode()
+S9.select("character")
+S9.select("start")
+S9.tick(120)
+check(S9.active == "xiao" and not S9.find_toast("not drafted"), "the run opens as Xiao with no draft bounce", S9.active)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then
   print("Last toasts:"); for i = math.max(1, #S.toasts - 5), #S.toasts do print("  " .. S.toasts[i]) end
