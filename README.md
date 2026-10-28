@@ -6,21 +6,23 @@ The source snapshot in this workspace is the canonical first implementation. Eac
 
 ## Install
 
-MoonFactory is not a separate download. It is built into the Chronicle and Chronicle Two PC ports, which you build
-yourself from your own disc image; nothing from either game is included here.
+MoonFactory is built into the Chronicle and Chronicle Two PC ports, which you build yourself from your own disc
+image; nothing from either game is included here.
 
-1. Build the port with the MoonFactory patch applied. Each port folder has the exact steps and pins the upstream
-   commit its patch supports:
-   - [Chronicle (Dark Cloud)](ports/chronicle/README.md): clone Chronicle, run `ports\chronicle\apply-moonfactory.ps1`,
-     then Chronicle's own `build.bat windows-x64-release` and `run.bat`.
+1. Build the port with MoonFactory in it. Each port folder has the exact steps and pins the upstream commit it
+   supports:
+   - [Chronicle (Dark Cloud)](ports/chronicle/README.md): download the release `MoonMod-<commit>`, named after the
+     Chronicle commit it is made for. Clone Chronicle at that commit, copy the release folder's contents into it
+     (replace the files), then run Chronicle's own `build.bat windows-x64-release` and `run.bat`. Or apply the
+     patch yourself with `ports\chronicle\apply-moonfactory.ps1`.
    - [Chronicle Two (Dark Chronicle)](ports/chronicle-two/README.md): clone ChronicleTwo, run
      `ports\chronicle-two\apply-moonfactory.ps1` (it applies the game patch and the required Kazarov input patch
      together), then build and run the same way.
-2. Put each mod in its own folder, named after the mod's id, in one of the two places the game searches:
-   - `mods\<mod id>\` inside the game's save folder (the `--save` folder the port uses), or
-   - `mods\<mod id>\` beside the game's executable.
-   A mod folder holds `mod.json` and the Lua entry script it names. The bundled mods in [`mods/`](mods/) and the
-   examples in [`examples/`](examples/) are ready to copy as they are.
+2. Put each mod in its own folder, named after the mod's id, in the game's mods folder. On Chronicle that is
+   `Chronicle\mods\<mod id>\`, which the release creates with the bundled mods in it. On Chronicle Two it is
+   `mods\<mod id>\` in the game's save folder or beside its executable. A mod folder holds `mod.json` and the Lua
+   entry script it names. The bundled mods in [`mods/`](mods/) and the examples in [`examples/`](examples/) are
+   ready to copy as they are.
 3. Start the game. New mods are discovered on start-up and begin **disabled**; turn them on in the Mod Manager (next
    section). Lua changes need only a game restart. Native (DLL) plugins must also be marked trusted in the Mod
    Manager before they load.
@@ -107,7 +109,7 @@ a memory limit and an instruction budget per callback).
 
 The catalog is broader than the current adapters. Authored locations and independent dungeon graphs, authored Georama geometry/assets, mod-created playable characters, authored model and standalone animation assets, fighting styles, other native script interpreters, renderer hooks, Chronicle velocity writes, and collision queries remain unsupported and return explicit reasons. Chronicle supports data-only Georama variants that inherit a loaded native solid piece; authored geometry and custom model assets remain open. Fighting-style definitions, animation API expansion, authored animation assets, and rig work are deferred until model rigging is in scope. Existing embedded model-motion playback on mod-spawned enemies remains available as a frozen, verified baseline. Both games also support bounded orbit changes on an active dungeon follow camera; camera render callbacks and draw layers remain unsupported. Read the [delivery roadmap](docs/ROADMAP.md) for the active gaps.
 
-The runtime searches the local save directory (`<save>/mods`) and the game's install directory (`mods/` beside the executable). It reads the profile from `<save>/moonmod/profile.json`; that existing storage path and the `moonmod` Lua namespace stay stable for compatibility. MoonFactory does not use an online catalog.
+On Chronicle the runtime reads mods from one folder: `mods/` in the Chronicle checkout, else `mods/` beside the executable, else `<save>/mods`. Chronicle Two reads `<save>/mods` and `mods/` beside the executable. It reads the profile from `<save>/moonmod/profile.json`; that existing storage path and the `moonmod` Lua namespace stay stable for compatibility. MoonFactory does not use an online catalog.
 
 Lua is vendored at `vendor/lua-5.5.1/src` and in each port's `port/third_party/lua-5.5.1`. Upstream Lua is MIT licensed; see `vendor/LUA-LICENSE.txt`.
 

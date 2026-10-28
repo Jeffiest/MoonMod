@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$base = '9418a5506e2a08e7739aa68d70841df6bc516201'
+$base = (Get-Content (Join-Path $PSScriptRoot 'CHRONICLE_COMMIT') -Raw).Trim()
 $patch = Join-Path $PSScriptRoot 'moonfactory-chronicle.patch'
 $kazarovPatch = Join-Path $PSScriptRoot 'moonfactory-kazarov.patch'
 $kazarov = Join-Path $Chronicle 'tools\kazarov'

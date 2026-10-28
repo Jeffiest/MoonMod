@@ -56,16 +56,16 @@ not merge into the Gauntlet branch until the gate before them is green.
 
 ## Gates
 
-### G0 — Engine: title modes and sandbox sessions
+### G0 — Engine: title modes and sandbox sessions — PASSED 2026-10-28 (see the log)
 *Entry:* the Chronicle patch applies cleanly to `9418a550`.
 *Automated:* the 9 engine tests above, and the full suite at baseline.
 *Playtest:*
-- [ ] The *Dark Genie's Gauntlet* row shows between OPTION and EXIT, and the copyright banner sits below the menu
+- [x] The *Dark Genie's Gauntlet* row shows between OPTION and EXIT, and the copyright banner sits below the menu
   without clipping, on **PAL (480)**. The Gauntlet is checked on the PAL disc only; NTSC is out of scope.
-- [ ] The mode screen's plate, font and pointing hand read cleanly. Fades in and out have no pop.
-- [ ] Keyboard and controller both move through Start Run, Starting Character, Norune Eternal and Records. Circle
+- [x] The mode screen's plate, font and pointing hand read cleanly. Fades in and out have no pop.
+- [x] Keyboard and controller both move through Start Run, Starting Character, Norune Eternal and Records. Circle
   returns to the normal title menu. (The mouse is a known gap, not a fail.)
-- [ ] With the mod disabled, the title menu is exactly the native one.
+- [x] With the mod disabled, the title menu is exactly the native one.
 
 ### G1 — Run start, no save file
 *Automated:* `test_runs.lua` scenarios for start, party setup and reload; `MoonModRoguelikePackage`.

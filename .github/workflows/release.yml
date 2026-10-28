@@ -1,0 +1,39 @@
+# Builds the MoonMod release folder for Chronicle (tools/make_release.py) and keeps it as a workflow artifact.
+# Run it by hand (Actions > release > Run workflow) to also publish it as the GitHub release MoonMod-<commit>,
+# named after the Chronicle commit in ports/chronicle/CHRONICLE_COMMIT. Running it again replaces that release's zip.
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths: ['ports/chronicle/**', 'mods/**', 'tools/make_release.py']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the release folder
+        run: |
+          python3 tools/make_release.py --output dist
+          echo "NAME=MoonMod-$(cut -c1-8 ports/chronicle/CHRONICLE_COMMIT)" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: dist/${{ env.NAME }}
+      - name: Publish the GitHub release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(cat ports/chronicle/CHRONICLE_COMMIT)
+          if gh release view "$NAME" > /dev/null 2>&1; then
+            gh release upload "$NAME" "dist/$NAME.zip" --clobber
+          else
+            gh release create "$NAME" "dist/$NAME.zip" --target "$GITHUB_SHA" --title "$NAME" \
+              --notes "MoonMod for Chronicle commit $commit. Copy the folder inside the zip into a Chronicle checkout at that commit and replace the files; see MoonMod-README.txt in it."
+          fi

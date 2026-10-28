@@ -2,6 +2,24 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G0 playtest, PAL: PASSED (after one fix)
+
+Patched Chronicle `9418a550`, `Dark Cloud (Europe) (En,Fr,De,Es,It).iso` extracted with `dcdata`, a fresh save
+folder with only `moonmod.roguelike` installed and enabled, English set in `config.json` to skip the language
+screen. Each line was checked on screenshots of headless runs driven by `--input` scripts (pad buttons, then the
+same with `key:Down`, `key:Return`, `key:Escape`), 640 x 480 logical, shown at 1280 x 960.
+
+| Line | Result |
+|---|---|
+| Row between OPTION and EXIT, banner clear | Pass. START, CONTINUE, OPTION, *Dark Genie's Gauntlet*, EXIT at 28 apart; the trademark lines sit below EXIT with room to spare. |
+| Mode screen reads cleanly, no pop | **Failed, then fixed.** Upstream's UI font is larger and its translucent plate draws taller than asked, so the old fixed layout left Norune Eternal and Records outside the plate and the hint above the entries. The screen is now laid out from its content on the stone plate (heading, lines, entries, hint at the bottom). Opening it is a clean cut: the plate is whole from its first frame. |
+| Keyboard and controller, Circle back | Pass. Down moves the hand, Cross or Return cycles Starting Character (Toan to Xiao, kept across a restart in the mod's storage), Circle or Escape returns to the title menu with the hand on the Gauntlet row. |
+| Mod disabled: native title | Pass. START, CONTINUE, OPTION, EXIT and the banner in its native place. |
+
+Not checked: the mouse (a known gap), and how the screens look on real NTSC (out of scope).
+Metric audit: G0 touches none of the five metrics directly; no score recorded.
+Next: G1 (Start Run from a fresh save into Divine Beast Cave floor I).
+
 ## 2026-10-28 — G0 automated on the new master, Windows
 
 The patch was ported to Chronicle `9418a550` (master after `d3666bcb` forked the game into `port/src/game`) and
