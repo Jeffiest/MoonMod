@@ -7394,7 +7394,7 @@ index 282d41fa..4fda2504 100644
          MakeGroundPeriodic(name, decoded);
          DumpTexture(name, decoded);
 diff --git a/port/src/game/title/titleloop.cpp b/port/src/game/title/titleloop.cpp
-index 642b570f..f9aa00c7 100644
+index 642b570f..50ce3bff 100644
 --- a/port/src/game/title/titleloop.cpp
 +++ b/port/src/game/title/titleloop.cpp
 @@ -52,6 +52,8 @@
@@ -7406,7 +7406,7 @@ index 642b570f..f9aa00c7 100644
  #include "ui/menu_pointer.hpp"
  #include "vutext.hpp"
  #include "wind.hpp"
-@@ -240,6 +242,53 @@ constexpr int MenuY(int y) {
+@@ -240,6 +242,69 @@ constexpr int MenuY(int y) {
  
  MenuPointer title_pointer;
  
@@ -7419,48 +7419,64 @@ index 642b570f..f9aa00c7 100644
 +bool TitleModeBackdropFading() {
 +    return CProcess.no == kTitleStepModFadeOut || (CProcess.no == kTitleStepModMode && CFade.Get(128) < 128);
 +}
-+// A mod title mode's screen: heading, subtitle, info lines and hint on a stone plate, then the entries
-+// with the title's pointing hand beside the selected one.
++// A mod title mode's screen on one plate, laid out from its content: heading, subtitle and info lines, the
++// entries with the title's pointing hand beside the selected one, and the hint at the bottom.
 +void DrawTitleModeScreen(int alpha) {
 +    const moonmod::TitleMode *mode = moonmod::OpenTitleModeScreenMode();
-+    if (mode == nullptr || alpha <= 0) return;
-+    ui::Window::Draw(60, MenuY(24), 520, 236, alpha * 3 / 4, ui::WindowPreset::DarkTranslucent);
++    if (mode == nullptr || alpha <= 0) {
++        return;
++    }
++    constexpr int kTop = 24;
++    constexpr int kLineStep = 22;
++    constexpr int kEntryStep = 26;
++    int           y = kTop + 58;
++    if (!mode->subtitle.empty()) {
++        y += 34;
++    }
++    const int lines_top = y;
++    y += static_cast<int>(mode->lines.size()) * kLineStep + 14;
++    const int entries_top = y;
++    y += static_cast<int>(mode->entries.size()) * kEntryStep + 6;
++    const int hint_y = y;
++    const int bottom = hint_y + 42;
++
++    ui::TrackerWindow::Draw(60, MenuY(kTop), 520, bottom - kTop, alpha, ui::WindowPreset::BlueStone);
 +    ui::Label heading(mode->title, ui::ColorGold, ui::Alignment::Center, true, 1.5f, ui::FontWeight::Bold);
 +    heading.SetOutline(2.0f);
-+    heading.Draw(320, MenuY(36), alpha);
++    heading.Draw(320, MenuY(kTop + 12), alpha);
 +    if (!mode->subtitle.empty()) {
-+        ui::Label(mode->subtitle, ui::ColorWhite, ui::Alignment::Center, true, 0.9f).Draw(320, MenuY(82), alpha);
++        ui::Label(mode->subtitle, ui::ColorWhite, ui::Alignment::Center, true, 0.9f).Draw(320, MenuY(kTop + 58), alpha);
 +    }
 +    for (std::size_t i = 0; i < mode->lines.size(); ++i) {
 +        ui::Label(mode->lines[i], ui::ColorWhite, ui::Alignment::Center, true, 0.8f)
-+            .Draw(320, MenuY(116 + static_cast<int>(i) * 22), alpha);
++            .Draw(320, MenuY(lines_top + static_cast<int>(i) * kLineStep), alpha);
 +    }
-+    const std::string hint = mode->hint.empty() ? std::string("{cross} Choose    {circle} Back") : mode->hint;
-+    ui::Label(hint, ui::ColorWhite, ui::Alignment::Center, true, 0.7f).Draw(320, MenuY(238), alpha * 3 / 4);
 +    for (std::size_t i = 0; i < mode->entries.size(); ++i) {
 +        const auto &entry = mode->entries[i];
-+        const bool selected = i == mode->cursor;
-+        const int y = MenuY(272 + static_cast<int>(i) * 24);
-+        const int entry_alpha = !entry.enabled ? 40 : (selected ? 128 : 80);
-+        ui::Label label(entry.label, selected ? ui::ColorGold : ui::ColorWhite, ui::Alignment::Center, true, 1.0f,
-+                        selected ? ui::FontWeight::Bold : ui::FontWeight::Normal);
-+        label.Draw(320, y, entry_alpha * alpha / 128);
++        const bool  selected = i == mode->cursor;
++        const int   entry_y = MenuY(entries_top + static_cast<int>(i) * kEntryStep);
++        const int   entry_alpha = !entry.enabled ? 48 : (selected ? 128 : 104);
++        ui::Label   label(entry.label, selected ? ui::ColorGold : ui::ColorWhite, ui::Alignment::Center, true, 1.0f,
++                          selected ? ui::FontWeight::Bold : ui::FontWeight::Normal);
++        label.Draw(320, entry_y, entry_alpha * alpha / 128);
 +        if (selected) {
 +            const int width = label.GetWidth();
-+            RECT rect = {0, 0, 32, 32};
++            RECT      rect = {0, 0, 32, 32};
 +            setbilinear(0);
 +            CursorVibeCnt++;
-+            DrawObjectVibe(static_cast<float>(320 - width / 2 - 34), static_cast<float>(y - 4),
++            DrawObjectVibe(static_cast<float>(320 - width / 2 - 34), static_cast<float>(entry_y - 4),
 +                           TexManager.GetTexture("icon01", -1), rect, 128, alpha);
 +            setbilinear(1);
 +        }
 +    }
++    const std::string hint = mode->hint.empty() ? std::string("{cross} Choose    {circle} Back") : mode->hint;
++    ui::Label(hint, ui::ColorWhite, ui::Alignment::Center, true, 0.7f).Draw(320, MenuY(hint_y), alpha * 3 / 4);
 +}
 +
  struct TitlePointerAction {
      bool start = false;
      bool confirm = false;
-@@ -251,7 +300,8 @@ struct TitlePointerAction {
+@@ -251,7 +316,8 @@ struct TitlePointerAction {
  TitlePointerAction TakeTitlePointer() {
      TitlePointerAction action;
      if (CProcess.no == TITLE_STEP_OPTION_INIT || CProcess.no == TITLE_STEP_OPTION ||
@@ -7470,7 +7486,7 @@ index 642b570f..f9aa00c7 100644
          // The child screen owns pointer capture, including a button held through the fade.
          title_pointer.Abandon();
          return action;
-@@ -414,18 +464,24 @@ int TitleLoop() {
+@@ -414,18 +480,24 @@ int TitleLoop() {
                  }
  
                  if (CCursol.select < 0) {
@@ -7498,7 +7514,7 @@ index 642b570f..f9aa00c7 100644
                      } else {
                          TiPlayVolSE(MIDI_PORT_SE_DEFAULT, 38, 20, 1.0f);
                          CProcess.no = TITLE_STEP_MENU_BLINK;
-@@ -562,6 +618,51 @@ int TitleLoop() {
+@@ -562,6 +634,51 @@ int TitleLoop() {
  
              break;
  
@@ -7550,7 +7566,7 @@ index 642b570f..f9aa00c7 100644
          case TITLE_STEP_EXIT:
              SndStopAllSe();
              CSnd.Stop(MIDI_PORT_BGM);
-@@ -600,7 +701,7 @@ void TitleDraw() {
+@@ -600,7 +717,7 @@ void TitleDraw() {
      };
      sceVu0FVECTOR ambient = {0.0f, 0.0f, 0.0f, 100.0f};
  
@@ -7559,7 +7575,7 @@ index 642b570f..f9aa00c7 100644
          ambient[3] = static_cast<float>(CFade.Get(128));
      } else {
          ambient[3] = 128.0f;
-@@ -632,7 +733,7 @@ void TitleDraw() {
+@@ -632,7 +749,7 @@ void TitleDraw() {
      if (CProcess.no != TITLE_STEP_OPENING_BOOK && CProcess.no != TITLE_STEP_EXIT) {
          TexManager.ReloadTexture(GetVif1Packet(), 1);
  
@@ -7568,7 +7584,7 @@ index 642b570f..f9aa00c7 100644
              ambient[3] = static_cast<float>(CFade.Get(100));
          } else {
              ambient[3] = 100.0f;
-@@ -678,6 +779,12 @@ void TitleDraw() {
+@@ -678,6 +795,12 @@ void TitleDraw() {
      MGClearZBuffer(0);
  
      switch (CProcess.no) {
@@ -7581,7 +7597,7 @@ index 642b570f..f9aa00c7 100644
          case TITLE_STEP_LOGO:
          case TITLE_STEP_RETURN_FADE_IN:
          case TITLE_STEP_MENU:
-@@ -703,7 +810,11 @@ void TitleDraw() {
+@@ -703,7 +826,11 @@ void TitleDraw() {
                  CSprite.Draw();
              }
  
@@ -7594,7 +7610,7 @@ index 642b570f..f9aa00c7 100644
  
              if (CProcess.no == TITLE_STEP_LOGO) {
                  set2DSprite(GetVif1Packet(), TexManager.GetTexture("start", -1), CRect_i_(64, MenuY(296), 512, 64), CRect_i_(0, 0, 512, 64), static_cast<u_char>(CFade.Get(Fade2)));
-@@ -767,4 +878,28 @@ void TitleDraw() {
+@@ -767,4 +894,28 @@ void TitleDraw() {
      TitlePortFeedback(35);
  }
  
