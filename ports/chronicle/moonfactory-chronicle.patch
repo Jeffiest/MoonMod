@@ -577,10 +577,10 @@ index 00000000..8c2f7839
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..77fde4cb
+index 00000000..186efbf6
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,138 @@
 +#pragma once
 +
 +#include <string>
@@ -606,6 +606,12 @@ index 00000000..77fde4cb
 +void ConfigureChronicleApi(RuntimeConfig &config);
 +std::string ChronicleDebugOverlayText();
 +std::vector<std::string> ChronicleOverlayLines();
++
++/**
++ * Whether a dungeon is drawing the mod HUD lines and notices in its own HUD pass (with the game's lettering), so the
++ * overlay presenter leaves them out.
++ */
++bool ChronicleDungeonDrawsModText();
 +// Mod HUD bars (render.bar_register) in id order, drawn under the water gauge.
 +struct ChronicleHudBar {
 +    double current = 0.0;
@@ -2499,7 +2505,7 @@ index 88bbacba..0ce12bf7 100644
 +
  } // namespace dc::app
 diff --git a/port/src/app/presentation.cpp b/port/src/app/presentation.cpp
-index c4048c90..51df3582 100644
+index c4048c90..c1dd9735 100644
 --- a/port/src/app/presentation.cpp
 +++ b/port/src/app/presentation.cpp
 @@ -7,10 +7,13 @@
@@ -2526,7 +2532,7 @@ index c4048c90..51df3582 100644
  struct FpsOverlay {
      bool                on = false;
      OverlayRate         frames;
-@@ -329,16 +335,54 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
+@@ -329,16 +335,58 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
  // Recorded again only when the text or the window's mapping changed. Always drawn in the overlay's
  // own 5x7 font, so the badge looks the same on every screen: the game's message font is only
  // loaded inside a mode, which made a second, different-looking badge for the intro and loading.
@@ -2539,9 +2545,13 @@ index c4048c90..51df3582 100644
 +        lines.push_back(GameFpsText());
 +    }
 +    const std::size_t badge_lines = lines.size();
-+    std::ranges::copy(moonmod::ChronicleOverlayLines(), std::back_inserter(lines));
++    // A dungeon draws them in its own HUD pass, in the game's lettering (topStatusInfo).
++    const bool in_hud = moonmod::ChronicleDungeonDrawsModText();
++    if (!in_hud) {
++        std::ranges::copy(moonmod::ChronicleOverlayLines(), std::back_inserter(lines));
++    }
 +    std::vector<std::string> toasts;
-+    if (!moonmod::ManagerOpen()) {
++    if (!moonmod::ManagerOpen() && !in_hud) {
 +        toasts = moonmod::GameToastLines();
 +    }
 +    if (lines.empty() && toasts.empty()) {
@@ -7240,20 +7250,22 @@ index 65af951a..d32264b7 100644
      {300,  150 },
      {300,  150 },
 diff --git a/port/src/game/shot_freefuncs.cpp b/port/src/game/shot_freefuncs.cpp
-index 73f3aac2..baf6bd68 100644
+index 73f3aac2..75c0e756 100644
 --- a/port/src/game/shot_freefuncs.cpp
 +++ b/port/src/game/shot_freefuncs.cpp
-@@ -40,6 +40,9 @@
+@@ -40,6 +40,11 @@
  #include "snd.hpp"
  #include "texture.hpp"
  #include "userstatus.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
++#include "moonmod/manager_ui.hpp"
++#include "ui/framework.hpp"
 +#include "monstorunit.hpp"
  
  namespace dc::game {
  
-@@ -52,7 +55,6 @@ namespace {
+@@ -52,7 +57,6 @@ namespace {
  /**
   * Number of floors in each dungeon.
   */
@@ -7261,7 +7273,7 @@ index 73f3aac2..baf6bd68 100644
  
  /**
   * Number of ripple slots on the water.
-@@ -135,9 +137,9 @@ int CheckHealingWater() {
+@@ -135,9 +139,9 @@ int CheckHealingWater() {
  
      sceVu0CopyVector(position, CharaMain.pos);
  
@@ -7274,7 +7286,7 @@ index 73f3aac2..baf6bd68 100644
  
              if (parts_no != -1) {
                  CDungeonParts *part = &NowDngMap->parts[parts_no];
-@@ -197,7 +199,7 @@ int CheckHealZone() {
+@@ -197,7 +201,7 @@ int CheckHealZone() {
  
      const int column = static_cast<int>((80.0f + position[0]) / 160.0f);
      const int row = static_cast<int>((80.0f + position[2]) / 160.0f);
@@ -7283,7 +7295,7 @@ index 73f3aac2..baf6bd68 100644
  
      if (parts_no == MAP_PARTS_NONE) {
          return 0;
-@@ -367,7 +369,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -367,7 +371,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
  
      sceVu0CopyVector(player, CharaMain.pos);
  
@@ -7292,7 +7304,7 @@ index 73f3aac2..baf6bd68 100644
          if (NowMonstorUnit->monster[monster_no].state == -1) {
              continue;
          }
-@@ -381,7 +383,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -381,7 +385,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
      }
  
      if (map_no != 5) {
@@ -7301,7 +7313,7 @@ index 73f3aac2..baf6bd68 100644
  
          if (UserStatus->cur_floor < floors - 1) {
              BtBattleMusic_Excg(nearest, &bgm_volume, &ambient_volume);
-@@ -624,6 +626,27 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -624,6 +628,53 @@ void topStatusInfo(int y, int selected_item, int floor) {
          set2DSprite(Vif1Packet, icons, CRect_i_(full_drops * 0x12 + 0x33, y + 0x22, 0x10, 0x14), CRect_i_((3 - static_cast<int>(static_cast<float>(leftover) / 2.5f)) * 16, 0x48, 0x10, 0x14), 0x50);
      }
  
@@ -7326,10 +7338,36 @@ index 73f3aac2..baf6bd68 100644
 +        bar_y += 12;
 +    }
 +
++    // Mod HUD text (render.layer_register) under the bars, and mod notices under that in the game's help window,
++    // both in the game's own lettering. The presenter leaves both out while a dungeon draws them here.
++    constexpr float kModTextScale = ui::metrics::kScaleSmall;
++    constexpr int   kModTextRow = 18;
++    int             text_y = bar_y + 2;
++    for (const std::string &line : moonmod::ChronicleOverlayLines()) {
++        ui::Label(line, ui::ColorWhite, ui::Alignment::Left, true, kModTextScale).Draw(0x30, text_y);
++        text_y += kModTextRow;
++    }
++    std::vector<std::string> notice_rows;
++    constexpr int            kNoticeWidth = 400;
++    for (const std::string &notice : moonmod::GameToastLines()) {
++        for (std::string &row : ui::WrapText(notice, kNoticeWidth - 24, kModTextScale)) notice_rows.push_back(std::move(row));
++    }
++    constexpr std::size_t kNoticeRows = 8; // the newest rows, when several long notices stack up
++    if (notice_rows.size() > kNoticeRows) notice_rows.erase(notice_rows.begin(), notice_rows.end() - kNoticeRows);
++    if (!notice_rows.empty()) {
++        const int box_y = text_y + 6;
++        ui::HelpBox::Draw(0x20, box_y, kNoticeWidth, static_cast<int>(notice_rows.size()) * kModTextRow + 14);
++        int row_y = box_y + 7;
++        for (const std::string &row : notice_rows) {
++            ui::Label(row, ui::ColorWhite, ui::Alignment::Left, true, kModTextScale).Draw(0x2C, row_y);
++            row_y += kModTextRow;
++        }
++    }
++
      static float popupYRate = -PI;
      popupYRate += 0.20943952f;
  
-@@ -872,6 +895,12 @@ void BtMapJumpCashClear() {
+@@ -872,6 +923,12 @@ void BtMapJumpCashClear() {
  }
  
  int BtMapJumpLoad(char *map_name) {
@@ -7342,7 +7380,7 @@ index 73f3aac2..baf6bd68 100644
      int mes_size = 0;
  
      CUserStatus *status = UserStatus;
-@@ -1029,3 +1058,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
+@@ -1029,3 +1086,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
  }
  
  } // namespace dc::game
@@ -9109,10 +9147,10 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..1bc4f823
+index 00000000..55cd3899
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9806 @@
+@@ -0,0 +1,9807 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -18209,6 +18247,7 @@ index 00000000..1bc4f823
 +    for (const auto &[owner,badges]:g_floor_badges) tier=std::max(tier,badges.value(key,badges.value("default",0)));
 +    return tier;
 +}
++bool ChronicleDungeonDrawsModText() { return mode == GAME_MODE_DUNGEON; }
 +std::vector<std::string> ChronicleOverlayLines() {
 +    std::vector<std::string> lines;
 +    for (const auto &[id, overlay] : g_debug_overlays) {

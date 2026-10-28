@@ -20,7 +20,8 @@ Also **fixed:** every floor intro showed twice. The floor's seed changes when it
 second arrival; the second sighting of the same floor within 2 s is now the same arrival.
 
 Noticed: the HUD line covered the native HP readout (with `NEXT CURSED` it hid all of 90/90); fixed in the engine
-(mod lines now start under the life, weapon and water block). Moves made with
+(mod lines now start under the life, weapon and water block). Later the same day: in a dungeon, mod lines and notices are
+drawn in the game's own HUD pass, in its lettering, with notices in its translucent help window. Moves made with
 `world.transition` inside a biome (the test mod's, not a player's) pass the dungeon entrance and pay no floor rewards.
 
 ## 2026-10-28 — G3 reworked: one weapon each, a broken weapon ends the run
