@@ -650,6 +650,8 @@ local function first_floor_setup()
   end
   local notes = {}
   local start = run.drafted[1]
+  -- The native dungeon start always loads Toan; switch now so the draft check has nothing to bounce.
+  try(game.party.set_active, {id = start})
   local w = equipped_weapon(start)
   if w then
     local selector = {id = w.id, character = start, slot = w.slot}

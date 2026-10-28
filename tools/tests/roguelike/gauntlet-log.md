@@ -2,6 +2,28 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G1 run start, PAL: PASSED (after one fix)
+
+Same build and PAL data as G0. Automated: `test_runs.lua` 63/63 (one new check, below), `test_standalone.lua` 38/38,
+engine filter 9/9. Headless runs now pass `--show-fps --screenshot-fps`: without them the screenshot leaves out the
+overlay, which is where mod HUD lines and toasts draw.
+
+| Line | Result |
+|---|---|
+| Start Run from a fresh install lands on DBC floor I | Pass. No story save in the folder. The toasts read *THE GAUNTLET OPENS: 5 biomes* and *DIVINE BEAST CAVE I (depth 1/20)*, the HUD line `GAUNTLET 1-I`, and the starter kit (2 bread, 2 water, 2 Repair Powder) arrives. Cross to control: about 7 s of game time (Cross on tick 900, the HUD is in by about tick 1320, after the native walk down the entrance stairs). |
+| Six in the party, draft enforced | Pass. The character ring shows all six; the undrafted are at 0 HP and dimmed, and the game refuses to switch to them. The mod's own bounce stays as the backstop. **Fixed:** the native dungeon start always loads Toan, so every run with another starting character opened with *Toan is not drafted for this run. Back to Xiao.* The mod now switches to the starting character quietly in its first-floor setup. The fake now starts every dungeon as Toan too, and a new scenario checks a Xiao start has no bounce. Re-checked in the game with Ruby. |
+| First weapons | Pass, all six: Toan Dagger (258), Xiao Wooden Slingshot (300), Goro Mallet (315), Ruby Gold Ring (332), Ungaga Fighting Stick (348), Osmond Machine Gun (364). |
+| Story save byte-identical; RPG and Ascension sit out | Pass. With a copy of a real story save (`saves/1`, `saves/autosave`, `state.json`) and RPG and Ascension (`moonmod.adventurer`) enabled, the save files hash the same after a run, and nothing of RPG's or Ascension's shows mid-run. Over every run, only the Gauntlet's own `storage.json` changed. |
+
+Noticed, not failures:
+- The native HUD shows *Floor 16* on Gauntlet floor I, because registered floors take native numbers after a
+  dungeon's own. Worth a look in G2 (the mod's own line says `1-I`).
+- With a story save present, the title cursor starts on CONTINUE, so the Gauntlet row is two presses down, not three.
+- Each run closed by quitting is counted as a retreat on the next start, as designed (25 runs started over G0 and G1: 24 retreats, the 25th still open in storage).
+
+Metric audit: **5 Clean sandbox: 2** (saves untouched, other mods sit out). No other metric touched.
+Next: G2 (the floor chain).
+
 ## 2026-10-28 — G0 playtest, PAL: PASSED (after one fix)
 
 Patched Chronicle `9418a550`, `Dark Cloud (Europe) (En,Fr,De,Es,It).iso` extracted with `dcdata`, a fresh save

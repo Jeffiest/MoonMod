@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 62 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 63 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -67,14 +67,14 @@ not merge into the Gauntlet branch until the gate before them is green.
   returns to the normal title menu. (The mouse is a known gap, not a fail.)
 - [x] With the mod disabled, the title menu is exactly the native one.
 
-### G1 — Run start, no save file
+### G1 — Run start, no save file — PASSED 2026-10-28 (see the log)
 *Automated:* `test_runs.lua` scenarios for start, party setup and reload; `MoonModRoguelikePackage`.
 *Playtest:*
-- [ ] Start Run from a **fresh install with no story progress** lands on Divine Beast Cave floor I. Time from Cross to
-  control: ______ s.
-- [ ] All six are in the party; only the starting character can fight, and switching to an undrafted one bounces back.
-- [ ] Every character from *Starting Character* starts with their first weapon.
-- [ ] Hash the story save folder before and after a run: it is byte-identical. RPG and Ascension show no slot mid-run.
+- [x] Start Run from a **fresh install with no story progress** lands on Divine Beast Cave floor I. Time from Cross to
+  control: about 7 s.
+- [x] All six are in the party; only the starting character can fight, and switching to an undrafted one bounces back.
+- [x] Every character from *Starting Character* starts with their first weapon.
+- [x] Hash the story save folder before and after a run: it is byte-identical. RPG and Ascension show no slot mid-run.
 *Kill criterion:* if the native dungeon entrance cannot run without story progress, the run needs its own entry path
 in the engine before anything else is built.
 
