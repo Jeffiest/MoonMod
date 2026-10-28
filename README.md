@@ -44,6 +44,7 @@ yourself from your own disc image; nothing from either game is included here.
   | `moonmod.rpg` RPG: Character Paths | Kills give XP, levels give HP, damage, toughness and skill points; a skill tree per character on the Journal's Character page |
   | `moonmod.adventurer` Ascension | Per-character levels and a 17-skill tree with face-button powers and a Focus bar |
   | `moonmod.dungeon-plus` Dungeon+ | Champions with themed loot, floors replayable at Tiers 1-5, mutators, bounties, bigger floors |
+  | `moonmod.roguelike` Dark Genie's Gauntlet | A roguelike game mode on the title menu, with its own title screen and progress and no save file: five biomes of three floors and a Warden, Cursed Gates, fast ABS, Shatter, an in-run Diorama, drafted allies and the Norune Eternal unlocks ([guide](mods/moonmod.roguelike/README.md)) |
   | `moonmod.controls` Controls | Dungeon quick-item hotkeys, party shortcuts and a first-person toggle |
   | `moonmod.autosave` Autosave | Controls Chronicle's guarded town autosave slot |
   | `moonmod.expanded-town` Expanded Town Camera | Toggles the legacy overhead camera while walking in towns |
