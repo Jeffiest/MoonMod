@@ -64,7 +64,7 @@ local BIOMES = {
   {key = "dbc", dungeon = 0, name = "Divine Beast Cave", sources = {2, 5, 10}, warden = 12},
   {key = "wof", dungeon = 1, name = "Wise Owl Forest", sources = {2, 5, 10}, warden = 13},
   {key = "ship", dungeon = 2, name = "Shipwreck", sources = {2, 5, 11}, warden = 14},
-  {key = "temple", dungeon = 3, name = "Sun & Moon Temple", sources = {2, 5, 11}, warden = 14},
+  {key = "temple", dungeon = 3, name = "Sun and Moon Temple", sources = {2, 5, 11}, warden = 14}, -- the overlay font has no "&"
   {key = "sea", dungeon = 4, name = "Moon Sea", sources = {2, 5, 10}, warden = 12},
 }
 local FLOOR_LABEL = {"I", "II", "III", "WARDEN"}
@@ -650,8 +650,6 @@ local function first_floor_setup()
   end
   local notes = {}
   local start = run.drafted[1]
-  -- The native dungeon start always loads Toan; switch now so the draft check has nothing to bounce.
-  try(game.party.set_active, {id = start})
   local w = equipped_weapon(start)
   if w then
     local selector = {id = w.id, character = start, slot = w.slot}
@@ -771,6 +769,9 @@ local function enter_floor(world)
     elseif run.awaiting and pos == run.awaiting and hit.slot == 1 then expected = true  -- the next biome
     end
   end
+  -- The launch and a move to the next biome re-enter the dungeon through its entrance, which reads as
+  -- floor 0 until the floor loads: wait it out instead of calling it off route.
+  if not expected and not hit and (run.phase == "launch" or run.awaiting) then return end
   if not expected then
     run.suspended = true
     floor = {token = world.token, biome = 0, slot = 0, scaled = {}}
@@ -803,6 +804,11 @@ local function enter_floor(world)
   end
   if hit.slot == WARDEN_SLOT then intro = intro .. "  The gate-key holder is the Warden." end
   if advanced and hit.slot == 2 and eternal("gaffer") > 0 then intro = intro .. "  Gaffer's Wagon is here (Actions)." end
+  -- Re-entering the dungeon (the launch, the next biome) loads Toan: switch back quietly, so the draft
+  -- check has nothing to bounce.
+  local p = try(game.player.get)
+  local keep = run.leader or run.drafted[1]
+  if p and p.character ~= keep then try(game.party.set_active, {id = keep}) end
   if first then first_floor_setup() end
   toast(intro, 420)
   if advanced and hit.slot == 2 and (pos == 1 or pos == 3) then draft_ally("GOLDEN ATLA") end
@@ -1029,6 +1035,7 @@ moonmod.on("game.tick", function(e)
   if p then
     if frame % 60 == 0 then enforce_draft(p) end
     if p.weapon and p.weapon.id then run.weapons[p.character] = {id = p.weapon.id, slot = p.weapon.slot} end
+    if contains(run.drafted, p.character) then run.leader = p.character end
     local regen = placed("tree") + (blessed("mender") and 2 or 0)
     if regen > 0 and frame % 180 == 0 and (p.hp or 0) > 0 and p.hp < p.max_hp then try(game.player.heal, {amount = regen}) end
   end

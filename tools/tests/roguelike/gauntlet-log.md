@@ -2,6 +2,35 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G2 floor chain, PAL: headless part done (3 fixes); Warden lines need hands
+
+Same build and data, plus the engine guard below. Automated: `test_runs.lua` 66/66 (3 new checks), `test_standalone.lua`
+38/38, engine filter 10/10 (1 new test). Scripted input can't walk a floor to its exit, so a test-only mod in the test
+save (not shipped) moved the run floor to floor with `world.transition` and logged each arrival.
+
+| Line | Result |
+|---|---|
+| Native exit chains I → II → III → Warden | Headless half. The registered floors sit straight after each dungeon's retail floors (DBC 15-18, Wise Owl Forest 17-20, Shipwreck 18-21, Temple 18-21, Moon Sea 15-18) and the native exit sets the current floor + 1 (`_SET_FLOOR_LEVEL`), in place, keeping the character. All 20 floors load, with 15 enemies each and no crash. Walking an exit is left for a hands-on pass. |
+| Warden: key, size, bar, next biome in 5 s | Not checked. `entities.query` lists only the monsters loaded around the player, so the key holder (and its Warden scaling and bar) appears once the player reaches its room. The floor shows the native *Floor Boss* plate, because it is the dungeon's last floor. |
+| Warden floor's exit before the Warden dies | Safe: the Warden holds the key. **Fixed:** in the 5 s between its death and the move to the next biome, opening the exit would have asked for a floor past the floor tables. The engine now keeps a mod's last floor's exit on that floor. |
+| Source floors play no scripted event | Pass, all five biomes. A registered floor copies only its source floor's enemy layout; story events key on retail floor numbers. |
+| Shuffle: weaker late biome, right HUD line | HUD half passes (a Temple start reads `GAUNTLET 1-II` on Temple II). The weaker enemies need combat. |
+
+Fixed besides the guard:
+- **The dungeon entrance read as off route.** The launch and every move to the next biome re-enter the dungeon
+  through its entrance, which reports floor 0 for about 7 s. The mod paused the run and toasted *This floor is off
+  the Gauntlet route* (in G1 too, hidden under the floor intro). It now waits the entrance out while it is moving the run.
+- **The next biome opened as Toan.** Re-entering the dungeon loads Toan, so a run started as anyone else bounced
+  back with a *not drafted* toast at each biome. The mod now switches back to the last drafted character quietly.
+  The fake engine models both (a 30-frame entrance with Toan loaded), and three new checks fail without the fixes.
+- **"Sun & Moon Temple" drew as "SUN ? MOON TEMPLE":** the overlay font has no "&". It is now "Sun and Moon Temple".
+
+Noticed, not failures: the mod's HUD line sits over the native HP readout's first digits, and the native HUD numbers
+registered floors after retail's (*Floor 16* on DBC I).
+
+Metric audit: **1 No way back: 2** so far (every exit ends the run or moves it on; the Warden's exit can't skip a biome).
+Next: the *(hands)* lines of G2, then G3.
+
 ## 2026-10-28 — G1 run start, PAL: PASSED (after one fix)
 
 Same build and PAL data as G0. Automated: `test_runs.lua` 63/63 (one new check, below), `test_standalone.lua` 38/38,

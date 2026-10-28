@@ -529,7 +529,16 @@ function F.new(opts)
       S.frame = S.frame + 1
       if S.pending_jump and S.frame % 5 == 0 then
         local j = S.pending_jump; S.pending_jump = nil
-        if j.town then S.to_town() else S.enter(j.dungeon, j.floor) end
+        if j.town then S.to_town()
+        else
+          -- A queued jump re-enters the dungeon: its entrance reads as floor 0, with Toan loaded, for a while.
+          S.context, S.dungeon, S.floor, S.back, S.active, S.monsters = "dungeon", j.dungeon, 0, false, "toan", {}
+          S.seed = S.seed + 1
+          S.entrance = {dungeon = j.dungeon, floor = j.floor, at = S.frame + 30}
+        end
+      elseif S.entrance and S.frame >= S.entrance.at then
+        local j = S.entrance; S.entrance = nil
+        S.enter(j.dungeon, j.floor)
       end
       if S.pending_events then
         local ev = S.pending_events; S.pending_events = nil

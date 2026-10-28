@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 63 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 66 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -36,7 +36,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    darkcloud_tests --gtest_filter='MoonModTitleModes*:MoonModRoguelike*:MoonModWorldTransition*'
    ```
-   That is 9 tests. The full suite must add no failure the baseline does not have, on the same machine and toolchain.
+   That is 10 tests. The full suite must add no failure the baseline does not have, on the same machine and toolchain.
    The baseline is the same Chronicle commit, unpatched, built the same way (`build.bat windows-x64-release`, then
    `DC_BUILD_TESTS=ON` and the `darkcloud_tests` target). Which tests fail on the baseline depends on the machine (Linux without a GPU and Windows with one
    differ), so compare the two runs; don't rely on a fixed list.
@@ -78,15 +78,24 @@ not merge into the Gauntlet branch until the gate before them is green.
 *Kill criterion:* if the native dungeon entrance cannot run without story progress, the run needs its own entry path
 in the engine before anything else is built.
 
-### G2 — The floor chain
+### G2 — The floor chain — HEADLESS PART DONE 2026-10-28; the lines marked *(hands)* need someone playing
 *Automated:* `MoonModWorldTransitionApi.*`, and the route scenarios in `test_runs.lua` (win, off-route floor).
 *Playtest:*
 - [ ] In every biome the native exit chains I → II → III → Warden on the registered floors, never onto a story floor.
-- [ ] The Warden holds the gate key, is larger, has its HUD bar, and on death moves the run to the next biome in 5 s.
-- [ ] Reaching the Warden floor's exit before the Warden dies does something safe. Record what: ______.
-- [ ] The source floors in `BIOMES` (`main.lua`) play no scripted event: Divine Beast Cave 2/5/10/12, Wise Owl Forest
-  2/5/10/13, Shipwreck and Sun & Moon Temple 2/5/11/14, Moon Sea 2/5/10/12 (0-based). Tick each biome.
-- [ ] *Shuffle biome order* on: a late biome rolled first is visibly weaker, and the HUD line names the right floor.
+  Headless: each biome's four floors are numbered straight after its retail floors (DBC and Moon Sea 15-18, Wise Owl
+  Forest 17-20, Shipwreck and Temple 18-21), the native exit asks for the current floor + 1, and all 20 floors load
+  and spawn 15 enemies. *(hands)* Walk one exit per biome.
+- [ ] *(hands)* The Warden holds the gate key, is larger, has its HUD bar, and on death moves the run to the next biome in 5 s.
+  The mod only sees the key holder once the player is in its room (`entities.query` lists loaded monsters only).
+- [x] Reaching the Warden floor's exit before the Warden dies does something safe. Record what: **it can't be reached**:
+  the Warden holds the key. In the 5 s after its death the exit could be opened; the engine now keeps a mod's last
+  floor's exit on that floor (`ChronicleScriptFloorLevel`) instead of reading past the floor tables, and the run
+  moves on when the 5 s are up.
+- [x] The source floors in `BIOMES` (`main.lua`) play no scripted event: Divine Beast Cave 2/5/10/12, Wise Owl Forest
+  2/5/10/13, Shipwreck and Sun and Moon Temple 2/5/11/14, Moon Sea 2/5/10/12 (0-based). A source floor gives only its
+  enemy layout; story events key on retail floor numbers, which the registered floors are past. All 20 visited.
+- [ ] *Shuffle biome order* on: a late biome rolled first is visibly weaker *(hands)*, and the HUD line names the right
+  floor (headless: yes, a Temple start reads `GAUNTLET 1-II` on Temple II).
 
 ### G3 — Weapons: fast ABS, found weapons, Shatter, Sacrifice
 *Automated:* the Shatter, Sacrifice and drafting scenarios in `test_runs.lua`.

@@ -1185,10 +1185,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..d4c9b755
+index 00000000..76ced2e4
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,75 @@
 +#pragma once
 +
 +/**
@@ -1227,6 +1227,7 @@ index 00000000..d4c9b755
 +void RecordChronicleChestValue(CDungeonMap *map, int slot, int item);
 +void CollectChronicleChestValue(CDungeonMap *map, int slot);
 +void ChroniclePrepareFloorGeneration(bool);
++int  ChronicleScriptFloorLevel(int dungeon_id, int floor);
 +
 +// The monsters.
 +void  ChronicleMonsterModelLoaded(CMonstorUnit *unit, int slot, int native_model_no);
@@ -2890,6 +2891,28 @@ index 19ea6bca..1a1acbb6 100644
 +
      const std::string_view prefix = kWeaponPrefixes[chara];
      const std::string      number = FormatWeaponIndex(weapon_index);
+ 
+diff --git a/port/src/game/btsysscript.cpp b/port/src/game/btsysscript.cpp
+index 08ba60f0..3425b738 100644
+--- a/port/src/game/btsysscript.cpp
++++ b/port/src/game/btsysscript.cpp
+@@ -36,6 +36,7 @@
+ #include "menu_dungeon.hpp"
+ #include "menu_misc.hpp"
+ #include "monstorunit.hpp"
++#include "moonmod/game_hooks.hpp"
+ #include "nowload.hpp"
+ #include "npcharacter.hpp"
+ #include "runscript.hpp"
+@@ -298,7 +299,8 @@ int _GET_FLOOR_LEVEL(RS_STACKDATA *stack, int /*argument_count*/) {
+ }
+ 
+ int _SET_FLOOR_LEVEL(RS_STACKDATA *stack, int /*argument_count*/) {
+-    static_cast<CDngStatusData *>(UserStatus)->SetNowFloor(GetStackInt(stack));
++    const int floor = moonmod::ChronicleScriptFloorLevel(selectMapNo, GetStackInt(stack)); // MoonMod: registered floors
++    static_cast<CDngStatusData *>(UserStatus)->SetNowFloor(floor);
+     return 1;
+ }
  
 diff --git a/port/src/game/character.cpp b/port/src/game/character.cpp
 index f377d189..c5fd0408 100644
@@ -9072,10 +9095,10 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..b37f7f70
+index 00000000..e005d7e7
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9766 @@
+@@ -0,0 +1,9773 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -18331,6 +18354,13 @@ index 00000000..b37f7f70
 +    const int floor_id = g_active_dungeon_floor_entry->floor_id;
 +    g_active_dungeon_floor_entry.reset();
 +    return floor_id;
++}
++
++int ChronicleScriptFloorLevel(int dungeon_id, int floor) {
++    // Retail's exit gate asks for the next floor with no check: on a mod's last registered floor (which, unlike
++    // retail's last, has an exit) that is past the floor tables. Stay on the last floor instead.
++    if (dungeon_id < 0 || dungeon_id >= DUNGEON_COUNT) return floor;
++    return std::min(floor, maxFloorTbl__3[dungeon_id] - 1);
 +}
 +
 +void ChronicleMonsterModelLoaded(dc::game::CMonstorUnit *unit, int slot, int native_model_no) {
@@ -40236,10 +40266,10 @@ index 00000000..e2993afa
 +}
 diff --git a/port/src/tests/moonmod_world_transition_api_test.cpp b/port/src/tests/moonmod_world_transition_api_test.cpp
 new file mode 100644
-index 00000000..21cdbbc5
+index 00000000..f95ec215
 --- /dev/null
 +++ b/port/src/tests/moonmod_world_transition_api_test.cpp
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,185 @@
 +#include <gtest/gtest.h>
 +
 +#include <memory>
@@ -40251,6 +40281,7 @@ index 00000000..21cdbbc5
 +#include "main.hpp"
 +#include "mainselect.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/game_hooks.hpp"
 +#include "savedata.hpp"
 +
 +namespace dc::game {}
@@ -40393,6 +40424,34 @@ index 00000000..21cdbbc5
 +    EXPECT_EQ(world.value.at("context"), "dungeon");
 +    EXPECT_EQ(world.value.at("dungeon_id"), 0);
 +    EXPECT_EQ(world.value.at("floor_id"), 15);
++
++    moonmod::ResetChronicleDungeonsForTests();
++}
++
++TEST(MoonModWorldTransitionApi, TheExitGateChainsRegisteredFloorsAndStopsAtTheLast) {
++    moonmod::ResetChronicleDungeonsForTests();
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleApi(config);
++    const auto *register_operation = moonmod::FindApiOperation("dungeons.register");
++    ASSERT_NE(register_operation, nullptr);
++
++    // Retail: the exit's next floor is never past the boss floor, so nothing changes.
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 3), 3);
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 14), 14);
++
++    const moonmod::ApiCallResult registered = config.api_handler(
++        "test.moonmod.transition",
++        *register_operation,
++        moonmod::Json::array({{{"id", "moon-vault"}, {"name", "Moon Vault"}, {"dungeon", 0},
++                              {"floors", {{{"id", "annex"}, {"source_floor", 2}}, {{"id", "depths"}, {"source_floor", 5}}}}}}));
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++
++    // Floor 15's exit goes on to the registered floor 16; floor 16's exit stays on 16 instead of leaving the tables.
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 16), 16);
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 17), 16);
++    // Other dungeons keep their own last floor.
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(1, 16), 16);
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(-1, 40), 40);
 +
 +    moonmod::ResetChronicleDungeonsForTests();
 +}

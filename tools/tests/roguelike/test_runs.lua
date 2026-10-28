@@ -37,7 +37,7 @@ end
 local function start_run(S)
   S.open_title_mode()
   S.select("start")
-  S.tick(10)
+  S.tick(40)
   S.tick(20)
 end
 local function run_floor(S, opts)
@@ -52,7 +52,7 @@ local function finish_biome(S)
   for _ = 2, 4 do S.exit_gate(); run_floor(S) end
   S.reveal_all(); S.tick(30)
   S.kill(S.monsters[6]); S.tick(2)
-  S.tick(320)
+  S.tick(350)
 end
 local function entry_ids(S) local t = {}; for _, e in ipairs(S.page().entries or {}) do t[#t + 1] = e.id end; return table.concat(t, ",") end
 
@@ -71,7 +71,7 @@ check(S.storage.meta.start_char == "toan", "and wraps back to Toan")
 S.select("start")
 check(S.session and S.session.owner == "moonmod.roguelike", "Start Run began a sandbox session")
 check(#S.party == 6 and S.slot_id and S.game.save.slot_id().slot_id == nil, "all six joined, no save slot")
-S.tick(10)
+S.tick(40)
 check(S.context == "dungeon" and S.dungeon == 0 and S.floor == 15, "dropped onto DBC run floor I", tostring(S.dungeon) .. ":" .. tostring(S.floor))
 run_floor(S, {atla = true})
 local run = S.storage.run
@@ -105,7 +105,7 @@ S.exit_gate(); S.tick(20)
 S.reveal_all(); S.tick(30)
 local warden = S.monsters[6]
 check(warden.max_hp >= 40 * 6 and S.bars.warden, "key holder became the Warden with a HUD bar", warden.max_hp)
-S.kill(warden); S.tick(2); S.tick(320)
+S.kill(warden); S.tick(2); S.tick(350)
 check(S.dungeon == 1 and S.floor == 17, "Warden death moved the run to Wise Owl Forest", tostring(S.dungeon) .. ":" .. tostring(S.floor))
 S.tick(20)
 check(S.storage.run.pos == 2 and S.storage.run.depth == 5, "biome 2, depth 5", S.storage.run.depth)
@@ -233,6 +233,11 @@ S9.select("character")
 S9.select("start")
 S9.tick(120)
 check(S9.active == "xiao" and not S9.find_toast("not drafted"), "the run opens as Xiao with no draft bounce", S9.active)
+check(not S9.find_toast("off the Gauntlet route"), "the dungeon entrance is not called off route")
+finish_biome(S9)
+check(S9.dungeon == 1 and S9.active == "xiao" and not S9.find_toast("not drafted"), "the next biome opens as Xiao too",
+      tostring(S9.dungeon) .. " " .. S9.active)
+check(not S9.find_toast("off the Gauntlet route") and not S9.storage.run.suspended, "and its entrance is not off route either")
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then

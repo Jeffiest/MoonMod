@@ -11,7 +11,7 @@ drafted allies, and Moon Shards that buy Norune Eternal unlocks. A run belongs t
 | `mods/moonmod.roguelike/` | The Lua mod (`main.lua`), its manifest, and its player guide (`README.md`). The guide also maps the design doc to what was built and lists the API limits. |
 | `ports/chronicle/moonfactory-chronicle.patch` | Refreshed engine patch. It adds **title modes and sandbox sessions** (`title.*`, `session.*`, `game.title.*` and `game.session.*` events) on top of the existing MoonFactory patch. Apply it with `ports/chronicle/apply-moonfactory.ps1` to Chronicle `9418a550` (the master after the game was forked into `port/src/game`; see `ports/chronicle/README.md`). |
 | `docs/API.md` | The section "Chronicle title modes and sandbox sessions" documents the new API. |
-| `tools/tests/roguelike/` | Lua harness: a fake adapter plus 63 checks that play whole runs (`lua tools/tests/roguelike/test_runs.lua`, Lua 5.4+), and 38 checks that RPG, Ascension and Dungeon+ sit runs out (`test_standalone.lua`). |
+| `tools/tests/roguelike/` | Lua harness: a fake adapter plus 66 checks that play whole runs (`lua tools/tests/roguelike/test_runs.lua`, Lua 5.4+), and 38 checks that RPG, Ascension and Dungeon+ sit runs out (`test_standalone.lua`). |
 | `mods/moonmod.hub/` | Two new quick links to the Gauntlet. |
 | `GAUNTLET.md`, `tools/tests/roguelike/gauntlet-log.md` | The stage-gate loop (G0–G7) for verifying the mode in the game, and its log of passes. |
 
@@ -30,10 +30,10 @@ The engine code inside the patch (in a Chronicle checkout):
 ## Verified (Linux, clang 18, no game data, no GPU)
 
 - The patched port builds.
-- `darkcloud_tests --gtest_filter='MoonModTitleModes*:MoonModRoguelike*:MoonModWorldTransition*'` passes: 9 tests.
+- `darkcloud_tests --gtest_filter='MoonModTitleModes*:MoonModRoguelike*:MoonModWorldTransition*'` passes: 10 tests.
 - The full suite: 101 suites pass. The 10 that fail (Gfx*, PlatformArena, PlatformMc, TexDecode, LocalizeOptions,
   CustomShopTest) fail identically on the untouched baseline, because this machine has no GPU.
-- The Lua harness passes all 63 checks, and the manifests validate against `manifest.schema.json`.
+- The Lua harness passes all 66 checks, and the manifests validate against `manifest.schema.json`.
 - A separate code review of the engine changes was done, and its findings are fixed and tested.
 
 ## Not verified: needs the real game (disc image and a GPU)

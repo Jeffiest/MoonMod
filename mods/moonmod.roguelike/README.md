@@ -134,7 +134,7 @@ Checked here, without the game's data:
 - `tools/tests/roguelike/test_runs.lua` (Lua 5.4+, or the vendored 5.5) plays whole runs against a fake adapter: a
   five-biome win, Norune Eternal purchases, unlocks on the next run, Shatter, Sacrifice, drafting, a retreat, a
   defeat, Abandon, an off-route floor, quitting mid-run, a reload, an engine without title modes, and a start as
-  someone other than Toan. 63 checks.
+  someone other than Toan, kept through the dungeon entrance and into the next biome. 66 checks.
 - `tools/tests/roguelike/test_standalone.lua` loads RPG, Ascension and Dungeon+ against a recording stub, starts a
   session in the middle of a story game and also loads each mod mid-run. It checks that every bonus goes to x1, that
   the run's events reach no game call and store nothing, and that everything comes back after. 38 checks.
