@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 90 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 92 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -132,15 +132,21 @@ in the engine before anything else is built.
   Powder) and biome 2 about 600 plus drops: likely no purchase in biome 1.
 *Kill criterion:* if testers curse fewer than 1 floor in 5, the reward is not worth the risk; retune before G5.
 
-### G5 — Run endings and the meta loop
-*Automated:* the win, defeat, retreat, Abandon, quit-mid-run, reload and purchase scenarios in `test_runs.lua`.
+### G5 — Run endings and the meta loop — HEADLESS PART DONE 2026-10-28; *(hands)* lines need someone playing
+*Automated:* the win, defeat, retreat, Abandon, quit-mid-run, reload, purchase and Moon Shard table scenarios in
+`test_runs.lua`.
 *Playtest:*
 - [ ] Each ending lands back on the Gauntlet's title screen with the last run shown: win, defeat, exit gate out,
-  Escape Powder, **Actions > Abandon Run**.
-- [ ] Closing the game mid-run counts as a retreat on the next start and keeps the run's Moon Shards.
-- [ ] Moon Shards match the table: a win pays about 45, a third-biome fall about 15. Records update.
-- [ ] Each Norune Eternal unlock bought shows up on the next run (Macho's Forge attachment, Matataki ally, and so on).
-- [ ] Runs to buy everything (161 shards): ______. Target: 6–10 runs.
+  Escape Powder, **Actions > Abandon Run**. Headless: defeat (*Fell in Divine Beast Cave 1-1*) and a weapon
+  breaking. *(hands)* the win, the exit gate, Escape Powder (`items.use` does not use it) and Abandon (Actions).
+- [x] Closing the game mid-run counts as a retreat on the next start and keeps the run's Moon Shards (in the game: a
+  run left open with 7 shards closed as a retreat on start-up, 0 → 7 shards, *Left at ..., +7*).
+- [x] Moon Shards match the table: a win pays about 45 (the harness's win: 46), a third-biome fall about 15 (12-18,
+  checked). Records update.
+- [x] Each Norune Eternal unlock bought shows up on the next run. In the game: Macho's Forge and Whetstone bought on
+  the title page (200 → 194 shards), and the next run's ring started with 1 attachment and 55/55 durability.
+- [ ] Runs to buy everything (161 shards): ______ *(hands)*. Target: 6–10 runs. Estimate: early falls pay 4-8, a
+  third-biome fall about 15, a win about 45; a player who improves gets there in about 8-10 runs, more with curses.
 
 ### G6 — Standalone runs
 *Automated:* `test_standalone.lua` (38 checks).

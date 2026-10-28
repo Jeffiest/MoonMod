@@ -2,6 +2,25 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G5 endings and the meta loop, PAL: headless part done
+
+Automated: `test_runs.lua` 92/92 (a new scenario: a fall on the third biome's second floor banks 12-18 shards; the win
+check is now 40-50, the harness's win banks 46), `test_standalone.lua` 38/38. A test-only mod ended runs in the game.
+
+| Line | Result |
+|---|---|
+| Endings land on the title with the last run | Defeat passes: `player.damage` to 0 ends the session as a defeat and the title reads *Fell in Divine Beast Cave ...*. A broken weapon passed in the G3 rework. Needs hands: the win, the exit gate, Escape Powder (`items.use` only uses healing, water and cures) and Abandon (the Mod Manager's Actions). |
+| Quitting mid-run is a retreat, shards kept | Pass. A run left open in storage with 7 shards closed as a retreat at start-up: retreats +1, shards 0 → 7, *Left at ..., +7*. |
+| Shards match the table | Pass in the harness: a clean win 46, a third-biome fall 12-18. |
+| Unlocks show on the next run | Pass in the game. Macho's Forge and Whetstone bought on the title page with scripted input (200 → 194), and the next run's Gold Ring started with 1 attachment and 55/55 durability. |
+| Runs to buy everything (161) | Needs hands. Estimate: about 8-10 runs for an improving player. |
+
+Fixed on the way: the last-run line named floors the old way (*Divine Beast Cave I*); it now reads *1-1* or *Warden*
+like the HUD. The Diorama tile notice ran to 79 characters (more than the message window's three lines; the harness
+caught it on the runs that placed a Windmill) and is now short.
+
+Metric audit: **4 Meta pull: 2** (each unlock changes the next run, seen in the game).
+
 ## 2026-10-28 — Run messages in the game's message window
 
 Engine: mod notices (`ui.notify`) queue and pop up one at a time in the dungeon's own message window (bottom right,

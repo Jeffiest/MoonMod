@@ -131,7 +131,7 @@ check(S.storage.meta.best_depth == 20, "best depth 20", S.storage.meta.best_dept
 check(S.page().lines[#S.page().lines]:find("CONQUERED"), "title screen shows the last run", S.page().lines[#S.page().lines])
 check(S.tuning == nil and S.floor_label == nil and next(S.hud_icons) == nil and S.sheet == nil, "run effects, HUD and Journal page cleared")
 local won = S.storage.meta.shards
-check(won >= 30, "Moon Shards banked", won)
+check(won >= 40 and won <= 50, "a win banks about 45 Moon Shards", won)
 
 -- every notice of the run fits the message window: three lines of about 24 characters
 local longest = ""; for _, t in ipairs(S.toasts) do if #t > #longest then longest = t end end
@@ -304,6 +304,17 @@ start_run(S11)
 local starter11 = S11.weapons.toan[S11.equipped.toan]
 check(starter11.durability == 30 + 20 and starter11.durability_f == 50, "Whetstone 2/3: +20 durability, full", starter11.durability)
 check((S11.items["chronicle:item:177"] or 0) == 3, "Repair Kit 1/2: a third Repair Powder", S11.items["chronicle:item:177"])
+
+-- 11. The Moon Shard table: a fall in the third biome pays about 15 ------------------------------------
+print("Scenario 11: Moon Shards for a fall in the third biome")
+local S12 = boot()
+start_run(S12); run_floor(S12); finish_biome(S12)
+S12.tick(20); run_floor(S12); finish_biome(S12)
+S12.tick(20); run_floor(S12); S12.exit_gate(); run_floor(S12)
+S12.game_over(); S12.tick(30)
+check(S12.storage.run == false and S12.storage.meta.deaths == 1, "fell on the third biome's second floor")
+check(S12.storage.meta.shards >= 12 and S12.storage.meta.shards <= 18, "a fall in the third biome banks about 15 Moon Shards",
+      S12.storage.meta.shards)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then

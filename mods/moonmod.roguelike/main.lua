@@ -778,7 +778,7 @@ local function end_run(outcome)
   else meta.retreats = meta.retreats + 1 end
   save_meta()
   local b = biome_def(run.pos)
-  local where = b and (b.name .. " " .. (FLOOR_LABEL[run.slot] or "")) or "?"
+  local where = b and (b.name .. (run.slot >= WARDEN_SLOT and " Warden" or (" " .. run.pos .. "-" .. run.slot))) or "?"
   local headline = outcome == "victory" and "CONQUERED" or (outcome == "death" and "Fell in " .. where or
       (outcome == "broken" and "Weapon broke in " .. where or "Left at " .. where))
   last_result = string.format("Last run: %s, depth %d, +%d", headline, depth, earned):sub(1, 64) -- Moon Shards are on the line above
@@ -1268,7 +1268,7 @@ moonmod.on("skills.train_requested", function(event)
     run.stock[node] = run.stock[node] - 1
     run.diorama[node] = placed(node) + 1
     try(game.skills.set_rank, {id = node_id("diorama", node), rank = run.diorama[node]})
-    toast(TILE[node].title .. " placed (" .. placed_total() .. "/" .. plots() .. "). " .. TILE[node].description)
+    toast(TILE[node].title .. " placed on the Diorama (" .. placed_total() .. "/" .. plots() .. ").")
     save_run()
     refresh()
   elseif tree == "eternal" and ETERNAL_NODE[node] then
