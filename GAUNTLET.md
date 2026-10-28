@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 83 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 84 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -114,16 +114,22 @@ in the engine before anything else is built.
 - [ ] Benched drafted allies level from shared ABS by the end of biome 2 *(hands)*.
 - [ ] Two players end biome 2 with different weapon builds *(hands)*.
 
-### G4 — Risk and reward: Cursed Gate, Vaults, Diorama, Gilda
+### G4 — Risk and reward: Cursed Gate, Vaults, Diorama, Gilda — HEADLESS PART DONE 2026-10-28 (2 fixes); *(hands)* lines need someone playing
 *Automated:* the curse, Vault, blessing and Diorama scenarios in `test_runs.lua`.
 *Playtest:*
 - [ ] **G**, **L1+Select** and **Actions** all curse the next floor; the HUD shows `NEXT CURSED`; the floor before a
-  Warden refuses.
-- [ ] A cursed floor feels harder (+60% HP, two of Parched/Brittle/Glass) and leaving it pays the Miracle cache.
-- [ ] A back floor on a run floor is a Vault and pays a blessing on the way out.
+  Warden refuses. Headless: G curses (HUD `GAUNTLET 1-I NEXT CURSED`), and G on floor III is refused. *(hands)*
+  L1+Select and Actions: scripted pad buttons do not reach mod bindings, and the Actions tab needs the Mod Manager.
+- [ ] A cursed floor feels harder (+60% HP, two of Parched/Brittle/Glass) *(hands)* and leaving it pays the Miracle
+  cache *(hands: a real exit)*. Headless: the floor opens with its two curses named and **now** gets its +50% chests
+  (fixed: the floor was built after the run had spent its curse, so cursed floors had no extra chests).
+- [ ] A back floor on a run floor is a Vault and pays a blessing on the way out *(hands)*: the back floor opens only
+  at a native script boundary (the back-floor key at the gate).
 - [ ] Each Diorama piece's effect is noticeable within a floor (a Lamp maps the floor, Trees heal, and so on). No piece
-  is one a player never places.
-- [ ] Gaffer's Wagon (if unlocked) appears on floor II and Gilda is enough to buy from it about once per biome.
+  is one a player never places *(hands: placing is on Journal > Character)*.
+- [ ] Gaffer's Wagon (if unlocked) appears on floor II and Gilda is enough to buy from it about once per biome
+  *(hands)*. Estimate: floors pay 40 x depth, so floor II of biome 1 has about 40 plus drops (short of 300 for Repair
+  Powder) and biome 2 about 600 plus drops: likely no purchase in biome 1.
 *Kill criterion:* if testers curse fewer than 1 floor in 5, the reward is not worth the risk; retune before G5.
 
 ### G5 — Run endings and the meta loop

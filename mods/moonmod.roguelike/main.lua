@@ -808,6 +808,13 @@ local function enter_floor(world)
   local pos = nil
   if hit then for p, index in ipairs(run.biomes) do if index == hit.biome then pos = p end end end
   local prev = floor
+  -- The engine reports the new floor a few frames before it builds it and sets its seed: the second sighting
+  -- of the same floor is the same arrival.
+  if prev and pos and pos == prev.biome and hit.slot == prev.slot and (world.back_floor == true) == prev.back and
+      frame - (prev.entered or 0) < 120 then
+    prev.token = world.token
+    return
+  end
   local expected = false
   if pos then
     if run.phase == "launch" then expected = pos == 1 and hit.slot == 1
@@ -869,7 +876,9 @@ end
 moonmod.on("game.dungeon.generating", function(e)
   if not run then return end
   local hit = FLOOR_AT[tostring(e.dungeon_id) .. ":" .. tostring(e.floor_id)]
-  local cursing = hit and run.next_cursed and hit.slot < WARDEN_SLOT
+  -- The floor may be built just after the run has arrived on it (and spent next_cursed).
+  local arrived = floor and floor.cursed and floor.slot == (hit and hit.slot) and run.biomes[floor.biome] == (hit and hit.biome)
+  local cursing = hit and hit.slot < WARDEN_SLOT and (run.next_cursed or arrived)
   try(game.dungeons.set_modifiers, cursing and {chests = 50, chest_value = 100} or {})
 end)
 

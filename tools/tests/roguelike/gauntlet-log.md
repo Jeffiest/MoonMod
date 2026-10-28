@@ -2,6 +2,26 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G4 risk and reward, PAL: headless part done (2 fixes)
+
+Automated: `test_runs.lua` 84/84 (one new check; the fake now reports a new floor 16 frames before it builds it, as
+the engine does, and two checks fail on the old mod), `test_standalone.lua` 38/38. A test-only mod moved Ruby's run
+through DBC I-III; the test copy of the mod also logged its toasts and floor generation (the repo copy does not).
+
+| Line | Result |
+|---|---|
+| G, L1+Select, Actions curse; `NEXT CURSED`; Warden floor refuses | G passes: *CURSED GATE* toast and the HUD reads `GAUNTLET 1-I NEXT CURSED`; G on floor III gives *The next floor is the Warden's: it cannot be cursed.* L1+Select and Actions need hands: mod bindings read scripted keys but not scripted pad buttons (`ModActionHeldInternal` reads the SDL gamepad), and Actions lives in the Mod Manager. |
+| Cursed floor harder, Miracle cache on leaving | **Fixed:** the engine reports the new floor about 3 frames before it builds it. The mod saw the arrival first and spent the curse, so the floor was built uncursed: no +50% chests. The build now checks the floor the run is cursing. In the game: DBC II and III built with `chest_bonus_percent` 50 and their two curses named. The extra HP and the cache need a fight and a real exit. |
+| Vault pays a blessing | Needs hands: `dungeons.back_floor_enter` queues the back floor for the next native script boundary (the back-floor key at the gate), which an idle player never reaches. |
+| Diorama pieces noticeable | Needs hands: tiles are placed with Cross on Journal > Character. |
+| Gaffer about once per biome | Needs hands. Estimate: floor II of biome 1 has about 40 Gilda plus drops, short of 300 for Repair Powder; biome 2 about 600 plus drops. |
+
+Also **fixed:** every floor intro showed twice. The floor's seed changes when it is built, so the mod counted a
+second arrival; the second sighting of the same floor within 2 s is now the same arrival.
+
+Noticed: the HUD line covers the native HP readout (with `NEXT CURSED` it hides all of 90/90). Moves made with
+`world.transition` inside a biome (the test mod's, not a player's) pass the dungeon entrance and pay no floor rewards.
+
 ## 2026-10-28 — G3 reworked: one weapon each, a broken weapon ends the run
 
 A design change after the G3 headless pass. Each character carries one weapon for the run, and a break ends it.

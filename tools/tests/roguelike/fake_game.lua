@@ -497,9 +497,14 @@ function F.new(opts)
     S.atla = {"a1"}
   end
   function S.reveal_all() for _, m in ipairs(S.monsters) do m.revealed = true end end
+  -- Like the engine, the new floor number shows before the floor is built (generating, a new seed, monsters).
   function S.enter(dungeon, floor_no, back)
-    S.emit("game.dungeon.generating", {dungeon_id = dungeon, floor_id = floor_no, back_floor = back or false})
-    S.context, S.dungeon, S.floor, S.back = "dungeon", dungeon, floor_no, back or false
+    S.context, S.dungeon, S.floor, S.back, S.monsters = "dungeon", dungeon, floor_no, back or false, {}
+    S.building = {dungeon = dungeon, floor = floor_no, back = back or false, at = S.frame + 16}
+  end
+  function S.build_floor()
+    local b = S.building; S.building = nil
+    S.emit("game.dungeon.generating", {dungeon_id = b.dungeon, floor_id = b.floor, back_floor = b.back})
     S.seed = S.seed + 1
     S.spawn_floor()
   end
@@ -554,6 +559,7 @@ function F.new(opts)
         local j = S.entrance; S.entrance = nil
         S.enter(j.dungeon, j.floor)
       end
+      if S.building and S.frame >= S.building.at then S.build_floor() end
       if S.pending_events then
         local ev = S.pending_events; S.pending_events = nil
         for _, e in ipairs(ev) do S.emit(e[1], e[2]) end

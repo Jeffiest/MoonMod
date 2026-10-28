@@ -80,6 +80,8 @@ check(S.hp.xiao == 0 and S.hp.ruby == 0 and S.hp.toan > 0, "undrafted allies sta
 check((S.items["chronicle:item:177"] or 0) == 2, "starter kit given in the fresh save")
 check(S.monsters[1].exp == 36, "ABS x6 on floor I", S.monsters[1].exp)
 check(S.layers.gauntlet == "GAUNTLET 1-I", "HUD layer", S.layers.gauntlet)
+local intros = 0; for _, t in ipairs(S.toasts) do if t:find("^DIVINE BEAST CAVE I  %(depth") then intros = intros + 1 end end
+check(intros == 1, "the floor intro shows once, though the floor is built after it is reported", intros)
 check(S.sheet and S.sheet.title == "MOON GAUNTLET", "Journal page set")
 local stock = 0; for _, n in pairs(S.storage.run.stock) do stock = stock + n end
 check(stock == 1, "Atla pickup gave a Diorama tile", stock)
