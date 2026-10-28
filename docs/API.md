@@ -23,7 +23,7 @@ The first runtime slice implements the marked surfaces:
 | `game.ui.register/remove` | Add or remove an owned action button in the in-game mod manager | Implemented on both ports; activation dispatches `ui.action` only to its owning mod |
 | `game.ui.navigate` | Open a loaded package and its Settings, Actions, Quests, Skills, or Journal tab | Implemented on Chronicle; validates destination package and tab |
 | `game.ui.sheet_set/sheet_clear/sheet_open` | Character page: a mod's sheet and skill tree as the native **Journal > Character** page | Implemented on Chronicle; unsupported on Chronicle Two |
-| `game.ui.notify` | Queue a bounded notice for the mod manager | Implemented on both ports |
+| `game.ui.notify` | Queue a bounded notice for the mod manager and over gameplay | Implemented on both ports |
 | `game.input.bind/unbind/state/consume/axis/context_push/context_pop/context_get/wheel_mode_set` | Mod-owned digital actions, processed stick/trigger axes, priority context stack, and Chronicle's scoped mouse-wheel routing | Actions and context frames are owner-scoped on both ports; all six gamepad axes report normalized values and connection status; wheel mode is Chronicle-only |
 | `moonmod.tasks` | Deferred work on a named game phase | Planned; event subscriptions are the current extension seam |
 | `game.localization.register/get` | Mod-owned localized strings and language fallback | Implemented in the shared runtime; lookups use the active game language unless the caller supplies a locale |
@@ -172,7 +172,7 @@ Mods can register WAV, FLAC, or Ogg Vorbis files under `resources/audio/`, then 
 local notice = assert(game.ui.notify({message = "New content is ready", duration_frames = 240}))
 ```
 
-The notice is queued for the manager's status line and stays there for the requested number of game frames (1-3600, default 240). Messages are limited to 200 bytes. If the manager is open, the notice appears immediately; otherwise it appears when the player opens the manager, unless its frame duration expires first. `ui.notify` requires `game.write`.
+The notice is queued for the manager's status line and stays there for the requested number of game frames (1-3600, default 240). Messages are limited to 200 bytes. It also draws over gameplay as a small line under the HUD, newest at the bottom, for the same duration; the manager's status line shows it too if the manager is open, or when the player opens it before the duration expires. `ui.notify` requires `game.write`.
 
 ### Shared mod-manager actions
 
@@ -1480,7 +1480,7 @@ The common runtime emits `game.tick` from the PC port clock pump and `runtime.lo
 The Tier 2 expansion introduces high-utility gameplay hooks across both games:
 
 - **HUD Overlays (`game.render.*`)**:
-  - `game.render.bar_register({id = "boss_hp", label = "Boss", value = 150, max = 200, x = 100, y = 50, width = 200, height = 12, color = {r = 255, g = 50, b = 50}})`: Registers an owner-scoped HUD progress bar overlay.
+  - `game.render.bar_register({id = "boss_hp", label = "Boss", current = 150, max = 200})`: Registers or updates an owner-scoped HUD progress bar overlay. It accepts only these four fields: `label` is 1-24 overlay characters, `max` is positive, and `current` is in `[0, max]`. Bars share the limit of four with diagnostic overlays and HUD text layers.
   - `game.render.bar_remove({id = "boss_hp"})`: Removes an owned HUD progress bar overlay.
 
 - **Weapon Mastery & Progression (`game.weapons.*`)**:

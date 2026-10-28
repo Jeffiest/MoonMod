@@ -51,10 +51,8 @@ The engine code inside the patch (in a Chronicle checkout):
 - Sessions use `session.finish` (not `end`, which is a Lua keyword).
 - The canonical runtime sources in `src/` lag the port copies. The title-mode code lives only in the Chronicle patch.
   Chronicle Two has no title modes.
-- RPG and Ascension weapon loot rolls never apply: `game.item_picked_up` gives `character` as a number (0-5), but those
-  mods compare it with ids like `"toan"`. This is a pre-existing bug and is not fixed here.
-- `docs/API.md` is stale in two places: `render.bar_register` takes `{id, label, current, max}`, and `ui.notify` notices
-  also draw over gameplay.
+- `game.item_picked_up` gives `character` as a number (0-5) while other APIs use ids like `"toan"`. RPG and Ascension
+  now map the number to an id, so their weapon loot rolls apply. The event payload itself is unchanged.
 
 ## Linux build notes, if you build there
 

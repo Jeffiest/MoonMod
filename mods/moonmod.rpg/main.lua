@@ -479,6 +479,7 @@ end)
 moonmod.on("game.item_picked_up", function(event)
   if event.kind ~= "weapon" or setting("weapon_loot_rolls", true) == false then return end
   local item, owner, where = tonumber(event.native_item_no), event.character, tonumber(event.slot)
+  if type(owner) == "number" then owner = CHARACTERS[owner + 1] end  -- the event gives 0-5; instances use ids
   if not item or item < 257 or not owner or not where then return end
   local roll = math.random(100)
   local rarity = roll <= 1 and {"Legendary", 0.35, 0.45} or roll <= 5 and {"Exquisite", 0.20, 0.30} or
