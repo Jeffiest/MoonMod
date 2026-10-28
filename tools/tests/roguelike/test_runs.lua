@@ -140,19 +140,60 @@ check(#longest <= 72, "every notice fits three lines of the message window", #lo
 -- 2. Norune Eternal from the title screen ----------------------------------------------------------
 print("Scenario 2: Norune Eternal on the title screen")
 S.select("eternal")
-check(entry_ids(S) == "gaffer,macho,vault,shrine,well,embassy,more", "eternal page lists the first six unlocks and More", entry_ids(S))
+local sky = S.page().sky
+check(sky and #sky.nodes >= 100 and #sky.groups >= 8, "eternal page is the sky", sky and #sky.nodes)
 check(S.page().root == false, "eternal page is a sub-page")
-S.select("gaffer")
-check(S.storage.meta.eternal.gaffer == nil and S.page().lines[2]:find("Gaffer"), "first Cross shows the unlock", S.page().lines[2])
-S.select("gaffer")
-check(S.storage.meta.eternal.gaffer == 1 and S.storage.meta.shards == won - 6, "second Cross buys it", S.storage.meta.shards)
-S.select("vault"); S.select("vault")
-S.select("macho"); S.select("macho")
-check(S.storage.meta.eternal.vault == 1 and S.storage.meta.eternal.macho == 1, "bought Heirloom Vault and Macho's Forge")
-for _ = 1, 3 do S.select("shrine"); S.select("shrine") end
-check(S.page().lines[2] and (S.page().lines[2]:find("needs") or (S.storage.meta.eternal.shrine or 0) >= 1), "unaffordable unlock says what it needs", S.page().lines[2])
+check(S.sky_node("norune").state == "owned" and S.sky_node("kit").state == "open" and S.sky_node("gaffer").state == "locked",
+      "the heart is lit, trunks open, the rest locked", S.sky_node("gaffer").state)
+S.sky_act("gaffer", "buy")
+check(S.storage.meta.eternal.gaffer == nil and S.sky_node("gaffer").cost:find("^Needs Repair Kit"), "a locked node says what it needs",
+      S.sky_node("gaffer").cost)
+S.sky_act("kit", "buy")
+check(S.storage.meta.eternal.kit == 1 and S.storage.meta.shards == won - 2, "Cross on an open node buys it", S.storage.meta.shards)
+check(S.sky_node("kit").rank == "1/2" and S.sky_node("gaffer").state == "open", "its rank shows and the next node opens")
+for _, id in ipairs({"gaffer", "whetstone", "macho", "gem", "vault"}) do S.sky_act(id, "buy") end
+local m = S.storage.meta.eternal
+check(m.gaffer == 1 and m.whetstone == 1 and m.macho == 1 and m.gem == 1 and m.vault == 1, "bought along Craft to the Heirloom Vault")
+check(S.storage.meta.shards == won - 32, "and paid for each", S.storage.meta.shards)
+S.sky_act("moonblade", "buy")
+check(S.sky_node("moonblade").cost:find("Needs"), "a Keystone far down a path stays out of reach", S.sky_node("moonblade").cost)
+-- switching off and ranks
+S.sky_act("whetstone", "toggle")
+check(S.storage.meta.off.whetstone == true and S.sky_node("whetstone").on == false and S.sky_node("macho").state == "owned",
+      "Square switches a node off and keeps what follows it")
+S.sky_act("whetstone", "toggle")
+check(S.storage.meta.off.whetstone == nil and S.sky_node("whetstone").on, "and back on")
+S.sky_act("whetstone", "buy")
+S.sky_act("whetstone", "rank_down")
+check(S.storage.meta.eternal.whetstone == 2 and S.storage.meta.set.whetstone == 1 and S.sky_node("whetstone").rank == "1/2 of 3",
+      "L1 sets a lower rank in use", S.sky_node("whetstone").rank)
+S.sky_act("whetstone", "rank_up")
+check(S.storage.meta.set.whetstone == nil and S.sky_node("whetstone").rank == "2/3", "R1 back to the rank owned")
+S.sky_act("feast", "toggle")
+check(S.sky_node("feast").cost == "Buy it first", "Square on an unbought node")
 S.select("back")
 check(entry_ids(S) == "start,character,eternal,records", "Circle on a sub-page goes back to the root page")
+-- Keystone slots, Heat and prices, from a prepared save
+do
+  local store = F.deepcopy(S.storage)
+  store.meta.shards, store.meta.sigils = 2, 20
+  for _, id in ipairs({"charm", "unbreakable", "laststand", "rain", "endless", "helping", "feast"}) do store.meta.eternal[id] = 1 end
+  store.meta.eternal.crowded, store.meta.eternal.hardened = 2, 1
+  store.meta.off = {feast = true}
+  local SK = boot({storage = store})
+  SK.open_title_mode(); SK.select("eternal")
+  SK.sky_act("shrine", "buy")
+  check(SK.sky_node("shrine").cost == "Needs 5 Moon Shards, you have 2", "unaffordable node says what it costs", SK.sky_node("shrine").cost)
+  check(SK.page().sky.top[3] == "Heat 3  x1.3    Keystones 3/2" or SK.page().sky.top[3]:find("^Heat 3"), "Pacts add Heat to the top line",
+        SK.page().sky.top[3])
+  SK.sky_act("feast", "toggle")
+  check(SK.storage.meta.off.feast == true and SK.sky_node("feast").cost:find("Keystone slots full"), "a third Keystone does not fit two slots",
+        SK.sky_node("feast").cost)
+  SK.sky_act("laststand", "toggle"); SK.sky_act("endless", "toggle"); SK.sky_act("feast", "toggle")
+  check(SK.storage.meta.off.feast == nil and SK.storage.meta.off.laststand == true, "switch one off to make room")
+  SK.sky_act("hardened", "toggle")
+  check(SK.page().sky.top[3]:find("^Heat 2"), "a Pact switched off takes its Heat with it", SK.page().sky.top[3])
+end
 S.select("records")
 check(S.page().lines[1]:find("Wins 1"), "records page", S.page().lines[1])
 S.select("done")
@@ -289,16 +330,14 @@ check(S10.storage.run.broken == true, "a starter turned into its broken version 
 S10.tick(200)
 
 -- 10. The durability unlocks and the paged Norune Eternal -----------------------------------------------
-print("Scenario 10: Whetstone, Repair Kit and the Eternal pages")
+print("Scenario 10: Whetstone, Repair Kit and the sky")
 S10.storage.meta.eternal.whetstone = 2
 S10.storage.meta.eternal.kit = 1
 local S11 = boot({storage = S10.storage})
 S11.open_title_mode()
 S11.select("eternal")
-local ids = entry_ids(S11)
-check(#S11.page().entries == 7 and ids:find("more$"), "the Eternal page holds six unlocks and More", ids)
-S11.select("more")
-check(entry_ids(S11) == "moon,whetstone,oil,kit,more", "More shows the rest", entry_ids(S11))
+check(S11.sky_node("whetstone").rank == "2/3" and S11.sky_node("kit").rank == "1/2", "the sky shows the ranks owned",
+      S11.sky_node("whetstone").rank)
 S11.select("back")
 start_run(S11)
 local starter11 = S11.weapons.toan[S11.equipped.toan]
@@ -315,6 +354,38 @@ S12.game_over(); S12.tick(30)
 check(S12.storage.run == false and S12.storage.meta.deaths == 1, "fell on the third biome's second floor")
 check(S12.storage.meta.shards >= 12 and S12.storage.meta.shards <= 18, "a fall in the third biome banks about 15 Moon Shards",
       S12.storage.meta.shards)
+
+-- 12. Sky effects: a start loaded with unlocks, the Pacts, and the Heat payout ------------------------------
+print("Scenario 12: sky effects and Heat")
+local S14 = boot({storage = {meta = {eternal = {fullparty = 1, purse = 1, heart = 2, baker = 1, gem = 1, antidote = 1,
+                                                 crowded = 2, sprawl = 1, hardened = 1}}}})
+start_run(S14)
+check(#S14.storage.run.drafted == 6, "Full Party drafts all six", #S14.storage.run.drafted)
+check(S14.storage.run.heat == 4, "the run carries its Heat: Crowded 2, Sprawling 1, Hardened 1", S14.storage.run.heat)
+check(S14.gilda >= 300, "Coin Purse: 300 Gilda", S14.gilda)
+check(S14.max_hp.toan == 75 + 20, "Steady Heart 2/3: +20 maximum HP", S14.max_hp.toan)
+check((S14.items["chronicle:item:148"] or 0) == 4 and (S14.items["chronicle:item:151"] or 0) == 2, "Baker's Bundle and Antidote Kit",
+      S14.items["chronicle:item:148"])
+run_floor(S14)
+check(S14.modifiers and S14.modifiers.monsters == 50 and S14.modifiers.rooms == 30, "Crowded Halls and Sprawling Floors reach the floor",
+      S14.modifiers and S14.modifiers.monsters)
+-- Moonblade: a first hit lands three times over, a second hit only once
+do
+  local SM = boot({storage = {meta = {eternal = {moonblade = 1}}}})
+  start_run(SM); run_floor(SM)
+  local m; for _, x in ipairs(SM.monsters) do if x.alive then m = x; break end end
+  local full = m.max_hp
+  m.hp = full - 10; SM.tick(30)
+  check(m.hp == full - 30, "Moonblade: the first hit lands three times", full .. " -> " .. m.hp)
+  m.hp = m.hp - 10; SM.tick(30)
+  check(m.hp == full - 40, "and a second hit only once", m.hp)
+end
+local before = S14.storage.meta.shards
+S14.exit_gate(); run_floor(S14)
+S14.game_over(); S14.tick(30)
+local banked = S14.storage.meta.shards - before
+check(S14.storage.run == false and banked >= 1, "a fall at Heat 4 still banks shards", banked)
+check((S14.storage.meta.marks.toan or 0) == 0, "no Marks for a run that cleared no biome")
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then

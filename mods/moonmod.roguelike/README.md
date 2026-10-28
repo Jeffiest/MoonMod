@@ -14,7 +14,7 @@ from this version on). On an older engine the mod loads, logs that the engine ha
    Gauntlet's own:
    - **Start Run**: a fresh game begins on the first floor of Divine Beast Cave.
    - **Starting Character**: who starts the run. Cross cycles through all six.
-   - **Norune Eternal**: spend Moon Shards. Cross on an unlock shows what it does; Cross again buys it.
+   - **Norune Eternal**: the unlock sky. See *Norune Eternal* below.
    - **Records**: Moon Shards, runs, wins, defeats, retreats, best depth and the Heirloom.
    - **Circle** goes back to the normal title menu. (The screen takes the keyboard and controller; the mouse cannot
      click its entries yet.)
@@ -30,7 +30,7 @@ badge and the chest its Miracle cache pays beside the key; a curse waiting for t
 turns the plate purple, as any back floor does. (An engine without HUD icons gets a text line instead.) The run's
 messages pop up one at a time in the game's message window for five seconds, short, with the Curse badge or the
 chest where they are about a curse or a cache. During a run, the
-Journal's Character page (or the Hub's **K**) shows the run page with the Diorama and Norune Eternal trees, and the
+Journal's Character page (or the Hub's **K**) shows the run page with the Diorama tree, and the
 Mod Manager's Actions tab has Run Status, the Cursed Gate, Heirloom, Gaffer and Abandon Run.
 
 ### No save file
@@ -75,20 +75,32 @@ Closing the game in the middle of one counts it as a retreat (its Moon Shards ar
 
 ## Norune Eternal
 
-| Unlock | Cost | Effect |
-| --- | --- | --- |
-| Gaffer's Wagon | 6, 10 | On floor II of every biome: **Actions > Gaffer** sells 2 Repair Powder (300 G) or 2 Bread and 2 Tasty Water (240 G). Rank 2 is a third cheaper. |
-| Macho's Forge | 4, 8, 12 | The starting weapon gets one random attachment per rank. |
-| Heirloom Vault | 10 | Each Warden gives a charge. **Actions > Bank Heirloom** keeps half of the equipped weapon's attack, endurance, speed, magic and elements. They are added to every new run's starting weapon. |
-| Dran's Shrine | 5, 10, 15 | +10% ABS per rank. |
-| Deep Well | 5, 9, 13 | +1 Diorama plot per rank. |
-| Matataki Embassy | 12 | A second ally is drafted when the run starts. |
-| Moon Blessing | 15 | Every run starts with a random blessing. |
-| Whetstone | 2, 4, 6 | +10 maximum durability on the starting weapon per rank. |
-| Gaffer's Oil | 3, 6 | Weapons wear 10% slower per rank. |
-| Repair Kit | 2, 4 | +1 Repair Powder in the starter kit per rank. |
+The permanent unlocks are a night sky on the Gauntlet's title screen: seven constellations around Norune Eternal, each
+a trunk that forks into build paths, each path ending in a **Keystone** that changes the rules. The full design is in
+[ETERNAL_TREE.md](ETERNAL_TREE.md).
 
-A win earns about 45 Moon Shards, and a run that falls in the third biome about 15. Everything costs 161. The Eternal page shows six unlocks at a time; *More unlocks* turns the page.
+- **Moving.** The D-pad moves to the nearest node in that direction; the view follows the cursor's constellation and
+  names the neighbouring ones at the screen's edges. **R2** or **Triangle** shows the whole sky. The plate at
+  the bottom names the node under the cursor: rank, what it costs, what it does, what it needs and what it opens.
+- **Buying.** **Cross** buys the next rank. A node opens once any node it links back to is bought, so paths branch
+  rather than run in a line, and some bridge into a neighbouring constellation (Craft into the Heirloom Vault).
+- **Switching.** **Square** switches a bought node off or on before a run, without touching what was bought after it.
+  **L1/R1** set a ranked node to any rank owned. Two Keystones can be on at once (Third Star adds a slot); Pact
+  Keystones don't use the slots.
+- **Three currencies.** Moon Shards from every run; **Genie Sigils** for Keystones (1 per Warden at Heat 5+, 3 per win,
+  +1 per win at Heat 10, 15 and 20); **Character Marks** for the run's starting character (1 per biome cleared), kept
+  for the Signature skies.
+- **Heat.** The Dark Genie's Pacts (more monsters, bigger floors, tougher enemies, thirst, wear, a lean start, angry
+  Wardens, every third floor cursed) add Heat while on. Each point pays +10% Moon Shards at the end of the run.
+
+Built now: 75 nodes (104 ranks), 816 Moon Shards and 45 Genie Sigils in all, up to Heat 23. The sky also shows the
+nodes still to come (*Coming soon* on the plate): the Companion path, the Signature skies, a dodge roll, Twin Wardens
+and the Warden's Court, the fourth floor, Blind Halls and Twin Keys, Barren, Loadouts and a few more. Those need
+engine work first.
+
+The run's own Moon Shards: 1 per floor, +2 for a cursed floor or Vault, +3 per Warden (6 with Moon Tithe), +10 for a
+win, times the Heat, Shard Lens and Full Party multipliers. A win earns about 45 at Heat 0, and a run that falls in the
+third biome about 15.
 
 ## How it is built
 
@@ -139,9 +151,10 @@ Checked here, without the game's data:
   all five biomes and the title mode with no warnings. It drives the pages, starts a session with all six joined and
   the chosen character active, ends it with a defeat, and checks that the title shows the result.
 - `tools/tests/roguelike/test_runs.lua` (Lua 5.4+, or the vendored 5.5) plays whole runs against a fake adapter: a
-  five-biome win, Norune Eternal purchases (two pages), unlocks on the next run, the found-weapon choice, absorbing, a broken weapon ending the run, drafting, a retreat, a
+  five-biome win, the Norune Eternal sky (buying along a path, locked nodes, switching off, ranks, Keystone slots,
+  Heat), unlocks on the next run, sky effects (Full Party, Coin Purse, Steady Heart, the Pacts, Moonblade), the found-weapon choice, absorbing, a broken weapon ending the run, drafting, a retreat, a
   defeat, Abandon, an off-route floor, quitting mid-run, a reload, an engine without title modes, and a start as
-  someone other than Toan, kept through the dungeon entrance and into the next biome. 92 checks.
+  someone other than Toan, kept through the dungeon entrance and into the next biome. 114 checks.
 - `tools/tests/roguelike/test_standalone.lua` loads RPG, Ascension and Dungeon+ against a recording stub, starts a
   session in the middle of a story game and also loads each mod mid-run. It checks that every bonus goes to x1, that
   the run's events reach no game call and store nothing, and that everything comes back after. 38 checks.

@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 92 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 114 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -145,8 +145,9 @@ in the engine before anything else is built.
   checked). Records update.
 - [x] Each Norune Eternal unlock bought shows up on the next run. In the game: Macho's Forge and Whetstone bought on
   the title page (200 → 194 shards), and the next run's ring started with 1 attachment and 55/55 durability.
-- [ ] Runs to buy everything (161 shards): ______ *(hands)*. Target: 6–10 runs. Estimate: early falls pay 4-8, a
-  third-biome fall about 15, a win about 45; a player who improves gets there in about 8-10 runs, more with curses.
+- [ ] Runs to buy everything built so far (816 shards, 45 Sigils, the Norune Eternal sky): ______ *(hands)*. Target:
+  a long grind, 40-60 runs with Heat raising the pay. Estimate: early falls pay 4-8, a third-biome fall about 15, a win
+  about 45 at Heat 0 and twice that at Heat 10; the 45 Sigils need about ten wins at Heat 5 or more.
 
 ### G6 — Standalone runs
 *Automated:* `test_standalone.lua` (38 checks).

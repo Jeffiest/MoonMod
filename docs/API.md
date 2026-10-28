@@ -1416,6 +1416,23 @@ end)
   Up and Down move the cursor without an event. On a sub-page the mod answers Circle, usually with `title.mode_set`.
   If it leaves three presses in a row unanswered, Circle returns to the title menu anyway. The screen takes the
   keyboard and controller; the mouse does not click its entries yet.
+- **A sky page.** `title.mode_set({id, sky = {...}})` swaps the entry list for a panning node sky (the Gauntlet's
+  Norune Eternal). A page with `entries` and no `sky` goes back to a list. The sky is checked whole and refused with
+  `invalid_argument` if any part is wrong:
+  - `groups`: 1-16 constellations, each `{id, name (1-32 bytes), x, y, colour = {r, g, b}?}`.
+  - `nodes`: 1-200, each `{id, group, x, y, label (1-32 bytes)}` plus optional `rank` (12 bytes), `icon` (a HUD icon:
+    `heart`, `sword`, `flask`, `drop`, `crystal`, `map`, `shield`, or a status badge `freeze`, `stamina`, `poison`,
+    `curse`, `goo`; or a registered png path, 240 bytes), `title` (64), `tag` (32), `text` (160), `needs` (96),
+    `cost` (48), `state` (`"locked"`, `"open"` or `"owned"`), `on` (false dims an owned node), `keystone` (a larger,
+    crowned ring) and `links` (up to 4 node ids, drawn as dotted lines; send no field rather than an empty table, which
+    reaches the engine as an object). Coordinates are sky units within ±8000; 640 units span the screen.
+  - `texts`: up to 24 captions `{text, x, y, colour?}`; `top`: up to 3 lines of 64 bytes at the top right.
+
+  The D-pad moves to the nearest node in that direction and R2 or Triangle toggles the whole-sky map, both without an
+  event. Cross, Square, L1 and R1 on a node send `game.title.selected` with `entry` = the node id and `action` =
+  `"buy"`, `"toggle"`, `"rank_down"` or `"rank_up"`; Circle sends `entry = "back"` as on any sub-page. The view
+  follows the cursor's constellation; the bottom plate shows the cursor node's `title`, `rank`, `tag`, `cost`, `text`
+  and `needs`. A new sky keeps the cursor on the same node id and keeps the map view.
 - `session.start({floor, party_size?, character?})` (`game.write`) works only while the caller's mode screen is
   open on the title. A queued start goes ahead on the next frame. Leaving the screen, or a start that cannot happen,
   drops it. `floor` is the stable id of a floor registered with `dungeons.register`. The screen fades out,

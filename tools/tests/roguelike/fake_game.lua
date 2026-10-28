@@ -162,6 +162,31 @@ function F.new(opts)
       assert(#(a.lines or m.lines or {}) <= 6, "at most 6 lines")
       for _, l in ipairs(a.lines or {}) do assert(#l <= 64, "line too long: " .. l) end
       for _, e in ipairs(a.entries or {}) do assert(#e.label <= 64 and e.id ~= "back", "entry " .. tostring(e.id)) end
+      if a.sky then
+        -- the engine's limits (moonmod/title_modes.cpp ReadSky)
+        local sky = a.sky
+        assert(#sky.groups >= 1 and #sky.groups <= 16, "sky groups 1-16: " .. #sky.groups)
+        assert(#sky.nodes >= 1 and #sky.nodes <= 200, "sky nodes 1-200: " .. #sky.nodes)
+        assert(#(sky.texts or {}) <= 24, "sky texts at most 24")
+        assert(#(sky.top or {}) <= 3, "sky top at most 3 lines")
+        local groups, ids = {}, {}
+        for _, g in ipairs(sky.groups) do assert(#g.name <= 32 and not groups[g.id], "sky group " .. g.id); groups[g.id] = true end
+        for _, n in ipairs(sky.nodes) do assert(not ids[n.id], "duplicate sky node " .. n.id); ids[n.id] = true end
+        local limits = {label = 32, rank = 12, icon = 240, title = 64, tag = 32, text = 160, needs = 96, cost = 48}
+        for _, n in ipairs(sky.nodes) do
+          assert(groups[n.group], "sky node " .. n.id .. " names no group")
+          assert(n.state == "locked" or n.state == "open" or n.state == "owned", "sky node state " .. tostring(n.state))
+          for k, limit in pairs(limits) do assert(n[k] == nil or #n[k] <= limit, "sky node " .. n.id .. " " .. k .. " too long") end
+          assert(#(n.links or {}) <= 4, "sky node " .. n.id .. " has more than 4 links")
+          -- an empty Lua table is encoded as a JSON object, which the engine refuses as links
+          assert(n.links == nil or #n.links > 0, "sky node " .. n.id .. " sends empty links")
+          for _, l in ipairs(n.links or {}) do assert(ids[l], "sky node " .. n.id .. " links to unknown " .. l) end
+          assert(math.abs(n.x) <= 8000 and math.abs(n.y) <= 8000, "sky node " .. n.id .. " off the sky")
+        end
+        for _, l in ipairs(sky.top or {}) do assert(#l <= 64, "sky top line too long: " .. l) end
+      elseif a.entries then
+        m.sky = nil -- a list page in place of the sky
+      end
       for k, v in pairs(a) do m[k] = deepcopy(v) end
       if a.entries and a.cursor == nil then m.cursor = 0 end
       return {id = a.id}
@@ -249,8 +274,15 @@ function F.new(opts)
     end,
     set = function(a)
       local c = a.character or S.active
-      assert(a.hp and math.type(a.hp) == "integer" and a.hp >= 0, "player.set hp")
+      local fields = (a.hp and 1 or 0) + (a.max_hp and 1 or 0) + (a.water and 1 or 0)
+      assert(fields == 1, "player.set takes exactly one field")
       if not S.max_hp[c] then return fail("invalid_argument", "character") end
+      if a.max_hp then
+        assert(math.type(a.max_hp) == "integer" and a.max_hp >= 1 and a.max_hp <= 999, "player.set max_hp")
+        S.max_hp[c] = a.max_hp; S.hp[c] = math.min(S.hp[c], a.max_hp); return {max_hp = a.max_hp}
+      end
+      if a.water then assert(math.type(a.water) == "integer" and a.water >= 0, "player.set water"); return {water = a.water} end
+      assert(math.type(a.hp) == "integer" and a.hp >= 0, "player.set hp")
       S.hp[c] = math.min(a.hp, S.max_hp[c]); return {hp = S.hp[c]}
     end,
     tuning_set = function(a)
@@ -263,7 +295,7 @@ function F.new(opts)
     end,
     tuning_clear = function() S.tuning = nil; return {} end,
     invincible = function(a) if not in_dungeon() then return fail("failed", "town") end; return {frames = a.frames} end,
-    heal = function(a) local c = S.active; S.hp[c] = math.min(S.max_hp[c], S.hp[c] + a.amount); return {hp = S.hp[c]} end,
+    heal = function(a) local c = a.character or S.active; S.hp[c] = math.min(S.max_hp[c], S.hp[c] + a.amount); return {hp = S.hp[c]} end,
   })
   game.combat = wrap("combat", {
     register_formula = function(a) assert(a.value >= 0 and a.value <= 100); S.formulas[a.id] = deepcopy(a); return {id = a.id} end,
@@ -309,12 +341,15 @@ function F.new(opts)
       for _, m in ipairs(S.monsters) do
         if m.handle == a.entity then
           if not m.revealed then return fail("failed", "unrevealed") end
-          assert(a.max_hp >= 1 and a.max_hp <= 1000000 and a.hp <= a.max_hp, "hp bounds")
-          assert(a.defense >= 0 and a.defense <= 32767, "defense bounds")
-          assert(a.reward_exp >= 0 and a.reward_exp <= 32767, "exp bounds")
-          assert(math.type(a.max_hp) == "integer" and math.type(a.reward_exp) == "integer" and math.type(a.defense) == "integer", "integers")
-          m.max_hp, m.hp, m.defense, m.exp, m.money = a.max_hp, a.hp, a.defense, a.reward_exp, a.reward_money
-          m.scaled = (m.scaled or 0) + 1
+          -- any subset of the stats, as the engine takes them
+          local max_hp = a.max_hp or m.max_hp
+          assert(max_hp >= 1 and max_hp <= 1000000 and (a.hp or 0) <= max_hp, "hp bounds")
+          for _, k in ipairs({"max_hp", "hp", "defense", "reward_exp"}) do assert(a[k] == nil or math.type(a[k]) == "integer", k .. " integer") end
+          assert(a.defense == nil or (a.defense >= 0 and a.defense <= 32767), "defense bounds")
+          assert(a.reward_exp == nil or (a.reward_exp >= 0 and a.reward_exp <= 32767), "exp bounds")
+          m.max_hp, m.hp = max_hp, a.hp or (a.max_hp and math.max(1, m.hp * a.max_hp // m.max_hp)) or m.hp
+          m.defense, m.exp, m.money = a.defense or m.defense, a.reward_exp or m.exp, a.reward_money or m.money
+          if a.max_hp then m.scaled = (m.scaled or 0) + 1 end
           return {changed = true}
         end
       end
@@ -556,6 +591,13 @@ function F.new(opts)
     S.emit("game.title.opened", {mode = "gauntlet"})
   end
   function S.page() return S.title_modes.gauntlet end
+  -- Cross (buy), Square (toggle), L1/R1 (rank_down/rank_up) on a sky page's node.
+  function S.sky_act(entry, action)
+    S.emit("game.title.selected", {mode = "gauntlet", entry = entry, action = action})
+  end
+  function S.sky_node(id)
+    for _, n in ipairs(S.page().sky and S.page().sky.nodes or {}) do if n.id == id then return n end end
+  end
   function S.select(entry)
     S.emit("game.title.selected", {mode = "gauntlet", entry = entry})
     if S.session_request then

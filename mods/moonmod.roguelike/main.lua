@@ -85,7 +85,7 @@ local MODE = "gauntlet"
 local HUD_CACHE_IMAGE = "moonmod/roguelike/hud/cache.png" -- resources/hud/cache.png, the Miracle cache chest
 
 -- Item numbers from Chronicle's item table (ps2/include/itemdata.hpp).
-local ITEM = {bread = 148, water = 146, repair = 177, antidote = 151, holy_water = 152}
+local ITEM = {bread = 148, water = 146, repair = 177, antidote = 151, holy_water = 152, auto_repair = 183}
 local GEMS = {96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107}
 local ATTACHMENTS = {91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120}
 
@@ -124,41 +124,235 @@ local TILE_IDS = {}
 for _, t in ipairs(TILES) do TILE[t.id] = t; TILE_IDS[#TILE_IDS + 1] = t.id end
 local BASE_PLOTS = 6
 
-local ETERNAL = {
-  {id = "gaffer", title = "Gaffer's Wagon", max_rank = 2, costs = {6, 10},
-   description = "Gaffer's buggy waits on floor II of every biome: buy Repair Powder and food in Actions. Rank 2: a third cheaper."},
-  {id = "macho", title = "Macho's Forge", max_rank = 3, costs = {4, 8, 12},
-   description = "The starting weapon gets one random attachment per rank."},
-  {id = "vault", title = "Heirloom Vault", max_rank = 1, costs = {10},
-   description = "Each Warden gives a charge: bank half your weapon's stats as the Heirloom, added to every new run's weapon."},
-  {id = "shrine", title = "Dran's Shrine", max_rank = 3, costs = {5, 10, 15},
-   description = "+10% weapon ABS per rank."},
-  {id = "well", title = "Deep Well", max_rank = 3, costs = {5, 9, 13},
-   description = "+1 Diorama plot per rank."},
-  {id = "embassy", title = "Matataki Embassy", max_rank = 1, costs = {12},
-   description = "A second ally is drafted when the run starts."},
-  {id = "moon", title = "Moon Blessing", max_rank = 1, costs = {15},
-   description = "Every run starts with a random blessing."},
-  {id = "whetstone", title = "Whetstone", max_rank = 3, costs = {2, 4, 6},
-   description = "+10 maximum durability on the starting weapon per rank."},
-  {id = "oil", title = "Gaffer's Oil", max_rank = 2, costs = {3, 6},
-   description = "Weapons wear 10% slower per rank."},
-  {id = "kit", title = "Repair Kit", max_rank = 2, costs = {2, 4},
-   description = "+1 Repair Powder in the starter kit per rank."},
+-- Norune Eternal: the sky of unlocks -------------------------------------------------------------------------
+-- Seven constellations around Norune Eternal, each a trunk that forks into build paths ending in a Keystone, and a
+-- Signature sky per character. A node needs one of its links owned. Costs are Moon Shards, Genie Sigils (Keystones
+-- and the deep nodes) or Character Marks (Signature skies). Every owned node can be switched off and set to any rank
+-- owned; two Keystones can be on at once (three with Third Star). Pact nodes make runs harder and add Heat, and each
+-- point of Heat pays +10% Moon Shards. ETERNAL_TREE.md is the design. Nodes marked soon are shown but not sold yet:
+-- they need engine work still to come.
+local SKY_GROUPS = {
+  {id = "norune", name = "Norune Eternal", colour = {255, 240, 190}, angle = nil},
+  {id = "arms", name = "Arms", colour = {248, 206, 92}, angle = -90},
+  {id = "allies", name = "Allies", colour = {150, 214, 255}, angle = -39},
+  {id = "fortune", name = "Fortune", colour = {196, 160, 255}, angle = 13},
+  {id = "diorama", name = "Diorama", colour = {140, 226, 160}, angle = 64},
+  {id = "pacts", name = "Dark Genie's Pacts", colour = {236, 92, 118}, angle = 116},
+  {id = "provisions", name = "Provisions", colour = {120, 220, 200}, angle = 167},
+  {id = "spirit", name = "Spirit", colour = {255, 170, 120}, angle = 219},
 }
+local SIGNATURE_CHARS = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
+for i, c in ipairs(SIGNATURE_CHARS) do
+  SKY_GROUPS[#SKY_GROUPS + 1] = {id = "sig_" .. c, name = (c:gsub("^%l", string.upper)) .. "'s Sky", colour = {230, 230, 255},
+                                 angle = -90 + (i - 1) * 60, signature = c}
+end
+local SKY_GROUP = {}
+for _, g in ipairs(SKY_GROUPS) do SKY_GROUP[g.id] = g end
+
+-- {id, group, path (0 trunk), title, ranks, costs, needs, icon, text, extra}; extra: cur = "sigil"|"mark",
+-- key (a Keystone), heat (per rank), soon, pos = {x, y} (relative to the constellation), path_name.
+local ETERNAL = {}
+local function N(id, group, path, title, ranks, costs, needs, icon, text, extra)
+  local n = {id = id, group = group, path = path, title = title, max_rank = ranks, costs = costs, needs = needs or {},
+             icon = icon, text = text}
+  for k, v in pairs(extra or {}) do n[k] = v end
+  ETERNAL[#ETERNAL + 1] = n
+end
+local S = {cur = "sigil"}
+local function K(extra) local t = {cur = "sigil", key = true}; for k, v in pairs(extra or {}) do t[k] = v end; return t end
+
+N("norune", "norune", 0, "Norune Eternal", 0, {}, {}, "crystal",
+  "Moon Shards from every run, Genie Sigils from Wardens and wins at Heat 5+, Marks for the character who ran.")
+N("third_star", "norune", 1, "Third Star", 1, {5}, {}, "crystal", "A third Keystone can be on at once.", {cur = "sigil", pos = {-120, 60}})
+N("loadouts", "norune", 1, "Loadouts", 1, {20}, {}, "map", "Save sets of switches by name.", {soon = true, pos = {120, 60}})
+
+-- Arms
+N("whetstone", "arms", 0, "Whetstone", 3, {2, 4, 6}, {}, "sword", "+10 maximum durability on the starting weapon per rank.")
+N("keen", "arms", 1, "Keen Edge", 3, {5, 10, 15}, {"whetstone"}, "sword", "+5% damage per rank.", {path_name = "Edge"})
+N("smith", "arms", 1, "Smith's Start", 3, {5, 10, 15}, {"keen"}, "sword", "The starting weapon starts one level up per rank.")
+N("charged", "arms", 1, "Charged Fury", 1, {12}, {"smith"}, "sword", "Charged attacks deal 30% more.", {soon = true})
+N("moonstrike", "arms", 1, "Moon Strike", 2, {15, 25}, {"smith", "charged"}, "crystal", "5% of hits deal double damage per rank.")
+N("moonblade", "arms", 1, "Moonblade", 1, {3}, {"moonstrike"}, "sword", "The first hit on each enemy deals triple damage.", K())
+N("oil", "arms", 2, "Gaffer's Oil", 2, {3, 6}, {"whetstone"}, "drop", "Weapons wear 10% slower per rank.", {path_name = "Endurance"})
+N("field", "arms", 2, "Field Repair", 1, {10}, {"oil"}, "flask", "Clearing a floor restores 10% of the weapon's durability.")
+N("grip", "arms", 2, "Tempered Grip", 1, {12}, {"field"}, "shield", "No weapon wear for the first 30 seconds of each floor.")
+N("charm", "arms", 2, "Auto-Repair Charm", 1, {12}, {"grip"}, "flask", "Start with an Auto Repair Powder.")
+N("unbreakable", "arms", 2, "Unbreakable Bond", 1, {3}, {"charm"}, "shield", "Each biome begins with an Auto Repair Powder: one break saved per biome.", K())
+N("macho", "arms", 3, "Macho's Forge", 3, {4, 8, 12}, {"whetstone"}, "shield", "The starting weapon gets one random attachment per rank.", {path_name = "Craft"})
+N("gem", "arms", 3, "Gem Pouch", 1, {8}, {"macho"}, "crystal", "Start with a random gem.")
+N("socket", "arms", 3, "Socket Sense", 1, {12}, {"gem"}, "map", "Found weapons arrive with one more attachment.")
+N("synth", "arms", 3, "Synth Mastery", 2, {15, 25}, {"socket"}, "crystal", "Absorbing a weapon takes 35% of its stats; rank 2, 45%.")
+N("master", "arms", 3, "Master's Gift", 1, {4}, {"synth"}, "sword", "Start with your character's second weapon.", K())
+N("vault", "arms", 4, "Heirloom Vault", 1, {10}, {"gem", "lens"}, "crystal",
+  "Each Warden gives a charge: bank half your weapon's stats for every new run's weapon.", {pos = {300, 30}})
+
+-- Allies
+N("embassy", "allies", 0, "Matataki Embassy", 1, {12}, {}, "heart", "A second ally is drafted when the run starts.")
+N("golden", "allies", 1, "Golden Atla's Call", 1, {8}, {"embassy"}, "heart", "A Golden Atla also drafts an ally in biomes 2 and 4.", {path_name = "Draft"})
+N("spoils", "allies", 1, "Shared Spoils", 2, {4, 8}, {"golden"}, "heart", "Benched allies take 25% more of each kill's ABS per rank.")
+N("rally", "allies", 1, "Rally", 1, {10}, {"spoils"}, "heart", "Switching characters heals the new one 10%.")
+N("fullparty", "allies", 1, "Full Party", 1, {3}, {"rally"}, "heart", "All six are drafted from the start; Moon Shards -10%.", K())
+N("companion", "allies", 2, "Companion", 1, {25}, {"embassy"}, "heart",
+  "A drafted ally fights beside you: can't be hurt, its weapon's base damage, your lock-on target.", {soon = true, path_name = "Companion"})
+N("stances", "allies", 2, "Stances", 1, {8}, {"companion"}, "heart", "Set the companion aggressive or passive in Actions.", {soon = true})
+N("keenpartner", "allies", 2, "Keen Partner", 1, {12}, {"stances"}, "sword", "Companion damage +25%.", {soon = true})
+N("twinstrike", "allies", 2, "Twin Strike", 1, {15}, {"keenpartner"}, "sword", "Hitting what the companion hits: +10% damage.", {soon = true})
+N("soulbond", "allies", 2, "Soul Bond", 1, {3}, {"twinstrike"}, "heart", "The companion's kills feed your weapon's ABS.", K({soon = true}))
+N("benchrest", "allies", 3, "Bench Rest", 1, {6}, {"embassy"}, "flask", "Benched allies regain 5% HP on each floor cleared.", {path_name = "Bench"})
+N("swift", "allies", 3, "Swift Swap", 1, {10}, {"benchrest"}, "drop", "No wait between switches.", {soon = true})
+N("relay", "allies", 3, "Relay", 1, {2}, {"benchrest", "swift"}, "shield", "Each switch gives the new character 3 seconds of invincibility.", K())
+
+-- Fortune
+N("shrine", "fortune", 0, "Dran's Shrine", 3, {5, 10, 15}, {}, "crystal", "+10% weapon ABS per rank.")
+N("lens", "fortune", 1, "Shard Lens", 3, {6, 12, 18}, {"shrine"}, "crystal", "+10% Moon Shards per rank.", {path_name = "Shards"})
+N("cachesense", "fortune", 1, "Cache Sense", 1, {8}, {"lens"}, HUD_CACHE_IMAGE, "Miracle caches hold a third treasure.")
+N("luckyfind", "fortune", 1, "Lucky Find", 1, {15}, {"cachesense"}, "crystal", "5% of kills drop a Moon Shard.")
+N("tithe", "fortune", 1, "Moon Tithe", 1, {3}, {"luckyfind"}, "crystal", "Wardens pay double Moon Shards.", K())
+N("moon", "fortune", 2, "Moon Blessing", 1, {15}, {"shrine"}, "crystal", "Every run starts with a random blessing.", {path_name = "Blessings"})
+N("choice", "fortune", 2, "Blessed Choice", 1, {15}, {"moon"}, "crystal", "Choose the starting blessing from three.", {soon = true})
+N("second", "fortune", 2, "Second Blessing", 1, {20}, {"moon", "choice"}, "crystal", "A second blessing at the start.")
+N("chosen", "fortune", 2, "Chosen of the Moon", 1, {4}, {"second"}, "crystal", "Every blessing counts twice.", K({soon = true}))
+N("purse", "fortune", 3, "Coin Purse", 1, {5}, {"shrine"}, "map", "Start with 300 Gilda.", {path_name = "Gilda"})
+N("carts", "fortune", 3, "Carts Count", 1, {10}, {"purse"}, "map", "Carts pay 40% each instead of 20%.")
+N("floorspay", "fortune", 3, "Gilda Floors", 1, {12}, {"carts"}, "map", "Floors pay 60 Gilda per depth instead of 40.")
+N("hoard", "fortune", 3, "Treasure Hoard", 1, {3}, {"floorspay"}, HUD_CACHE_IMAGE, "Chests are worth 50% more.", K())
+
+-- Diorama
+N("well", "diorama", 0, "Deep Well", 3, {5, 9, 13}, {}, "map", "+1 Diorama plot per rank.")
+N("houses", "diorama", 1, "Sturdy Houses", 1, {8}, {"well"}, "shield", "Houses cut damage taken by 9% each instead of 6%.", {path_name = "Hearth"})
+N("trees", "diorama", 1, "Old Trees", 1, {10}, {"houses"}, "heart", "Trees heal twice as often.")
+N("living", "diorama", 1, "Living Norune", 1, {3}, {"trees"}, "map", "Start each run with two random tiles placed.", K())
+N("mills", "diorama", 2, "Mill Rights", 1, {10}, {"well"}, "crystal", "Windmill pairs give 35% ABS instead of 25%.", {path_name = "Industry"})
+N("smiths", "diorama", 2, "Smithy Guild", 1, {10}, {"mills"}, "shield", "Smithies cut wear by 18% each instead of 12%.")
+N("industrious", "diorama", 2, "Industrious", 1, {2}, {"smiths"}, "map", "Every sixth tile earned comes with a free extra.", K())
+N("lampoil", "diorama", 3, "Lamp Oil", 1, {8}, {"well"}, "crystal", "One Lamp maps the floor and shows monsters.", {path_name = "Light"})
+N("plots", "diorama", 3, "Moonlit Plots", 1, {12}, {"lampoil"}, "map", "+2 Diorama plots.")
+N("beacon", "diorama", 3, "Beacon", 1, {2}, {"plots"}, "crystal", "Lamps add 8% damage each instead of 4%.", K())
+
+-- Spirit
+N("heart", "spirit", 0, "Steady Heart", 3, {4, 8, 12}, {}, "heart", "+10 maximum HP per rank.")
+N("thick", "spirit", 1, "Thick Skin", 2, {8, 14}, {"heart"}, "shield", "-5% damage taken per rank.", {path_name = "Guard"})
+N("secondwind", "spirit", 1, "Second Wind", 1, {20}, {"thick"}, "heart", "Once a floor, a fatal hit leaves 1 HP.", {soon = true})
+N("laststand", "spirit", 1, "Last Stand", 1, {3}, {"thick", "secondwind"}, "sword", "Below 25% HP you deal double damage.", K())
+N("lightstep", "spirit", 2, "Light Step", 1, {8}, {"heart"}, "drop", "Run 8% faster.", {path_name = "Speed"})
+N("gauge", "spirit", 2, "Quick Gauge", 1, {12}, {"lightstep"}, "sword", "The attack gauge refills 20% faster.")
+N("moonwalker", "spirit", 2, "Moonwalker", 1, {4}, {"gauge"}, "drop", "A dodge roll on Circle, with a moment of invincibility.", K({soon = true}))
+N("antidote", "spirit", 3, "Antidote Kit", 1, {4}, {"heart"}, "flask", "Start with two Antidotes.", {path_name = "Ailments"})
+N("hardy", "spirit", 3, "Hardy", 1, {10}, {"antidote"}, "shield", "Ailments last half as long.", {soon = true})
+N("clearmind", "spirit", 3, "Clear Mind", 1, {2}, {"hardy"}, "crystal", "Immune to Freeze and Stamina.", K({soon = true}))
+
+-- Provisions
+N("kit", "provisions", 0, "Repair Kit", 2, {2, 4}, {}, "flask", "+1 Repair Powder in the starter kit per rank.")
+N("waterskin", "provisions", 1, "Full Waterskin", 2, {3, 6}, {"kit"}, "drop", "Water drains 10% slower per rank.", {path_name = "Water"})
+N("spring", "provisions", 1, "Spring Sense", 1, {10}, {"waterskin"}, "drop", "Start each run with a River tile in stock.")
+N("rain", "provisions", 1, "Moon Rain", 1, {12}, {"spring"}, "drop", "Clearing a floor refills a quarter of your water.")
+N("endless", "provisions", 1, "Endless Spring", 1, {2}, {"rain"}, "drop", "Water drains half as fast.", K())
+N("baker", "provisions", 2, "Baker's Bundle", 1, {3}, {"kit"}, "flask", "+2 Bread in the starter kit.", {path_name = "Food"})
+N("hearty", "provisions", 2, "Hearty Bread", 1, {8}, {"baker"}, "heart", "Clearing a floor gives a Bread (up to five a run).")
+N("helping", "provisions", 2, "Second Helping", 1, {10}, {"hearty"}, "heart", "+2 Bread on each biome's first floor.")
+N("feast", "provisions", 2, "Feast", 1, {2}, {"helping"}, "heart", "Each floor starts with a 20% heal.", K())
+N("gaffer", "provisions", 3, "Gaffer's Wagon", 2, {6, 10}, {"kit"}, "map",
+  "Gaffer waits on floor II of every biome (Actions). Rank 2: a third cheaper.", {path_name = "Merchant"})
+N("haggler", "provisions", 3, "Haggler", 1, {8}, {"gaffer"}, "map", "Gaffer is 20% cheaper.")
+N("stock", "provisions", 3, "Gaffer's Stock", 1, {15}, {"haggler"}, "crystal", "Gaffer also sells attachments (Actions).")
+N("partner", "provisions", 3, "Gaffer's Partner", 1, {3}, {"stock"}, "map", "Gaffer's Wagon stops on floors II and III.", K())
+
+-- The Dark Genie's Pacts (Heat)
+N("crowded", "pacts", 0, "Crowded Halls", 2, {3, 6}, {}, "stamina", "+25% monsters on every floor per rank.", {heat = 1})
+N("hardened", "pacts", 1, "Hardened Hide", 3, {4, 8, 12}, {"crowded"}, "poison", "Enemies +25% HP per rank.", {heat = 1, path_name = "Beasts"})
+N("claws", "pacts", 1, "Sharp Claws", 2, {5, 10}, {"hardened"}, "curse", "Enemies hit 20% harder per rank.", {heat = 1})
+N("deeper", "pacts", 1, "Deeper Dark", 1, {15}, {"claws"}, "goo", "Enemies are as strong as five floors deeper.", {heat = 3})
+N("champions", "pacts", 1, "Genie's Champions", 1, {2}, {"deeper"}, "freeze", "Every floor's key holder is a lesser Warden.", K({heat = 3, pact = true}))
+N("sprawl", "pacts", 2, "Sprawling Floors", 2, {5, 10}, {"crowded"}, "map", "Floors have 30% more rooms per rank.", {heat = 1, path_name = "Labyrinth"})
+N("blind", "pacts", 2, "Blind Halls", 1, {8}, {"sprawl"}, "map", "No floor map.", {heat = 1, soon = true})
+N("twinkeys", "pacts", 2, "Twin Keys", 1, {12}, {"sprawl", "blind"}, "map", "Every exit needs two keys.", {heat = 2, soon = true})
+N("maze", "pacts", 2, "Endless Maze", 1, {2}, {"twinkeys"}, "map", "Every biome has a fourth floor.", K({heat = 3, pact = true, soon = true}))
+N("parched", "pacts", 3, "Parched Road", 1, {6}, {"crowded"}, "drop", "Water drains twice as fast.", {heat = 1, path_name = "Scarcity"})
+N("brittle", "pacts", 3, "Brittle Steel", 1, {6}, {"parched"}, "shield", "Weapons wear 50% faster.", {heat = 2})
+N("lean", "pacts", 3, "Lean Start", 1, {4}, {"brittle"}, "flask", "No starter kit.", {heat = 1})
+N("barren", "pacts", 3, "Barren", 1, {2}, {"lean"}, "curse", "No chests on floors I to III.", K({heat = 3, pact = true, soon = true}))
+N("twinwardens", "pacts", 4, "Twin Wardens", 2, {8, 16}, {"crowded"}, "goo", "Warden floors hold two Wardens; rank 2, three.", {heat = 2, soon = true, path_name = "Wardens"})
+N("rage", "pacts", 4, "Warden's Rage", 1, {12}, {"crowded", "twinwardens"}, "curse", "On Warden floors enemies hit 50% harder.", {heat = 2})
+N("mark", "pacts", 4, "The Genie's Mark", 1, {10}, {"rage"}, "curse", "Every third floor is cursed, chosen or not.", {heat = 2})
+N("court", "pacts", 4, "Warden's Court", 1, {3}, {"mark"}, "goo", "The last Warden is all five Wardens at once.", K({heat = 4, pact = true, soon = true}))
+
+-- Signature skies (Character Marks): one per character, a fork after the second node.
+local SIGNATURES = {
+  toan = {{"Dagger Dance", "+15% speed with daggers."}, {"Lightning Fang", "Charged attacks shock."},
+          {"Swordsman", "+1 attachment slot on swords."}, {"Wanderer", "+8% run speed."}, {"Atlamillia's Chosen", "Start with a blessing of Atla Sight."}},
+  xiao = {{"Quick Draw", "Slingshots fire faster."}, {"Pebble Storm", "Slingshots fire two shots."},
+          {"Sniper", "+20% damage from range."}, {"Tumbler", "A hop that dodges."}, {"Cat's Nine Lives", "Survive one fall each biome."}},
+  goro = {{"Iron Grip", "Hammers can't be knocked away."}, {"Ground Pound", "Charged attacks shake the room."},
+          {"Bulwark", "-15% damage taken."}, {"Berserker", "+15% damage."}, {"Mountain's Might", "Charged attacks stagger Wardens."}},
+  ruby = {{"Flame Rings", "Rings add fire damage."}, {"Orb Split", "Magic orbs split in two."},
+          {"Pyromancer", "+20% magic damage."}, {"Moonsinger", "Orbs heal you a little."}, {"Genie's Daughter", "Magic pierces enemies."}},
+  ungaga = {{"Spear Reach", "+20% spear reach."}, {"Totem Guard", "A totem guards you."},
+            {"Warrior", "+15% damage."}, {"Shaman", "Totems heal."}, {"Spirit of the Woods", "Allies take less damage."}},
+  osmond = {{"Steady Aim", "Guns fire steadier."}, {"Rocket Boost", "A jetpack dash."},
+            {"Gunner", "+20% gun damage."}, {"Scholar", "+20% ABS."}, {"Moon People's Gift", "Start with a Moon blessing."}},
+}
+for _, c in ipairs(SIGNATURE_CHARS) do
+  local sig = SIGNATURES[c]
+  local g = "sig_" .. c
+  N(c .. "_1", g, 0, sig[1][1], 1, {1}, {}, "sword", sig[1][2], {cur = "mark", char = c, soon = true, pos = {0, 110}})
+  N(c .. "_2", g, 0, sig[2][1], 1, {2}, {c .. "_1"}, "sword", sig[2][2], {cur = "mark", char = c, soon = true, pos = {0, 50}})
+  N(c .. "_3", g, 0, sig[3][1], 1, {3}, {c .. "_2"}, "sword", sig[3][2], {cur = "mark", char = c, soon = true, pos = {-120, -10}})
+  N(c .. "_4", g, 0, sig[4][1], 1, {3}, {c .. "_2"}, "drop", sig[4][2], {cur = "mark", char = c, soon = true, pos = {120, -10}})
+  N(c .. "_5", g, 0, sig[5][1], 1, {6}, {c .. "_3", c .. "_4"}, "crystal", sig[5][2],
+    {cur = "mark", char = c, soon = true, key = true, signature_key = true, pos = {0, -80}})
+end
+
 local ETERNAL_NODE = {}
 for _, n in ipairs(ETERNAL) do ETERNAL_NODE[n.id] = n end
 
--- Skill trees: the Diorama (placed tiles, per run) and Norune Eternal (bought with Moon Shards) -------
+-- Layout: constellations on a ring around Norune Eternal, Signature skies on an outer ring; each path fans out from
+-- its trunk at the bottom of the view to its Keystone at the top.
+do
+  local paths = {}
+  for _, n in ipairs(ETERNAL) do
+    paths[n.group] = paths[n.group] or {}
+    if n.path > 0 and not n.pos then
+      paths[n.group][n.path] = paths[n.group][n.path] or {}
+      table.insert(paths[n.group][n.path], n)
+    end
+  end
+  local SPREAD = {[1] = {0}, [2] = {-170, 170}, [3] = {-230, 0, 230}, [4] = {-255, -85, 85, 255}}
+  for _, g in ipairs(SKY_GROUPS) do
+    local radius = g.signature and 1500 or 820
+    local a = g.angle and math.rad(g.angle) or nil
+    g.x = a and math.floor(math.cos(a) * radius * 1.25) or 0
+    g.y = a and math.floor(math.sin(a) * radius) or 0
+    g.texts = {}
+    local gp = paths[g.id] or {}
+    local count = 0
+    for p in pairs(gp) do count = math.max(count, p) end
+    for p = 1, count do
+      local list = gp[p] or {}
+      local x_end = (SPREAD[count] or SPREAD[3])[p] or 0
+      for k, n in ipairs(list) do
+        local f = #list > 1 and (k - 1) / (#list - 1) or 1
+        local base = count >= 4 and 0.75 or 0.42 -- four paths start wider apart, so the first row of labels fits
+        n.pos = {math.floor(x_end * (base + (1 - base) * f)), 62 - (k - 1) * 40}
+      end
+      local last = list[#list]
+      if last and list[1].path_name then
+        g.texts[#g.texts + 1] = {text = list[1].path_name:upper(), x = last.pos[1], y = last.pos[2] - 36}
+      end
+    end
+  end
+  for _, n in ipairs(ETERNAL) do
+    local g = SKY_GROUP[n.group]
+    n.pos = n.pos or {0, n.group == "norune" and 0 or 108}
+    n.x, n.y = g.x + n.pos[1], g.y + n.pos[2]
+  end
+end
+
+-- Skill tree: the Diorama (placed tiles, per run) ------------------------------------------------------------
 do
   local nodes = {}
   for _, t in ipairs(TILES) do nodes[#nodes + 1] = {id = t.id, title = t.title, description = t.description, max_rank = 9} end
   local ok, err = call(game.skills.register, {id = "diorama", title = "DIORAMA", description = "Georama tiles placed for this run.", skills = nodes})
   if not ok then moonmod.log("warn", "diorama tree: " .. errmsg(err)) end
-  nodes = {}
-  for _, n in ipairs(ETERNAL) do nodes[#nodes + 1] = {id = n.id, title = n.title, description = n.description, max_rank = n.max_rank} end
-  ok, err = call(game.skills.register, {id = "eternal", title = "NORUNE ETERNAL", description = "Unlocks bought with Moon Shards.", skills = nodes})
-  if not ok then moonmod.log("warn", "eternal tree: " .. errmsg(err)) end
 end
 local function node_id(tree, node) return ID .. ":" .. tree .. "." .. node end
 
@@ -203,14 +397,38 @@ local function load_meta()
   m.shards = math.floor(tonumber(m.shards) or 0)
   m.runs, m.wins, m.deaths, m.retreats = tonumber(m.runs) or 0, tonumber(m.wins) or 0, tonumber(m.deaths) or 0, tonumber(m.retreats) or 0
   m.best_depth = tonumber(m.best_depth) or 0
-  m.eternal = type(m.eternal) == "table" and m.eternal or {}
+  m.eternal = type(m.eternal) == "table" and m.eternal or {} -- ranks owned
+  m.sigils = math.floor(tonumber(m.sigils) or 0)
+  m.marks = type(m.marks) == "table" and m.marks or {}           -- character -> Character Marks
+  m.off = type(m.off) == "table" and m.off or {}                 -- node -> true while switched off
+  m.set = type(m.set) == "table" and m.set or {}                 -- node -> the rank in use, when below the rank owned
+  m.best_heat = math.floor(tonumber(m.best_heat) or 0)
   m.start_char = type(m.start_char) == "string" and m.start_char or "toan"
   if type(m.heirloom) ~= "table" then m.heirloom = nil end
   return m
 end
 local meta = load_meta()
 local function save_meta() moonmod.storage.set("meta", meta) end
-local function eternal(id) return math.floor(tonumber(meta.eternal[id]) or 0) end
+local function owned(id) return math.floor(tonumber(meta.eternal[id]) or 0) end
+-- The rank of an unlock in use this run: what is owned, unless switched off or set lower.
+local function eternal(id)
+  local r = owned(id)
+  if r == 0 or meta.off[id] then return 0 end
+  local set = tonumber(meta.set[id])
+  return set and math.max(1, math.min(r, math.floor(set))) or r
+end
+local function heat()
+  local h = 0
+  for _, n in ipairs(ETERNAL) do if n.heat then h = h + n.heat * eternal(n.id) end end
+  return h
+end
+local function keystone_slots() return 2 + eternal("third_star") end
+local function counts_as_keystone(n) return n.key and not n.pact and not n.signature_key end
+local function keystones_on(except)
+  local k = 0
+  for _, n in ipairs(ETERNAL) do if counts_as_keystone(n) and n.id ~= except and eternal(n.id) > 0 then k = k + 1 end end
+  return k
+end
 
 -- A run lives only inside its sandbox session. One still in storage at start-up was cut short when the
 -- game closed; it is closed below as a retreat once the helpers exist.
@@ -235,7 +453,7 @@ local function total_floors() return run and (#run.biomes * WARDEN_SLOT) or 0 en
 local function placed(id) return run and math.floor(tonumber(run.diorama[id]) or 0) or 0 end
 local function blessed(id) return run and contains(run.blessings, id) end
 local function cursed(id) return floor and floor.cursed and contains(floor.curses, id) end
-local function plots() return BASE_PLOTS + eternal("well") end
+local function plots() return BASE_PLOTS + eternal("well") + (eternal("plots") > 0 and 2 or 0) end
 local function placed_total() local n = 0; for _, id in ipairs(TILE_IDS) do n = n + placed(id) end; return n end
 local function stock_total() local n = 0; for _, id in ipairs(TILE_IDS) do n = n + math.floor(tonumber(run and run.stock[id]) or 0) end; return n end
 
@@ -249,7 +467,7 @@ end
 
 local function abs_multiplier()
   local pairs_built = math.min(placed("windmill"), placed("storehouse"))
-  local m = setting("abs_rate", 6) * (1 + 0.25 * pairs_built) * (1 + 0.1 * eternal("shrine"))
+  local m = setting("abs_rate", 6) * (1 + (eternal("mills") > 0 and 0.35 or 0.25) * pairs_built) * (1 + 0.1 * eternal("shrine"))
   if blessed("scholar") then m = m * 1.25 end
   if floor and floor.cursed then m = m * 1.5 end
   if floor and floor.back then m = m * 1.5 end
@@ -258,7 +476,10 @@ end
 
 -- Weapon wear: Smithy tiles, Tempered Steel and the Brittle curse.
 local function wear_scale()
-  return clamp((0.88 ^ placed("smithy")) * (0.9 ^ eternal("oil")) * (blessed("tempered") and 0.75 or 1) * (cursed("brittle") and 2 or 1), 0.25, 4)
+  -- Tempered Grip: no wear for the first 30 seconds of a floor
+  if eternal("grip") > 0 and floor and frame - (floor.entered or 0) < 1800 then return 0 end
+  return clamp(((eternal("smiths") > 0 and 0.82 or 0.88) ^ placed("smithy")) * (0.9 ^ eternal("oil")) * (blessed("tempered") and 0.75 or 1) *
+      (cursed("brittle") and 2 or 1) * (eternal("brittle") > 0 and 1.5 or 1), 0.25, 4)
 end
 
 local function apply_effects()
@@ -273,20 +494,26 @@ local function apply_effects()
     end
     return
   end
-  local out = (1 + 0.04 * placed("lamp")) * (blessed("moonlit") and 1.15 or 1)
-  local incoming = (0.94 ^ placed("house")) * (blessed("ward") and 0.85 or 1) * (cursed("glass") and 1.5 or 1)
+  local out = (1 + (eternal("beacon") > 0 and 0.08 or 0.04) * placed("lamp")) * (blessed("moonlit") and 1.15 or 1) *
+      (1 + 0.05 * eternal("keen"))
+  local p = try(game.player.get)
+  if eternal("laststand") > 0 and p and (p.max_hp or 0) > 0 and (p.hp or 0) * 4 < p.max_hp then out = out * 2 end
+  local incoming = ((eternal("houses") > 0 and 0.91 or 0.94) ^ placed("house")) * (blessed("ward") and 0.85 or 1) * (cursed("glass") and 1.5 or 1) *
+      (0.95 ^ eternal("thick")) * (1.2 ^ eternal("claws")) * ((eternal("rage") > 0 and floor and floor.slot == WARDEN_SLOT) and 1.5 or 1)
   local shuffle = shuffle_scale()
   if shuffle < 1 then incoming = incoming * math.max(0.5, shuffle) end
   try(game.combat.register_formula, {id = "gauntlet_out", operation = "multiply", value = clamp(out, 0, 100), priority = 120})
-  try(game.combat.register_formula, {id = "gauntlet_lucky", operation = "chance_multiply", value = 2, chance = blessed("lucky") and 10 or 0, priority = 121})
+  try(game.combat.register_formula, {id = "gauntlet_lucky", operation = "chance_multiply", value = 2, chance = (blessed("lucky") and 10 or 0) + 5 * eternal("moonstrike"), priority = 121})
   try(game.combat.register_player_formula, {id = "gauntlet_in", operation = "multiply", value = clamp(incoming, 0, 100), priority = 120})
   local tuning = {
-    thirst_drain = clamp((0.88 ^ placed("river")) * (blessed("flask") and 0.75 or 1) * (cursed("parched") and 3 or 1), 0.25, 4),
+    thirst_drain = clamp((0.88 ^ placed("river")) * (blessed("flask") and 0.75 or 1) * (cursed("parched") and 3 or 1) *
+        (0.9 ^ eternal("waterskin")) * (eternal("endless") > 0 and 0.5 or 1) * (eternal("parched") > 0 and 2 or 1), 0.25, 4),
     durability_wear = wear_scale(),
-    run_speed = blessed("stride") and 1.15 or 1,
+    run_speed = (blessed("stride") and 1.15 or 1) * (eternal("lightstep") > 0 and 1.08 or 1),
+    gauge_refill = eternal("gauge") > 0 and 1.2 or 1,
     invincible_bonus_frames = blessed("breath") and 12 or 0,
     map_reveal = placed("lamp") >= 1,
-    monster_reveal = placed("lamp") >= 2,
+    monster_reveal = placed("lamp") >= 2 or (eternal("lampoil") > 0 and placed("lamp") >= 1),
   }
   local _, err = call(game.player.tuning_set, tuning)
   if err and err.code ~= "unsupported" then moonmod.log("warn", "tuning: " .. errmsg(err)) end
@@ -320,7 +547,7 @@ local function update_sheet()
   local hint = #stock > 0 and ("Cross places a tile. Stock: " .. table.concat(stock, ", ")) or "Atla, cleared floors and caches give tiles."
   try(game.ui.sheet_set, {title = "MOON GAUNTLET", lines = lines, hint = hint:sub(1, 80),
       progress = clamp(run.depth / math.max(1, total_floors()), 0, 1),
-      progress_label = ("Depth " .. run.depth .. " / " .. total_floors()), trees = {"diorama", "eternal"}})
+      progress_label = ("Depth " .. run.depth .. " / " .. total_floors()), trees = {"diorama"}})
 end
 
 -- The HUD in the game's own art: the floor plate reads "2-3" (a Warden floor keeps the native "Boss") and the floor
@@ -387,9 +614,6 @@ end
 local function push_diorama_ranks()
   for _, id in ipairs(TILE_IDS) do try(game.skills.set_rank, {id = node_id("diorama", id), rank = placed(id)}) end
 end
-local function push_eternal_ranks()
-  for _, n in ipairs(ETERNAL) do try(game.skills.set_rank, {id = node_id("eternal", n.id), rank = math.min(n.max_rank, eternal(n.id))}) end
-end
 
 local function give_tiles(n, why)
   if not run then return end
@@ -398,6 +622,13 @@ local function give_tiles(n, why)
     local id = pick(TILE_IDS)
     run.stock[id] = (tonumber(run.stock[id]) or 0) + 1
     got[#got + 1] = TILE[id].title
+    run.tiles_earned = (run.tiles_earned or 0) + 1
+    if eternal("industrious") > 0 and run.tiles_earned % 6 == 0 then
+      local extra = pick(TILE_IDS)
+      run.stock[extra] = (tonumber(run.stock[extra]) or 0) + 1
+      got[#got + 1] = TILE[extra].title
+      n = n + 1
+    end
   end
   toast((why and (why .. ": ") or "") .. "+" .. n .. " Diorama tile" .. (n > 1 and "s" or "") .. " (" .. table.concat(got, ", ") .. ").")
 end
@@ -431,6 +662,10 @@ local function miracle_cache()
   local a = try(game.items.give, {id = "chronicle:item:" .. gem, count = 1})
   local b = try(game.items.give, {id = "chronicle:item:" .. attach, count = 1})
   local n = ((a and (a.added or 0) > 0) and 1 or 0) + ((b and (b.added or 0) > 0) and 1 or 0)
+  if eternal("cachesense") > 0 then
+    local c = try(game.items.give, {id = "chronicle:item:" .. pick(ATTACHMENTS), count = 1})
+    n = n + ((c and (c.added or 0) > 0) and 1 or 0)
+  end
   toast("Miracle cache! " .. n .. " treasure" .. (n == 1 and "" or "s") .. " added to the bag." .. (n < 2 and " Is it full?" or ""), HUD_CACHE_IMAGE)
 end
 
@@ -495,7 +730,7 @@ end
 
 -- Shared ABS: benched drafted allies' equipped weapons get a share of each kill's ABS.
 local function share_abs(amount, active)
-  local share = math.floor(amount * setting("ally_abs_share", 50) / 100)
+  local share = math.floor(amount * setting("ally_abs_share", 50) / 100 * (1 + 0.25 * eternal("spoils")))
   if share <= 0 or not run or not run.weapons then return end
   for _, c in ipairs(run.drafted) do
     local w = c ~= active and run.weapons[c]
@@ -555,9 +790,6 @@ end
 -- Title screen pages ------------------------------------------------------------------------------------
 -- The Gauntlet's title screen is a page the engine draws: heading, up to six lines, up to seven entries.
 local page = "root"          -- "root", "eternal" or "records"
-local eternal_pending = nil  -- the unlock waiting for a second Cross
-local ETERNAL_PER_PAGE = 6   -- a title page holds 7 entries: six unlocks and "More unlocks"
-local eternal_from = 1        -- the first unlock on the Eternal page shown
 local last_result = nil      -- a line about the run that just ended
 local title_ready = false
 local start_run              -- defined below
@@ -581,35 +813,134 @@ local function root_page()
           }}
 end
 
-local function eternal_page()
-  local entries = {}
-  for i = eternal_from, math.min(#ETERNAL, eternal_from + ETERNAL_PER_PAGE - 1) do
-    local n = ETERNAL[i]
-    local rank = eternal(n.id)
-    local label = rank >= n.max_rank and string.format("%s  %d/%d  complete", n.title, rank, n.max_rank) or
-        string.format("%s  %d/%d  -  %d shards", n.title, rank, n.max_rank, n.costs[rank + 1])
-    entries[#entries + 1] = {id = n.id, label = label, enabled = rank < n.max_rank}
-  end
-  if #ETERNAL > ETERNAL_PER_PAGE then
-    local pages = math.ceil(#ETERNAL / ETERNAL_PER_PAGE)
-    entries[#entries + 1] = {id = "more", label = string.format("More unlocks  (page %d/%d)", (eternal_from - 1) // ETERNAL_PER_PAGE + 1, pages)}
-  end
-  local lines = {string.format("Moon Shards %d", meta.shards)}
-  if eternal_pending then
-    local n = ETERNAL_NODE[eternal_pending]
-    lines[#lines + 1] = n.title .. ":"
-    local text = n.description
-    while #text > 0 and #lines < 5 do
-      local cut_at = #text <= 62 and #text or (text:sub(1, 62):match(".*() ") or 62)
-      lines[#lines + 1] = text:sub(1, cut_at):gsub("%s+$", "")
-      text = text:sub(cut_at + 1):gsub("^%s+", "")
+local eternal_msg = nil -- {id, text}: the answer to the last Cross or Square, shown on that node
+local function eternal_open(n)
+  if n.group == "norune" and n.path == 0 then return true end
+  if #n.needs == 0 then return true end
+  for _, id in ipairs(n.needs) do if owned(id) > 0 then return true end end
+  return false
+end
+local function purse(n)
+  if n.cur == "sigil" then return meta.sigils, "Genie Sigil" end
+  if n.cur == "mark" then return math.floor(tonumber(meta.marks[n.char]) or 0), title(n.char) .. " Mark" end
+  return meta.shards, "Moon Shard"
+end
+local function spend(n, amount)
+  if n.cur == "sigil" then meta.sigils = meta.sigils - amount
+  elseif n.cur == "mark" then meta.marks[n.char] = math.floor(tonumber(meta.marks[n.char]) or 0) - amount
+  else meta.shards = meta.shards - amount end
+end
+local function plural(count, word) return count .. " " .. word .. (count == 1 and "" or "s") end
+local function node_names(ids)
+  local t = {}
+  for _, id in ipairs(ids) do t[#t + 1] = ETERNAL_NODE[id] and ETERNAL_NODE[id].title or id end
+  return table.concat(t, " or ")
+end
+-- The lines drawn between nodes: each node to what it needs (a trunk to the heart of the sky).
+local function sky_links(n)
+  local links = {}
+  for _, id in ipairs(n.needs) do if ETERNAL_NODE[id] and #links < 4 then links[#links + 1] = id end end
+  if #links == 0 and n.path == 0 and n.group ~= "norune" and not SKY_GROUP[n.group].signature then links[1] = "norune" end
+  return #links > 0 and links or nil -- an empty table would reach the engine as an object, not a list
+end
+local function eternal_sky()
+  local groups, nodes, texts = {}, {}, {}
+  for _, g in ipairs(SKY_GROUPS) do
+    groups[#groups + 1] = {id = g.id, name = g.name, colour = g.colour, x = g.x, y = g.y}
+    for _, t in ipairs(g.texts or {}) do
+      if #texts < 24 then texts[#texts + 1] = {text = t.text, x = g.x + t.x, y = g.y + t.y, colour = g.colour} end
     end
-    lines[#lines + 1] = "Cross again to buy it."
-  else
-    lines[#lines + 1] = "Cross on an unlock shows what it does; Cross again buys it."
   end
-  return {title = "NORUNE ETERNAL", subtitle = "Unlocks kept for every run", root = false, lines = lines, entries = entries,
-          hint = "{cross} Choose    {circle} Back"}
+  local opens = {}
+  for _, n in ipairs(ETERNAL) do for _, need in ipairs(n.needs) do opens[need] = opens[need] or {}; table.insert(opens[need], n.title) end end
+  for _, n in ipairs(ETERNAL) do
+    local r = owned(n.id)
+    local state = (r > 0 or n.group == "norune" and n.path == 0) and "owned" or (eternal_open(n) and not n.soon and "open" or "locked")
+    local rank = n.max_rank > 1 and (r .. "/" .. n.max_rank) or ""
+    if n.max_rank > 1 and r > 0 and eternal(n.id) > 0 and eternal(n.id) < r then rank = eternal(n.id) .. "/" .. r .. " of " .. n.max_rank end
+    local cost
+    if n.soon then cost = "Coming soon"
+    elseif n.max_rank == 0 then cost = ""
+    elseif r >= n.max_rank then cost = "Complete"
+    else
+      local price = n.costs[r + 1]
+      local _, unit = purse(n)
+      cost = "Next: " .. plural(price, unit)
+    end
+    if eternal_msg and eternal_msg.id == n.id then cost = eternal_msg.text end
+    local text = n.text
+    if n.heat then text = text .. " Heat +" .. n.heat .. (n.max_rank > 1 and " per rank." or ".") end
+    if n.key then text = text .. (n.pact and " (A Pact Keystone.)" or (n.signature_key and "" or " (A Keystone.)")) end
+    local needs = {}
+    if #n.needs > 0 then needs[#needs + 1] = "Needs: " .. node_names(n.needs) end
+    if opens[n.id] then needs[#needs + 1] = "Opens: " .. table.concat(opens[n.id], ", ") end
+    local g = SKY_GROUP[n.group]
+    nodes[#nodes + 1] = {id = n.id, group = n.group, x = n.x, y = n.y, label = n.title, rank = rank, icon = n.icon,
+      title = n.title, tag = (n.path_name or ((n.path > 0 or g.name == n.title) and "" or g.name)), text = text:sub(1, 160),
+      needs = table.concat(needs, "    "):sub(1, 96), cost = cost:sub(1, 48), state = state,
+      on = r > 0 and not meta.off[n.id] or n.group == "norune" and n.path == 0, keystone = n.key == true, links = sky_links(n)}
+  end
+  -- the path names: each path's first node carries it
+  for _, n in ipairs(nodes) do
+    local spec = ETERNAL_NODE[n.id]
+    if spec.path > 0 and n.tag == "" then
+      for _, m in ipairs(ETERNAL) do if m.group == spec.group and m.path == spec.path and m.path_name then n.tag = m.path_name end end
+    end
+  end
+  local h = heat()
+  return {groups = groups, nodes = nodes, texts = texts,
+          top = {"Moon Shards " .. meta.shards,
+                 "Genie Sigils " .. meta.sigils .. "    " .. title(meta.start_char) .. " Marks " .. math.floor(tonumber(meta.marks[meta.start_char]) or 0),
+                 string.format("Heat %d  x%.1f    Keystones %d/%d", h, 1 + 0.1 * h, keystones_on(), keystone_slots())}}
+end
+local function eternal_page()
+  return {title = "NORUNE ETERNAL", root = false, sky = eternal_sky()}
+end
+local function eternal_say(n, text) eternal_msg = {id = n.id, text = text} end
+local function eternal_action(id, action)
+  local n = ETERNAL_NODE[id]
+  eternal_msg = nil
+  if not n then return end
+  local r = owned(id)
+  if action == "buy" then
+    if n.max_rank == 0 then eternal_say(n, "The heart of the sky"); return end
+    if n.soon then eternal_say(n, "Coming soon: not in this build yet"); return end
+    if r >= n.max_rank then eternal_say(n, "Complete"); return end
+    if not eternal_open(n) then eternal_say(n, "Needs " .. node_names(n.needs) .. " first"); return end
+    local price = n.costs[r + 1]
+    local have, unit = purse(n)
+    if have < price then eternal_say(n, "Needs " .. plural(price, unit) .. ", you have " .. have); return end
+    spend(n, price)
+    meta.eternal[id] = r + 1
+    meta.set[id] = nil
+    if r == 0 and counts_as_keystone(n) and keystones_on(id) >= keystone_slots() then
+      meta.off[id] = true
+      eternal_say(n, "Bought: Keystone slots full, switched off")
+    else
+      eternal_say(n, (r + 1 < n.max_rank) and ("Rank " .. (r + 1) .. " bought") or "Bought")
+    end
+    try(game.audio.se_play, {se = 20})
+  elseif action == "toggle" then
+    if r == 0 then eternal_say(n, n.max_rank == 0 and "The heart of the sky" or "Buy it first"); return end
+    if meta.off[id] then
+      if counts_as_keystone(n) and keystones_on(id) >= keystone_slots() then
+        eternal_say(n, "Keystone slots full (" .. keystones_on(id) .. "/" .. keystone_slots() .. ")")
+        return
+      end
+      meta.off[id] = nil
+      eternal_say(n, "Switched on")
+    else
+      meta.off[id] = true
+      eternal_say(n, "Switched off")
+    end
+  elseif action == "rank_up" or action == "rank_down" then
+    if r < 2 then eternal_say(n, "Only one rank"); return end
+    local now = eternal(id) > 0 and eternal(id) or r
+    local want = math.max(1, math.min(r, now + (action == "rank_up" and 1 or -1)))
+    meta.set[id] = want < r and want or nil
+    eternal_say(n, "Using rank " .. want .. " of " .. r)
+  end
+  save_meta()
 end
 
 local function records_page()
@@ -647,7 +978,7 @@ end
 
 moonmod.on("game.title.opened", function()
   page = "root"
-  eternal_pending = nil
+  eternal_msg = nil
   show_page("root")
 end)
 
@@ -661,39 +992,13 @@ moonmod.on("game.title.selected", function(e)
       meta.start_char = CHARACTERS[index % #CHARACTERS + 1]
       save_meta()
       show_page("root", 1)
-    elseif entry == "eternal" then eternal_pending = nil; eternal_from = 1; show_page("eternal", 0)
+    elseif entry == "eternal" then eternal_msg = nil; show_page("eternal", 0)
     elseif entry == "records" then show_page("records", 0)
     end
   elseif page == "eternal" then
-    if entry == "back" then eternal_pending = nil; show_page("root", 2); return end
-    if entry == "more" then
-      eternal_pending = nil
-      eternal_from = eternal_from + ETERNAL_PER_PAGE
-      if eternal_from > #ETERNAL then eternal_from = 1 end
-      show_page("eternal", math.min(ETERNAL_PER_PAGE, #ETERNAL - eternal_from + 1))
-      return
-    end
-    local n = ETERNAL_NODE[entry]
-    if not n then return end
-    local cursor = cursor_of(ETERNAL, entry) - (eternal_from - 1)
-    if eternal_pending ~= entry then eternal_pending = entry; show_page("eternal", cursor); return end
-    local rank = eternal(entry)
-    local cost = n.costs[rank + 1]
-    if rank < n.max_rank and meta.shards >= cost then
-      meta.shards = meta.shards - cost
-      meta.eternal[entry] = rank + 1
-      save_meta()
-      try(game.skills.set_rank, {id = node_id("eternal", entry), rank = rank + 1})
-      eternal_pending = nil
-      try(game.audio.se_play, {se = 20})
-    else
-      eternal_pending = nil
-    end
-    show_page("eternal", cursor)
-    if meta.eternal[entry] == rank then
-      try(game.title.mode_set, {id = MODE, lines = {string.format("Moon Shards %d", meta.shards),
-          n.title .. " needs " .. cost .. " Moon Shards."}})
-    end
+    if entry == "back" then eternal_msg = nil; show_page("root", 2); return end
+    eternal_action(entry, e.action)
+    show_page("eternal", 0)
   elseif page == "records" then
     show_page("root", 3)
   end
@@ -713,11 +1018,14 @@ start_run = function()
   run = {active = true, phase = "launch", biomes = biomes, pos = 1, slot = 1, depth = 0, next_cursed = false,
          stock = {}, diorama = {}, blessings = {}, drafted = {start}, shards = 0,
          heirloom_charges = 0, kills = 0, weapons = {}}
-  if eternal("embassy") > 0 then
+  if eternal("fullparty") > 0 then
+    for _, c in ipairs(CHARACTERS) do if c ~= start then run.drafted[#run.drafted + 1] = c end end
+  elseif eternal("embassy") > 0 then
     local others = {}
     for _, c in ipairs(CHARACTERS) do if c ~= start then others[#others + 1] = c end end
     run.drafted[#run.drafted + 1] = pick(others)
   end
+  run.heat = heat()
   for _, id in ipairs(TILE_IDS) do run.diorama[id] = 0; run.stock[id] = 0 end
   local result, err = call(game.session.start, {floor = ROUTE[biomes[1]].floors[1].id, party_size = 6, character = start})
   if not result then
@@ -742,6 +1050,19 @@ local function first_floor_setup()
   if w then
     local selector = {id = w.id, character = start, slot = w.slot}
     if apply_heirloom(start, w) then notes[#notes + 1] = "Heirloom applied" end
+    if eternal("master") > 0 then
+      -- Master's Gift: the character's second weapon in place of the first
+      local second = "chronicle:weapon:" .. ((tonumber(tostring(w.id):match("(%d+)$")) or 0) + 1)
+      local given = call(game.weapons.give, {id = second})
+      if given and call(game.weapons.equip, {id = second, character = start, slot = given.slot}) then
+        try(game.weapons.remove, {id = w.id, character = start, slot = w.slot})
+        w = {id = second, slot = given.slot}
+        selector = {id = w.id, character = start, slot = w.slot}
+        notes[#notes + 1] = "Master's Gift"
+      end
+    end
+    local leveled = eternal("smith") > 0 and level_up(selector, eternal("smith")) or 0
+    if leveled > 0 then notes[#notes + 1] = "+" .. leveled .. " level" .. (leveled == 1 and "" or "s") end
     local forged = eternal("macho") > 0 and insert_attachments(selector, eternal("macho")) or 0
     if forged > 0 then notes[#notes + 1] = forged .. " forged attachment" .. (forged == 1 and "" or "s") end
     local whet = eternal("whetstone") * 10
@@ -753,12 +1074,27 @@ local function first_floor_setup()
       notes[#notes + 1] = "Whetstone +" .. whet .. " durability"
     end
   end
-  if setting("starter_kit", true) then
-    try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 2})
+  if setting("starter_kit", true) and eternal("lean") == 0 then
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 2 + (eternal("baker") > 0 and 2 or 0)})
     try(game.items.give, {id = "chronicle:item:" .. ITEM.water, count = 2})
     try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 2 + eternal("kit")})
   end
+  if eternal("charm") > 0 or eternal("unbreakable") > 0 then try(game.items.give, {id = "chronicle:item:" .. ITEM.auto_repair, count = 1}) end
+  if eternal("gem") > 0 then try(game.items.give, {id = "chronicle:item:" .. pick(GEMS), count = 1}) end
+  if eternal("antidote") > 0 then try(game.items.give, {id = "chronicle:item:" .. ITEM.antidote, count = 2}) end
+  if eternal("purse") > 0 then try(game.economy.add, {amount = 300}) end
+  if eternal("heart") > 0 then
+    for _, c in ipairs(run.drafted) do
+      local hp = max_hp_of(c)
+      if hp then try(game.player.set, {max_hp = hp + 10 * eternal("heart"), character = c}); try(game.player.set, {hp = hp + 10 * eternal("heart"), character = c}) end
+    end
+  end
+  if eternal("spring") > 0 then run.stock.river = (tonumber(run.stock.river) or 0) + 1 end
+  if eternal("living") > 0 then
+    for _ = 1, 2 do local id = pick(TILE_IDS); run.diorama[id] = placed(id) + 1 end
+  end
   if eternal("moon") > 0 then bless("Moon Blessing") end
+  if eternal("second") > 0 then bless("Second Blessing") end
   cache_weapons()
   prepare_floor_rules()
   push_diorama_ranks()
@@ -771,6 +1107,17 @@ local function end_run(outcome)
   local depth = run.depth
   local earned = run.shards
   if outcome == "victory" then earned = earned + 10 end
+  local h = run.heat or 0
+  earned = math.floor(earned * (1 + 0.1 * h) * (1 + 0.1 * eternal("lens")) * (eternal("fullparty") > 0 and 0.9 or 1) + 0.5)
+  local sigils = run.sigils or 0
+  if outcome == "victory" then
+    sigils = sigils + 3 + (h >= 10 and 1 or 0) + (h >= 15 and 1 or 0) + (h >= 20 and 1 or 0)
+    meta.best_heat = math.max(meta.best_heat, h)
+  end
+  meta.sigils = meta.sigils + sigils
+  local cleared = outcome == "victory" and #run.biomes or (run.pos - 1)
+  local starter = run.drafted[1]
+  if cleared > 0 and starter then meta.marks[starter] = math.floor(tonumber(meta.marks[starter]) or 0) + cleared end
   meta.shards = math.min(SHARD_LIMIT, meta.shards + earned)
   meta.best_depth = math.max(meta.best_depth, depth)
   if outcome == "victory" then meta.wins = meta.wins + 1
@@ -819,7 +1166,25 @@ local function complete_floor(prev)
   run.floors_done = (run.floors_done or 0) + 1
   local depth = run.depth
   earn_shards(1)
-  pay(40 * depth)
+  pay((eternal("floorspay") > 0 and 60 or 40) * depth)
+  local p = try(game.player.get)
+  if p and eternal("field") > 0 and p.weapon and p.weapon.id and (p.weapon.durability_max or 0) > 0 then
+    try(game.weapons.durability_set, {id = p.weapon.id, character = p.character, slot = p.weapon.slot,
+        durability = math.min(p.weapon.durability_max, math.floor(p.weapon.durability + p.weapon.durability_max / 10))})
+  end
+  if p and eternal("rain") > 0 and p.max_water then
+    try(game.player.set, {water = math.min(p.max_water, math.floor((p.water or 0) + p.max_water / 4)), character = p.character})
+  end
+  if eternal("hearty") > 0 and (run.hearty or 0) < 5 then
+    run.hearty = (run.hearty or 0) + 1
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 1})
+  end
+  if eternal("benchrest") > 0 and p then
+    for _, c in ipairs(run.drafted) do
+      local hp = max_hp_of(c)
+      if c ~= p.character and hp then try(game.player.heal, {amount = math.max(1, math.floor(hp / 20)), character = c}) end
+    end
+  end
   local tiles = 1 + (prev.swept and 1 or 0) + (prev.cursed and 1 or 0)
   if prev.cursed then
     earn_shards(2)
@@ -834,7 +1199,8 @@ local function warden_cleared()
   if not (run and floor) or floor.warden_done then return end
   floor.warden_done = true
   try(game.render.bar_remove, {id = "warden"})
-  earn_shards(3)
+  earn_shards(eternal("tithe") > 0 and 6 or 3)
+  if (run.heat or 0) >= 5 then run.sigils = (run.sigils or 0) + 1 end
   give_tiles(1, "Warden felled")
   bless("Warden felled")
   if eternal("vault") > 0 then run.heirloom_charges = run.heirloom_charges + 1 end
@@ -914,7 +1280,19 @@ local function enter_floor(world)
   local keep = run.leader or run.drafted[1]
   if p and p.character ~= keep then try(game.party.set_active, {id = keep}) end
   if first then first_floor_setup() else toast(intro, floor.cursed and "curse" or nil) end
-  if advanced and hit.slot == 2 and (pos == 1 or pos == 3) then draft_ally("GOLDEN ATLA") end
+  if advanced and hit.slot == 2 and (pos == 1 or pos == 3 or (eternal("golden") > 0 and (pos == 2 or pos == 4))) then
+    draft_ally("GOLDEN ATLA")
+  end
+  if advanced and not first then
+    if eternal("feast") > 0 then
+      local pl = try(game.player.get)
+      if pl and pl.max_hp then try(game.player.heal, {amount = math.max(1, math.floor(pl.max_hp / 5))}) end
+    end
+    if hit.slot == 1 and eternal("helping") > 0 then try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 2}) end
+    if hit.slot == 1 and eternal("unbreakable") > 0 then try(game.items.give, {id = "chronicle:item:" .. ITEM.auto_repair, count = 1}) end
+  end
+  -- The Genie's Mark: every third floor is cursed, chosen or not
+  if advanced and eternal("mark") > 0 and (run.depth + 1) % 3 == 0 and hit.slot + 1 < WARDEN_SLOT then run.next_cursed = true end
   if advanced and hit.slot == 1 then cache_weapons() end
   save_meta()
   save_run()
@@ -928,7 +1306,11 @@ moonmod.on("game.dungeon.generating", function(e)
   -- The floor may be built just after the run has arrived on it (and spent next_cursed).
   local arrived = floor and floor.cursed and floor.slot == (hit and hit.slot) and run.biomes[floor.biome] == (hit and hit.biome)
   local cursing = hit and hit.slot < WARDEN_SLOT and (run.next_cursed or arrived)
-  try(game.dungeons.set_modifiers, cursing and {chests = 50, chest_value = 100} or {})
+  local mods = cursing and {chests = 50, chest_value = 100} or {}
+  if eternal("crowded") > 0 then mods.monsters = 25 * eternal("crowded") end
+  if eternal("sprawl") > 0 then mods.rooms = 30 * eternal("sprawl") end
+  if eternal("hoard") > 0 then mods.chest_value = math.min(300, (mods.chest_value or 0) + 50) end
+  try(game.dungeons.set_modifiers, mods)
 end)
 
 -- Enemies ------------------------------------------------------------------------------------------------
@@ -938,11 +1320,12 @@ local function drop_of(e)
 end
 
 local function scale_enemies(roster)
-  local hp_mult = (1 + setting("depth_hp", 6) / 100 * math.max(0, run.depth - 1)) * shuffle_scale()
+  local depth = run.depth + (eternal("deeper") > 0 and 5 or 0)
+  local hp_mult = (1 + setting("depth_hp", 6) / 100 * math.max(0, depth - 1)) * shuffle_scale() * (1.25 ^ eternal("hardened"))
   if floor.cursed then hp_mult = hp_mult * setting("curse_hp", 160) / 100 end
   if floor.back then hp_mult = hp_mult * 1.5 end
   local abs_mult = abs_multiplier()
-  local money_mult = 1 + 0.2 * placed("cart")
+  local money_mult = 1 + (eternal("carts") > 0 and 0.4 or 0.2) * placed("cart")
   local defense_add = math.floor(run.depth / 2)
   for _, e in ipairs(roster) do
     local handle = e.entity_id or e.id
@@ -952,7 +1335,9 @@ local function scale_enemies(roster)
       local combat = e.combat or {}
       if hp > 0 then
         local warden = floor.slot == WARDEN_SLOT and not floor.warden and (drop_of(e) or -1) >= 0
-        local mult = hp_mult * (warden and setting("warden_hp", 6) or 1)
+        -- Genie's Champions: every other floor's key holder is a lesser Warden (twice the HP)
+        local champion = not warden and eternal("champions") > 0 and (drop_of(e) or -1) >= 0
+        local mult = hp_mult * (warden and setting("warden_hp", 6) or (champion and 2 or 1))
         local request = {entity = handle,
           max_hp = math.floor(clamp(hp * mult, 1, 1000000)),
           defense = math.floor(clamp(((tonumber(combat.defense) or 0) + defense_add) * (warden and 1.5 or 1), 0, 32767)),
@@ -968,6 +1353,21 @@ local function scale_enemies(roster)
           end
         end
       end
+    end
+  end
+end
+
+-- Moonblade: the first hit on each enemy lands twice more (seen as its first drop from full health, after scaling).
+local function moonblade(roster)
+  if eternal("moonblade") == 0 then return end
+  floor.struck = floor.struck or {}
+  for _, e in ipairs(roster) do
+    local handle = e.entity_id or e.id
+    local key = tostring(handle)
+    local now, full = e.health and tonumber(e.health.current) or 0, e.health and tonumber(e.health.maximum) or 0
+    if handle and floor.scaled[key] and not floor.struck[key] and now > 0 and now < full then
+      floor.struck[key] = true
+      try(game.entities.set_stats, {entity = handle, hp = math.max(1, math.floor(now - 2 * (full - now)))})
     end
   end
 end
@@ -989,6 +1389,7 @@ moonmod.on("game.enemy_defeated", function(e)
   local exp = tonumber(e.reward_exp) or 0
   local p = try(game.player.get)
   if exp > 0 then share_abs(exp, p and p.character) end
+  if eternal("luckyfind") > 0 and math.random(100) <= 5 then earn_shards(1) end
   if floor.warden and e.entity and tostring(e.entity) == tostring(floor.warden) then warden_cleared() end
 end)
 
@@ -997,7 +1398,7 @@ end)
 -- take the new one; the other is absorbed into the keeper (a quarter of its attack, endurance, speed, magic and
 -- elements). A weapon for someone outside the draft is absorbed into the active character's weapon. A weapon
 -- that breaks ends the run.
-local ABSORB = 0.25
+local function absorb_share() return eternal("synth") >= 2 and 0.45 or (eternal("synth") >= 1 and 0.35 or 0.25) end
 local STAT_KEYS = {"attack", "endurance", "speed", "magic"}
 local BROKEN = {[257] = true, [299] = true, [314] = true, [331] = true, [347] = true, [363] = true} -- the broken starters
 
@@ -1006,10 +1407,10 @@ local BROKEN = {[257] = true, [299] = true, [314] = true, [331] = true, [347] = 
 local function absorbed(into, from)
   local out = {elem = {}}
   for _, k in ipairs(STAT_KEYS) do
-    out[k] = math.floor(clamp((tonumber(into.stats[k]) or 0) + (tonumber(from.stats[k]) or 0) * ABSORB, 0, 32767))
+    out[k] = math.floor(clamp((tonumber(into.stats[k]) or 0) + (tonumber(from.stats[k]) or 0) * absorb_share(), 0, 32767))
   end
   for e = 1, 5 do
-    out.elem[e] = math.floor(clamp((tonumber(into.elements[e]) or 0) + (tonumber(from.elements[e]) or 0) * ABSORB, 0, 127))
+    out.elem[e] = math.floor(clamp((tonumber(into.elements[e]) or 0) + (tonumber(from.elements[e]) or 0) * absorb_share(), 0, 127))
   end
   return out
 end
@@ -1086,7 +1487,7 @@ moonmod.on("game.item_picked_up", function(e)
     local roll = math.random(100)
     local levels = roll <= 10 and 4 or (roll <= 30 and 3 or (roll <= 60 and 2 or 1))
     local gained = level_up(selector, levels)
-    local attached = insert_attachments(selector, math.random(100) <= 35 and 2 or 1)
+    local attached = insert_attachments(selector, (math.random(100) <= 35 and 2 or 1) + (eternal("socket") > 0 and 1 or 0))
     if gained > 0 or attached > 0 then
       toast(string.format("Found weapon: +%d level%s, %d attachment%s.", gained, gained == 1 and "" or "s", attached, attached == 1 and "" or "s"))
     end
@@ -1237,10 +1638,18 @@ moonmod.on("game.tick", function(e)
     if p.weapon and p.weapon.id then run.weapons[p.character] = {id = p.weapon.id, slot = p.weapon.slot} end
     if contains(run.drafted, p.character) then run.leader = p.character end
     local regen = placed("tree") + (blessed("mender") and 2 or 0)
-    if regen > 0 and frame % 180 == 0 and (p.hp or 0) > 0 and p.hp < p.max_hp then try(game.player.heal, {amount = regen}) end
+    if regen > 0 and frame % (eternal("trees") > 0 and 90 or 180) == 0 and (p.hp or 0) > 0 and p.hp < p.max_hp then try(game.player.heal, {amount = regen}) end
+    -- Rally and Relay: a switch heals the new character and gives a moment of invincibility
+    if run.last_active and run.last_active ~= p.character and contains(run.drafted, p.character) then
+      if eternal("rally") > 0 and p.max_hp then try(game.player.heal, {amount = math.max(1, math.floor(p.max_hp / 10))}) end
+      if eternal("relay") > 0 then try(game.player.invincible, {frames = 180}) end
+    end
+    run.last_active = p.character
+    if frame % 60 == 0 and (eternal("laststand") > 0 or eternal("grip") > 0) then apply_effects() end
   end
   local result = try(game.entities.query, {type = "monster"})
   scale_enemies(result and result.entities or {})
+  moonblade(result and result.entities or {})
   update_warden_bar()
   if frame % 60 == 0 then poll_atla() end
   if frame - floor.entered > 180 and not floor.swept then
@@ -1271,18 +1680,6 @@ moonmod.on("skills.train_requested", function(event)
     toast(TILE[node].title .. " placed on the Diorama (" .. placed_total() .. "/" .. plots() .. ").")
     save_run()
     refresh()
-  elseif tree == "eternal" and ETERNAL_NODE[node] then
-    local n = ETERNAL_NODE[node]
-    local rank = eternal(node)
-    if rank >= n.max_rank then toast(n.title .. " is complete."); return end
-    local cost = n.costs[rank + 1]
-    if meta.shards < cost then toast(n.title .. " needs " .. cost .. " Moon Shards (you have " .. meta.shards .. ")."); return end
-    meta.shards = meta.shards - cost
-    meta.eternal[node] = rank + 1
-    save_meta()
-    try(game.skills.set_rank, {id = node_id("eternal", node), rank = rank + 1})
-    toast(n.title .. " " .. (rank + 1) .. "/" .. n.max_rank .. " unlocked. " .. meta.shards .. " Moon Shards left.")
-    refresh()
   end
 end)
 
@@ -1295,6 +1692,7 @@ local ACTIONS = {
   {"heirloom", "Bank Heirloom", "Spend a Warden charge: keep half your weapon's stats for future runs"},
   {"gaffer_repair", "Gaffer: Repair Powder", "Floor II of each biome with Gaffer's Wagon: 2 Repair Powder"},
   {"gaffer_food", "Gaffer: Bread & Water", "Floor II of each biome with Gaffer's Wagon: 2 Bread, 2 Tasty Water"},
+  {"gaffer_attach", "Gaffer: Attachments", "With Gaffer's Stock: two random attachments (400 G)"},
   {"abandon", "Abandon Run", "Leave the Gauntlet now (a retreat): back to its title screen"},
   {"records", "Eternal Records", "Moon Shards, runs, wins, best depth and the Heirloom"},
 }
@@ -1302,8 +1700,10 @@ for _, a in ipairs(ACTIONS) do try(game.ui.register, {id = a[1], label = a[2], d
 
 local function gaffer(items, price)
   if eternal("gaffer") < 1 then toast("Unlock Gaffer's Wagon in Norune Eternal first."); return end
-  if not on_route() or run.slot ~= 2 then toast("Gaffer's Wagon stops on floor II of each biome."); return end
+  local here = run and (run.slot == 2 or (eternal("partner") > 0 and run.slot == 3))
+  if not on_route() or not here then toast(eternal("partner") > 0 and "Gaffer's Wagon stops on floors II and III." or "Gaffer's Wagon stops on floor II of each biome."); return end
   if eternal("gaffer") >= 2 then price = math.floor(price * 2 / 3) end
+  if eternal("haggler") > 0 then price = math.floor(price * 0.8) end
   local spent, err = call(game.economy.spend, {amount = price})
   if not spent then toast("Gaffer wants " .. price .. " Gilda (" .. errmsg(err) .. ")."); return end
   local n = 0
@@ -1348,6 +1748,9 @@ moonmod.on("ui.action", function(a)
   elseif a.id == "heirloom" then bank_heirloom()
   elseif a.id == "gaffer_repair" then gaffer({{ITEM.repair, 2}}, 300)
   elseif a.id == "gaffer_food" then gaffer({{ITEM.bread, 2}, {ITEM.water, 2}}, 240)
+  elseif a.id == "gaffer_attach" then
+    if eternal("stock") < 1 then toast("Unlock Gaffer's Stock in Norune Eternal first."); return end
+    gaffer({{pick(ATTACHMENTS), 1}, {pick(ATTACHMENTS), 1}}, 400)
   elseif a.id == "diorama_clear" then
     if not run then toast("No run is under way."); return end
     for _, id in ipairs(TILE_IDS) do run.stock[id] = (tonumber(run.stock[id]) or 0) + placed(id); run.diorama[id] = 0 end
@@ -1377,7 +1780,6 @@ try(game.scripts.register_function, {id = "run_state", description = "Moon Gaunt
 end)
 
 -- Start-up: a run still in storage was cut short when the game closed mid-run: it counts as a retreat.
-push_eternal_ranks()
 if run then
   run.biomes = type(run.biomes) == "table" and run.biomes or {1}
   run.shards = tonumber(run.shards) or 0

@@ -2,6 +2,30 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — The Norune Eternal sky
+
+Engine: `title.mode_set` takes a `sky` page (groups, nodes, links, captions, top lines), and the title draws it as a
+panning night sky: item-box nodes in moon rings, dotted links, the cursor's constellation in view with its neighbours
+named at the screen's edges, a star map, R2/Triangle for the whole sky, and the bottom plate for the cursor's node.
+Cross/Square/L1/R1 send `buy`/`toggle`/`rank_down`/`rank_up`. New engine test
+`MoonModTitleModes.SkyPageValidatesAndMovesByDirection`; the package test now expects the sky.
+
+Mod: the Eternal list became the sky from ETERNAL_TREE.md: 126 nodes in 14 constellations, 75 working now (816
+shards, 45 Sigils, Heat up to 23), the rest *Coming soon*. Genie Sigils, Character Marks, Heat, Keystone slots,
+switching off and rank setting are in. Effects added for the new nodes (damage, crits, Moonblade, wear, thirst, speed,
+HP, starting kit and purse, floor rewards, Wardens, Gaffer, the Diorama paths, the Pacts, the Heat payout).
+
+| Check | Result |
+|---|---|
+| `test_runs.lua` | 114 passed (new: the sky's buying, locks, switching, ranks, Keystone slots and Heat; sky effects; Moonblade) |
+| `test_standalone.lua` | 38 passed |
+| Engine mod suites | 29 passed (with the new sky test) |
+| Full engine suite | 803 passed; the 7 known baseline failures only |
+| Patch | Applies to upstream `9418a550` |
+| In the game | The sky draws and moves: heart, Arms (bottom and top), the Pacts, the map. Node labels were dropped at the user's request (the bottom plate names the node). Fixed on the way: overlapping edge names (now eight compass slots, nearest constellation each), plates under the panel (the camera follows the cursor within tall constellations), links missing from the payload, and off-screen links costing draws (5619 → 1725). |
+
+Needs hands: buying and switching with a pad, and how the grind feels.
+
 ## 2026-10-28 — G5 endings and the meta loop, PAL: headless part done
 
 Automated: `test_runs.lua` 92/92 (a new scenario: a fall on the third biome's second floor banks 12-18 shards; the win
