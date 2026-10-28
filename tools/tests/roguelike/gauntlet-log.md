@@ -2,6 +2,25 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G3 weapons, PAL: headless part done (1 fix); fights need hands
+
+Automated: `test_runs.lua` 69/69 (3 new checks, 2 of them fail without the fix), `test_standalone.lua` 38/38, the
+engine filter 10/10 plus a new `player.get` weapon test. A test-only mod in the test save drove Ruby's run on DBC I
+and II.
+
+| Line | Result |
+|---|---|
+| Wear per hit; nothing breaks at the default 3 | **Fixed.** From `hitvalue.cpp`: a hit wears `(1.5 - endurance/100) x weight`, the weight 0.8-1.8, a charged attack 3, times the run's wear. A charged hit on low endurance wears up to 4.5, and on a Brittle floor (2x) a plain combo hit up to 5.4, so a weapon at 4-5 could break outright before the threshold of 3 caught it. Shatter now also fires once the next charged hit could break the weapon, and comes back clear of that point. `player.get` now reports the weapon's endurance (Ruby's Gold Ring: 40, so 3.3: at 4 no Shatter, at 3 Shatter, checked in the game). Measured wear per hit needs a fight. |
+| First Shatter between biome 1 III and biome 2 II | Needs hands. Estimate: 45 durability at 1-2 a hit is 30-40 hits, so floor I-II without Repair Powder (the kit has 2). Leveling up raises the maximum by 1-3 and does not refill. If play agrees, it lands early: consider more durability on the starter kit or a gentler threshold. |
+| Burst; 75% attack; at most two | Stats pass in the game: attack 10 → 7 → 5, max durability 45 → 33 → 24, back to 11 then 8, and a third drop to 3 does not shatter. The burst needs enemies in range (hands). |
+| Found weapon 1-4 levels, 1-2 attachments | The mod reacts to a chest pickup, which needs hands. The calls it makes work in the game: a given Gold Ring went from level 0 to 3 and both its sockets took an attachment. |
+| Benched allies level by the end of biome 2 | Needs hands. In the game: Goro, drafted by the Golden Atla on floor II, has his weapon recorded for the shared ABS, and every benched weapon takes ABS (30 of 32-45 to the next level). |
+| Different builds | Needs two players. |
+
+Sacrifice: the engine side works (a +8 unequipped ring synthesized). Metric audit: G3's metric (2, Build within a
+run) needs the hands-on lines; not scored.
+Next: the *(hands)* lines of G2 and G3, then G4.
+
 ## 2026-10-28 — G2 floor chain, PAL: headless part done (3 fixes); Warden lines need hands
 
 Same build and data, plus the engine guard below. Automated: `test_runs.lua` 66/66 (3 new checks), `test_standalone.lua`

@@ -61,7 +61,7 @@ Closing the game in the middle of one counts it as a retreat (its Moon Shards ar
 | Fast ABS | Revealed enemies carry 6x their ABS (*Weapon ABS multiplier*, 1-12), so weapons build up within one run. Cursed floors and Vaults give 1.5x more. |
 | Shared ABS | Drafted allies on the bench get 50% of each kill's ABS on their equipped weapon, and level up from it. |
 | Found weapons | A weapon picked up on a run floor arrives 1-4 levels up with 1-2 random attachments. |
-| Shatter | When the equipped weapon falls to 3 durability or less, it bursts instead of breaking: every enemy within range takes 4x its attack. It survives, fractured: 75% attack and max durability, back to 35% durability. After two fractures, it can break for real. |
+| Shatter | When the equipped weapon falls to 3 durability or less, or low enough that its next charged hit could break it (which depends on its endurance and the run's wear), it bursts instead of breaking: every enemy within range takes 4x its attack. It survives, fractured: 75% attack and max durability, back to 35% durability. After two fractures, it can break for real. |
 | Sacrifice | **Actions > Sacrifice Spare Weapon** status-breaks your best unequipped +5 or higher weapon into a SynthSphere. Its level x 40 ABS also flows into the equipped weapon. |
 | Diorama | Atla picked up on run floors, cleared floors, swept floors, Wardens and caches give Georama tiles. Place them on the Diorama tree with Cross (6 plots, more with Deep Well). **Clear Diorama** puts every tile back in stock. Rivers: water drains 12% slower each. Windmill + Storehouse pairs: +25% ABS each. Lamps: +4% damage each; 1 maps every floor, 2 show monsters. Trees: 1 HP every 3 s each. Houses: -6% damage taken each. Carts: +20% Gilda each. Smithies: wear 12% slower each. |
 | Blessings | Wardens, Vaults and some cursed floors grant one for the rest of the run: Moonlit Edge, Dran's Stride, Fairy Ward, Tempered Steel, Bottomless Flask, Second Breath, Lucky Star, Scholar's Eye, Mender's Charm. |
@@ -134,7 +134,7 @@ Checked here, without the game's data:
 - `tools/tests/roguelike/test_runs.lua` (Lua 5.4+, or the vendored 5.5) plays whole runs against a fake adapter: a
   five-biome win, Norune Eternal purchases, unlocks on the next run, Shatter, Sacrifice, drafting, a retreat, a
   defeat, Abandon, an off-route floor, quitting mid-run, a reload, an engine without title modes, and a start as
-  someone other than Toan, kept through the dungeon entrance and into the next biome. 66 checks.
+  someone other than Toan, kept through the dungeon entrance and into the next biome, and Shatter ahead of the hardest hit. 69 checks.
 - `tools/tests/roguelike/test_standalone.lua` loads RPG, Ascension and Dungeon+ against a recording stub, starts a
   session in the middle of a story game and also loads each mod mid-run. It checks that every bonus goes to x1, that
   the run's events reach no game call and store nothing, and that everything comes back after. 38 checks.
@@ -145,11 +145,10 @@ Not run: the game itself, which needs your disc image and a GPU. These need a pa
   layout, and how well the text reads on both PAL (480) and NTSC (448).
 - **Starting straight into a dungeon from a fresh save.** `cur_georama` and party setup are covered by tests. What the
   native dungeon entrance does with no story progress is not.
-- That the native exit on a registered floor loads the next registered floor, and what the Warden floor's exit does
-  if you reach it before the Warden dies. The run expects the Warden to die first.
-- That the source floors in `BIOMES` hold no scripted events (0-based: Divine Beast Cave 2/5/10/12, Wise Owl Forest
-  2/5/10/13, Shipwreck and Sun & Moon Temple 2/5/11/14, Moon Sea 2/5/10/12).
-- How much one hit wears a weapon. Raise *Shatter at durability* if a weapon ever breaks outright.
+- Walking the native exit from floor to floor. The registered floors are numbered straight after the retail ones and
+  the exit asks for the next number, so they chain; all 20 load (G2 in `GAUNTLET.md`). The Warden floor's exit can
+  only be opened after the Warden dies, and the engine keeps it on that floor.
+- The Warden (its size, bar and the move to the next biome) and Shatter's burst, which need a fight.
 
 RPG, Ascension and Dungeon+ sit runs out (see *Its own game* above), so their pages, bonuses and floor rules do not
 mix with the Gauntlet's.

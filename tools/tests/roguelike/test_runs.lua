@@ -239,6 +239,19 @@ check(S9.dungeon == 1 and S9.active == "xiao" and not S9.find_toast("not drafted
       tostring(S9.dungeon) .. " " .. S9.active)
 check(not S9.find_toast("off the Gauntlet route") and not S9.storage.run.suspended, "and its entrance is not off route either")
 
+-- 9. Shatter comes before the hardest hit can break a weapon ------------------------------------
+print("Scenario 9: Shatter before the hardest hit")
+local S10 = boot()
+start_run(S10)
+run_floor(S10)
+local w10 = S10.weapons[S10.active][S10.equipped[S10.active]]
+-- endurance 5: a charged attack wears (1.5 - 0.05) x 3 = 4.35, more than the default threshold of 3
+w10.durability_f = 4.6; S10.tick(1)
+check(not S10.find_toast("SHATTER"), "no shatter while a charged hit cannot break it", w10.durability_f)
+w10.durability_f = 4.3; S10.tick(1)
+check(S10.find_toast("SHATTER"), "shatters once a charged hit could break it, above the threshold of 3")
+check(w10.durability_f > 4.35, "and comes back clear of the next trigger", w10.durability_f)
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then
   print("Last toasts:"); for i = math.max(1, #S.toasts - 5), #S.toasts do print("  " .. S.toasts[i]) end

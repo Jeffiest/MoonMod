@@ -236,7 +236,7 @@ function F.new(opts)
       local r = {character = c, hp = S.hp[c], max_hp = S.max_hp[c], water = 50, max_water = 100}
       local slot = S.equipped[c]
       local w = slot and S.weapons[c][slot]
-      if w then r.weapon = {id = wid(w.item_no), item_no = w.item_no, slot = slot, attack = w.attack, speed = w.speed, durability = w.durability_f, durability_max = w.durability} end
+      if w then r.weapon = {id = wid(w.item_no), item_no = w.item_no, slot = slot, attack = w.attack, endurance = w.endurance, speed = w.speed, durability = w.durability_f, durability_max = w.durability} end
       if in_dungeon() then r.position = {x = 0, y = 0, z = 0} end
       return r
     end,

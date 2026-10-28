@@ -9095,7 +9095,7 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..e005d7e7
+index 00000000..03f03f20
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
 @@ -0,0 +1,9773 @@
@@ -10452,8 +10452,8 @@ index 00000000..e005d7e7
 +    if (equipped >= 0 && equipped < 11) {
 +        const auto &weapon = status->chara_weapons[character_id][equipped];
 +        if (weapon.item_no >= ITEM_WEAPON_START) result["weapon"] = {{"id", "chronicle:weapon:" + std::to_string(weapon.item_no)},
-+            {"item_no", weapon.item_no}, {"slot", equipped}, {"attack", weapon.attack}, {"speed", weapon.speed},
-+            {"durability", weapon.durability_f}, {"durability_max", weapon.durability}};
++            {"item_no", weapon.item_no}, {"slot", equipped}, {"attack", weapon.attack}, {"endurance", weapon.endurance},
++            {"speed", weapon.speed}, {"durability", weapon.durability_f}, {"durability_max", weapon.durability}};
 +    }
 +    if (IsActiveDungeonStatus(status)) {
 +        float position[4]{};
@@ -38005,10 +38005,10 @@ index 00000000..eeff1dcd
 +}
 diff --git a/port/src/tests/moonmod_player_party_api_test.cpp b/port/src/tests/moonmod_player_party_api_test.cpp
 new file mode 100644
-index 00000000..1ed80c2b
+index 00000000..0db3e7b0
 --- /dev/null
 +++ b/port/src/tests/moonmod_player_party_api_test.cpp
-@@ -0,0 +1,485 @@
+@@ -0,0 +1,520 @@
 +#include <gtest/gtest.h>
 +
 +#include <memory>
@@ -38492,6 +38492,41 @@ index 00000000..1ed80c2b
 +    EXPECT_EQ(UserStatus->ailment_frames[CHARA_TOAN], 0);
 +
 +    UserStatus = previous_user_status;
++    SaveData = previous_save;
++}
++
++TEST(MoonModPlayerPartyApi, ReportsTheEquippedWeaponWithItsEnduranceAndDurability) {
++    CSaveData *previous_save = SaveData;
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    CDngStatusData *status = save->GetDngStatus();
++    ASSERT_NE(status, nullptr);
++    status->party_size = 1;
++    status->cur_chara = CHARA_TOAN;
++    status->equipped_weapon_slot[CHARA_TOAN] = 0;
++    WEAPON_HAVE &weapon = status->chara_weapons[CHARA_TOAN][0];
++    weapon.item_no = ITEM_WEAPON_START;
++    weapon.attack = 12;
++    weapon.endurance = 7;
++    weapon.durability = 30;
++    weapon.durability_f = 4.5f;
++
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleApi(config);
++    const moonmod::ApiOperationSpec *player_get = moonmod::FindApiOperation("player.get");
++    ASSERT_NE(player_get, nullptr);
++    const moonmod::ApiCallResult player = config.api_handler("test.moonmod.chronicle-player", *player_get,
++                                                             moonmod::Json::array());
++    ASSERT_EQ(player.status, moonmod::ApiCallStatus::Ok) << player.message;
++    ASSERT_TRUE(player.value.contains("weapon"));
++    const moonmod::Json &reported = player.value.at("weapon");
++    EXPECT_EQ(reported.value("attack", -1), 12);
++    // The Gauntlet's Shatter needs endurance to know how hard the next hit can wear.
++    EXPECT_EQ(reported.value("endurance", -1), 7);
++    EXPECT_FLOAT_EQ(reported.value("durability", -1.0f), 4.5f);
++    EXPECT_EQ(reported.value("durability_max", -1), 30);
++
 +    SaveData = previous_save;
 +}
 diff --git a/port/src/tests/moonmod_render_api_test.cpp b/port/src/tests/moonmod_render_api_test.cpp

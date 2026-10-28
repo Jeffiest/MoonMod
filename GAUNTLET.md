@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 66 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 69 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -97,16 +97,25 @@ in the engine before anything else is built.
 - [ ] *Shuffle biome order* on: a late biome rolled first is visibly weaker *(hands)*, and the HUD line names the right
   floor (headless: yes, a Temple start reads `GAUNTLET 1-II` on Temple II).
 
-### G3 — Weapons: fast ABS, found weapons, Shatter, Sacrifice
-*Automated:* the Shatter, Sacrifice and drafting scenarios in `test_runs.lua`.
+### G3 — Weapons: fast ABS, found weapons, Shatter, Sacrifice — HEADLESS PART DONE 2026-10-28; *(hands)* lines need someone playing
+*Automated:* the Shatter, Sacrifice and drafting scenarios in `test_runs.lua`, and
+`MoonModPlayerPartyApi.ReportsTheEquippedWeaponWithItsEnduranceAndDurability`.
 *Playtest:*
-- [ ] Wear per hit, measured on the starting weapon: ______ durability per hit. No weapon ever breaks outright at the
-  default *Shatter at durability* (3). If one does, raise the default and log it.
-- [ ] The first Shatter on a fresh weapon happens between biome 1 floor III and biome 2 floor II (not floor I, not never).
-- [ ] The burst visibly hits enemies in range; the fractured weapon is at 75% attack and can break only after two.
-- [ ] A found weapon arrives 1–4 levels up with 1–2 attachments.
-- [ ] Benched drafted allies level from shared ABS by the end of biome 2.
-- [ ] Two players end biome 2 with different weapon builds.
+- [ ] Wear per hit, measured on the starting weapon: ______ durability per hit *(hands)*. From the code: a hit wears
+  `(1.5 - endurance/100) x weight` (weight 0.8-1.8, a charged attack 3), times the run's wear (Brittle 2x). No weapon
+  ever breaks outright at the default *Shatter at durability* (3): **fixed** so Shatter also fires once the next
+  charged hit could break the weapon (a 3 alone let one hit break it, on any floor with low endurance, on Brittle
+  floors with any).
+- [ ] The first Shatter on a fresh weapon happens between biome 1 floor III and biome 2 floor II (not floor I, not
+  never) *(hands)*. Estimate: Ruby's ring (45, endurance 40) shatters after 30-40 hits with no Repair Powder, so
+  floor I-II; leveling up raises the maximum but does not refill.
+- [ ] The burst visibly hits enemies in range *(hands)*; the fractured weapon is at 75% attack and can break only after
+  two (headless: 10 → 7 → 5 attack, 45 → 33 → 24 max, then no third Shatter).
+- [ ] A found weapon arrives 1–4 levels up with 1–2 attachments *(hands: a chest)*. Headless: the calls the mod makes on
+  pickup level a given weapon 0 → 3 and fill its 2 sockets.
+- [ ] Benched drafted allies level from shared ABS by the end of biome 2 *(hands)*. Headless: a drafted ally's weapon is
+  recorded on its first floor and takes ABS while benched.
+- [ ] Two players end biome 2 with different weapon builds *(hands)*.
 
 ### G4 — Risk and reward: Cursed Gate, Vaults, Diorama, Gilda
 *Automated:* the curse, Vault, blessing and Diorama scenarios in `test_runs.lua`.

@@ -205,6 +205,7 @@ local frame = 0
 local floor = nil          -- {token, biome, slot, back, cursed, curses, scaled, warden, warden_max, seen, swept, entered, atla}
 local pending_transition = nil   -- {id, at, tries, why}
 local effects_on = false
+local wear_tuned = false   -- player.tuning_set took durability_wear (an engine without it wears at x1)
 local hud_text = nil
 
 local function on_route() return run and run.phase == "active" and floor ~= nil and not run.suspended end
@@ -236,6 +237,11 @@ local function abs_multiplier()
   return m
 end
 
+-- Weapon wear: Smithy tiles, Tempered Steel and the Brittle curse.
+local function wear_scale()
+  return clamp((0.88 ^ placed("smithy")) * (blessed("tempered") and 0.75 or 1) * (cursed("brittle") and 2 or 1), 0.25, 4)
+end
+
 local function apply_effects()
   local active = on_route()
   if not active then
@@ -257,13 +263,14 @@ local function apply_effects()
   try(game.combat.register_player_formula, {id = "gauntlet_in", operation = "multiply", value = clamp(incoming, 0, 100), priority = 120})
   local tuning = {
     thirst_drain = clamp((0.88 ^ placed("river")) * (blessed("flask") and 0.75 or 1) * (cursed("parched") and 3 or 1), 0.25, 4),
-    durability_wear = clamp((0.88 ^ placed("smithy")) * (blessed("tempered") and 0.75 or 1) * (cursed("brittle") and 2 or 1), 0.25, 4),
+    durability_wear = wear_scale(),
     run_speed = blessed("stride") and 1.15 or 1,
     invincible_bonus_frames = blessed("breath") and 12 or 0,
     map_reveal = placed("lamp") >= 1,
     monster_reveal = placed("lamp") >= 2,
   }
   local _, err = call(game.player.tuning_set, tuning)
+  wear_tuned = not err
   if err and err.code ~= "unsupported" then moonmod.log("warn", "tuning: " .. errmsg(err)) end
   effects_on = true
 end
@@ -906,7 +913,9 @@ end)
 local function shatter_check(p)
   local w = p.weapon
   if not (w and type(w.durability) == "number" and type(w.durability_max) == "number" and w.durability_max > 0) then return end
-  if w.durability > setting("shatter_threshold", 3) then return end
+  -- The hardest native hit (a charged attack) wears (1.5 - endurance/100) x 3: shatter before one can break it.
+  local worst = math.max(0, 1.5 - (tonumber(w.endurance) or 0) / 100) * 3 * (wear_tuned and wear_scale() or 1)
+  if w.durability > math.max(setting("shatter_threshold", 3), worst) then return end
   local key = p.character .. ":" .. tostring(w.slot) .. ":" .. tostring(w.item_no)
   local fractures = tonumber(run.fractures[key]) or 0
   if fractures >= 2 then return end
@@ -921,7 +930,9 @@ local function shatter_check(p)
   local new_max = math.max(1, math.floor(w.durability_max * 0.75))
   try(game.weapons.stats_set, {id = w.id, character = p.character, slot = w.slot,
       attack = math.floor(clamp((tonumber(w.attack) or 0) * 0.75, 1, 32767)), durability = new_max})
-  try(game.weapons.durability_set, {id = w.id, character = p.character, slot = w.slot, durability = math.max(1, math.floor(new_max * 0.35))})
+  -- Back to 35%, but clear of the trigger so the next shatter takes real wear.
+  local rest = math.min(new_max, math.max(1, math.floor(new_max * 0.35), math.floor(worst) + 2))
+  try(game.weapons.durability_set, {id = w.id, character = p.character, slot = w.slot, durability = rest})
   toast(string.format("SHATTER! The burst hits %d enem%s for %d. Fractured (%d/2): -25%% attack%s", hit, hit == 1 and "y" or "ies", damage,
       fractures + 1, fractures + 1 >= 2 and ". Next break is final" or ""), 360)
   save_run()
