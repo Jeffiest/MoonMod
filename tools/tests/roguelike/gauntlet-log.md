@@ -2,6 +2,16 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — The Gauntlet's HUD in the game's own art
+
+The run's HUD text line is gone. Engine: `render.hud_icon_set` (a native status badge at half size, or a mod png)
+draws icons left of the key and floor plate, and `render.floor_label_set` puts a label on the plate and a number on the
+arrival card. The Gauntlet's plate reads `1-2` (digits: the game font's capital I reads as l), the card *B2* (depth),
+a Warden floor keeps *Boss*, a cursed floor shows the Curse badge and a new chest icon (`resources/hud/cache.png`,
+drawn by `tools/roguelike/make_chest.ps1`), and a waiting curse blinks its badge. Checked in the game on DBC I and a
+cursed DBC II. Engine filter plus the new render test pass; the full suite has the baseline's 7 failures (802 pass).
+`test_runs.lua` 88/88, `test_standalone.lua` 38/38.
+
 ## 2026-10-28 — G4 risk and reward, PAL: headless part done (2 fixes)
 
 Automated: `test_runs.lua` 84/84 (one new check; the fake now reports a new floor 16 frames before it builds it, as

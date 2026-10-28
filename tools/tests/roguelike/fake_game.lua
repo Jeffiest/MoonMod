@@ -38,6 +38,7 @@ function F.new(opts)
     sheet = nil, layers = {}, bars = {},
     pending_jump = nil,
     bind_context = {}, contexts = {}, blocked = nil,
+    floor_label = nil, hud_icons = {}, overrides = {},
     atla = {},
     ranks = {},
     slot_id = {slot_id = 1, slot_generation = 7},
@@ -437,6 +438,12 @@ function F.new(opts)
       return {atla = out}
     end,
   })
+  game.resources = wrap("resources", {
+    override = function(a)
+      assert(a.path:match("^resources/") and a.game_path, "resources.override path")
+      S.overrides[a.game_path] = a.path; return {game_path = a.game_path}
+    end,
+  })
   game.input = wrap("input", {
     bind = function(a) S.bind_context[a.id] = a.context or "default"; return {id = a.id} end,
     -- Only actions bound to the context on top report presses; others drop theirs.
@@ -462,6 +469,18 @@ function F.new(opts)
       S.bars[a.id] = deepcopy(a); return {}
     end,
     bar_remove = function(a) S.bars[a.id] = nil; return {} end,
+    floor_label_set = function(a)
+      assert(type(a.text) == "string" and #a.text >= 1 and #a.text <= 6, "floor label length: " .. tostring(a.text))
+      assert(a.number == nil or (math.type(a.number) == "integer" and a.number >= 1 and a.number <= 99), "floor number")
+      S.floor_label, S.floor_number = a.text, a.number; return {text = a.text}
+    end,
+    floor_label_clear = function(a) assert(a == nil, "floor_label_clear takes no arguments"); S.floor_label, S.floor_number = nil, nil; return {cleared = true} end,
+    hud_icon_set = function(a)
+      assert((a.icon == nil) ~= (a.image == nil), "exactly one of icon or image")
+      if a.image then assert(S.overrides[a.image], "hud image not registered: " .. a.image) end
+      S.hud_icons[a.id] = {icon = a.icon, image = a.image, blink = a.blink == true}; return {id = a.id}
+    end,
+    hud_icon_remove = function(a) local had = S.hud_icons[a.id] ~= nil; S.hud_icons[a.id] = nil; return {removed = had} end,
   })
   game.audio = wrap("audio", {se_play = function() return {} end})
   game.scripts = wrap("scripts", {register_function = function(def, fn) S.exported = fn; return {id = def.id} end})

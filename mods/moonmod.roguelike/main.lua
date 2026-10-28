@@ -72,6 +72,7 @@ local FLOOR_LABEL = {"I", "II", "III", "WARDEN"}
 local WARDEN_SLOT = 4
 local CHARACTERS = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
 local MODE = "gauntlet"
+local HUD_CACHE_IMAGE = "moonmod/roguelike/hud/cache.png" -- resources/hud/cache.png, the Miracle cache chest
 
 -- Item numbers from Chronicle's item table (ps2/include/itemdata.hpp).
 local ITEM = {bread = 148, water = 146, repair = 177, antidote = 151, holy_water = 152}
@@ -213,6 +214,7 @@ local floor = nil          -- {token, biome, slot, back, cursed, curses, scaled,
 local pending_transition = nil   -- {id, at, tries, why}
 local effects_on = false
 local hud_text = nil
+local hud_native = nil       -- the engine draws the floor label and HUD icons (false: fall back to a text line)
 local choice = nil         -- an open weapon choice: {character, keep, take, pick = 1 keep | 2 take, armed, token}
 
 local function on_route() return run and run.phase == "active" and floor ~= nil and not run.suspended end
@@ -311,16 +313,54 @@ local function update_sheet()
       progress_label = ("Depth " .. run.depth .. " / " .. total_floors()), trees = {"diorama", "eternal"}})
 end
 
+-- The HUD in the game's own art: the floor plate reads "2-3" (a Warden floor keeps the native "Boss") and the floor
+-- card the run's depth ("B6"), a cursed
+-- floor shows a small Curse badge and the chest its Miracle cache pays, and a curse waiting for the next floor
+-- blinks. A Vault needs nothing: the native plate turns purple on a back floor. An engine without these draws a
+-- text line instead.
+local function hud_state()
+  if not (run and run.phase == "active" and floor) or run.suspended then return nil end
+  -- Digits: the game font's capital I reads as a lower-case l.
+  local s = {label = run.slot < WARDEN_SLOT and (run.pos .. "-" .. run.slot) or nil, icons = {}}
+  if floor.cursed then
+    s.icons[#s.icons + 1] = {id = "curse", icon = "curse"}
+    s.icons[#s.icons + 1] = {id = "cache", image = HUD_CACHE_IMAGE}
+  elseif run.next_cursed then
+    s.icons[#s.icons + 1] = {id = "curse", icon = "curse", blink = true}
+  end
+  return s
+end
+
+local function hud_line()
+  if not (run and run.phase == "active" and floor) then return nil end
+  if run.suspended then return "GAUNTLET: OFF ROUTE" end
+  return string.format("GAUNTLET %d-%s%s%s", run.pos, FLOOR_LABEL[run.slot] or "?",
+      floor.cursed and " CURSED" or (floor.back and " VAULT" or ""), run.next_cursed and " NEXT CURSED" or "")
+end
+
 local function update_hud()
-  local text = nil
-  if run and run.phase == "active" and floor then
-    if run.suspended then text = "GAUNTLET: OFF ROUTE"
+  local s = hud_state()
+  local key = s and ((s.label or "-") .. "|" .. run.depth .. "|" .. #s.icons .. "|" .. tostring(s.icons[1] and s.icons[1].blink)) or ""
+  if hud_native ~= false then
+    if key == hud_text then return end
+    hud_text = key
+    local err
+    if not (game.render.floor_label_set and game.render.hud_icon_set) then err = {code = "unsupported"}
+    elseif s and s.label then _, err = call(game.render.floor_label_set, {text = s.label, number = math.min(99, run.depth)})
+    else _, err = call(game.render.floor_label_clear) end
+    if err and (err.code == "unsupported" or err.code == "not_found") then hud_native = false; hud_text = nil
     else
-      text = string.format("GAUNTLET %d-%s%s%s", run.pos, FLOOR_LABEL[run.slot] or "?",
-          floor.cursed and " CURSED" or (floor.back and " VAULT" or ""), run.next_cursed and " NEXT CURSED" or "")
+      hud_native = true
+      local wanted = {}
+      for _, icon in ipairs(s and s.icons or {}) do
+        wanted[icon.id] = true
+        try(game.render.hud_icon_set, {id = icon.id, icon = icon.icon, image = icon.image, blink = icon.blink})
+      end
+      for _, id in ipairs({"curse", "cache"}) do if not wanted[id] then try(game.render.hud_icon_remove, {id = id}) end end
+      return
     end
   end
-  if choice then text = nil end -- the weapon choice needs the room
+  local text = not choice and hud_line() or nil -- the weapon choice needs the room
   if text == hud_text then return end
   hud_text = text
   if text then try(game.render.layer_register, {id = "gauntlet", text = text})
@@ -1118,6 +1158,8 @@ local _, bind_err = call(game.input.bind, {id = "curse_key", keys = {setting("cu
 if bind_err then moonmod.log("warn", "bind curse_key: " .. errmsg(bind_err)) end
 call(game.input.bind, {id = "curse_pad_l1", keys = {"Gamepad:leftshoulder"}})
 call(game.input.bind, {id = "curse_pad_back", keys = {"Gamepad:back"}})
+-- The HUD's cache chest: our own art, under a game path the engine draws HUD icons from.
+call(game.resources.override, {path = "resources/hud/cache.png", game_path = HUD_CACHE_IMAGE})
 -- The weapon choice reads these only while its context is on top.
 call(game.input.bind, {id = "choice_prev", context = "choice", keys = {"Gamepad:leftshoulder", "Left"}})
 call(game.input.bind, {id = "choice_next", context = "choice", keys = {"Gamepad:rightshoulder", "Right"}})

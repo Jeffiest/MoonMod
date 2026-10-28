@@ -577,10 +577,10 @@ index 00000000..8c2f7839
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..186efbf6
+index 00000000..1371942a
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,159 @@
 +#pragma once
 +
 +#include <string>
@@ -619,6 +619,27 @@ index 00000000..186efbf6
 +    int    number = -1; // trailing number of the label ("LV5" -> 5), drawn left of the bar
 +};
 +std::vector<ChronicleHudBar> ChronicleHudBars();
++
++/**
++ * A mod's HUD icon (render.hud_icon_set): a native status badge (0 freeze, 1 stamina, 2 poison, 3 curse, 4 goo) or a
++ * png behind a native resource override, drawn beside the key and floor plate; blinking ones pulse.
++ */
++struct ChronicleHudIcon {
++    int         native = -1;
++    std::string image;
++    bool        blink = false;
++};
++std::vector<ChronicleHudIcon> ChronicleHudIcons();
++
++/**
++ * The text a mod put on the floor plate in place of its number (render.floor_label_set), or empty.
++ */
++std::string ChronicleFloorLabel();
++
++/**
++ * The number a mod gave the floor card ("B3") with its label, or 0 for the native one.
++ */
++int ChronicleFloorNumber();
 +// Pad buttons a mod has hidden from the game (input.block_native), as PAD_* bits.
 +int ChronicleBlockedNativeButtons();
 +bool ChronicleLoadMonsterModelForMod(dc::game::CMonstorUnit *unit, int native_model_no, int *out_slot);
@@ -2968,6 +2989,30 @@ index f377d189..c5fd0408 100644
  
      if (motion_no < 0) {
          return;
+diff --git a/port/src/game/collisiondata.cpp b/port/src/game/collisiondata.cpp
+index de785f39..ec46e49c 100644
+--- a/port/src/game/collisiondata.cpp
++++ b/port/src/game/collisiondata.cpp
+@@ -21,6 +21,7 @@
+ #include "rect.hpp"
+ #include "snd.hpp"
+ #include "userstatus.hpp"
++#include "moonmod/chronicle_adapter.hpp"
+ 
+ namespace dc::game {
+ 
+@@ -617,6 +618,11 @@ void StartMessageDraw(CTexture *texture, int dungeon, int floor, int ura, int al
+         floor = BtGetFloorLevel(floor - 1);
+     }
+ 
++    // MoonMod: a mod's floor number (render.floor_label_set) on the card, in the card's own digits.
++    if (const int mod_number = moonmod::ChronicleFloorNumber(); mod_number > 0) {
++        floor = mod_number;
++    }
++
+     if (floor < 10) {
+         x -= 0x13;
+         const int ones_x = floor % 10 * 0x26;
 diff --git a/port/src/game/dataread.cpp b/port/src/game/dataread.cpp
 index 370281e3..e59c1aef 100644
 --- a/port/src/game/dataread.cpp
@@ -7250,22 +7295,31 @@ index 65af951a..d32264b7 100644
      {300,  150 },
      {300,  150 },
 diff --git a/port/src/game/shot_freefuncs.cpp b/port/src/game/shot_freefuncs.cpp
-index 73f3aac2..75c0e756 100644
+index 73f3aac2..85a858cc 100644
 --- a/port/src/game/shot_freefuncs.cpp
 +++ b/port/src/game/shot_freefuncs.cpp
-@@ -40,6 +40,11 @@
+@@ -7,6 +7,7 @@
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdlib>
+ #include <format>
+ #include <numbers>
+ #include <print>
+@@ -40,6 +41,12 @@
  #include "snd.hpp"
  #include "texture.hpp"
  #include "userstatus.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
++#include "moonmod/item_icon_override.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "ui/framework.hpp"
 +#include "monstorunit.hpp"
  
  namespace dc::game {
  
-@@ -52,7 +57,6 @@ namespace {
+@@ -52,7 +59,6 @@ namespace {
  /**
   * Number of floors in each dungeon.
   */
@@ -7273,7 +7327,7 @@ index 73f3aac2..75c0e756 100644
  
  /**
   * Number of ripple slots on the water.
-@@ -135,9 +139,9 @@ int CheckHealingWater() {
+@@ -135,9 +141,9 @@ int CheckHealingWater() {
  
      sceVu0CopyVector(position, CharaMain.pos);
  
@@ -7286,7 +7340,7 @@ index 73f3aac2..75c0e756 100644
  
              if (parts_no != -1) {
                  CDungeonParts *part = &NowDngMap->parts[parts_no];
-@@ -197,7 +201,7 @@ int CheckHealZone() {
+@@ -197,7 +203,7 @@ int CheckHealZone() {
  
      const int column = static_cast<int>((80.0f + position[0]) / 160.0f);
      const int row = static_cast<int>((80.0f + position[2]) / 160.0f);
@@ -7295,7 +7349,7 @@ index 73f3aac2..75c0e756 100644
  
      if (parts_no == MAP_PARTS_NONE) {
          return 0;
-@@ -367,7 +371,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -367,7 +373,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
  
      sceVu0CopyVector(player, CharaMain.pos);
  
@@ -7304,7 +7358,7 @@ index 73f3aac2..75c0e756 100644
          if (NowMonstorUnit->monster[monster_no].state == -1) {
              continue;
          }
-@@ -381,7 +385,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -381,7 +387,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
      }
  
      if (map_no != 5) {
@@ -7313,7 +7367,7 @@ index 73f3aac2..75c0e756 100644
  
          if (UserStatus->cur_floor < floors - 1) {
              BtBattleMusic_Excg(nearest, &bgm_volume, &ambient_volume);
-@@ -624,6 +628,53 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -624,6 +630,53 @@ void topStatusInfo(int y, int selected_item, int floor) {
          set2DSprite(Vif1Packet, icons, CRect_i_(full_drops * 0x12 + 0x33, y + 0x22, 0x10, 0x14), CRect_i_((3 - static_cast<int>(static_cast<float>(leftover) / 2.5f)) * 16, 0x48, 0x10, 0x14), 0x50);
      }
  
@@ -7367,7 +7421,67 @@ index 73f3aac2..75c0e756 100644
      static float popupYRate = -PI;
      popupYRate += 0.20943952f;
  
-@@ -872,6 +923,12 @@ void BtMapJumpCashClear() {
+@@ -682,7 +735,28 @@ void topStatusInfo(int y, int selected_item, int floor) {
+ 
+     int last_floor = maxFloorTbl__3[georama];
+ 
+-    if (floor + 1 == last_floor) {
++    // A mod's label (render.floor_label_set) takes the number's place, lettered like it and shrunk to fit.
++    if (const std::string label = moonmod::ChronicleFloorLabel(); !label.empty()) {
++        ui::TextStyle style;
++        style.align = ui::Alignment::Center;
++        style.drop_shadow = false;
++        style.use_custom_rgb = true;
++        style.fill_r = 250;
++        style.fill_g = 244;
++        style.fill_b = 226;
++        style.outline_width = 1.5f;
++        style.outline_r = 72;
++        style.outline_g = 40;
++        style.outline_b = 18;
++        style.scale = 0.86f;
++        ui::Label plate_label(label, ui::ColorWhite, ui::Alignment::Center, false, style.scale);
++        plate_label.SetStyle(style);
++        constexpr int kPlateNumberWidth = 0x24;
++        if (const int width = plate_label.GetWidth(); width > kPlateNumberWidth) {
++            plate_label.SetScale(style.scale * static_cast<float>(kPlateNumberWidth) / static_cast<float>(width));
++        }
++        plate_label.DrawCenteredInRect(0x23C, y + 0x11, 0x26, 0x13);
++    } else if (floor + 1 == last_floor) {
+         set2DSprite(Vif1Packet, frame, CRect_i_(0x23C, y + 0x12, 0x26, 0x11), CRect_i_(0x78, 0x9E, 0x26, 0x12));
+     } else {
+         const int x = floor + 1 >= 10 ? 0x245 : 0x23F;
+@@ -696,6 +770,29 @@ void topStatusInfo(int y, int selected_item, int floor) {
+         set2DSprite(Vif1Packet, frame, CRect_i_(x + 9, number_y, 0xE, 0x11), CRect_i_((floor + 1) % 10 * 12, 0x9E, 0xC, 0x12));
+     }
+ 
++    // Mod HUD icons (render.hud_icon_set) in a row left of the key: native status badges at half size, or a
++    // mod's own 32x32 png at 22x22. A blinking one pulses.
++    static int hud_icon_pulse = 0;
++    hud_icon_pulse = (hud_icon_pulse + 1) % 64;
++    const int pulse_alpha = 0x30 + std::abs(32 - hud_icon_pulse) * 3;
++    int       icon_right = 0x1FA;
++    for (const moonmod::ChronicleHudIcon &icon : moonmod::ChronicleHudIcons()) {
++        const int icon_alpha = icon.blink ? pulse_alpha : 0x80;
++        if (icon.native >= 0 && icon.native < 5) {
++            constexpr std::array<std::array<int, 2>, 5> badge_cells = {{{1, 0}, {0, 1}, {1, 1}, {1, 2}, {0, 2}}};
++            const auto &cell = badge_cells[icon.native];
++            icon_right -= 31;
++            set2DSprite(Vif1Packet, icons, CRect_i_(icon_right, y + 0x0C, 31, 18),
++                        CRect_i_(cell[0] * 62 + 132, cell[1] * 36 + 84, 62, 36), icon_alpha);
++        } else if (CTexture *image = HudImageTexture(icon.image.c_str())) {
++            icon_right -= 22;
++            set2DSprite(Vif1Packet, image, CRect_i_(icon_right, y + 0x0A, 22, 22), CRect_i_(0, 0, 32, 32), icon_alpha);
++        } else {
++            continue;
++        }
++        icon_right -= 3;
++    }
++
+     selected_item *= 40;
+     set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0xFC, y, 0x10, 0x10), CRect_i_(0x4A, 0x48, 0x10, 0x10));
+     set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0x113, y, 0x10, 0x10), CRect_i_(0x5A, 0x48, 0x10, 0x10));
+@@ -872,6 +969,12 @@ void BtMapJumpCashClear() {
  }
  
  int BtMapJumpLoad(char *map_name) {
@@ -7380,7 +7494,7 @@ index 73f3aac2..75c0e756 100644
      int mes_size = 0;
  
      CUserStatus *status = UserStatus;
-@@ -1029,3 +1086,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
+@@ -1029,3 +1132,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
  }
  
  } // namespace dc::game
@@ -8098,10 +8212,10 @@ index 43dfe76a..4d9260b3 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..e3255a04
+index 00000000..2fbfe83c
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,506 @@
+@@ -0,0 +1,510 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -8302,6 +8416,10 @@ index 00000000..e3255a04
 +    {"render.layer_remove", "render", "layer_remove", "render", "content.register", "Remove a HUD text layer owned by this mod."},
 +    {"render.bar_register", "render", "bar_register", "render", "content.register", "Register or update a bounded owner-scoped HUD progress bar."},
 +    {"render.bar_remove", "render", "bar_remove", "render", "content.register", "Remove a HUD progress bar owned by this mod."},
++    {"render.hud_icon_set", "render", "hud_icon_set", "render", "content.register", "Show or update a HUD icon beside the floor plate: a native status badge or a png."},
++    {"render.hud_icon_remove", "render", "hud_icon_remove", "render", "content.register", "Remove a HUD icon owned by this mod."},
++    {"render.floor_label_set", "render", "floor_label_set", "render", "content.register", "Show up to six characters on the floor plate in place of its number."},
++    {"render.floor_label_clear", "render", "floor_label_clear", "render", "content.register", "Give the floor plate its number back."},
 +    {"render.camera_get", "render", "camera_get", "any", "game.read", "Read the active dungeon camera pose."},
 +    {"render.camera_set", "render", "camera_set", "render", "game.write", "Set bounded distance, height, or angle on the active dungeon follow camera."},
 +    {"text.get", "text", "get", "any", "game.read", "Read a game message by its language-file key, and whether a mod, the language file or the disc gives it."},
@@ -9147,10 +9265,10 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..55cd3899
+index 00000000..730769f1
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9807 @@
+@@ -0,0 +1,9938 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -16862,6 +16980,116 @@ index 00000000..55cd3899
 +            {}};
 +}
 +
++// HUD icons and the floor plate's label (render.hud_icon_set, render.floor_label_set): drawn by the dungeon HUD beside
++// the key and floor plate (topStatusInfo), in the game's own art.
++constexpr std::size_t                     kMaximumHudIcons = 6;
++constexpr std::size_t                     kMaximumFloorLabel = 6;
++constexpr std::array<std::string_view, 5> kNativeHudIcons = {"freeze", "stamina", "poison", "curse", "goo"};
++
++struct HudIconRecord {
++    std::string owner;
++    int         native = -1;
++    std::string image;
++    bool        blink = false;
++};
++std::map<std::string, HudIconRecord, std::less<>> g_hud_icons;
++std::string                                       g_floor_label_owner;
++std::string                                       g_floor_label;
++int                                               g_floor_number = 0; // 0: the native number
++
++ApiCallResult SetHudIcon(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("id") ||
++        !args[0]["id"].is_string()) {
++        return Invalid("expected {id = local_id, icon = native icon name | image = png game path, blink = optional boolean}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "id" && field.key() != "icon" && field.key() != "image" && field.key() != "blink") {
++            return Invalid("render.hud_icon_set accepts only id, icon, image, and blink");
++        }
++    }
++    std::string id;
++    if (!QualifyModContentId(mod_id, request["id"].get_ref<const std::string &>(), id, "hud icon")) {
++        return Invalid("id must be a local identifier owned by this mod");
++    }
++    const bool has_icon = request.contains("icon");
++    const bool has_image = request.contains("image");
++    if (has_icon == has_image) return Invalid("give exactly one of icon (a native icon name) or image (a png game path)");
++    HudIconRecord record{std::string(mod_id)};
++    if (has_icon) {
++        const auto found = request["icon"].is_string()
++                               ? std::ranges::find(kNativeHudIcons, request["icon"].get_ref<const std::string &>())
++                               : kNativeHudIcons.end();
++        if (found == kNativeHudIcons.end()) return Invalid("icon must be freeze, stamina, poison, curse, or goo");
++        record.native = static_cast<int>(found - kNativeHudIcons.begin());
++    } else {
++        if (!request["image"].is_string()) return Invalid("image must be a png game path");
++        const std::string &image = request["image"].get_ref<const std::string &>();
++        if (image.size() < 5 || image.size() > 240 || !image.ends_with(".png")) return Invalid("image must be a png game path");
++        if (!NativeResourceOverrideOwnedBy(mod_id, image)) {
++            return Failed("image must be a game path this mod registered with resources.override");
++        }
++        record.image = image;
++    }
++    if (request.contains("blink")) {
++        if (!request["blink"].is_boolean()) return Invalid("blink must be a boolean");
++        record.blink = request["blink"].get<bool>();
++    }
++    const auto existing = g_hud_icons.find(id);
++    if (existing != g_hud_icons.end() && existing->second.owner != mod_id) return Invalid("hud icon is owned by another mod");
++    if (existing == g_hud_icons.end() && g_hud_icons.size() >= kMaximumHudIcons) {
++        return Failed("the HUD holds at most six mod icons");
++    }
++    g_hud_icons[id] = std::move(record);
++    return {ApiCallStatus::Ok, {{"id", id}, {"status", "set"}}, {}};
++}
++
++ApiCallResult RemoveHudIcon(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 || !args[0].contains("id") ||
++        !args[0]["id"].is_string()) {
++        return Invalid("expected {id = local_id}");
++    }
++    std::string id;
++    if (!QualifyModContentId(mod_id, args[0]["id"].get_ref<const std::string &>(), id, "hud icon")) {
++        return Invalid("id must be a local identifier owned by this mod");
++    }
++    const auto existing = g_hud_icons.find(id);
++    const bool removed = existing != g_hud_icons.end() && existing->second.owner == mod_id;
++    if (removed) g_hud_icons.erase(existing);
++    return {ApiCallStatus::Ok, {{"id", id}, {"removed", removed}}, {}};
++}
++
++ApiCallResult SetFloorLabel(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("text") ||
++        !args[0]["text"].is_string() || args[0].size() > (args[0].contains("number") ? 2u : 1u)) {
++        return Invalid("expected {text = up to six characters, number = optional floor number 1-99}");
++    }
++    int number = 0;
++    if (args[0].contains("number") && !ReadBoundedInt(args[0], "number", 1, 99, number)) {
++        return Invalid("number must be an integer from 1 to 99");
++    }
++    const std::string text = args[0]["text"].get<std::string>();
++    if (text.empty() || text.size() > kMaximumFloorLabel || !IsDebugOverlayText(text)) {
++        return Invalid("text must be 1 to 6 supported characters");
++    }
++    if (!g_floor_label_owner.empty() && g_floor_label_owner != mod_id) return Failed("another mod labels the floor plate");
++    g_floor_label_owner = std::string(mod_id);
++    g_floor_label = text;
++    g_floor_number = number;
++    return {ApiCallStatus::Ok, {{"text", text}, {"number", number}}, {}};
++}
++
++ApiCallResult ClearFloorLabel(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || !args.empty()) return Invalid("render.floor_label_clear takes no arguments");
++    const bool owned = g_floor_label_owner == mod_id;
++    if (owned) {
++        g_floor_label_owner.clear();
++        g_floor_label.clear();
++        g_floor_number = 0;
++    }
++    return {ApiCallStatus::Ok, {{"cleared", owned}}, {}};
++}
++
 +ApiCallResult RemoveRenderBar(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 ||
 +        !args[0].contains("id") || !args[0]["id"].is_string()) {
@@ -18173,6 +18401,10 @@ index 00000000..55cd3899
 +    if (operation.path == "render.layer_remove") return RemoveRenderLayer(mod_id, args);
 +    if (operation.path == "render.bar_register") return RegisterRenderBar(mod_id, args);
 +    if (operation.path == "render.bar_remove") return RemoveRenderBar(mod_id, args);
++    if (operation.path == "render.hud_icon_set") return SetHudIcon(mod_id, args);
++    if (operation.path == "render.hud_icon_remove") return RemoveHudIcon(mod_id, args);
++    if (operation.path == "render.floor_label_set") return SetFloorLabel(mod_id, args);
++    if (operation.path == "render.floor_label_clear") return ClearFloorLabel(mod_id, args);
 +    if (operation.path == "debug.overlay_register") return RegisterDebugOverlay(mod_id, args);
 +    return {ApiCallStatus::Unsupported, nullptr, "this Chronicle adapter does not implement the operation"};
 +}
@@ -18258,6 +18490,13 @@ index 00000000..55cd3899
 +int ChronicleBlockedNativeButtons() {
 +    return SharedRuntime().Frame() <= g_native_block_until ? g_native_block_mask : 0;
 +}
++std::vector<ChronicleHudIcon> ChronicleHudIcons() {
++    std::vector<ChronicleHudIcon> icons;
++    for (const auto &[id, icon] : g_hud_icons) icons.push_back({icon.native, icon.image, icon.blink});
++    return icons;
++}
++std::string ChronicleFloorLabel() { return g_floor_label; }
++int ChronicleFloorNumber() { return g_floor_number; }
 +std::vector<ChronicleHudBar> ChronicleHudBars() {
 +    std::vector<ChronicleHudBar> bars;
 +    for (const auto &[id, overlay] : g_debug_overlays) {
@@ -18773,6 +19012,10 @@ index 00000000..55cd3899
 +    config.api_capabilities.push_back({"render.layer_remove", true, {}});
 +    config.api_capabilities.push_back({"render.bar_register", true, {}});
 +    config.api_capabilities.push_back({"render.bar_remove", true, {}});
++    config.api_capabilities.push_back({"render.hud_icon_set", true, {}});
++    config.api_capabilities.push_back({"render.hud_icon_remove", true, {}});
++    config.api_capabilities.push_back({"render.floor_label_set", true, {}});
++    config.api_capabilities.push_back({"render.floor_label_clear", true, {}});
 +    for (const char *path : {"input.bind", "input.unbind", "input.state", "input.consume", "input.axis", "input.wheel_mode_set", "input.block_native",
 +                             "input.context_push", "input.context_pop", "input.context_get"}) {
 +        config.api_capabilities.push_back({path, true, {}});
@@ -18831,6 +19074,12 @@ index 00000000..55cd3899
 +        RestoreMonsterScalesByOwner(mod_id);
 +        DespawnOwnedChronicleActors(mod_id);
 +        std::erase_if(g_debug_overlays, [mod_id](const auto &entry) { return entry.second.owner == mod_id; });
++        std::erase_if(g_hud_icons, [mod_id](const auto &entry) { return entry.second.owner == mod_id; });
++        if (g_floor_label_owner == mod_id) {
++            g_floor_label_owner.clear();
++            g_floor_label.clear();
++            g_floor_number = 0;
++        }
 +        RemoveTitleModesByOwner(mod_id);
 +    };
 +    ConfigureAudioApi(config);
@@ -19811,10 +20060,10 @@ index 00000000..e1ce090f
 +}
 diff --git a/port/src/moonmod/item_icon_override.cpp b/port/src/moonmod/item_icon_override.cpp
 new file mode 100644
-index 00000000..8811e78d
+index 00000000..4457ee49
 --- /dev/null
 +++ b/port/src/moonmod/item_icon_override.cpp
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,138 @@
 +#include "moonmod/item_icon_override.hpp"
 +
 +#include <cstdio>
@@ -19912,12 +20161,53 @@ index 00000000..8811e78d
 +}
 +
 +// RetCTex (item_icon3d.cpp) asks ItemIconOverrideTexture first, so a mod's own icon wins.
++
++namespace {
++
++std::map<std::string, ModIcon> g_hud_images;
++
++} // namespace
++
++CTexture *HudImageTexture(const char *game_path) {
++    if (game_path == nullptr || game_path[0] == 0) return nullptr;
++    ModIcon &icon = g_hud_images[game_path];
++    if (icon.failed) return nullptr;
++    if (icon.texture && PortKeyLive(icon.key)) return icon.texture.get();
++    const auto file = moonmod::FindNativeResourceOverride(game_path);
++    int                  width = 0;
++    int                  height = 0;
++    std::vector<uint8_t> rgba;
++    if (!file || !imagefile::LoadPng(*file, width, height, rgba) || width <= 0 || height <= 0) {
++        std::fprintf(stderr, "hud icon: cannot read %s\n", game_path);
++        icon.failed = true;
++        return nullptr;
++    }
++    PortDecodedTexture decoded;
++    decoded.width = kIconSize;
++    decoded.height = kIconSize;
++    decoded.format = gfx::TextureFormat::Rgba8;
++    decoded.has_alpha = true;
++    decoded.levels.push_back(width == kIconSize && height == kIconSize
++                                 ? std::move(rgba)
++                                 : LocalizeResample(rgba.data(), width, height, kIconSize, kIconSize));
++    icon.key = PortCreateTexture(decoded, PortTextureOwner::Other, nullptr);
++    if (icon.key == 0) return nullptr; // no renderer yet; asked again next time
++    auto texture = std::make_unique<CTexture>();
++    texture->block = -1;
++    texture->width = kIconSize;
++    texture->height = kIconSize;
++    texture->bpp = 4;
++    std::snprintf(texture->name, sizeof texture->name, "hud icon");
++    texture->tex0 = Tex0(icon.key, kIconSize / 64 + 1, SCE_GS_PSMCT32, 5, 5);
++    icon.texture = std::move(texture);
++    return icon.texture.get();
++}
 diff --git a/port/src/moonmod/item_icon_override.hpp b/port/src/moonmod/item_icon_override.hpp
 new file mode 100644
-index 00000000..98b2b8e8
+index 00000000..12ea4260
 --- /dev/null
 +++ b/port/src/moonmod/item_icon_override.hpp
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,16 @@
 +#pragma once
 +
 +namespace dc::game {
@@ -19930,6 +20220,10 @@ index 00000000..98b2b8e8
 +
 +/// The texture of an item's mod icon, read on first use; null where it has none or the file is unusable.
 +dc::game::CTexture *ItemIconOverrideTexture(int item_no);
++
++/// A HUD icon's texture (render.hud_icon_set with an image): the PNG behind the native resource override at
++/// `game_path`, drawn whole into a 32x32 cell; read on first use, null where the file is missing or unusable.
++dc::game::CTexture *HudImageTexture(const char *game_path);
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
 index 00000000..7244d8bf
@@ -33690,10 +33984,10 @@ index 00000000..4ac4f6c9
 +}
 diff --git a/port/src/tests/moonmod_debug_inspect_test.cpp b/port/src/tests/moonmod_debug_inspect_test.cpp
 new file mode 100644
-index 00000000..06b10869
+index 00000000..467a995d
 --- /dev/null
 +++ b/port/src/tests/moonmod_debug_inspect_test.cpp
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,222 @@
 +#include <gtest/gtest.h>
 +
 +#include <memory>
@@ -33844,6 +34138,77 @@ index 00000000..06b10869
 +    ASSERT_EQ(removed.status, moonmod::ApiCallStatus::Ok) << removed.message;
 +    EXPECT_TRUE(removed.value.at("removed").get<bool>());
 +    EXPECT_TRUE(moonmod::ChronicleDebugOverlayText().empty());
++}
++
++TEST(MoonModRenderApi, SetsHudIconsAndTheFloorPlateLabel) {
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleApi(config);
++    const auto *icon_set = moonmod::FindApiOperation("render.hud_icon_set");
++    const auto *icon_remove = moonmod::FindApiOperation("render.hud_icon_remove");
++    const auto *label_set = moonmod::FindApiOperation("render.floor_label_set");
++    const auto *label_clear = moonmod::FindApiOperation("render.floor_label_clear");
++    ASSERT_NE(icon_set, nullptr);
++    ASSERT_NE(icon_remove, nullptr);
++    ASSERT_NE(label_set, nullptr);
++    ASSERT_NE(label_clear, nullptr);
++
++    constexpr std::string_view owner = "test.moonmod.hud-icons";
++    struct Cleanup {
++        moonmod::RuntimeConfig &config;
++        ~Cleanup() { if (config.api_owner_unloaded) config.api_owner_unloaded("test.moonmod.hud-icons"); }
++    } cleanup{config};
++
++    // A native badge, blinking.
++    const moonmod::ApiCallResult curse = config.api_handler(
++        owner, *icon_set, moonmod::Json::array({{{"id", "curse"}, {"icon", "curse"}, {"blink", true}}}));
++    ASSERT_EQ(curse.status, moonmod::ApiCallStatus::Ok) << curse.message;
++    auto icons = moonmod::ChronicleHudIcons();
++    ASSERT_EQ(icons.size(), 1u);
++    EXPECT_EQ(icons[0].native, 3);
++    EXPECT_TRUE(icons[0].blink);
++
++    // Unknown badges, both kinds at once, and a png the mod never registered are refused.
++    EXPECT_EQ(config.api_handler(owner, *icon_set, moonmod::Json::array({{{"id", "x"}, {"icon", "sparkle"}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(config.api_handler(owner, *icon_set,
++                                 moonmod::Json::array({{{"id", "x"}, {"icon", "curse"}, {"image", "hud/x.png"}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(config.api_handler(owner, *icon_set, moonmod::Json::array({{{"id", "x"}, {"image", "hud/chest.png"}}})).status,
++              moonmod::ApiCallStatus::Failed);
++    EXPECT_EQ(moonmod::ChronicleHudIcons().size(), 1u);
++
++    const moonmod::ApiCallResult removed = config.api_handler(owner, *icon_remove, moonmod::Json::array({{{"id", "curse"}}}));
++    ASSERT_EQ(removed.status, moonmod::ApiCallStatus::Ok) << removed.message;
++    EXPECT_TRUE(removed.value.at("removed").get<bool>());
++    EXPECT_TRUE(moonmod::ChronicleHudIcons().empty());
++
++    // The floor plate: one owner at a time, six characters at most.
++    ASSERT_EQ(config.api_handler(owner, *label_set, moonmod::Json::array({{{"text", "2-III"}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::ChronicleFloorLabel(), "2-III");
++    EXPECT_EQ(moonmod::ChronicleFloorNumber(), 0); // the floor card keeps the native number
++    ASSERT_EQ(config.api_handler(owner, *label_set, moonmod::Json::array({{{"text", "2-3"}, {"number", 7}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::ChronicleFloorNumber(), 7);
++    EXPECT_EQ(config.api_handler(owner, *label_set, moonmod::Json::array({{{"text", "2-3"}, {"number", 0}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(config.api_handler("test.moonmod.other", *label_set, moonmod::Json::array({{{"text", "9"}}})).status,
++              moonmod::ApiCallStatus::Failed);
++    EXPECT_EQ(config.api_handler(owner, *label_set, moonmod::Json::array({{{"text", "TOOLONG"}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(moonmod::ChronicleFloorLabel(), "2-3");
++    ASSERT_EQ(config.api_handler(owner, *label_clear, moonmod::Json::array()).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_TRUE(moonmod::ChronicleFloorLabel().empty());
++    EXPECT_EQ(moonmod::ChronicleFloorNumber(), 0);
++
++    // Unloading takes the owner's icons and label away.
++    ASSERT_EQ(config.api_handler(owner, *icon_set, moonmod::Json::array({{{"id", "curse"}, {"icon", "curse"}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    ASSERT_EQ(config.api_handler(owner, *label_set, moonmod::Json::array({{{"text", "1-I"}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    config.api_owner_unloaded(owner);
++    EXPECT_TRUE(moonmod::ChronicleHudIcons().empty());
++    EXPECT_TRUE(moonmod::ChronicleFloorLabel().empty());
 +}
 diff --git a/port/src/tests/moonmod_dungeons_api_test.cpp b/port/src/tests/moonmod_dungeons_api_test.cpp
 new file mode 100644

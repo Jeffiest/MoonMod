@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 84 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 88 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with

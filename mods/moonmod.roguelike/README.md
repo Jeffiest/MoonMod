@@ -24,7 +24,10 @@ from this version on). On an older engine the mod loads, logs that the engine ha
 5. After the fifth Warden, or after a defeat, or if you leave the dungeon (exit, Escape Powder, or **Actions > Abandon
    Run**), you are back on the Gauntlet's title screen. It shows how the last run went.
 
-The top-left HUD line shows the run's state, for example `GAUNTLET 2-III CURSED NEXT CURSED`. During a run, the
+The HUD shows the run in the game's own art. The floor plate reads the biome and floor (`2-3`; a Warden floor keeps
+the native *Boss*), and the card shown on arriving reads the run's depth (*B6*). A cursed floor shows a small Curse
+badge and the chest its Miracle cache pays beside the key; a curse waiting for the next floor blinks its badge. A Vault
+turns the plate purple, as any back floor does. (An engine without HUD icons gets a text line instead.) During a run, the
 Journal's Character page (or the Hub's **K**) shows the run page with the Diorama and Norune Eternal trees, and the
 Mod Manager's Actions tab has Run Status, the Cursed Gate, Heirloom, Gaffer and Abandon Run.
 
@@ -136,7 +139,7 @@ Checked here, without the game's data:
 - `tools/tests/roguelike/test_runs.lua` (Lua 5.4+, or the vendored 5.5) plays whole runs against a fake adapter: a
   five-biome win, Norune Eternal purchases (two pages), unlocks on the next run, the found-weapon choice, absorbing, a broken weapon ending the run, drafting, a retreat, a
   defeat, Abandon, an off-route floor, quitting mid-run, a reload, an engine without title modes, and a start as
-  someone other than Toan, kept through the dungeon entrance and into the next biome. 84 checks.
+  someone other than Toan, kept through the dungeon entrance and into the next biome. 88 checks.
 - `tools/tests/roguelike/test_standalone.lua` loads RPG, Ascension and Dungeon+ against a recording stub, starts a
   session in the middle of a story game and also loads each mod mid-run. It checks that every bonus goes to x1, that
   the run's events reach no game call and store nothing, and that everything comes back after. 38 checks.

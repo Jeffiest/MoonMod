@@ -79,7 +79,8 @@ check(run.phase == "active" and run.depth == 1, "run active at depth 1")
 check(S.hp.xiao == 0 and S.hp.ruby == 0 and S.hp.toan > 0, "undrafted allies start knocked out")
 check((S.items["chronicle:item:177"] or 0) == 2, "starter kit given in the fresh save")
 check(S.monsters[1].exp == 36, "ABS x6 on floor I", S.monsters[1].exp)
-check(S.layers.gauntlet == "GAUNTLET 1-I", "HUD layer", S.layers.gauntlet)
+check(S.floor_label == "1-1" and S.floor_number == 1 and not S.layers.gauntlet and next(S.hud_icons) == nil,
+      "the floor plate reads 1-1 and the card B1, no text line", S.floor_label)
 local intros = 0; for _, t in ipairs(S.toasts) do if t:find("^DIVINE BEAST CAVE I  %(depth") then intros = intros + 1 end end
 check(intros == 1, "the floor intro shows once, though the floor is built after it is reported", intros)
 check(S.sheet and S.sheet.title == "MOON GAUNTLET", "Journal page set")
@@ -88,10 +89,13 @@ check(stock == 1, "Atla pickup gave a Diorama tile", stock)
 S.monsters[1].alive = true; S.kill(S.monsters[1]); S.tick(2)
 S.input_pressed["curse_key"] = true; S.tick(1)
 check(S.storage.run.next_cursed == true, "G toggles the Cursed Gate")
+check(S.hud_icons.curse and S.hud_icons.curse.blink and not S.hud_icons.cache, "a waiting curse blinks its badge")
 S.exit_gate(); run_floor(S, {sweep = true})
 run = S.storage.run
 check(run.slot == 2 and run.depth == 2 and run.kills == 1, "native exit moved the run to floor II", run.slot)
 check(S.modifiers.chest_value == 100, "cursed floor generated with richer chests")
+check(S.floor_label == "1-2" and S.floor_number == 2 and S.hud_icons.curse and not S.hud_icons.curse.blink and S.hud_icons.cache and
+      S.hud_icons.cache.image == "moonmod/roguelike/hud/cache.png", "a cursed floor shows the Curse badge and the cache chest")
 check(#run.drafted == 2, "Golden Atla drafted an ally", #run.drafted)
 local ally = run.drafted[2]
 check(S.hp[ally] == S.max_hp[ally], "the drafted ally is revived", ally .. " " .. S.hp[ally])
@@ -107,6 +111,7 @@ S.exit_gate(); S.tick(20)
 S.reveal_all(); S.tick(30)
 local warden = S.monsters[6]
 check(warden.max_hp >= 40 * 6 and S.bars.warden, "key holder became the Warden with a HUD bar", warden.max_hp)
+check(S.floor_label == nil and next(S.hud_icons) == nil, "the Warden floor keeps the native Boss plate", S.floor_label)
 S.kill(warden); S.tick(2); S.tick(350)
 check(S.dungeon == 1 and S.floor == 17, "Warden death moved the run to Wise Owl Forest", tostring(S.dungeon) .. ":" .. tostring(S.floor))
 S.tick(20)
@@ -122,7 +127,7 @@ check(S.context == "title" and not S.session, "the last Warden ended the session
 check(S.storage.run == false and S.storage.meta.wins == 1, "victory recorded", S.storage.meta.wins)
 check(S.storage.meta.best_depth == 20, "best depth 20", S.storage.meta.best_depth)
 check(S.page().lines[#S.page().lines]:find("CONQUERED"), "title screen shows the last run", S.page().lines[#S.page().lines])
-check(S.tuning == nil and S.layers.gauntlet == nil and S.sheet == nil, "run effects, HUD and Journal page cleared")
+check(S.tuning == nil and S.floor_label == nil and next(S.hud_icons) == nil and S.sheet == nil, "run effects, HUD and Journal page cleared")
 local won = S.storage.meta.shards
 check(won >= 30, "Moon Shards banked", won)
 
@@ -174,7 +179,7 @@ S2.tick(25); S2.input_pressed.choice_ok = true; S2.tick(1)
 check(S2.weapons.toan[found_slot] == nil and S2.equipped.toan == held_slot, "kept the held weapon; the found one is gone")
 check(S2.weapons.toan[held_slot].attack == held_attack + math.floor(found_attack / 4), "and a quarter of its attack went into the held one",
       S2.weapons.toan[held_slot].attack)
-check(not S2.layers.choice_b and S2.layers.gauntlet and #S2.contexts == 0, "the choice closed and the HUD line is back")
+check(not S2.layers.choice_b and S2.floor_label and #S2.contexts == 0, "the choice closed")
 -- a drafted ally switched to an undrafted one bounces back
 local drafted = S2.storage.run.drafted
 local outsider; for _, c in ipairs(S2.party) do local d = false; for _, x in ipairs(drafted) do if x == c then d = true end end; if not d then outsider = c end end
@@ -201,7 +206,7 @@ print("Scenario 5: off route, quit mid-run, reload")
 local S4 = boot({storage = S3.storage})
 start_run(S4); run_floor(S4)
 S4.enter(0, 3); S4.tick(20)
-check(S4.storage.run.suspended == true and S4.layers.gauntlet == "GAUNTLET: OFF ROUTE", "a native floor pauses the run", S4.layers.gauntlet)
+check(S4.storage.run.suspended == true and S4.floor_label == nil, "a native floor pauses the run and the plate shows its number")
 S4.enter(0, 15); S4.tick(20)
 check(S4.storage.run.suspended == false, "back on route resumes it")
 -- the game closes mid-run; on the next start the run counts as a retreat
@@ -217,6 +222,10 @@ local S7 = boot({fail_ops = {["title.mode_register"] = true, ["player.tuning_set
 local warned = false; for _, l in ipairs(S7.log) do if l:find("no title modes") then warned = true end end
 check(warned, "logs that the engine has no title modes")
 check(S7.page() == nil, "no title mode registered")
+-- an engine without the floor label and HUD icons gets the text line
+local S7b = boot({fail_ops = {["render.floor_label_set"] = true, ["render.floor_label_clear"] = true}})
+start_run(S7b); run_floor(S7b)
+check(S7b.layers.gauntlet == "GAUNTLET 1-I", "without HUD icons the run falls back to a text line", S7b.layers.gauntlet)
 
 -- 7. Biome shuffle ---------------------------------------------------------------------------------
 print("Scenario 7: biome shuffle")
