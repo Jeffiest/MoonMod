@@ -2,6 +2,29 @@
 
 Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
 
+## 2026-10-28 — G3 reworked: one weapon each, a broken weapon ends the run
+
+A design change after the G3 headless pass. Each character carries one weapon for the run, and a break ends it.
+Shatter and Sacrifice are gone. A chest weapon opens a choice: keep the held one or take the found one, and the
+other is absorbed into the keeper (25% of its attack, endurance, speed, magic and elements). A weapon for a character
+outside the draft is absorbed into the active weapon. Three cheap Norune Eternal unlocks soften the start: Whetstone
+(+10 durability per rank, 2/4/6), Gaffer's Oil (10% slower wear per rank, 3/6) and Repair Kit (+1 Repair Powder per
+rank, 2/4). Everything now costs 161 shards, and the Eternal page shows six unlocks at a time with *More unlocks*.
+
+Engine: `weapons.equip` now works in a dungeon; for the active character it reloads the model through the native
+character-switch routine. A new `weapons.remove` deletes an unequipped instance. New test
+`MoonModWeaponsApi.EquipsInADungeonWithAModelReloadAndRemovesTheSpare`; the weapon, API and player suites pass (20).
+
+Automated: `test_runs.lua` 83/83 (the Shatter and Sacrifice checks replaced by the choice, absorb, break and unlock
+checks), `test_standalone.lua` 38/38.
+
+In the game (Ruby, DBC I, a test-only mod): a given Crystal Ring equipped mid-floor (the HUD weapon changed, 48/48),
+the old Gold Ring removed; durability set to 0 ended the run, and the title read *Weapon broke in Divine Beast Cave I*.
+The result line had cut off at *+0 shard*, so it no longer says "shards" (the total is on the line above). Both Eternal
+pages draw cleanly on the plate.
+
+Not checked: the choice screen itself, which only a real chest pickup opens.
+
 ## 2026-10-28 — G3 weapons, PAL: headless part done (1 fix); fights need hands
 
 Automated: `test_runs.lua` 69/69 (3 new checks, 2 of them fail without the fix), `test_standalone.lua` 38/38, the

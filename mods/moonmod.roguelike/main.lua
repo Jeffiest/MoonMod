@@ -8,7 +8,7 @@
 -- storage. Leaving the dungeon, a game over or the last Warden brings the player back to the Gauntlet's
 -- title screen.
 --
--- A run is five biomes (Divine Beast Cave, Wise Owl Forest, Shipwreck, Sun & Moon Temple, Moon Sea), each
+-- A run is five biomes (Divine Beast Cave, Wise Owl Forest, Shipwreck, Sun and Moon Temple, Moon Sea), each
 -- three floors and a Warden floor. The mod appends those four floors to each dungeon with dungeons.register,
 -- so the native exit gate carries the player from floor I to II to III to the Warden; the Warden's death
 -- moves the run to the next biome with world.transition.
@@ -18,14 +18,15 @@
 --   Warden        the gate-key holder on the Warden floor grows into a boss with a HUD bar.
 --   Fast ABS      revealed enemies carry several times their ABS, so a weapon builds up inside one run;
 --                 benched drafted allies take a share; found weapons arrive pre-leveled with attachments.
---   Shatter       a weapon about to break bursts (damaging every enemy nearby) and survives, fractured:
---                 a quarter less attack, back to 35% durability. The third time it breaks for real.
+--   One weapon    each character carries one weapon all run. A found weapon means a choice: keep the held one
+--                 or take the new one, and the other is absorbed into it. A weapon that breaks ends the run.
 --   Diorama       Atla, floors and caches give Georama tiles; place them on Journal > Character (Diorama tree)
 --                 for run buffs: Rivers, Windmills + Storehouses, Lamps, Trees, Houses, Carts, Smithies.
 --   Drafting      the run starts solo (the others start knocked out); a Golden Atla drafts and revives an
 --                 ally on floor II of the first and third biome.
 --   Eternal       Moon Shards from every run (kept on defeat) buy the Norune Eternal unlocks: Gaffer's Wagon,
---                 Macho's Forge, Heirloom Vault, Dran's Shrine, Deep Well, Matataki Embassy, Moon Blessing.
+--                 Macho's Forge, Heirloom Vault, Dran's Shrine, Deep Well, Matataki Embassy, Moon Blessing,
+--                 Whetstone, Gaffer's Oil, Repair Kit.
 --
 -- API notes: everything here is a Chronicle adapter operation; calls go through try() so an operation the
 -- running engine lacks fails quietly. Without title modes (an older engine) the mode cannot start.
@@ -127,6 +128,12 @@ local ETERNAL = {
    description = "A second ally is drafted when the run starts."},
   {id = "moon", title = "Moon Blessing", max_rank = 1, costs = {15},
    description = "Every run starts with a random blessing."},
+  {id = "whetstone", title = "Whetstone", max_rank = 3, costs = {2, 4, 6},
+   description = "+10 maximum durability on the starting weapon per rank."},
+  {id = "oil", title = "Gaffer's Oil", max_rank = 2, costs = {3, 6},
+   description = "Weapons wear 10% slower per rank."},
+  {id = "kit", title = "Repair Kit", max_rank = 2, costs = {2, 4},
+   description = "+1 Repair Powder in the starter kit per rank."},
 }
 local ETERNAL_NODE = {}
 for _, n in ipairs(ETERNAL) do ETERNAL_NODE[n.id] = n end
@@ -205,8 +212,8 @@ local frame = 0
 local floor = nil          -- {token, biome, slot, back, cursed, curses, scaled, warden, warden_max, seen, swept, entered, atla}
 local pending_transition = nil   -- {id, at, tries, why}
 local effects_on = false
-local wear_tuned = false   -- player.tuning_set took durability_wear (an engine without it wears at x1)
 local hud_text = nil
+local choice = nil         -- an open weapon choice: {character, keep, take, pick = 1 keep | 2 take, armed, token}
 
 local function on_route() return run and run.phase == "active" and floor ~= nil and not run.suspended end
 local function biome_def(pos) return run and BIOMES[run.biomes[pos]] end
@@ -239,7 +246,7 @@ end
 
 -- Weapon wear: Smithy tiles, Tempered Steel and the Brittle curse.
 local function wear_scale()
-  return clamp((0.88 ^ placed("smithy")) * (blessed("tempered") and 0.75 or 1) * (cursed("brittle") and 2 or 1), 0.25, 4)
+  return clamp((0.88 ^ placed("smithy")) * (0.9 ^ eternal("oil")) * (blessed("tempered") and 0.75 or 1) * (cursed("brittle") and 2 or 1), 0.25, 4)
 end
 
 local function apply_effects()
@@ -270,7 +277,6 @@ local function apply_effects()
     monster_reveal = placed("lamp") >= 2,
   }
   local _, err = call(game.player.tuning_set, tuning)
-  wear_tuned = not err
   if err and err.code ~= "unsupported" then moonmod.log("warn", "tuning: " .. errmsg(err)) end
   effects_on = true
 end
@@ -314,6 +320,7 @@ local function update_hud()
           floor.cursed and " CURSED" or (floor.back and " VAULT" or ""), run.next_cursed and " NEXT CURSED" or "")
     end
   end
+  if choice then text = nil end -- the weapon choice needs the room
   if text == hud_text then return end
   hud_text = text
   if text then try(game.render.layer_register, {id = "gauntlet", text = text})
@@ -381,6 +388,16 @@ end
 local function weapon_instances(id)
   local w = try(game.weapons.get, id)
   return w and type(w.instances) == "table" and w.instances or {}, w
+end
+
+-- One owned weapon instance: {id, slot, level, stats, elements}.
+local function weapon_info(id, character, slot)
+  local w = try(game.weapons.get, id)
+  for _, i in ipairs(w and w.instances or {}) do
+    if i.character == character and i.slot == slot then
+      return {id = id, slot = slot, level = tonumber(i.level) or 0, stats = i.stats or {}, elements = i.elements or {}}
+    end
+  end
 end
 
 -- The equipped weapon of a joined character: {id, slot} (scans the weapons that character can use).
@@ -489,6 +506,8 @@ end
 -- The Gauntlet's title screen is a page the engine draws: heading, up to six lines, up to seven entries.
 local page = "root"          -- "root", "eternal" or "records"
 local eternal_pending = nil  -- the unlock waiting for a second Cross
+local ETERNAL_PER_PAGE = 6   -- a title page holds 7 entries: six unlocks and "More unlocks"
+local eternal_from = 1        -- the first unlock on the Eternal page shown
 local last_result = nil      -- a line about the run that just ended
 local title_ready = false
 local start_run              -- defined below
@@ -514,11 +533,16 @@ end
 
 local function eternal_page()
   local entries = {}
-  for _, n in ipairs(ETERNAL) do
+  for i = eternal_from, math.min(#ETERNAL, eternal_from + ETERNAL_PER_PAGE - 1) do
+    local n = ETERNAL[i]
     local rank = eternal(n.id)
     local label = rank >= n.max_rank and string.format("%s  %d/%d  complete", n.title, rank, n.max_rank) or
         string.format("%s  %d/%d  -  %d shards", n.title, rank, n.max_rank, n.costs[rank + 1])
     entries[#entries + 1] = {id = n.id, label = label, enabled = rank < n.max_rank}
+  end
+  if #ETERNAL > ETERNAL_PER_PAGE then
+    local pages = math.ceil(#ETERNAL / ETERNAL_PER_PAGE)
+    entries[#entries + 1] = {id = "more", label = string.format("More unlocks  (page %d/%d)", (eternal_from - 1) // ETERNAL_PER_PAGE + 1, pages)}
   end
   local lines = {string.format("Moon Shards %d", meta.shards)}
   if eternal_pending then
@@ -587,14 +611,21 @@ moonmod.on("game.title.selected", function(e)
       meta.start_char = CHARACTERS[index % #CHARACTERS + 1]
       save_meta()
       show_page("root", 1)
-    elseif entry == "eternal" then eternal_pending = nil; show_page("eternal", 0)
+    elseif entry == "eternal" then eternal_pending = nil; eternal_from = 1; show_page("eternal", 0)
     elseif entry == "records" then show_page("records", 0)
     end
   elseif page == "eternal" then
     if entry == "back" then eternal_pending = nil; show_page("root", 2); return end
+    if entry == "more" then
+      eternal_pending = nil
+      eternal_from = eternal_from + ETERNAL_PER_PAGE
+      if eternal_from > #ETERNAL then eternal_from = 1 end
+      show_page("eternal", math.min(ETERNAL_PER_PAGE, #ETERNAL - eternal_from + 1))
+      return
+    end
     local n = ETERNAL_NODE[entry]
     if not n then return end
-    local cursor = cursor_of(ETERNAL, entry)
+    local cursor = cursor_of(ETERNAL, entry) - (eternal_from - 1)
     if eternal_pending ~= entry then eternal_pending = entry; show_page("eternal", cursor); return end
     local rank = eternal(entry)
     local cost = n.costs[rank + 1]
@@ -630,7 +661,7 @@ start_run = function()
   for i = 1, math.min(#available, setting("biome_count", 5)) do biomes[i] = available[i] end
   local start = contains(CHARACTERS, meta.start_char) and meta.start_char or "toan"
   run = {active = true, phase = "launch", biomes = biomes, pos = 1, slot = 1, depth = 0, next_cursed = false,
-         stock = {}, diorama = {}, blessings = {}, drafted = {start}, fractures = {}, shards = 0,
+         stock = {}, diorama = {}, blessings = {}, drafted = {start}, shards = 0,
          heirloom_charges = 0, kills = 0, weapons = {}}
   if eternal("embassy") > 0 then
     local others = {}
@@ -663,11 +694,19 @@ local function first_floor_setup()
     if apply_heirloom(start, w) then notes[#notes + 1] = "Heirloom applied" end
     local forged = eternal("macho") > 0 and insert_attachments(selector, eternal("macho")) or 0
     if forged > 0 then notes[#notes + 1] = forged .. " forged attachment" .. (forged == 1 and "" or "s") end
+    local whet = eternal("whetstone") * 10
+    local d = whet > 0 and weapon_info(w.id, start, w.slot)
+    if d then
+      local max = math.floor((tonumber(d.stats.durability) or 0) + whet)
+      try(game.weapons.stats_set, {id = w.id, character = start, slot = w.slot, durability = max})
+      try(game.weapons.durability_set, {id = w.id, character = start, slot = w.slot, durability = max})
+      notes[#notes + 1] = "Whetstone +" .. whet .. " durability"
+    end
   end
   if setting("starter_kit", true) then
     try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 2})
     try(game.items.give, {id = "chronicle:item:" .. ITEM.water, count = 2})
-    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 2})
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 2 + eternal("kit")})
   end
   if eternal("moon") > 0 then bless("Moon Blessing") end
   cache_weapons()
@@ -685,13 +724,14 @@ local function end_run(outcome)
   meta.shards = math.min(SHARD_LIMIT, meta.shards + earned)
   meta.best_depth = math.max(meta.best_depth, depth)
   if outcome == "victory" then meta.wins = meta.wins + 1
-  elseif outcome == "death" then meta.deaths = meta.deaths + 1
+  elseif outcome == "death" or outcome == "broken" then meta.deaths = meta.deaths + 1
   else meta.retreats = meta.retreats + 1 end
   save_meta()
   local b = biome_def(run.pos)
   local where = b and (b.name .. " " .. (FLOOR_LABEL[run.slot] or "")) or "?"
-  local headline = outcome == "victory" and "CONQUERED" or (outcome == "death" and "Fell in " .. where or "Left at " .. where)
-  last_result = string.format("Last run: %s, depth %d, +%d shards", headline, depth, earned):sub(1, 64)
+  local headline = outcome == "victory" and "CONQUERED" or (outcome == "death" and "Fell in " .. where or
+      (outcome == "broken" and "Weapon broke in " .. where or "Left at " .. where))
+  last_result = string.format("Last run: %s, depth %d, +%d", headline, depth, earned):sub(1, 64) -- Moon Shards are on the line above
   run = nil
   floor = nil
   pending_transition = nil
@@ -894,48 +934,132 @@ moonmod.on("game.enemy_defeated", function(e)
   if floor.warden and e.entity and tostring(e.entity) == tostring(floor.warden) then warden_cleared() end
 end)
 
--- Found weapons arrive pre-leveled with attachments ----------------------------------------------------
+-- One weapon each -------------------------------------------------------------------------------------------
+-- Each character carries one weapon for the whole run. A found weapon opens a choice: keep the one in hand or
+-- take the new one; the other is absorbed into the keeper (a quarter of its attack, endurance, speed, magic and
+-- elements). A weapon for someone outside the draft is absorbed into the active character's weapon. A weapon
+-- that breaks ends the run.
+local ABSORB = 0.25
+local STAT_KEYS = {"attack", "endurance", "speed", "magic"}
+local BROKEN = {[257] = true, [299] = true, [314] = true, [331] = true, [347] = true, [363] = true} -- the broken starters
+
+
+-- What `into` becomes after absorbing `from`.
+local function absorbed(into, from)
+  local out = {elem = {}}
+  for _, k in ipairs(STAT_KEYS) do
+    out[k] = math.floor(clamp((tonumber(into.stats[k]) or 0) + (tonumber(from.stats[k]) or 0) * ABSORB, 0, 32767))
+  end
+  for e = 1, 5 do
+    out.elem[e] = math.floor(clamp((tonumber(into.elements[e]) or 0) + (tonumber(from.elements[e]) or 0) * ABSORB, 0, 127))
+  end
+  return out
+end
+
+local function absorb(into_character, into, from_character, from)
+  local s = absorbed(into, from)
+  try(game.weapons.stats_set, {id = into.id, character = into_character, slot = into.slot, attack = s.attack,
+      endurance = s.endurance, speed = s.speed, magic = s.magic, elem = s.elem})
+  try(game.weapons.remove, {id = from.id, character = from_character, slot = from.slot})
+  return s
+end
+
+local function choice_line(tag, chosen, w, s)
+  local d = w.stats
+  return string.format("%s%s LV%d ATK%d MAG%d END%d DUR%d/%d", chosen and "[" or " ", tag .. (chosen and "]" or " "), w.level,
+      s.attack, s.magic, s.endurance, math.floor(tonumber(d.durability_current) or 0), math.floor(tonumber(d.durability) or 0)):sub(1, 48)
+end
+
+local function draw_choice()
+  local k, t = choice.keep, choice.take
+  try(game.render.layer_register, {id = "choice_a", text = ("ONE WEAPON FOR " .. choice.character:upper() .. ": L1/R1 PICK, X KEEPS"):sub(1, 48)})
+  try(game.render.layer_register, {id = "choice_b", text = choice_line("KEEP HELD", choice.pick == 1, k, absorbed(k, t))})
+  try(game.render.layer_register, {id = "choice_c", text = choice_line("TAKE FOUND", choice.pick == 2, t, absorbed(t, k))})
+end
+
+local function open_choice(character, keep, take)
+  choice = {character = character, keep = keep, take = take, pick = 1, armed = frame + 20}
+  local ctx = try(game.input.context_push, {id = "choice"})
+  choice.token = ctx and ctx.token
+  for _, id in ipairs({"choice_prev", "choice_next", "choice_ok"}) do try(game.input.consume, {id = id}) end
+  refresh() -- hides the HUD line to make room
+  draw_choice()
+end
+
+local function close_choice()
+  for _, id in ipairs({"choice_a", "choice_b", "choice_c"}) do try(game.render.layer_remove, {id = id}) end
+  if choice.token then try(game.input.context_pop, {token = choice.token}) end
+  choice = nil
+  refresh()
+end
+
+local function confirm_choice()
+  local c, k, t = choice.character, choice.keep, choice.take
+  if choice.pick == 2 then
+    local ok, err = call(game.weapons.equip, {id = t.id, character = c, slot = t.slot})
+    if not ok then toast("Cannot change weapons right now (" .. errmsg(err) .. "). Try again in a moment.", 180); return end
+    k, t = t, k
+  end
+  local s = absorb(c, k, c, t)
+  run.weapons[c] = {id = k.id, slot = k.slot}
+  save_run()
+  toast(string.format("%s %s the %s weapon and absorbs the other: ATK %d, MAG %d, END %d", title(c), choice.pick == 2 and "takes" or "keeps",
+      choice.pick == 2 and "found" or "held", s.attack, s.magic, s.endurance), 300)
+  close_choice()
+end
+
+local function poll_choice()
+  if not choice then return end
+  try(game.input.block_native, {buttons = {"l1", "r1", "cross"}, frames = 4})
+  try(game.player.invincible, {frames = 30})
+  local prev, nxt = try(game.input.consume, {id = "choice_prev"}), try(game.input.consume, {id = "choice_next"})
+  local ok = try(game.input.consume, {id = "choice_ok"})
+  if (prev and prev.pressed) or (nxt and nxt.pressed) then choice.pick = 3 - choice.pick; draw_choice() end
+  if ok and ok.pressed and frame >= choice.armed then confirm_choice() end
+end
+
+-- A found weapon: pre-leveled, then the choice (or absorbed, if it belongs to someone outside the draft).
 moonmod.on("game.item_picked_up", function(e)
-  if not on_route() or e.kind ~= "weapon" or not setting("preroll_weapons", true) then return end
+  if not on_route() or e.kind ~= "weapon" then return end
   local character = type(e.character) == "number" and CHARACTERS[e.character + 1] or e.character
   if type(character) ~= "string" or type(e.slot) ~= "number" then return end
-  local selector = {id = e.id, character = character, slot = e.slot}
-  local roll = math.random(100)
-  local levels = roll <= 10 and 4 or (roll <= 30 and 3 or (roll <= 60 and 2 or 1))
-  local gained = level_up(selector, levels)
-  local attached = insert_attachments(selector, math.random(100) <= 35 and 2 or 1)
-  if gained > 0 or attached > 0 then
-    toast(string.format("Found weapon: +%d level%s, %d attachment%s", gained, gained == 1 and "" or "s", attached, attached == 1 and "" or "s"), 240)
+  if setting("preroll_weapons", true) then
+    local selector = {id = e.id, character = character, slot = e.slot}
+    local roll = math.random(100)
+    local levels = roll <= 10 and 4 or (roll <= 30 and 3 or (roll <= 60 and 2 or 1))
+    local gained = level_up(selector, levels)
+    local attached = insert_attachments(selector, math.random(100) <= 35 and 2 or 1)
+    if gained > 0 or attached > 0 then
+      toast(string.format("Found weapon: +%d level%s, %d attachment%s", gained, gained == 1 and "" or "s", attached, attached == 1 and "" or "s"), 240)
+    end
   end
+  local found = weapon_info(e.id, character, e.slot)
+  if not found then return end
+  if choice or not contains(run.drafted, character) then
+    local p = try(game.player.get)
+    local w = p and p.weapon
+    local into = w and w.id and weapon_info(w.id, p.character, w.slot)
+    if not into then return end
+    local s = absorb(p.character, into, character, found)
+    toast(string.format("A weapon for %s, who is not in this run: absorbed into %s's. ATK %d, MAG %d, END %d", title(character),
+        title(p.character), s.attack, s.magic, s.endurance), 300)
+    return
+  end
+  local held = equipped_weapon(character)
+  local keep = held and weapon_info(held.id, character, held.slot)
+  if not keep or keep.slot == found.slot then return end
+  open_choice(character, keep, found)
 end)
 
--- Shatter --------------------------------------------------------------------------------------------------
-local function shatter_check(p)
+-- A broken weapon ends the run.
+local function check_break(p)
   local w = p.weapon
-  if not (w and type(w.durability) == "number" and type(w.durability_max) == "number" and w.durability_max > 0) then return end
-  -- The hardest native hit (a charged attack) wears (1.5 - endurance/100) x 3: shatter before one can break it.
-  local worst = math.max(0, 1.5 - (tonumber(w.endurance) or 0) / 100) * 3 * (wear_tuned and wear_scale() or 1)
-  if w.durability > math.max(setting("shatter_threshold", 3), worst) then return end
-  local key = p.character .. ":" .. tostring(w.slot) .. ":" .. tostring(w.item_no)
-  local fractures = tonumber(run.fractures[key]) or 0
-  if fractures >= 2 then return end
-  run.fractures[key] = fractures + 1
-  local damage = math.floor(clamp((tonumber(w.attack) or 10) * 4, 20, 1000000))
-  local hit = 0
-  local found = p.position and try(game.physics.query, {shape = "sphere", center = p.position, radius = setting("shatter_radius", 200)})
-  for _, m in ipairs(found and found.matches or {}) do
-    if try(game.combat.damage, {entity = m.entity, amount = damage}) then hit = hit + 1 end
-  end
-  try(game.player.invincible, {frames = 60})
-  local new_max = math.max(1, math.floor(w.durability_max * 0.75))
-  try(game.weapons.stats_set, {id = w.id, character = p.character, slot = w.slot,
-      attack = math.floor(clamp((tonumber(w.attack) or 0) * 0.75, 1, 32767)), durability = new_max})
-  -- Back to 35%, but clear of the trigger so the next shatter takes real wear.
-  local rest = math.min(new_max, math.max(1, math.floor(new_max * 0.35), math.floor(worst) + 2))
-  try(game.weapons.durability_set, {id = w.id, character = p.character, slot = w.slot, durability = rest})
-  toast(string.format("SHATTER! The burst hits %d enem%s for %d. Fractured (%d/2): -25%% attack%s", hit, hit == 1 and "y" or "ies", damage,
-      fractures + 1, fractures + 1 >= 2 and ". Next break is final" or ""), 360)
+  if run.broken or not w or choice then return end
+  if not (BROKEN[tonumber(w.item_no) or 0] or (tonumber(w.durability) or 1) <= 0) then return end
+  run.broken = true
   save_run()
+  toast(title(p.character) .. "'s weapon broke. The run is over.", 360)
+  queue_transition("end", 180, "weapon broke")
 end
 
 -- Atla: each sphere picked up on a run floor gives a Diorama tile ----------------------------------------
@@ -985,6 +1109,10 @@ local _, bind_err = call(game.input.bind, {id = "curse_key", keys = {setting("cu
 if bind_err then moonmod.log("warn", "bind curse_key: " .. errmsg(bind_err)) end
 call(game.input.bind, {id = "curse_pad_l1", keys = {"Gamepad:leftshoulder"}})
 call(game.input.bind, {id = "curse_pad_back", keys = {"Gamepad:back"}})
+-- The weapon choice reads these only while its context is on top.
+call(game.input.bind, {id = "choice_prev", context = "choice", keys = {"Gamepad:leftshoulder", "Left"}})
+call(game.input.bind, {id = "choice_next", context = "choice", keys = {"Gamepad:rightshoulder", "Right"}})
+call(game.input.bind, {id = "choice_ok", context = "choice", keys = {"Gamepad:a", "Return"}})
 local function poll_input()
   local key = try(game.input.consume, {id = "curse_key"})
   local back = try(game.input.consume, {id = "curse_pad_back"})
@@ -1016,6 +1144,7 @@ end
 moonmod.on("game.session.ended", function(e)
   if not run or not e or e.owner ~= ID then return end
   if run.phase == "victory" then end_run("victory")
+  elseif run.broken then end_run("broken")
   elseif e.reason == "defeat" then end_run("death")
   else end_run("retreat") end
 end)
@@ -1033,9 +1162,10 @@ moonmod.on("game.tick", function(e)
   if not run then return end
   pump_transition()
   poll_input()
-  if run.phase == "active" and floor and not run.suspended and setting("shatter", true) then
+  poll_choice()
+  if run.phase == "active" and floor then
     local p = try(game.player.get)
-    if p then shatter_check(p) end
+    if p then check_break(p) end
   end
   if frame % 15 ~= 0 then return end
   local session = try(game.session.get)
@@ -1103,7 +1233,6 @@ local ACTIONS = {
   {"curse", "Toggle Cursed Gate", "Curse the next floor for a Miracle cache (also G, or L1+Select)"},
   {"page", "Open Run Page", "Journal > Character: the Diorama and Norune Eternal trees"},
   {"diorama_clear", "Clear Diorama", "Take every placed tile back into stock to rearrange"},
-  {"sacrifice", "Sacrifice Spare Weapon", "Status-break a spare +5 weapon into a SynthSphere and feed ABS to your weapon"},
   {"heirloom", "Bank Heirloom", "Spend a Warden charge: keep half your weapon's stats for future runs"},
   {"gaffer_repair", "Gaffer: Repair Powder", "Floor II of each biome with Gaffer's Wagon: 2 Repair Powder"},
   {"gaffer_food", "Gaffer: Bread & Water", "Floor II of each biome with Gaffer's Wagon: 2 Bread, 2 Tasty Water"},
@@ -1126,29 +1255,6 @@ local function gaffer(items, price)
   toast("Gaffer: \"Pleasure doing business!\"  " .. n .. " item" .. (n == 1 and "" or "s") .. " for " .. price .. " Gilda", 240)
 end
 
-local function sacrifice()
-  local p = try(game.player.get)
-  if not p then toast("Load a game first."); return end
-  local best = nil
-  for _, def in ipairs(try(game.weapons.list) or {}) do
-    if type(def) == "table" and def.owner == p.character then
-      for _, inst in ipairs(weapon_instances(def.id)) do
-        if inst.character == p.character and not inst.equipped and (inst.level or 0) >= 5 and (not best or inst.level > best.level) then
-          best = {id = def.id, slot = inst.slot, level = inst.level}
-        end
-      end
-    end
-  end
-  if not best then toast("No spare +5 weapon for " .. title(p.character) .. " (the equipped one cannot be sacrificed)."); return end
-  local done, err = call(game.weapons.synthesize, {id = best.id, character = p.character, slot = best.slot})
-  if not done then toast("Sacrifice failed: " .. errmsg(err)); return end
-  local w = p.weapon
-  if w and w.id then
-    try(game.weapons.abs_add, {id = w.id, character = p.character, slot = w.slot, amount = math.min(32767, best.level * 40)})
-    try(game.weapons.upgrade, {id = w.id, character = p.character, slot = w.slot})
-  end
-  toast("Sacrificed a +" .. best.level .. " weapon: a SynthSphere is in your bag and " .. (best.level * 40) .. " ABS flowed into your weapon.", 360)
-end
 
 local function bank_heirloom()
   if not run or (run.heirloom_charges or 0) < 1 then toast("Heirloom charges come from Wardens once Heirloom Vault is unlocked."); return end
@@ -1181,7 +1287,6 @@ moonmod.on("ui.action", function(a)
         b and b.name or "?", FLOOR_LABEL[run.slot] or "-", run.depth, total_floors(), run.suspended and "OFF ROUTE" or run.phase,
         curses, placed_total(), plots(), #run.blessings, run.kills, run.shards), 600)
   elseif a.id == "curse" then toggle_curse()
-  elseif a.id == "sacrifice" then sacrifice()
   elseif a.id == "heirloom" then bank_heirloom()
   elseif a.id == "gaffer_repair" then gaffer({{ITEM.repair, 2}}, 300)
   elseif a.id == "gaffer_food" then gaffer({{ITEM.bread, 2}, {ITEM.water, 2}}, 240)

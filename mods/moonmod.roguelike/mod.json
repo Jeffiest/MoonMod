@@ -4,7 +4,7 @@
   "name": "Dark Genie's Gauntlet (Roguelike)",
   "version": "0.2.0",
   "author": "Jeffiest",
-  "description": "A roguelike game mode on the title menu. Dark Genie's Gauntlet has its own title screen and its own progress: Start Run begins a fresh game that belongs to no save file and drops you onto the first floor of a forward-only run through five biomes, three floors and a Warden each. Cursed Gates, fast ABS, Shatter, an in-run Diorama, drafted allies and Moon Shards for the Norune Eternal unlocks. Needs the MoonFactory engine with title modes.",
+  "description": "A roguelike game mode on the title menu. Dark Genie's Gauntlet has its own title screen and its own progress: Start Run begins a fresh game that belongs to no save file and drops you onto the first floor of a forward-only run through five biomes, three floors and a Warden each. Cursed Gates, fast ABS, one weapon each (a broken one ends the run), an in-run Diorama, drafted allies and Moon Shards for the Norune Eternal unlocks. Needs the MoonFactory engine with title modes.",
   "framework_api": 1,
   "games": ["chronicle"],
   "entry": "main.lua",
@@ -12,7 +12,7 @@
   "load_after": ["moonmod.dungeon-plus", "moonmod.rpg"],
   "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"],
   "settings": [
-    {"id": "biome_count", "name": "Biomes per run", "type": "integer", "default": 5, "min": 1, "max": 5, "step": 1, "description": "Divine Beast Cave, Wise Owl Forest, Shipwreck, Sun & Moon Temple and Moon Sea, in that order."},
+    {"id": "biome_count", "name": "Biomes per run", "type": "integer", "default": 5, "min": 1, "max": 5, "step": 1, "description": "Divine Beast Cave, Wise Owl Forest, Shipwreck, Sun and Moon Temple and Moon Sea, in that order."},
     {"id": "biome_shuffle", "name": "Shuffle biome order", "type": "boolean", "default": false, "description": "Biomes come in a random order; a late biome rolled early has its enemies and their hits scaled down."},
     {"id": "starter_kit", "name": "Starter kit (food, water, repair)", "type": "boolean", "default": true},
     {"id": "abs_rate", "name": "Weapon ABS multiplier", "type": "integer", "default": 6, "min": 1, "max": 12, "step": 1},
@@ -21,9 +21,6 @@
     {"id": "warden_hp", "name": "Warden HP multiplier", "type": "integer", "default": 6, "min": 2, "max": 20, "step": 1},
     {"id": "curse_hp", "name": "Cursed floor enemy HP (%)", "type": "integer", "default": 160, "min": 100, "max": 300, "step": 10},
     {"id": "preroll_weapons", "name": "Found weapons arrive pre-leveled", "type": "boolean", "default": true},
-    {"id": "shatter", "name": "Shatter instead of breaking", "type": "boolean", "default": true},
-    {"id": "shatter_threshold", "name": "Shatter at durability", "type": "integer", "default": 3, "min": 1, "max": 10, "step": 1, "description": "The lowest durability that shatters. A weapon also shatters once its next charged hit could break it (that depends on its endurance and the run's wear), so this rarely needs raising."},
-    {"id": "shatter_radius", "name": "Shatter burst radius", "type": "integer", "default": 200, "min": 80, "max": 400, "step": 20},
     {"id": "enforce_draft", "name": "Only drafted allies may fight", "type": "boolean", "default": true},
     {"id": "curse_key", "name": "Cursed Gate toggle key", "type": "choice", "default": "G", "choices": ["G", "H", "U", "F7", "F8", "F9"]},
     {"id": "journal_page", "name": "Show the run on Journal > Character", "type": "boolean", "default": true}

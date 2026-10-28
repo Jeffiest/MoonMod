@@ -127,7 +127,7 @@ check(won >= 30, "Moon Shards banked", won)
 -- 2. Norune Eternal from the title screen ----------------------------------------------------------
 print("Scenario 2: Norune Eternal on the title screen")
 S.select("eternal")
-check(entry_ids(S) == "gaffer,macho,vault,shrine,well,embassy,moon", "eternal page lists the unlocks", entry_ids(S))
+check(entry_ids(S) == "gaffer,macho,vault,shrine,well,embassy,more", "eternal page lists the first six unlocks and More", entry_ids(S))
 check(S.page().root == false, "eternal page is a sub-page")
 S.select("gaffer")
 check(S.storage.meta.eternal.gaffer == nil and S.page().lines[2]:find("Gaffer"), "first Cross shows the unlock", S.page().lines[2])
@@ -145,8 +145,8 @@ check(S.page().lines[1]:find("Wins 1"), "records page", S.page().lines[1])
 S.select("done")
 check(entry_ids(S) == "start,character,eternal,records", "back from records")
 
--- 3. Second run: heirloom, forge, gaffer, shatter, sacrifice, retreat ------------------------------
-print("Scenario 3: second run with unlocks, shatter, sacrifice, retreat")
+-- 3. Second run: heirloom, forge, gaffer, a found weapon, retreat ------------------------------
+print("Scenario 3: second run with unlocks, a found weapon, retreat")
 S.storage.meta.heirloom = {attack = 20, endurance = 0, speed = 0, magic = 5, elem = {0, 10, 0, 0, 0}}
 local S2 = boot({storage = S.storage, overrides = {biome_count = 2}})
 start_run(S2)
@@ -158,19 +158,21 @@ S2.exit_gate(); run_floor(S2)
 S2.gilda = 1000
 S2.action("gaffer_repair")
 check(S2.gilda == 700 and S2.last_toast():find("Gaffer"), "Gaffer sells on floor II", S2.last_toast())
-local w = S2.weapons[S2.active][S2.equipped[S2.active]]
-w.durability_f = 2; S2.tick(1)
-check(S2.find_toast("SHATTER") and w.durability_f >= 1, "weapon shattered instead of breaking")
-w.durability_f = 1; S2.tick(1); w.durability_f = 1; S2.tick(1)
-local fr = 0; for _, n in pairs(S2.storage.run.fractures) do fr = math.max(fr, n) end
-check(fr == 2, "a weapon fractures at most twice", fr)
-S2.active = "toan"
-S2.weapons.toan[1] = {item_no = 258, level = 6, abs = 0, attack = 25, endurance = 5, speed = 5, magic = 2, durability = 40, durability_f = 40, elem = {0,0,0,0,0}, attach = {}}
-S2.action("sacrifice")
-check(S2.items.sphere == 1 and S2.weapons.toan[1] == nil, "spare +6 weapon became a SynthSphere", S2.last_toast())
-S2.weapons.toan[5] = {item_no = 258, level = 0, abs = 0, attack = 25, endurance = 5, speed = 5, magic = 2, durability = 40, durability_f = 40, elem = {0,0,0,0,0}, attach = {}}
-S2.emit("game.item_picked_up", {id = "chronicle:weapon:258", kind = "weapon", native_item_no = 258, character = 0, slot = 5})
-check(S2.weapons.toan[5].level >= 1 and #S2.weapons.toan[5].attach >= 1, "found weapon arrived pre-leveled with an attachment")
+-- a found weapon: pre-leveled, then the choice between it and the held one
+local held_slot = S2.equipped.toan
+local held_attack = S2.weapons.toan[held_slot].attack
+local found_slot = S2.pickup_weapon("toan", 259)
+check(S2.weapons.toan[found_slot].level >= 1 and #S2.weapons.toan[found_slot].attach >= 1, "found weapon arrived pre-leveled with an attachment")
+check(S2.layers.choice_b and S2.layers.choice_c and not S2.layers.gauntlet, "the weapon choice opened in place of the HUD line", S2.layers.choice_b)
+check(S2.layers.choice_b:find("^%[KEEP HELD%]"), "the held weapon is picked first", S2.layers.choice_b)
+local found_attack = S2.weapons.toan[found_slot].attack
+S2.input_pressed.choice_ok = true; S2.tick(1)
+check(S2.layers.choice_b, "Cross from the chest does not answer the choice at once")
+S2.tick(25); S2.input_pressed.choice_ok = true; S2.tick(1)
+check(S2.weapons.toan[found_slot] == nil and S2.equipped.toan == held_slot, "kept the held weapon; the found one is gone")
+check(S2.weapons.toan[held_slot].attack == held_attack + math.floor(found_attack / 4), "and a quarter of its attack went into the held one",
+      S2.weapons.toan[held_slot].attack)
+check(not S2.layers.choice_b and S2.layers.gauntlet and #S2.contexts == 0, "the choice closed and the HUD line is back")
 -- a drafted ally switched to an undrafted one bounces back
 local drafted = S2.storage.run.drafted
 local outsider; for _, c in ipairs(S2.party) do local d = false; for _, x in ipairs(drafted) do if x == c then d = true end end; if not d then outsider = c end end
@@ -239,18 +241,52 @@ check(S9.dungeon == 1 and S9.active == "xiao" and not S9.find_toast("not drafted
       tostring(S9.dungeon) .. " " .. S9.active)
 check(not S9.find_toast("off the Gauntlet route") and not S9.storage.run.suspended, "and its entrance is not off route either")
 
--- 9. Shatter comes before the hardest hit can break a weapon ------------------------------------
-print("Scenario 9: Shatter before the hardest hit")
+-- 9. One weapon each: take the found one, an outsider's weapon, a broken weapon ends the run ------------
+print("Scenario 9: one weapon each, and a broken weapon ends the run")
 local S10 = boot()
 start_run(S10)
 run_floor(S10)
-local w10 = S10.weapons[S10.active][S10.equipped[S10.active]]
--- endurance 5: a charged attack wears (1.5 - 0.05) x 3 = 4.35, more than the default threshold of 3
-w10.durability_f = 4.6; S10.tick(1)
-check(not S10.find_toast("SHATTER"), "no shatter while a charged hit cannot break it", w10.durability_f)
-w10.durability_f = 4.3; S10.tick(1)
-check(S10.find_toast("SHATTER"), "shatters once a charged hit could break it, above the threshold of 3")
-check(w10.durability_f > 4.35, "and comes back clear of the next trigger", w10.durability_f)
+local old_slot = S10.equipped.toan
+local old_magic = S10.weapons.toan[old_slot].magic
+local new_slot = S10.pickup_weapon("toan", 260, {magic = 9})
+S10.tick(25); S10.input_pressed.choice_next = true; S10.tick(1)
+check(S10.layers.choice_c and S10.layers.choice_c:find("^%[TAKE FOUND%]"), "R1 picks the found weapon", S10.layers.choice_c)
+S10.input_pressed.choice_ok = true; S10.tick(1)
+check(S10.equipped.toan == new_slot and S10.weapons.toan[old_slot] == nil, "took the found weapon; the held one is gone")
+check(S10.weapons.toan[new_slot].magic == 9 + math.floor(old_magic / 4), "and it absorbed a quarter of the old one",
+      S10.weapons.toan[new_slot].magic)
+check(S10.storage.run.weapons.toan.slot == new_slot, "the run follows the new weapon")
+local attack = S10.weapons.toan[new_slot].attack
+local goro_slot = S10.pickup_weapon("goro", 316, {attack = 40})
+check(S10.weapons.goro[goro_slot] == nil and not S10.layers.choice_b, "a weapon for an undrafted ally is absorbed, no choice")
+check(S10.weapons.toan[new_slot].attack >= attack + 10, "into the active character's weapon", S10.weapons.toan[new_slot].attack)
+S10.weapons.toan[new_slot].durability_f = 0; S10.tick(1)
+check(S10.find_toast("weapon broke"), "a weapon at 0 durability breaks the run", S10.last_toast())
+S10.tick(200)
+check(S10.context == "title" and S10.storage.run == false and S10.storage.meta.deaths == 1, "and ends it as a death")
+check(S10.page().lines[#S10.page().lines]:find("Weapon broke"), "the title says the weapon broke", S10.page().lines[#S10.page().lines])
+-- the broken starter (Broken Dagger) counts too
+start_run(S10); run_floor(S10)
+S10.weapons.toan[S10.equipped.toan].item_no = 257; S10.tick(1)
+check(S10.storage.run.broken == true, "a starter turned into its broken version ends the run")
+S10.tick(200)
+
+-- 10. The durability unlocks and the paged Norune Eternal -----------------------------------------------
+print("Scenario 10: Whetstone, Repair Kit and the Eternal pages")
+S10.storage.meta.eternal.whetstone = 2
+S10.storage.meta.eternal.kit = 1
+local S11 = boot({storage = S10.storage})
+S11.open_title_mode()
+S11.select("eternal")
+local ids = entry_ids(S11)
+check(#S11.page().entries == 7 and ids:find("more$"), "the Eternal page holds six unlocks and More", ids)
+S11.select("more")
+check(entry_ids(S11) == "moon,whetstone,oil,kit,more", "More shows the rest", entry_ids(S11))
+S11.select("back")
+start_run(S11)
+local starter11 = S11.weapons.toan[S11.equipped.toan]
+check(starter11.durability == 30 + 20 and starter11.durability_f == 50, "Whetstone 2/3: +20 durability, full", starter11.durability)
+check((S11.items["chronicle:item:177"] or 0) == 3, "Repair Kit 1/2: a third Repair Powder", S11.items["chronicle:item:177"])
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then

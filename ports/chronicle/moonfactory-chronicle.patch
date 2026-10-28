@@ -8047,10 +8047,10 @@ index 43dfe76a..4d9260b3 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..1487e635
+index 00000000..e3255a04
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,505 @@
+@@ -0,0 +1,506 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -8191,6 +8191,7 @@ index 00000000..1487e635
 +    {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon, optionally with its own model and menu icon."},
 +    {"weapons.give", "weapons", "give", "simulation", "game.write", "Give a native or registered weapon to a compatible character."},
 +    {"weapons.equip", "weapons", "equip", "simulation", "game.write", "Equip a weapon through the game's equipment rules."},
++    {"weapons.remove", "weapons", "remove", "simulation", "game.write", "Remove one owned, unequipped Chronicle weapon instance."},
 +    {"weapons.upgrade", "weapons", "upgrade", "simulation", "game.write", "Upgrade a weapon through supported progression rules."},
 +    {"weapons.stats_set", "weapons", "stats_set", "simulation", "game.write", "Set bounded stats and properties on one owned Chronicle weapon instance."},
 +    {"weapons.durability_set", "weapons", "durability_set", "simulation", "game.write", "Set current durability on one owned Chronicle weapon instance."},
@@ -9095,10 +9096,10 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..03f03f20
+index 00000000..1bc4f823
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9773 @@
+@@ -0,0 +1,9806 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -15289,8 +15290,10 @@ index 00000000..03f03f20
 +
 +    CDngStatusData *status = CurrentStatus();
 +    if (status == nullptr) return Failed("the game has no active save data");
-+    if (mode != GAME_MODE_EDIT || status->cur_floor != -1 || status->cur_georama < 0 || status->cur_georama >= 6) {
-+        return Failed("weapons.equip can change the saved loadout only in an active Georama town");
++    const bool in_town = mode == GAME_MODE_EDIT && status->cur_floor == -1 && status->cur_georama >= 0 && status->cur_georama < 6;
++    const bool in_dungeon = IsActiveDungeonStatus(status);
++    if (!in_town && !in_dungeon) {
++        return Failed("weapons.equip works only in an active Georama town or dungeon");
 +    }
 +
 +    int character_id = status->cur_chara;
@@ -15350,7 +15353,16 @@ index 00000000..03f03f20
 +    }
 +    const int previous_item_no = status->chara_weapons[character_id][previous_slot].item_no;
 +    const bool changed = previous_slot != target_slot;
++    // In a dungeon the active character holds the weapon model: reload it the way a character switch does.
++    const bool reload = changed && in_dungeon && character_id == status->cur_chara;
++    if (reload) {
++        if (BtActStatus.action_on != 0 || BtActStatus.movement_locked != 0) {
++            return Failed("the native game currently prevents changing weapons during this action");
++        }
++        if (g_character_switch_routine == nullptr) return Failed("the native character switch routine is unavailable");
++    }
 +    if (changed) status->equipped_weapon_slot[character_id] = static_cast<s8>(target_slot);
++    if (reload) g_character_switch_routine(character_id, 1);
 +
 +    return {ApiCallStatus::Ok,
 +            {{"id", "chronicle:weapon:" + std::to_string(item_no)}, {"item_no", item_no},
@@ -16912,6 +16924,27 @@ index 00000000..03f03f20
 +            {}};
 +}
 +
++ApiCallResult RemoveWeapon(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected {id = weapon_id, character = optional character_id, slot = optional 0-10}");
++    }
++    CDngStatusData *status = nullptr;
++    WEAPON_HAVE *target = nullptr;
++    int item_no = -1;
++    int character_id = -1;
++    int slot = -1;
++    ApiCallResult error;
++    if (!FindOwnedChronicleWeapon(args[0], status, target, item_no, character_id, slot, error)) return error;
++    if (status->equipped_weapon_slot[character_id] == slot) {
++        return Failed("the equipped weapon cannot be removed; equip another first");
++    }
++    *target = WEAPON_HAVE{};
++    return {ApiCallStatus::Ok,
++            {{"id", WeaponStableId(item_no)}, {"native_item_no", item_no},
++             {"character", kCharacterIds[character_id]}, {"slot", slot}, {"removed", true}},
++            {}};
++}
++
 +ApiCallResult SetWeaponDurability(const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() ||
 +        !args[0].contains("durability") || !args[0]["durability"].is_number()) {
@@ -18013,6 +18046,7 @@ index 00000000..03f03f20
 +    if (operation.path == "weapons.definition_set") return SetWeaponDefinition(mod_id, args);
 +    if (operation.path == "weapons.give") return GiveWeapon(args);
 +    if (operation.path == "weapons.equip") return EquipWeapon(args);
++    if (operation.path == "weapons.remove") return RemoveWeapon(args);
 +    if (operation.path == "weapons.upgrade") return UpgradeWeapon(args);
 +    if (operation.path == "weapons.stats_set") return SetWeaponStats(args);
 +    if (operation.path == "weapons.durability_set") return SetWeaponDurability(args);
@@ -18655,7 +18689,7 @@ index 00000000..03f03f20
 +                             "dungeons.floor_rules_get", "dungeons.floor_rules_set", "dungeons.loot_get", "dungeons.loot_override",
 +                             "dungeons.back_floor_get", "dungeons.back_floor_enter",
 +                             "world.register_dungeon",
-+                             "weapons.list", "weapons.get", "weapons.give", "weapons.register", "weapons.equip", "weapons.upgrade",
++                             "weapons.list", "weapons.get", "weapons.give", "weapons.register", "weapons.equip", "weapons.remove", "weapons.upgrade",
 +                             "weapons.definition_set", "weapons.stats_set", "weapons.durability_set", "weapons.abs_get", "weapons.abs_add", "weapons.attachments_get", "weapons.attachment_insert",
 +                             "weapons.attachment_remove", "weapons.build_up_list", "weapons.build_up_register", "weapons.synthesize",
 +                             "shops.list", "shops.get", "shops.register_item", "shops.remove_item", "shops.set_items", "shops.set_price",
@@ -39481,10 +39515,10 @@ index 00000000..101c783c
 +}
 diff --git a/port/src/tests/moonmod_weapon_api_test.cpp b/port/src/tests/moonmod_weapon_api_test.cpp
 new file mode 100644
-index 00000000..314a5d23
+index 00000000..e1354d61
 --- /dev/null
 +++ b/port/src/tests/moonmod_weapon_api_test.cpp
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,683 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -40093,6 +40127,80 @@ index 00000000..314a5d23
 +    ASSERT_NE(completed_equip, quests.value.at("quests").end());
 +    EXPECT_EQ(completed_equip->at("status"), "completed");
 +    EXPECT_EQ(completed_equip->at("objectives").at(0).at("progress"), 1);
++}
++
++namespace {
++
++int g_weapon_reload_character = -1;
++int g_weapon_reload_flag = -1;
++
++void RecordWeaponReload(int character_id, int reload) {
++    g_weapon_reload_character = character_id;
++    g_weapon_reload_flag = reload;
++}
++
++} // namespace
++
++TEST(MoonModWeaponsApi, EquipsInADungeonWithAModelReloadAndRemovesTheSpare) {
++    CSaveData *previous_save = SaveData;
++    const s32 previous_mode = mode;
++    const s32 previous_dungeon = selectMapNo;
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    CDngStatusData *status = save->GetDngStatus();
++    ASSERT_NE(status, nullptr);
++    status->party_size = 2;
++    status->cur_chara = CHARA_TOAN;
++    status->cur_georama = 0;
++    status->cur_floor = 3;
++    status->chara_weapons[CHARA_TOAN][0].item_no = ITEM_WEAPON_DAGGER;
++    status->chara_weapons[CHARA_TOAN][1].item_no = ITEM_WEAPON_DAGGER + 1;
++    status->equipped_weapon_slot[CHARA_TOAN] = 0;
++    mode = GAME_MODE_DUNGEON;
++    selectMapNo = 0;
++    g_weapon_reload_character = -1;
++    g_weapon_reload_flag = -1;
++    moonmod::SetChronicleCharacterSwitchRoutineForTests(RecordWeaponReload);
++
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleApi(config);
++    const auto *equip = moonmod::FindApiOperation("weapons.equip");
++    const auto *remove = moonmod::FindApiOperation("weapons.remove");
++    ASSERT_NE(equip, nullptr);
++    ASSERT_NE(remove, nullptr);
++    const std::string old_id = "chronicle:weapon:" + std::to_string(ITEM_WEAPON_DAGGER);
++    const std::string new_id = "chronicle:weapon:" + std::to_string(ITEM_WEAPON_DAGGER + 1);
++
++    // The equipped weapon cannot be removed.
++    const moonmod::ApiCallResult equipped_kept = config.api_handler(
++        "test.moonmod.chronicle-weapons", *remove,
++        moonmod::Json::array({moonmod::Json{{"id", old_id}, {"character", "toan"}, {"slot", 0}}}));
++    EXPECT_EQ(equipped_kept.status, moonmod::ApiCallStatus::Failed);
++
++    // Equipping the active character's other weapon in a dungeon reloads its model like a character switch.
++    const moonmod::ApiCallResult swapped = config.api_handler(
++        "test.moonmod.chronicle-weapons", *equip,
++        moonmod::Json::array({moonmod::Json{{"id", new_id}, {"character", "toan"}, {"slot", 1}}}));
++    ASSERT_EQ(swapped.status, moonmod::ApiCallStatus::Ok) << swapped.message;
++    EXPECT_TRUE(swapped.value.value("changed", false));
++    EXPECT_EQ(status->equipped_weapon_slot[CHARA_TOAN], 1);
++    EXPECT_EQ(g_weapon_reload_character, CHARA_TOAN);
++    EXPECT_EQ(g_weapon_reload_flag, 1);
++
++    // The old weapon, now spare, goes.
++    const moonmod::ApiCallResult removed = config.api_handler(
++        "test.moonmod.chronicle-weapons", *remove,
++        moonmod::Json::array({moonmod::Json{{"id", old_id}, {"character", "toan"}, {"slot", 0}}}));
++    ASSERT_EQ(removed.status, moonmod::ApiCallStatus::Ok) << removed.message;
++    EXPECT_TRUE(removed.value.value("removed", false));
++    EXPECT_LT(status->chara_weapons[CHARA_TOAN][0].item_no, ITEM_WEAPON_START);
++    EXPECT_EQ(status->chara_weapons[CHARA_TOAN][1].item_no, ITEM_WEAPON_DAGGER + 1);
++
++    moonmod::SetChronicleCharacterSwitchRoutineForTests(nullptr);
++    selectMapNo = previous_dungeon;
++    mode = previous_mode;
++    SaveData = previous_save;
 +}
 diff --git a/port/src/tests/moonmod_world_flags_api_test.cpp b/port/src/tests/moonmod_world_flags_api_test.cpp
 new file mode 100644

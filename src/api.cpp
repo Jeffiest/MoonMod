@@ -130,6 +130,7 @@ constexpr ApiOperationSpec kApiCatalog[] = {
     {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon and supported behavior."},
     {"weapons.give", "weapons", "give", "simulation", "game.write", "Give a native or registered weapon to a compatible character."},
     {"weapons.equip", "weapons", "equip", "simulation", "game.write", "Equip a weapon through the game's equipment rules."},
+    {"weapons.remove", "weapons", "remove", "simulation", "game.write", "Remove one owned, unequipped Chronicle weapon instance."},
     {"weapons.upgrade", "weapons", "upgrade", "simulation", "game.write", "Upgrade a weapon through supported progression rules."},
     {"weapons.stats_set", "weapons", "stats_set", "simulation", "game.write", "Set bounded combat stats on one owned Chronicle weapon instance."},
     {"weapons.durability_set", "weapons", "durability_set", "simulation", "game.write", "Set current durability on one owned Chronicle weapon instance within its native capacity."},

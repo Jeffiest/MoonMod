@@ -27,7 +27,7 @@ not merge into the Gauntlet branch until the gate before them is green.
    ```
    Then, from the repo root:
    ```
-   lua tools/tests/roguelike/test_runs.lua         # 69 checks: whole runs against a fake adapter
+   lua tools/tests/roguelike/test_runs.lua         # 83 checks: whole runs against a fake adapter
    lua tools/tests/roguelike/test_standalone.lua   # 38 checks: RPG, Ascension and Dungeon+ sit runs out
    ```
    The engine side lives in the Chronicle patch. Apply `ports/chronicle/moonfactory-chronicle.patch` with
@@ -43,8 +43,8 @@ not merge into the Gauntlet branch until the gate before them is green.
 
    A pass logged with only the Lua harness says so and stays **provisional** until the engine filter runs too.
 3. **Playtest.** Enable *Dark Genie's Gauntlet* in the Mod Manager, restart, and work through the gate's checklist.
-   Write times and failures into `tools/tests/roguelike/gauntlet-log.md`. Keep the *Weapon ABS multiplier*, *Shatter
-   at durability* and other settings at their defaults unless the line says otherwise, and log any you changed.
+   Write times and failures into `tools/tests/roguelike/gauntlet-log.md`. Keep the *Weapon ABS multiplier* and the
+   other settings at their defaults unless the line says otherwise, and log any you changed.
 4. **Score** the 5 metrics (table at the bottom) and record them in the log.
 5. **Verdict:**
    - **PASS:** the gate is signed and the next one starts.
@@ -97,24 +97,21 @@ in the engine before anything else is built.
 - [ ] *Shuffle biome order* on: a late biome rolled first is visibly weaker *(hands)*, and the HUD line names the right
   floor (headless: yes, a Temple start reads `GAUNTLET 1-II` on Temple II).
 
-### G3 — Weapons: fast ABS, found weapons, Shatter, Sacrifice — HEADLESS PART DONE 2026-10-28; *(hands)* lines need someone playing
-*Automated:* the Shatter, Sacrifice and drafting scenarios in `test_runs.lua`, and
-`MoonModPlayerPartyApi.ReportsTheEquippedWeaponWithItsEnduranceAndDurability`.
+### G3 — Weapons: one each, fast ABS, found weapons — REWORKED 2026-10-28 (one weapon each); *(hands)* lines need someone playing
+*Automated:* the found-weapon, absorb, broken-weapon and drafting scenarios in `test_runs.lua`, and
+`MoonModWeaponsApi.EquipsInADungeonWithAModelReloadAndRemovesTheSpare`.
 *Playtest:*
 - [ ] Wear per hit, measured on the starting weapon: ______ durability per hit *(hands)*. From the code: a hit wears
-  `(1.5 - endurance/100) x weight` (weight 0.8-1.8, a charged attack 3), times the run's wear (Brittle 2x). No weapon
-  ever breaks outright at the default *Shatter at durability* (3): **fixed** so Shatter also fires once the next
-  charged hit could break the weapon (a 3 alone let one hit break it, on any floor with low endurance, on Brittle
-  floors with any).
-- [ ] The first Shatter on a fresh weapon happens between biome 1 floor III and biome 2 floor II (not floor I, not
-  never) *(hands)*. Estimate: Ruby's ring (45, endurance 40) shatters after 30-40 hits with no Repair Powder, so
-  floor I-II; leveling up raises the maximum but does not refill.
-- [ ] The burst visibly hits enemies in range *(hands)*; the fractured weapon is at 75% attack and can break only after
-  two (headless: 10 → 7 → 5 attack, 45 → 33 → 24 max, then no third Shatter).
-- [ ] A found weapon arrives 1–4 levels up with 1–2 attachments *(hands: a chest)*. Headless: the calls the mod makes on
-  pickup level a given weapon 0 → 3 and fill its 2 sockets.
-- [ ] Benched drafted allies level from shared ABS by the end of biome 2 *(hands)*. Headless: a drafted ally's weapon is
-  recorded on its first floor and takes ABS while benched.
+  `(1.5 - endurance/100) x weight` (weight 0.8-1.8, a charged attack 3), times the run's wear (Brittle 2x).
+- [ ] A weapon at 0 ends the run: the title shows *Weapon broke in ...* and it counts as a death (headless: yes).
+  How many floors a careful player gets from the starting weapon with the kit's 2 Repair Powder: ______ *(hands)*.
+  Fewer than 3 is too harsh; tune the kit or the durability unlocks.
+- [ ] A chest weapon for a drafted character opens the choice over the HUD; L1/R1 switch, Cross confirms, and each
+  line's stats are what that weapon ends with *(hands: a chest)*. Headless: the in-dungeon swap reloads the model,
+  the spare goes, and the harness covers keep, take and the 25% absorb.
+- [ ] A chest weapon for someone outside the draft is absorbed into the active weapon with a message *(hands)*.
+- [ ] A found weapon arrives 1–4 levels up with 1–2 attachments before the choice *(hands: a chest)*.
+- [ ] Benched drafted allies level from shared ABS by the end of biome 2 *(hands)*.
 - [ ] Two players end biome 2 with different weapon builds *(hands)*.
 
 ### G4 — Risk and reward: Cursed Gate, Vaults, Diorama, Gilda
@@ -137,7 +134,7 @@ in the engine before anything else is built.
 - [ ] Closing the game mid-run counts as a retreat on the next start and keeps the run's Moon Shards.
 - [ ] Moon Shards match the table: a win pays about 45, a third-biome fall about 15. Records update.
 - [ ] Each Norune Eternal unlock bought shows up on the next run (Macho's Forge attachment, Matataki ally, and so on).
-- [ ] Runs to buy everything (134 shards): ______. Target: 6–10 runs.
+- [ ] Runs to buy everything (161 shards): ______. Target: 6–10 runs.
 
 ### G6 — Standalone runs
 *Automated:* `test_standalone.lua` (38 checks).

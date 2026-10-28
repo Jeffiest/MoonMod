@@ -26,7 +26,7 @@ from this version on). On an older engine the mod loads, logs that the engine ha
 
 The top-left HUD line shows the run's state, for example `GAUNTLET 2-III CURSED NEXT CURSED`. During a run, the
 Journal's Character page (or the Hub's **K**) shows the run page with the Diorama and Norune Eternal trees, and the
-Mod Manager's Actions tab has Run Status, the Cursed Gate, Sacrifice, Heirloom, Gaffer and Abandon Run.
+Mod Manager's Actions tab has Run Status, the Cursed Gate, Heirloom, Gaffer and Abandon Run.
 
 ### No save file
 
@@ -55,14 +55,14 @@ Closing the game in the middle of one counts it as a retreat (its Moon Shards ar
 | System | How it plays |
 | --- | --- |
 | Party | All six characters are in the party, but only the starting one can fight; the others start knocked out. A Golden Atla drafts and revives a random ally on floor II of the first and third biome. Switching to someone who is not drafted bounces you back (setting *Only drafted allies may fight*). Everyone starts with their first weapon, Toan's Dagger and so on. |
-| Route | Divine Beast Cave → Wise Owl Forest → Shipwreck → Sun & Moon Temple → Moon Sea, or a shuffled order (*Shuffle biome order*). A late biome rolled early has weaker enemies and weaker hits. Enemy HP grows 6% per floor of depth. |
+| Route | Divine Beast Cave → Wise Owl Forest → Shipwreck → Sun and Moon Temple → Moon Sea, or a shuffled order (*Shuffle biome order*). A late biome rolled early has weaker enemies and weaker hits. Enemy HP grows 6% per floor of depth. |
 | Cursed Gate | Press **G** (or **L1+Select**, or **Actions**) on a floor to curse the *next* one. It gets +60% enemy HP and two of: Parched (water drains 3x), Brittle (wear 2x), Glass (+50% damage taken). It also gets more and richer chests. Leaving it pays a **Miracle cache** (a gem and an attachment), two extra tiles, two Moon Shards and a 35% chance of a blessing. The floor before a Warden cannot be cursed. |
 | Vault | A back floor on a run floor (native back-floor key) is a Vault: 1.5x enemy HP and ABS, and a blessing when you leave. |
 | Fast ABS | Revealed enemies carry 6x their ABS (*Weapon ABS multiplier*, 1-12), so weapons build up within one run. Cursed floors and Vaults give 1.5x more. |
 | Shared ABS | Drafted allies on the bench get 50% of each kill's ABS on their equipped weapon, and level up from it. |
 | Found weapons | A weapon picked up on a run floor arrives 1-4 levels up with 1-2 random attachments. |
-| Shatter | When the equipped weapon falls to 3 durability or less, or low enough that its next charged hit could break it (which depends on its endurance and the run's wear), it bursts instead of breaking: every enemy within range takes 4x its attack. It survives, fractured: 75% attack and max durability, back to 35% durability. After two fractures, it can break for real. |
-| Sacrifice | **Actions > Sacrifice Spare Weapon** status-breaks your best unequipped +5 or higher weapon into a SynthSphere. Its level x 40 ABS also flows into the equipped weapon. |
+| One weapon | Each character carries one weapon for the whole run. Picking up another (a chest) opens a choice over the HUD: **L1/R1** (or Left/Right) between *KEEP HELD* and *TAKE FOUND*, each line showing the stats it would end with, and **Cross** (or Enter) to confirm. The weapon not kept is absorbed into the keeper: a quarter of its attack, endurance, speed, magic and elements. A weapon for someone outside the draft is absorbed into the active character's weapon at once. |
+| A broken weapon ends the run | When the equipped weapon breaks (durability 0, or a starter turned into its broken version), the run is over: it counts as a death and goes back to the Gauntlet's title. Repair Powder, Smithies, Tempered Steel and the durability unlocks are the protection. |
 | Diorama | Atla picked up on run floors, cleared floors, swept floors, Wardens and caches give Georama tiles. Place them on the Diorama tree with Cross (6 plots, more with Deep Well). **Clear Diorama** puts every tile back in stock. Rivers: water drains 12% slower each. Windmill + Storehouse pairs: +25% ABS each. Lamps: +4% damage each; 1 maps every floor, 2 show monsters. Trees: 1 HP every 3 s each. Houses: -6% damage taken each. Carts: +20% Gilda each. Smithies: wear 12% slower each. |
 | Blessings | Wardens, Vaults and some cursed floors grant one for the rest of the run: Moonlit Edge, Dran's Stride, Fairy Ward, Tempered Steel, Bottomless Flask, Second Breath, Lucky Star, Scholar's Eye, Mender's Charm. |
 | Gilda | Every run starts with none. Floors pay 40 x depth, and enemies pay as usual. Gaffer's Wagon is where you spend it. |
@@ -79,8 +79,11 @@ Closing the game in the middle of one counts it as a retreat (its Moon Shards ar
 | Deep Well | 5, 9, 13 | +1 Diorama plot per rank. |
 | Matataki Embassy | 12 | A second ally is drafted when the run starts. |
 | Moon Blessing | 15 | Every run starts with a random blessing. |
+| Whetstone | 2, 4, 6 | +10 maximum durability on the starting weapon per rank. |
+| Gaffer's Oil | 3, 6 | Weapons wear 10% slower per rank. |
+| Repair Kit | 2, 4 | +1 Repair Powder in the starter kit per rank. |
 
-A win earns about 45 Moon Shards, and a run that falls in the third biome about 15. Everything costs 134.
+A win earns about 45 Moon Shards, and a run that falls in the third biome about 15. Everything costs 161. The Eternal page shows six unlocks at a time; *More unlocks* turns the page.
 
 ## How it is built
 
@@ -111,8 +114,7 @@ the `weapons.*` operations, and Atla through `georama.atla_list`.
 | Boss floor per biome | Warden floor: the key holder becomes a boss | The story boss arenas are scripted by floor number, so copying them would not bring the boss. |
 | Two exits per floor (normal and cursed) | One exit, plus a Cursed Gate toggle for the next floor | The exit gate cannot be duplicated from Lua. |
 | Tiered enemy pools across biomes | Depth scaling, biome shuffle with scale-down | A registered floor's roster can only be replaced by mod-registered enemies whose templates are loaded on the floor. |
-| Shatter drops a 50% SynthSphere | The weapon survives fractured, up to twice | The equipped weapon cannot be removed or status-broken mid-floor. |
-| Status break at +3 | Sacrifice at +5 (native rule) | `weapons.synthesize` uses the native +5 check. |
+| Shatter drops a 50% SynthSphere; status break at +3 | One weapon each, a broken weapon ends the run, found weapons absorbed | A design change after G3: the run's weapon is the run, so durability is the pressure. |
 | Build-up thresholds -35% | Not changed; fast ABS does the pacing | `weapons.definition_set` on build-up targets would collide with Dungeon+'s Expanded Data edits. |
 | 8x8 Georama grid with adjacency | Diorama plots with count and pair synergies | There is no grid UI; the skill-tree page is the closest page a mod can drive. |
 | Character gates guard vaults | Drafting only | Obstacles and doors are native map data. |
@@ -132,9 +134,9 @@ Checked here, without the game's data:
   all five biomes and the title mode with no warnings. It drives the pages, starts a session with all six joined and
   the chosen character active, ends it with a defeat, and checks that the title shows the result.
 - `tools/tests/roguelike/test_runs.lua` (Lua 5.4+, or the vendored 5.5) plays whole runs against a fake adapter: a
-  five-biome win, Norune Eternal purchases, unlocks on the next run, Shatter, Sacrifice, drafting, a retreat, a
+  five-biome win, Norune Eternal purchases (two pages), unlocks on the next run, the found-weapon choice, absorbing, a broken weapon ending the run, drafting, a retreat, a
   defeat, Abandon, an off-route floor, quitting mid-run, a reload, an engine without title modes, and a start as
-  someone other than Toan, kept through the dungeon entrance and into the next biome, and Shatter ahead of the hardest hit. 69 checks.
+  someone other than Toan, kept through the dungeon entrance and into the next biome. 83 checks.
 - `tools/tests/roguelike/test_standalone.lua` loads RPG, Ascension and Dungeon+ against a recording stub, starts a
   session in the middle of a story game and also loads each mod mid-run. It checks that every bonus goes to x1, that
   the run's events reach no game call and store nothing, and that everything comes back after. 38 checks.
@@ -148,7 +150,8 @@ Not run: the game itself, which needs your disc image and a GPU. These need a pa
 - Walking the native exit from floor to floor. The registered floors are numbered straight after the retail ones and
   the exit asks for the next number, so they chain; all 20 load (G2 in `GAUNTLET.md`). The Warden floor's exit can
   only be opened after the Warden dies, and the engine keeps it on that floor.
-- The Warden (its size, bar and the move to the next biome) and Shatter's burst, which need a fight.
+- The Warden (its size, bar and the move to the next biome), and the weapon choice opened by a real chest, which need
+  someone playing.
 
 RPG, Ascension and Dungeon+ sit runs out (see *Its own game* above), so their pages, bonuses and floor rules do not
 mix with the Gauntlet's.

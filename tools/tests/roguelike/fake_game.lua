@@ -37,6 +37,7 @@ function F.new(opts)
     tuning = nil, formulas = {}, player_formulas = {},
     sheet = nil, layers = {}, bars = {},
     pending_jump = nil,
+    bind_context = {}, contexts = {}, blocked = nil,
     atla = {},
     ranks = {},
     slot_id = {slot_id = 1, slot_generation = 7},
@@ -52,7 +53,7 @@ function F.new(opts)
   end
   -- weapon catalog: per character three weapons, item numbers by character
   local catalog = {}
-  local base = {toan = 257, xiao = 270, goro = 280, ruby = 290, ungaga = 300, osmond = 310}
+  local base = {toan = 258, xiao = 300, goro = 315, ruby = 332, ungaga = 348, osmond = 364} -- each character's first weapon
   for c, no in pairs(base) do
     for i = 0, 2 do
       catalog[#catalog + 1] = {id = "chronicle:weapon:" .. (no + i), native_item_no = no + i, owner = c, mod_owned = false,
@@ -375,7 +376,7 @@ function F.new(opts)
       return fail("failed", "no free slot")
     end,
     equip = function(a)
-      if S.context ~= "georama" then return fail("failed", "weapons.equip can change the saved loadout only in an active Georama town") end
+      if S.context ~= "georama" and not in_dungeon() then return fail("failed", "weapons.equip works only in an active Georama town or dungeon") end
       local w, c, slot = find_weapon(a)
       if not w then return nil, c end
       S.equipped[c] = slot; return {equipped = true, changed = true}
@@ -416,6 +417,11 @@ function F.new(opts)
       assert(a.durability >= 0 and a.durability <= w.durability, "durability above max")
       w.durability_f = a.durability; return {durability = a.durability}
     end,
+    remove = function(a)
+      local w, c, slot = find_weapon(a); if not w then return nil, c end
+      if S.equipped[c] == slot then return fail("failed", "the equipped weapon cannot be removed; equip another first") end
+      S.weapons[c][slot] = nil; return {removed = true}
+    end,
     synthesize = function(a)
       local w, c, slot = find_weapon(a); if not w then return nil, c end
       if S.equipped[c] == slot then return fail("failed", "cannot status-break the currently equipped weapon") end
@@ -432,14 +438,22 @@ function F.new(opts)
     end,
   })
   game.input = wrap("input", {
-    bind = function(a) return {id = a.id} end,
-    consume = function(a) local p = S.input_pressed[a.id]; S.input_pressed[a.id] = nil; return {pressed = p == true} end,
+    bind = function(a) S.bind_context[a.id] = a.context or "default"; return {id = a.id} end,
+    -- Only actions bound to the context on top report presses; others drop theirs.
+    consume = function(a)
+      local p = S.input_pressed[a.id]; S.input_pressed[a.id] = nil
+      local top = S.contexts[#S.contexts] or "default"
+      return {pressed = p == true and (S.bind_context[a.id] or "default") == top}
+    end,
+    context_push = function(a) S.contexts[#S.contexts + 1] = a.id; return {token = #S.contexts, id = a.id} end,
+    context_pop = function(a) table.remove(S.contexts, a.token); return {removed = true} end,
+    block_native = function(a) S.blocked = deepcopy(a.buttons); return {frames = a.frames} end,
     state = function(a) return {down = S.input_down[a.id] == true} end,
   })
   game.render = wrap("render", {
     layer_register = function(a)
       assert(#a.text >= 1 and #a.text <= 48, "layer text length")
-      assert(a.text:match("^[%w %-%:%.]+$"), "layer text charset: " .. a.text)
+      assert(a.text:match("^[%w %.,:;/%(%)%+%-_%%'%[%]%?~]+$"), "layer text charset: " .. a.text)
       S.layers[a.id] = a.text; return {}
     end,
     layer_remove = function(a) S.layers[a.id] = nil; return {} end,
@@ -548,6 +562,17 @@ function F.new(opts)
     end
   end
   function S.exit_gate() S.enter(S.dungeon, S.floor + 1) end
+  -- A chest hands `character` a weapon: it lands in a free slot and the engine reports the pickup.
+  local ORDER = {toan = 0, xiao = 1, goro = 2, ruby = 3, ungaga = 4, osmond = 5}
+  function S.pickup_weapon(character, item_no, stats)
+    local slot = 0
+    while S.weapons[character][slot] do slot = slot + 1 end
+    local w = new_weapon(item_no, 0)
+    for k, v in pairs(stats or {}) do w[k] = v end
+    S.weapons[character][slot] = w
+    S.emit("game.item_picked_up", {id = wid(item_no), kind = "weapon", native_item_no = item_no, character = ORDER[character], slot = slot})
+    return slot, w
+  end
   function S.kill_all(scripted) for _, m in ipairs(S.monsters) do if m.alive then S.kill(m, scripted) end end end
   function S.action(id) S.emit("ui.action", {id = id}) end
   function S.last_toast() return S.toasts[#S.toasts] end
