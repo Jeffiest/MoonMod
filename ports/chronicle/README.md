@@ -5,7 +5,7 @@ separate download. You build the game yourself from your own disc; nothing from 
 
 | File | What it is |
 | :--- | :--- |
-| `moonfactory-chronicle.patch` | All MoonFactory changes to Chronicle: the Lua and native-plugin runtime, the game adapter, the in-game Mod Manager, the engine changes it needs (256 monster slots, 48 x 48 floor grid, 64 rooms) and its tests. Includes Lua 5.5.1 (MIT, `port/third_party/lua-5.5.1/LUA-LICENSE.txt`). |
+| `moonfactory-chronicle.patch` | All MoonFactory changes to Chronicle: the Lua and native-plugin runtime, the game adapter, the in-game Mod Manager, mod title modes and sandbox sessions, the engine changes it needs (256 monster slots, 48 x 48 floor grid, 64 rooms) and its tests. Includes Lua 5.5.1 (MIT, `port/third_party/lua-5.5.1/LUA-LICENSE.txt`). |
 | `moonfactory-kazarov.patch` | The changes MoonFactory needs in the Kazarov renderer submodule (`tools/kazarov`): named input bindings for mods and the window hooks they use. |
 | `apply-moonfactory.ps1` | Checks out the matching Chronicle commit and applies both patches. |
 

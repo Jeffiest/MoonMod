@@ -276,10 +276,10 @@ index 00000000..8c2f7839
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..76ba0d2f
+index 00000000..ae336daf
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,125 @@
 +#pragma once
 +
 +#include <string>
@@ -362,6 +362,13 @@ index 00000000..76ba0d2f
 +    int (*place)(::CEditGround *, int, float, float, float, int),
 +    int (*remove)(::CEditGround *, int *, int *, float, float, float));
 +void ResetChronicleGeoramaForTests();
++// Sandbox sessions (title modes): the game loop starts a queued session from the title, redirects its
++// exits back to the title (true when it ended the session, so the caller resets the save), notes a game
++// over, and ends it in place when something else takes over the game (a save loaded, a developer jump).
++bool StartPendingChronicleSandbox();
++bool RedirectChronicleSandboxMapJump();
++void NoteChronicleSandboxDefeat();
++void EndChronicleSandboxInPlace(std::string_view reason);
 +bool PreparePendingChronicleDungeonEntry();
 +int TakePendingChronicleDungeonFloor(int dungeon_id);
 +bool IsSeamlessDungeonEnabled();
@@ -1482,6 +1489,119 @@ index 00000000..6e5acc5a
 +};
 +
 +Runtime &SharedRuntime();
++
++} // namespace moonmod
+diff --git a/port/include/moonmod/title_modes.hpp b/port/include/moonmod/title_modes.hpp
+new file mode 100644
+index 00000000..d670602f
+--- /dev/null
++++ b/port/include/moonmod/title_modes.hpp
+@@ -0,0 +1,107 @@
++#pragma once
++
++// Mod title modes and sandbox sessions (Chronicle).
++//
++// A mod registers a title mode (game.title.mode_register): one more row on the title menu under NEW GAME,
++// LOAD and OPTION. Choosing the row swaps the title screen for the mode's own screen, a page the mod
++// drives: a heading, up to six info lines and up to seven menu entries. Confirming an entry, or Circle,
++// sends game.title.selected to the owning mod, which can change the page (game.title.mode_set) or start
++// a sandbox session (game.session.start).
++//
++// A sandbox session is a fresh in-memory game that belongs to no save slot: the save data is reset as for
++// a new game, native saving never happens (the session never reaches a town or the save screen), and
++// leaving the dungeon, a game over or game.session.finish brings the player back to the mode's screen.
++
++#include <cstddef>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "moonmod/api.hpp"
++
++namespace moonmod {
++
++inline constexpr std::size_t kTitleModeLimit = 2;
++inline constexpr std::size_t kTitleModeLineLimit = 6;
++inline constexpr std::size_t kTitleModeEntryLimit = 7;
++inline constexpr std::size_t kTitleModeLabelBytes = 32;
++inline constexpr std::size_t kTitleModeTitleBytes = 40;
++inline constexpr std::size_t kTitleModeTextBytes = 64;
++// The title loop's result for "start the requested sandbox session" (TitleLoop returns select + 1).
++inline constexpr int kTitleMenuSandbox = 9;
++inline constexpr int kTitleResultSandbox = kTitleMenuSandbox + 1;
++
++struct TitleModeEntry {
++    std::string id;
++    std::string label;
++    bool enabled = true;
++};
++
++struct TitleMode {
++    std::string owner;
++    std::string id;       // qualified: owner:local
++    std::string local_id;
++    std::string label;    // the title menu row
++    std::string title;    // the mode screen's heading
++    std::string subtitle;
++    std::string hint;
++    std::vector<std::string> lines;
++    std::vector<TitleModeEntry> entries;
++    std::size_t cursor = 0;
++    bool root = true;     // Circle on a root page goes back to the title menu
++};
++
++// Registry: the API operations.
++ApiCallResult RegisterTitleMode(std::string_view owner, const Json &args);
++ApiCallResult SetTitleMode(std::string_view owner, const Json &args);
++ApiCallResult RemoveTitleMode(std::string_view owner, const Json &args);
++void RemoveTitleModesByOwner(std::string_view owner);
++const std::vector<TitleMode> &TitleModes();
++const TitleMode *FindTitleMode(std::string_view qualified_or_local, std::string_view owner = {});
++Json TitleModeJson(const TitleMode &mode);
++
++// The mode screen, driven by the title loop.
++enum class TitleModeInput { None, Up, Down, Confirm, Back };
++enum class TitleModeOutcome { Stay, ReturnToTitle, StartSession };
++bool OpenTitleModeScreen(std::size_t index);
++const TitleMode *OpenTitleModeScreenMode();
++void CloseTitleModeScreen();
++TitleModeOutcome HandleTitleModeInput(TitleModeInput input);
++
++// Sandbox sessions.
++struct SandboxRequest {
++    std::string owner;
++    std::string mode_id;
++    std::string floor_id;   // stable registered floor id
++    int dungeon_id = -1;
++    int floor = -1;         // native floor number
++    int party_size = 1;
++    int character = 0;      // the active character at the start, 0 (Toan) to 5
++};
++struct SandboxSession {
++    std::string owner;
++    std::string mode_id;
++    int started_frame = 0;
++};
++
++// session.start validates the caller, then queues the request; the title loop fades out and the game loop
++// starts it with TakeSandboxRequest.
++void QueueSandboxRequest(SandboxRequest request);
++bool SandboxRequestPending();
++std::optional<SandboxRequest> TakeSandboxRequest();
++void BeginSandboxSession(const SandboxRequest &request);
++bool SandboxActive();
++const SandboxSession *ActiveSandbox();
++// Records why the session is ending ("defeat", "ended", "left_dungeon", "loaded_save"); the first reason wins.
++void NoteSandboxEnding(std::string_view reason);
++// Ends the session: queues game.session.ended for every mod and asks the title to reopen the mode screen.
++// Returns the reason used.
++std::string EndSandboxSession(std::string_view fallback_reason, bool reopen_mode = true);
++// The mode to reopen when the title screen next initialises, taken once.
++std::optional<std::string> TakeTitleModeReturn();
++Json SessionJson(bool in_title);
++
++void ResetTitleModesForTests();
 +
 +} // namespace moonmod
 diff --git a/port/include/stubs/character.hpp b/port/include/stubs/character.hpp
@@ -6265,7 +6385,7 @@ index 9347158c..cb4cde7a 100644
  
          topStatusInfo(rogoY3, itemNowSel, UserStatus->cur_floor);
 diff --git a/port/src/dun/movechara.cpp b/port/src/dun/movechara.cpp
-index 8ec72e26..6c115b65 100644
+index 8ec72e26..466bf03b 100644
 --- a/port/src/dun/movechara.cpp
 +++ b/port/src/dun/movechara.cpp
 @@ -58,6 +58,8 @@
@@ -6577,7 +6697,28 @@ index 8ec72e26..6c115b65 100644
                          sceVu0FVECTOR chara_rot;
  
                          CharaMainHandViewFlag = 0;
-@@ -3031,6 +3118,25 @@ static void HitBlowVelocity(int hit_no, float *velocity) {
+@@ -2678,6 +2765,7 @@ PORT_OVERRIDE void DunMoveChara() {
+                 if (BtMiniChrSelectNo == 2) {
+                     ClearSystemMes();
+                     driveStepHold = 1;
++                    moonmod::NoteChronicleSandboxDefeat();
+                     gameTask = GAME_TASK_EXIT_FADE_START;
+                     ((CDngStatusData *) UserStatus)->SetDead();
+                 } else {
+@@ -2879,10 +2967,12 @@ PORT_OVERRIDE void DunMoveChara() {
+                     CMonUnitHold = 0;
+                     CEffectHold = 0;
+                 } else {
++                    moonmod::NoteChronicleSandboxDefeat();
+                     gameTask = GAME_TASK_EXIT_FADE_START;
+                     ((CDngStatusData *) UserStatus)->SetDead();
+                 }
+ #else
++                moonmod::NoteChronicleSandboxDefeat();
+                 gameTask = GAME_TASK_EXIT_FADE_START;
+                 ((CDngStatusData *) UserStatus)->SetDead();
+ #endif
+@@ -3031,6 +3121,25 @@ static void HitBlowVelocity(int hit_no, float *velocity) {
      velocity[2] = away_z / length;
  }
  
@@ -6603,7 +6744,7 @@ index 8ec72e26..6c115b65 100644
  PORT_OVERRIDE int BtCheckDamageProc() {
      sceVu0FVECTOR pos;
      sceVu0FVECTOR from;
-@@ -3297,6 +3403,7 @@ PORT_OVERRIDE int BtCheckDamageProc() {
+@@ -3297,6 +3406,7 @@ PORT_OVERRIDE int BtCheckDamageProc() {
                      driveNoInterpolate = 1;
                      lockOnTargetFlag = 0;
                      BtActStatus.recoil_frames = 0xA0;
@@ -6611,7 +6752,7 @@ index 8ec72e26..6c115b65 100644
                  }
              }
  
-@@ -3386,6 +3493,8 @@ PORT_OVERRIDE int BtCheckDamageProc() {
+@@ -3386,6 +3496,8 @@ PORT_OVERRIDE int BtCheckDamageProc() {
                      } else {
                          setUnitAmbientAnime(80.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                      }
@@ -7693,7 +7834,7 @@ index 9ddf0b36..a1e9fe33 100644
                      continue;
                  }
 diff --git a/port/src/gameloop.cpp b/port/src/gameloop.cpp
-index 468b23af..fd0340fb 100644
+index 468b23af..368fd910 100644
 --- a/port/src/gameloop.cpp
 +++ b/port/src/gameloop.cpp
 @@ -7,6 +7,7 @@
@@ -7715,25 +7856,27 @@ index 468b23af..fd0340fb 100644
  #include "exitcodes.hpp"
  #include "gamemode.hpp"
  #include "gamepad.hpp"
-@@ -34,6 +38,9 @@
+@@ -34,6 +38,10 @@
  #include "menu_save.hpp"
  #include "mglib.hpp"
  #include "mglib_port.hpp"
 +#include "moonmod/runtime.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/manager_ui.hpp"
++#include "moonmod/title_modes.hpp"
  #include "nowload.hpp"
  #include "platform/clock.hpp"
  #include "platform/config.hpp"
-@@ -51,6 +58,7 @@
+@@ -50,6 +58,8 @@
+ #include "title/opening.hpp"
  #include "title/rushmovi.hpp"
  #include "title/title.hpp"
- 
++#include "title/title_port.hpp"
 +
+ 
  int  EditInit(void *param);
  int  EditLoop();
- void SndInit();
-@@ -75,6 +83,8 @@ constexpr int kConfigLastFile = 17;
+@@ -75,6 +85,8 @@ constexpr int kConfigLastFile = 17;
  constexpr int kSaveMapNoOffset = 0x1C8;
  
  constexpr int kWarmUpTicks = 60;
@@ -7742,7 +7885,7 @@ index 468b23af..fd0340fb 100644
  
  // The TEXA vudata.cpp's My_DrawEnv loads at the start of every mode, through My_dma_start0.
  constexpr sceGsTexa kDrawEnvTexa = {0x80, 0, 1, 0, 0x80, 0};
-@@ -91,6 +101,7 @@ PresentClock::time_point g_last_present;
+@@ -91,6 +103,7 @@ PresentClock::time_point g_last_present;
  bool g_menu_chord_held = false;
  bool g_debug_r3_held = false;
  
@@ -7750,7 +7893,7 @@ index 468b23af..fd0340fb 100644
  double SecondsSince(PresentClock::time_point start) {
      return std::chrono::duration<double>(PresentClock::now() - start).count();
  }
-@@ -116,6 +127,15 @@ void PollFpsToggle() {
+@@ -116,6 +129,15 @@ void PollFpsToggle() {
  
  std::vector<int> g_give;
  
@@ -7766,7 +7909,7 @@ index 468b23af..fd0340fb 100644
  bool Holds(CDngStatusData &status, int item) {
      if (item >= ITEM_WEAPON_START) {
          for (const auto &weapons : status.chara_weapons) {
-@@ -134,15 +154,38 @@ void GiveOnArrival() {
+@@ -134,15 +156,38 @@ void GiveOnArrival() {
      static int last_mode = -1;
      bool       arrived = mode != last_mode && (mode == GAME_MODE_EDIT || mode == GAME_MODE_DUNGEON);
      last_mode = mode;
@@ -7810,7 +7953,7 @@ index 468b23af..fd0340fb 100644
  }
  
  bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
-@@ -154,15 +197,38 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
+@@ -154,15 +199,38 @@ bool SameMapping(const gfx::LogicalMapping &a, const gfx::LogicalMapping &b) {
  // own 5x7 font, so the badge looks the same on every screen: the game's message font is only
  // loaded inside a mode, which made a second, different-looking badge for the intro and loading.
  const gfx::DisplayList *FpsOverlayList() {
@@ -7853,7 +7996,7 @@ index 468b23af..fd0340fb 100644
          g_fps.text = std::move(text);
          g_fps.mapping = mapping;
      }
-@@ -209,6 +275,7 @@ struct Jump {
+@@ -209,6 +277,7 @@ struct Jump {
  Jump g_jump;
  bool g_fast_load;
  bool g_autosave;
@@ -7861,7 +8004,7 @@ index 468b23af..fd0340fb 100644
  int g_developer_return_mode = GAME_MODE_TITLE;
  int g_developer_return_map = 800;
  int g_developer_return_local_map = 0;
-@@ -219,6 +286,36 @@ std::int64_t g_frame_budget = -1;
+@@ -219,6 +288,36 @@ std::int64_t g_frame_budget = -1;
  std::int64_t g_frames;
  bool         g_stop;
  
@@ -7898,7 +8041,62 @@ index 468b23af..fd0340fb 100644
  // Retail's save_data and config_data are static in main.cpp, so the port
  // keeps its own; everything else reaches the save through SaveData.
  alignas(64) CSaveData g_save_data;
-@@ -452,6 +549,10 @@ void GameFollowMapJump() {
+@@ -255,6 +354,8 @@ void ModeInit(int &title_ran, int &exist_data, bool &skip_title) {
+                 }
+             }
+             TitleInit(exist_data);
++            // Back from a mod's sandbox session: the title opens on that mod's title mode screen.
++            TitlePortReopenMode();
+             break;
+         case GAME_MODE_RUSH_MOVIE:
+             SndInitialize(4, 30, 4, 5);
+@@ -293,6 +394,23 @@ void ModeInit(int &title_ran, int &exist_data, bool &skip_title) {
+     }
+ }
+ 
++// A mod's sandbox session (title modes): a new game's save, no story, straight onto the mod's floor.
++void StartSandboxGame() {
++    char names[6][64];
++    for (int i = 0; i < 6; ++i) {
++        std::memcpy(names[i], g_save_data.GetCharaName(i), sizeof(names[i]));
++    }
++    ResetSaveKeepingConfig(g_save_data);
++    GameOptionsApply(ConfigGet().options);
++    for (int i = 0; i < 6; ++i) {
++        std::memcpy(g_save_data.GetCharaName(i), names[i], sizeof(names[i]));
++    }
++    QuestHostNewGame();
++    if (!moonmod::StartPendingChronicleSandbox()) {
++        MapJump(800, -1);
++    }
++}
++
+ void StartNewGame() {
+     char names[6][64];
+     for (int i = 0; i < 6; ++i) {
+@@ -359,6 +477,8 @@ void LoadDrawEnv() {
+ 
+ // What the developer menu's choice (and the dungeon loader's) leaves behind.
+ void ApplyJump() {
++    // A developer jump can land in a town without a map jump; a sandbox session must not run there.
++    moonmod::EndChronicleSandboxInPlace("developer_jump");
+     OldMapNo = -1;
+     NextMapNo = -1;
+     GamePad.AutoRepeatOff();
+@@ -418,6 +538,12 @@ void GameFollowMapJump() {
+     if (NextMapNo < 0) {
+         return;
+     }
++    // A sandbox session that leaves its dungeon (exit, game over, session.end) goes back to the title,
++    // and its save is thrown away: it belonged to no slot.
++    if (moonmod::RedirectChronicleSandboxMapJump()) {
++        ResetSaveKeepingConfig(g_save_data);
++        GameOptionsApply(ConfigGet().options);
++    }
+     OldMapNo = MapNo;
+     if (NextMapNo < 200) {
+         mode = GAME_MODE_EDIT;
+@@ -452,6 +578,10 @@ void GameFollowMapJump() {
      }
  }
  
@@ -7909,7 +8107,17 @@ index 468b23af..fd0340fb 100644
  void GameApplyLoopResult(int loop_mode, int result) {
      switch (loop_mode) {
          case GAME_MODE_LANGUAGE:
-@@ -576,6 +677,36 @@ bool GameSetGive(const char *list) {
+@@ -479,6 +609,9 @@ void GameApplyLoopResult(int loop_mode, int result) {
+                 MapJump(400, -1);
+                 StartNewGame();
+             }
++            if (result == moonmod::kTitleResultSandbox) {
++                StartSandboxGame();
++            }
+             if (result == 4) {
+                 MapJump(801, -1);
+             }
+@@ -576,6 +709,36 @@ bool GameSetGive(const char *list) {
      return !g_give.empty();
  }
  
@@ -7946,7 +8154,7 @@ index 468b23af..fd0340fb 100644
  bool GameSetJump(const char *spec) {
      std::string_view text = spec;
      std::string_view name = text.substr(0, text.find(':'));
-@@ -661,7 +792,12 @@ void GameEnterDeveloperMenu() {
+@@ -661,7 +824,12 @@ void GameEnterDeveloperMenu() {
  }
  
  void GameSetAutosave(bool on) {
@@ -7959,7 +8167,7 @@ index 468b23af..fd0340fb 100644
  }
  
  void GameSetFastLoad(bool fast) {
-@@ -913,20 +1049,41 @@ int RunGame(int argc, char **argv) {
+@@ -913,20 +1081,41 @@ int RunGame(int argc, char **argv) {
          // A save loaded since the last mode brought its own options.
          GameOptionsApply(ConfigGet().options);
          bool event_start = StartEventNo >= 0;
@@ -8003,7 +8211,7 @@ index 468b23af..fd0340fb 100644
          }
  
          int result;
-@@ -944,6 +1101,8 @@ int RunGame(int argc, char **argv) {
+@@ -944,6 +1133,8 @@ int RunGame(int argc, char **argv) {
  
              result = ModeLoop(skip_title);
              GameApplyLoopResult(old_main_mode, result);
@@ -8012,6 +8220,14 @@ index 468b23af..fd0340fb 100644
              if (result == 0 && LocalizeLanguagePending() && !MenuOptionOpen() &&
                  (mode == GAME_MODE_EDIT || mode == GAME_MODE_TITLE)) {
                  // The language was changed in this town or title and the Options screen has closed: load
+@@ -955,6 +1146,7 @@ int RunGame(int argc, char **argv) {
+             }
+             
+             if (result == 0 && TakeBattleMenuLoadRequest()) {
++                moonmod::EndChronicleSandboxInPlace("loaded_save");
+                 const s32 loaded_map = *reinterpret_cast<const s32 *>(
+                     reinterpret_cast<const char *>(SaveData) + kSaveMapNoOffset);
+                 MapNo        = (loaded_map >= 0 && loaded_map < 200) ? loaded_map : 0;
 diff --git a/port/src/gameloop.hpp b/port/src/gameloop.hpp
 index 7577f905..097f6530 100644
 --- a/port/src/gameloop.hpp
@@ -10730,10 +10946,10 @@ index 5e4e17ed..4f573899 100644
          if (drawn && monster[i].shadow_visible != 0 && monster[i].revealed != 0) {
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..412b9780
+index 00000000..65a454f4
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,493 @@
+@@ -0,0 +1,503 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -10969,6 +11185,12 @@ index 00000000..412b9780
 +    {"debug.inspect", "debug", "inspect", "any", "debug.inspect", "Read a bounded snapshot of the current native scene context."},
 +    {"debug.profile", "debug", "profile", "any", "debug.inspect", "Read bounded per-mod resource and registration counters."},
 +    {"debug.overlay_register", "debug", "overlay_register", "render", "debug.inspect", "Register or update an owner-scoped one-line diagnostic overlay."},
++    {"title.mode_register", "title", "mode_register", "content", "content.register", "Add or update this mod's title mode: a title-menu row that opens a screen the mod drives."},
++    {"title.mode_set", "title", "mode_set", "any", "game.write", "Change this mod's title mode screen: heading, info lines, menu entries and cursor."},
++    {"title.mode_remove", "title", "mode_remove", "content", "content.register", "Remove this mod's title mode."},
++    {"session.get", "session", "get", "any", "game.read", "Read whether the game is in the title, a story save or a mod's sandbox session."},
++    {"session.start", "session", "start", "any", "game.write", "From this mod's open title mode screen, start a sandbox session on a registered dungeon floor: a fresh game with no save slot."},
++    {"session.finish", "session", "finish", "simulation", "game.write", "End this mod's sandbox session and return to its title mode screen."},
 +    {"api.list", "api", "list", "any", "", "List all catalogued operations and capability status."},
 +    {"api.supports", "api", "supports", "any", "", "Query one operation capability by canonical path."},
 +    {"api.call", "api", "call", "any", "", "Invoke an operation by canonical path."},
@@ -11018,6 +11240,10 @@ index 00000000..412b9780
 +    {"game.georama.piece_placed", "georama", "both", "A Georama piece was placed."},
 +    {"game.georama.piece_removed", "georama", "both", "A Georama piece was removed."},
 +    {"game.npc.talk", "characters", "chronicle", "The player pressed talk at a town villager the mod registered (characters.register kind = 'npc') that has no native talk event."},
++    {"game.title.opened", "title", "chronicle", "The player opened this mod's title mode screen from the title menu."},
++    {"game.title.selected", "title", "chronicle", "The player confirmed an entry on this mod's title mode screen, or pressed Circle (entry 'back')."},
++    {"game.session.started", "session", "chronicle", "A mod's sandbox session started: a fresh game with no save slot."},
++    {"game.session.ended", "session", "chronicle", "A sandbox session ended: reason 'defeat', 'left_dungeon', 'ended' or 'loaded_save'."},
 +    {"quests.started", "quests", "both", "A registered quest became active."},
 +    {"quests.objective_advanced", "quests", "both", "A quest objective advanced."},
 +    {"quests.completed", "quests", "both", "All objectives in a quest are complete."},
@@ -11763,15 +11989,16 @@ index 00000000..f92408e6
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..4d342bbd
+index 00000000..79aa958f
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9639 @@
+@@ -0,0 +1,9777 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
 +#include "moonmod/runtime.hpp"
++#include "moonmod/title_modes.hpp"
 +
 +#include <algorithm>
 +#include <array>
@@ -20480,11 +20707,85 @@ index 00000000..4d342bbd
 +            {}};
 +}
 +
++// Sandbox sessions (title modes): session.start from the mod's open title mode screen, session.finish in play.
++ApiCallResult StartSandboxSession(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected {floor = registered floor id, party_size = 1..6, character = optional id}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "floor" && field.key() != "party_size" && field.key() != "character") {
++            return Invalid("session.start accepts only floor, party_size and character");
++        }
++    }
++    if (mode != GAME_MODE_TITLE) return Failed("a sandbox session starts from the title screen");
++    const TitleMode *open = OpenTitleModeScreenMode();
++    if (open == nullptr || open->owner != mod_id) return Failed("start the session from this mod's open title mode screen");
++    if (SandboxRequestPending()) return Failed("a sandbox session is already starting");
++    if (!request.contains("floor") || !request["floor"].is_string()) {
++        return Invalid("floor must be the stable id of a floor registered with dungeons.register");
++    }
++    const std::string &floor_id = request["floor"].get_ref<const std::string &>();
++    const ModDungeon *dungeon = nullptr;
++    const ModDungeonFloor *floor = nullptr;
++    for (const auto &[id, candidate] : g_mod_dungeons) {
++        (void)id;
++        const auto found = std::ranges::find(candidate.floors, floor_id, &ModDungeonFloor::id);
++        if (found != candidate.floors.end()) {
++            dungeon = &candidate;
++            floor = &*found;
++            break;
++        }
++    }
++    if (dungeon == nullptr || floor == nullptr) return Failed("no registered dungeon floor has that id");
++    int party_size = 1;
++    if (request.contains("party_size") && !ReadBoundedInt(request, "party_size", 1, 6, party_size)) {
++        return Invalid("party_size must be an integer from 1 to 6");
++    }
++    int character = 0;
++    if (request.contains("character")) {
++        if (!request["character"].is_string()) return Invalid("character must be a playable character id");
++        const auto found = std::ranges::find(kCharacterIds, request["character"].get<std::string>());
++        if (found == kCharacterIds.end()) return Invalid("character must be a playable character id");
++        character = static_cast<int>(found - kCharacterIds.begin());
++    }
++    if (character >= party_size) return Invalid("the starting character must be within party_size (Toan, Xiao, Goro, Ruby, Ungaga, Osmond)");
++    SandboxRequest queued;
++    queued.owner = std::string(mod_id);
++    queued.mode_id = open->id;
++    queued.floor_id = floor->id;
++    queued.dungeon_id = dungeon->native_dungeon_id;
++    queued.floor = floor->native_floor_id;
++    queued.party_size = party_size;
++    queued.character = character;
++    QueueSandboxRequest(queued);
++    return {ApiCallStatus::Ok,
++            {{"queued", true}, {"floor", floor->id}, {"native_dungeon_id", dungeon->native_dungeon_id},
++             {"native_floor_id", floor->native_floor_id}, {"party_size", party_size},
++             {"character", kCharacterIds[character]}},
++            {}};
++}
++
++ApiCallResult EndSandboxSessionApi(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || args.size() > 1 || (args.size() == 1 && (!args[0].is_object() || !args[0].empty()))) {
++        return Invalid("session.finish takes no arguments");
++    }
++    const SandboxSession *session = ActiveSandbox();
++    if (session == nullptr) return Failed("no sandbox session is running");
++    if (session->owner != mod_id) return Failed("only the mod that started the sandbox session can end it");
++    if (mode != GAME_MODE_DUNGEON) return Failed("a sandbox session ends from its dungeon");
++    if (NextMapNo >= 0) return Failed("a native map transition is already pending");
++    NoteSandboxEnding("ended");
++    MapJump(800, -1);
++    return {ApiCallStatus::Ok, {{"queued", true}, {"mode", session->mode_id}}, {}};
++}
++
 +ApiCallResult Call(std::string_view mod_id, const std::filesystem::path &save_root,
 +                   const ApiOperationSpec &operation, const Json &args) {
 +    if (operation.path == "save.slot_id") {
 +        if (!args.is_array() || !args.empty()) return Invalid("save.slot_id takes no arguments");
-+        const int file_no = SaveSlotCurrentNativeFileNo();
++        // A sandbox session belongs to no save slot, whichever slot was loaded last.
++        const int file_no = SandboxActive() ? -1 : SaveSlotCurrentNativeFileNo();
 +        if (file_no < 0) return {ApiCallStatus::Ok, {{"slot_id", nullptr}, {"slot_generation", nullptr}}, {}};
 +        const std::uint64_t generation = SaveSlotGeneration(file_no);
 +        if (generation == 0) return {ApiCallStatus::Failed, {}, "Could not persist native save-slot identity"};
@@ -20594,6 +20895,15 @@ index 00000000..4d342bbd
 +        return GetWorld(args);
 +    }
 +    if (operation.path == "debug.inspect") return InspectNativeRuntime(args);
++    if (operation.path == "title.mode_register") return RegisterTitleMode(mod_id, args);
++    if (operation.path == "title.mode_set") return SetTitleMode(mod_id, args);
++    if (operation.path == "title.mode_remove") return RemoveTitleMode(mod_id, args);
++    if (operation.path == "session.get") {
++        if (!args.is_array() || !args.empty()) return Invalid("session.get takes no arguments");
++        return {ApiCallStatus::Ok, SessionJson(mode == GAME_MODE_TITLE), {}};
++    }
++    if (operation.path == "session.start") return StartSandboxSession(mod_id, args);
++    if (operation.path == "session.finish") return EndSandboxSessionApi(mod_id, args);
 +    if (operation.path == "world.transition") return TransitionWorld(mod_id, args);
 +    if (operation.path == "world.set_time") return SetWorldTime(args);
 +    if (operation.path == "world.story_flag_get") return GetStoryFlag(args);
@@ -20876,6 +21186,53 @@ index 00000000..4d342bbd
 +    g_thirst_baseline = false;
 +}
 +
++bool StartPendingChronicleSandbox() {
++    std::optional<SandboxRequest> request = TakeSandboxRequest();
++    if (!request) {
++        CloseTitleModeScreen();
++        return false;
++    }
++    CDngStatusData *status = CurrentStatus();
++    if (status == nullptr || request->dungeon_id < 0 || request->dungeon_id >= DUNGEON_COUNT || request->floor < 0 ||
++        request->floor >= maxFloorTbl__3[request->dungeon_id]) {
++        std::fprintf(stderr, "MoonMod: sandbox session could not start\n");
++        CloseTitleModeScreen();
++        return false;
++    }
++    // A new game's save gives every character start HP and water but only Toan a weapon (and party size 1).
++    constexpr int kStarterWeapons[6] = {ITEM_WEAPON_DAGGER, ITEM_WEAPON_WOODEN_SLINGSHOT, ITEM_WEAPON_MALLET,
++                                        ITEM_WEAPON_GOLD_RING, ITEM_WEAPON_FIGHTING_STICK, ITEM_WEAPON_MACHINE_GUN};
++    status->SetPartySize(static_cast<s8>(request->party_size));
++    for (int character = 0; character < request->party_size; ++character) {
++        if (status->equipped_weapon_slot[character] >= 0) continue;
++        WEAPON_HAVE &owned = status->chara_weapons[character][0];
++        if (owned.item_no < ITEM_WEAPON_START) WepDataListToHaveCopy(kStarterWeapons[character], &owned);
++        status->equipped_weapon_slot[character] = 0;
++    }
++    status->cur_chara = request->character;
++    // A new game's save has no area yet (-1); the dungeon code indexes its per-dungeon tables with it.
++    status->cur_georama = request->dungeon_id;
++    BeginSandboxSession(*request);
++    g_pending_dungeon_floor_entry = PendingDungeonFloorEntry{request->dungeon_id, request->floor};
++    MapJump(request->dungeon_id + 200, -1);
++    return true;
++}
++
++bool RedirectChronicleSandboxMapJump() {
++    if (!SandboxActive() || NextMapNo < 0) return false;
++    if (NextMapNo >= 200 && NextMapNo < 300) return false; // another floor or dungeon: the session goes on
++    NextMapNo = 800;
++    g_pending_dungeon_floor_entry.reset();
++    EndSandboxSession("left_dungeon");
++    return true;
++}
++
++void NoteChronicleSandboxDefeat() { NoteSandboxEnding("defeat"); }
++
++void EndChronicleSandboxInPlace(std::string_view reason) {
++    if (SandboxActive()) EndSandboxSession(reason, false);
++}
++
 +bool PreparePendingChronicleDungeonEntry() {
 +    if (!g_pending_dungeon_floor_entry.has_value()) return false;
 +    const PendingDungeonFloorEntry target = *g_pending_dungeon_floor_entry;
@@ -20889,6 +21246,8 @@ index 00000000..4d342bbd
 +        return false;
 +    }
 +    g_active_dungeon_floor_entry = target;
++    // A sandbox session moves between dungeons without a town: keep its area on the dungeon it enters.
++    if (SandboxActive()) status->cur_georama = target.dungeon_id;
 +    return true;
 +}
 +
@@ -21240,6 +21599,10 @@ index 00000000..4d342bbd
 +    config.api_capabilities.push_back({"dungeons.set_badges", true, {}});
 +    config.api_capabilities.push_back({"dungeons.set_modifiers", true, {}});
 +    config.api_capabilities.push_back({"combat.register_player_formula", true, {}});
++    for (const char *path : {"title.mode_register", "title.mode_set", "title.mode_remove",
++                             "session.get", "session.start", "session.finish"}) {
++        config.api_capabilities.push_back({path, true, {}});
++    }
 +    config.api_resource_override_removal_guard = ChronicleModelOverrideRemovalGuard;
 +    SetRetailAudio({[](int se_no, int volume) { SndSePlay(se_no, volume, 0); },
 +                    [](int set_no, int track_no) {
@@ -21280,6 +21643,7 @@ index 00000000..4d342bbd
 +        RestoreMonsterScalesByOwner(mod_id);
 +        DespawnOwnedChronicleActors(mod_id);
 +        std::erase_if(g_debug_overlays, [mod_id](const auto &entry) { return entry.second.owner == mod_id; });
++        RemoveTitleModesByOwner(mod_id);
 +    };
 +    ConfigureAudioApi(config);
 +    CompleteApiCapabilityLedger(config.game_id, config.api_capabilities);
@@ -29632,6 +29996,360 @@ index 00000000..cd009b3d
 +}
 +
 +} // namespace moonmod
+diff --git a/port/src/moonmod/title_modes.cpp b/port/src/moonmod/title_modes.cpp
+new file mode 100644
+index 00000000..46484051
+--- /dev/null
++++ b/port/src/moonmod/title_modes.cpp
+@@ -0,0 +1,348 @@
++#include "moonmod/title_modes.hpp"
++
++#include <algorithm>
++#include <utility>
++
++#include "moonmod/runtime.hpp"
++
++namespace moonmod {
++namespace {
++
++std::vector<TitleMode> g_title_modes;
++std::optional<std::string> g_open_mode;       // qualified id of the mode whose screen is open
++std::optional<SandboxRequest> g_sandbox_request;
++std::optional<SandboxSession> g_sandbox;
++std::string g_sandbox_ending;                 // the first reason noted for the ending session
++std::optional<std::string> g_title_mode_return;
++int g_ignored_backs = 0;                       // Circle presses on a sub-page the mod did not answer
++
++ApiCallResult Invalid(std::string message) { return {ApiCallStatus::InvalidArgument, nullptr, std::move(message)}; }
++ApiCallResult Failed(std::string message) { return {ApiCallStatus::Failed, nullptr, std::move(message)}; }
++
++bool ValidLocalId(std::string_view id) {
++    if (id.empty() || id.size() > 64) return false;
++    return std::ranges::all_of(id, [](char c) {
++        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
++    });
++}
++
++// Printable text without control characters, at most max_bytes. The title draws it with the game font.
++bool ValidText(const Json &value, std::size_t max_bytes, bool allow_empty) {
++    if (!value.is_string()) return false;
++    const std::string &text = value.get_ref<const std::string &>();
++    if ((!allow_empty && text.empty()) || text.size() > max_bytes) return false;
++    return std::ranges::none_of(text, [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7f; });
++}
++
++std::string Qualify(std::string_view owner, std::string_view local) {
++    std::string id(owner);
++    id.push_back(':');
++    id.append(local);
++    return id;
++}
++
++// Reads the page fields shared by mode_register and mode_set into mode. Fields left out keep their value.
++ApiCallResult ReadPage(const Json &request, TitleMode &mode) {
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        const std::string &key = field.key();
++        if (key != "id" && key != "label" && key != "title" && key != "subtitle" && key != "hint" &&
++            key != "lines" && key != "entries" && key != "cursor" && key != "root") {
++            return Invalid("unsupported title mode field '" + key + "'");
++        }
++    }
++    if (request.contains("label")) {
++        if (!ValidText(request["label"], kTitleModeLabelBytes, false)) return Invalid("label must be 1-32 bytes of text");
++        mode.label = request["label"].get<std::string>();
++    }
++    if (request.contains("title")) {
++        if (!ValidText(request["title"], kTitleModeTitleBytes, false)) return Invalid("title must be 1-40 bytes of text");
++        mode.title = request["title"].get<std::string>();
++    }
++    for (const char *key : {"subtitle", "hint"}) {
++        if (!request.contains(key)) continue;
++        if (!ValidText(request[key], kTitleModeTextBytes, true)) return Invalid(std::string(key) + " must be at most 64 bytes of text");
++        (std::string_view(key) == "subtitle" ? mode.subtitle : mode.hint) = request[key].get<std::string>();
++    }
++    if (request.contains("lines")) {
++        const Json &lines = request["lines"];
++        if (!lines.is_array() || lines.size() > kTitleModeLineLimit) return Invalid("lines must be an array of at most 6 strings");
++        std::vector<std::string> out;
++        for (const Json &line : lines) {
++            if (!ValidText(line, kTitleModeTextBytes, true)) return Invalid("each line must be at most 64 bytes of text");
++            out.push_back(line.get<std::string>());
++        }
++        mode.lines = std::move(out);
++    }
++    if (request.contains("entries")) {
++        const Json &entries = request["entries"];
++        if (!entries.is_array() || entries.size() > kTitleModeEntryLimit) return Invalid("entries must be an array of at most 7 entries");
++        std::vector<TitleModeEntry> out;
++        for (const Json &entry : entries) {
++            if (!entry.is_object() || !entry.contains("id") || !entry["id"].is_string() ||
++                !ValidLocalId(entry["id"].get_ref<const std::string &>()) || entry["id"] == "back") {
++                return Invalid("each entry needs an id of 1-64 letters, digits, '.', '_' or '-' (not 'back')");
++            }
++            for (auto field = entry.begin(); field != entry.end(); ++field) {
++                if (field.key() != "id" && field.key() != "label" && field.key() != "enabled") {
++                    return Invalid("entries accept only id, label and enabled");
++                }
++            }
++            if (!entry.contains("label") || !ValidText(entry["label"], kTitleModeTextBytes, false)) {
++                return Invalid("each entry needs a label of 1-64 bytes of text");
++            }
++            if (entry.contains("enabled") && !entry["enabled"].is_boolean()) return Invalid("entry enabled must be a boolean");
++            const std::string id = entry["id"].get<std::string>();
++            if (std::ranges::find(out, id, &TitleModeEntry::id) != out.end()) return Invalid("entry ids must be unique");
++            out.push_back({id, entry["label"].get<std::string>(), entry.value("enabled", true)});
++        }
++        mode.entries = std::move(out);
++        if (!request.contains("cursor")) mode.cursor = 0;
++    }
++    if (request.contains("cursor")) {
++        if (!request["cursor"].is_number_integer() || request["cursor"].get<std::int64_t>() < 0) {
++            return Invalid("cursor must be a 0-based entry index");
++        }
++        mode.cursor = static_cast<std::size_t>(request["cursor"].get<std::int64_t>());
++    }
++    if (mode.cursor >= mode.entries.size()) mode.cursor = mode.entries.empty() ? 0 : mode.entries.size() - 1;
++    if (request.contains("root")) {
++        if (!request["root"].is_boolean()) return Invalid("root must be a boolean");
++        mode.root = request["root"].get<bool>();
++    }
++    return {ApiCallStatus::Ok, nullptr, {}};
++}
++
++TitleMode *FindMutable(std::string_view id, std::string_view owner) {
++    for (TitleMode &mode : g_title_modes) {
++        if (mode.id == id || (!owner.empty() && mode.owner == owner && mode.local_id == id)) return &mode;
++    }
++    return nullptr;
++}
++
++const Json *ReadRequest(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return nullptr;
++    return &args[0];
++}
++
++} // namespace
++
++ApiCallResult RegisterTitleMode(std::string_view owner, const Json &args) {
++    const Json *request = ReadRequest(args);
++    if (request == nullptr || !request->contains("id") || !(*request)["id"].is_string()) {
++        return Invalid("expected {id, label, title, subtitle?, hint?, lines?, entries?, cursor?, root?}");
++    }
++    const std::string local_id = (*request)["id"].get<std::string>();
++    if (!ValidLocalId(local_id)) return Invalid("id must be 1-64 letters, digits, '.', '_' or '-'");
++    if (!request->contains("label") || !request->contains("title")) return Invalid("a title mode needs a label and a title");
++    const std::string id = Qualify(owner, local_id);
++    if (TitleMode *existing = FindMutable(id, {})) {
++        TitleMode updated = *existing;
++        if (ApiCallResult read = ReadPage(*request, updated); read.status != ApiCallStatus::Ok) return read;
++        *existing = std::move(updated);
++        return {ApiCallStatus::Ok, TitleModeJson(*existing), {}};
++    }
++    if (g_title_modes.size() >= kTitleModeLimit) return Failed("the title menu has room for 2 mod title modes");
++    TitleMode mode;
++    mode.owner = std::string(owner);
++    mode.id = id;
++    mode.local_id = local_id;
++    if (ApiCallResult read = ReadPage(*request, mode); read.status != ApiCallStatus::Ok) return read;
++    g_title_modes.push_back(std::move(mode));
++    return {ApiCallStatus::Ok, TitleModeJson(g_title_modes.back()), {}};
++}
++
++ApiCallResult SetTitleMode(std::string_view owner, const Json &args) {
++    const Json *request = ReadRequest(args);
++    if (request == nullptr || !request->contains("id") || !(*request)["id"].is_string()) {
++        return Invalid("expected {id, title?, subtitle?, hint?, lines?, entries?, cursor?, root?, label?}");
++    }
++    TitleMode *mode = FindMutable((*request)["id"].get_ref<const std::string &>(), owner);
++    if (mode == nullptr || mode->owner != owner) return Failed("no title mode with that id belongs to this mod");
++    TitleMode updated = *mode;
++    if (ApiCallResult read = ReadPage(*request, updated); read.status != ApiCallStatus::Ok) return read;
++    *mode = std::move(updated);
++    g_ignored_backs = 0;
++    return {ApiCallStatus::Ok, TitleModeJson(*mode), {}};
++}
++
++ApiCallResult RemoveTitleMode(std::string_view owner, const Json &args) {
++    const Json *request = ReadRequest(args);
++    if (request == nullptr || !request->contains("id") || !(*request)["id"].is_string()) return Invalid("expected {id}");
++    const TitleMode *mode = FindTitleMode((*request)["id"].get_ref<const std::string &>(), owner);
++    if (mode == nullptr || mode->owner != owner) return Failed("no title mode with that id belongs to this mod");
++    const std::string id = mode->id;
++    if (g_open_mode == id) g_open_mode.reset();
++    std::erase_if(g_title_modes, [&id](const TitleMode &m) { return m.id == id; });
++    return {ApiCallStatus::Ok, {{"id", id}, {"removed", true}}, {}};
++}
++
++void RemoveTitleModesByOwner(std::string_view owner) {
++    if (g_open_mode) {
++        const TitleMode *open = FindTitleMode(*g_open_mode);
++        if (open != nullptr && open->owner == owner) g_open_mode.reset();
++    }
++    std::erase_if(g_title_modes, [owner](const TitleMode &m) { return m.owner == owner; });
++    if (g_sandbox_request && g_sandbox_request->owner == owner) g_sandbox_request.reset();
++}
++
++const std::vector<TitleMode> &TitleModes() { return g_title_modes; }
++
++const TitleMode *FindTitleMode(std::string_view id, std::string_view owner) { return FindMutable(id, owner); }
++
++Json TitleModeJson(const TitleMode &mode) {
++    Json entries = Json::array();
++    for (const TitleModeEntry &entry : mode.entries) {
++        entries.push_back({{"id", entry.id}, {"label", entry.label}, {"enabled", entry.enabled}});
++    }
++    return {{"id", mode.id}, {"local_id", mode.local_id}, {"owner", mode.owner}, {"label", mode.label},
++            {"title", mode.title}, {"subtitle", mode.subtitle}, {"hint", mode.hint}, {"lines", mode.lines},
++            {"entries", std::move(entries)}, {"cursor", mode.cursor}, {"root", mode.root},
++            {"open", g_open_mode == mode.id}};
++}
++
++bool OpenTitleModeScreen(std::size_t index) {
++    if (index >= g_title_modes.size()) return false;
++    g_open_mode = g_title_modes[index].id;
++    g_ignored_backs = 0;
++    // Copies: the callback may register, change or remove modes, which can move g_title_modes.
++    const std::string owner = g_title_modes[index].owner;
++    const Json payload = {{"mode", g_title_modes[index].local_id}, {"qualified_id", g_title_modes[index].id},
++                          {"frame", SharedRuntime().Frame()}};
++    SharedRuntime().PublishToMod(owner, "game.title.opened", payload);
++    return true;
++}
++
++const TitleMode *OpenTitleModeScreenMode() {
++    return g_open_mode ? FindTitleMode(*g_open_mode) : nullptr;
++}
++
++void CloseTitleModeScreen() {
++    g_open_mode.reset();
++    g_sandbox_request.reset();
++    g_ignored_backs = 0;
++}
++
++TitleModeOutcome HandleTitleModeInput(TitleModeInput input) {
++    // A session the mod asked for outside an input (from game.tick or game.title.opened) starts first.
++    if (g_sandbox_request) return TitleModeOutcome::StartSession;
++    TitleMode *mode = g_open_mode ? FindMutable(*g_open_mode, {}) : nullptr;
++    if (mode == nullptr) {
++        CloseTitleModeScreen();
++        return TitleModeOutcome::ReturnToTitle;
++    }
++    switch (input) {
++        case TitleModeInput::None:
++            break;
++        case TitleModeInput::Up:
++            if (!mode->entries.empty()) mode->cursor = (mode->cursor + mode->entries.size() - 1) % mode->entries.size();
++            break;
++        case TitleModeInput::Down:
++            if (!mode->entries.empty()) mode->cursor = (mode->cursor + 1) % mode->entries.size();
++            break;
++        case TitleModeInput::Confirm: {
++            if (mode->entries.empty() || !mode->entries[mode->cursor].enabled) break;
++            const std::string owner = mode->owner;
++            const Json payload = {{"mode", mode->local_id}, {"qualified_id", mode->id},
++                                  {"entry", mode->entries[mode->cursor].id}, {"index", mode->cursor},
++                                  {"frame", SharedRuntime().Frame()}};
++            SharedRuntime().PublishToMod(owner, "game.title.selected", payload);
++            break;
++        }
++        case TitleModeInput::Back: {
++            if (mode->root) {
++                const std::string owner = mode->owner;
++                const Json payload = {{"mode", mode->local_id}, {"qualified_id", mode->id}, {"entry", "back"},
++                                      {"closed", true}, {"frame", SharedRuntime().Frame()}};
++                CloseTitleModeScreen();
++                SharedRuntime().PublishToMod(owner, "game.title.selected", payload);
++                g_sandbox_request.reset(); // the screen is gone: nothing may start from it
++                return TitleModeOutcome::ReturnToTitle;
++            }
++            // A sub-page: the mod answers Circle. If it ignores two in a row (a broken handler), Circle
++            // leaves anyway so the player is never trapped on the screen.
++            if (++g_ignored_backs > 2) {
++                CloseTitleModeScreen();
++                return TitleModeOutcome::ReturnToTitle;
++            }
++            const std::string owner = mode->owner;
++            const Json payload = {{"mode", mode->local_id}, {"qualified_id", mode->id}, {"entry", "back"},
++                                  {"closed", false}, {"frame", SharedRuntime().Frame()}};
++            SharedRuntime().PublishToMod(owner, "game.title.selected", payload);
++            break;
++        }
++    }
++    if (g_sandbox_request) return TitleModeOutcome::StartSession;
++    // The mod may have removed its own mode from inside the callback.
++    if (!g_open_mode || FindTitleMode(*g_open_mode) == nullptr) {
++        CloseTitleModeScreen();
++        return TitleModeOutcome::ReturnToTitle;
++    }
++    return TitleModeOutcome::Stay;
++}
++
++void QueueSandboxRequest(SandboxRequest request) { g_sandbox_request = std::move(request); }
++bool SandboxRequestPending() { return g_sandbox_request.has_value(); }
++
++std::optional<SandboxRequest> TakeSandboxRequest() {
++    std::optional<SandboxRequest> request = std::move(g_sandbox_request);
++    g_sandbox_request.reset();
++    return request;
++}
++
++void BeginSandboxSession(const SandboxRequest &request) {
++    g_sandbox = SandboxSession{request.owner, request.mode_id, static_cast<int>(SharedRuntime().Frame())};
++    g_sandbox_ending.clear();
++    g_open_mode.reset();
++    SharedRuntime().Publish("game.session.started",
++                               {{"kind", "sandbox"}, {"owner", request.owner}, {"mode", request.mode_id},
++                                {"floor", request.floor_id}, {"party_size", request.party_size},
++                                {"frame", SharedRuntime().Frame()}});
++}
++
++bool SandboxActive() { return g_sandbox.has_value(); }
++const SandboxSession *ActiveSandbox() { return g_sandbox ? &*g_sandbox : nullptr; }
++
++void NoteSandboxEnding(std::string_view reason) {
++    if (g_sandbox && g_sandbox_ending.empty()) g_sandbox_ending = std::string(reason);
++}
++
++std::string EndSandboxSession(std::string_view fallback_reason, bool reopen_mode) {
++    if (!g_sandbox) return {};
++    const std::string reason = g_sandbox_ending.empty() ? std::string(fallback_reason) : g_sandbox_ending;
++    const SandboxSession ended = *g_sandbox;
++    g_sandbox.reset();
++    g_sandbox_ending.clear();
++    if (reopen_mode && FindTitleMode(ended.mode_id) != nullptr) g_title_mode_return = ended.mode_id;
++    // Published now, so mods hear the end before the title reopens the mode screen (game.title.opened).
++    SharedRuntime().Publish("game.session.ended",
++                               {{"kind", "sandbox"}, {"owner", ended.owner}, {"mode", ended.mode_id},
++                                {"reason", reason}, {"frame", SharedRuntime().Frame()}});
++    return reason;
++}
++
++std::optional<std::string> TakeTitleModeReturn() {
++    std::optional<std::string> id = std::move(g_title_mode_return);
++    g_title_mode_return.reset();
++    return id;
++}
++
++Json SessionJson(bool in_title) {
++    if (g_sandbox) {
++        return {{"kind", "sandbox"}, {"owner", g_sandbox->owner}, {"mode", g_sandbox->mode_id},
++                {"ending", g_sandbox_ending.empty() ? Json(nullptr) : Json(g_sandbox_ending)}};
++    }
++    return {{"kind", in_title ? "title" : "story"}, {"owner", nullptr}, {"mode", nullptr},
++            {"open_mode", g_open_mode ? Json(*g_open_mode) : Json(nullptr)}};
++}
++
++void ResetTitleModesForTests() {
++    g_ignored_backs = 0;
++    g_title_modes.clear();
++    g_open_mode.reset();
++    g_sandbox_request.reset();
++    g_sandbox.reset();
++    g_sandbox_ending.clear();
++    g_title_mode_return.reset();
++}
++
++} // namespace moonmod
 diff --git a/port/src/mouse_collision.cpp b/port/src/mouse_collision.cpp
 index 6b30ee29..66a85b01 100644
 --- a/port/src/mouse_collision.cpp
@@ -30568,10 +31286,10 @@ index 3e79f87f..570a8b16 100644
      Player().Rewind(port, 0);
      Player().Play(port);
 diff --git a/port/src/tests/CMakeLists.txt b/port/src/tests/CMakeLists.txt
-index ee8b9d59..2a720439 100644
+index ee8b9d59..2d022335 100644
 --- a/port/src/tests/CMakeLists.txt
 +++ b/port/src/tests/CMakeLists.txt
-@@ -15,11 +15,32 @@ include(GoogleTest)
+@@ -15,11 +15,38 @@ include(GoogleTest)
  
  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp)
  add_executable(darkcloud_tests ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${TEST_SOURCES})
@@ -30595,6 +31313,12 @@ index ee8b9d59..2a720439 100644
 +    target_compile_definitions(darkcloud_tests PRIVATE
 +        MOONFACTORY_FIRST_STEPS_PATH="${MOONFACTORY_FIRST_STEPS_PATH}")
 +endif()
++set(MOONFACTORY_ROGUELIKE_PATH "${CMAKE_SOURCE_DIR}/../MoonFactory/mods/moonmod.roguelike")
++if(EXISTS "${MOONFACTORY_ROGUELIKE_PATH}/mod.json")
++    file(TO_CMAKE_PATH "${MOONFACTORY_ROGUELIKE_PATH}" MOONFACTORY_ROGUELIKE_PATH)
++    target_compile_definitions(darkcloud_tests PRIVATE
++        MOONFACTORY_ROGUELIKE_PATH="${MOONFACTORY_ROGUELIKE_PATH}")
++endif()
 +add_dependencies(darkcloud_tests moonmod_native_plugin_shared_fixture)
  set_target_properties(darkcloud_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
  target_include_directories(darkcloud_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -30605,7 +31329,7 @@ index ee8b9d59..2a720439 100644
  
  # A case is a unit test: it finishes in milliseconds, and one that does not is cut off. The clock
  # cases measure short sleeps, which the parallel gfx cases skew, so they run on their own.
-@@ -32,3 +53,11 @@ gtest_discover_tests(darkcloud_tests
+@@ -32,3 +59,11 @@ gtest_discover_tests(darkcloud_tests
      DISCOVERY_MODE PRE_TEST
      TEST_FILTER PlatformClock.*
      PROPERTIES TIMEOUT ${DC_TEST_TIMEOUT} ENVIRONMENT "DC_TEST_FONT=${CMAKE_SOURCE_DIR}/tools/font/DarkCloudCompendium.ttf" RUN_SERIAL TRUE)
@@ -38958,6 +39682,176 @@ index 00000000..b705fb09
 +        "test.moonmod.render-probe", *operation, moonmod::Json::array());
 +    EXPECT_EQ(unavailable.status, moonmod::ApiCallStatus::Failed);
 +}
+diff --git a/port/src/tests/moonmod_roguelike_package_test.cpp b/port/src/tests/moonmod_roguelike_package_test.cpp
+new file mode 100644
+index 00000000..a7c7ea09
+--- /dev/null
++++ b/port/src/tests/moonmod_roguelike_package_test.cpp
+@@ -0,0 +1,164 @@
++// Loads MoonFactory's Dark Genie's Gauntlet package (mods/moonmod.roguelike) through the real Lua runtime and
++// the Chronicle adapter: its title mode, its pages, Start Run's sandbox session and a defeat that brings the
++// player back to its title screen. Skipped when the MoonFactory checkout is not beside this game checkout.
++
++#include <gtest/gtest.h>
++
++#include <chrono>
++#include <filesystem>
++#include <fstream>
++#include <string>
++#include <vector>
++
++#include "dngstatusdata.hpp"
++#include "gameloop.hpp"
++#include "dun/gameloop.hpp"
++#include "gamemode.hpp"
++#include "main.hpp"
++#include "mainselect.hpp"
++#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/runtime.hpp"
++#include "moonmod/title_modes.hpp"
++#include "savedata.hpp"
++
++extern s32 mode;
++
++namespace {
++
++namespace fs = std::filesystem;
++
++struct TempRoot {
++    fs::path path = fs::temp_directory_path() /
++                    ("moonmod-roguelike-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    ~TempRoot() {
++        std::error_code ignored;
++        fs::remove_all(path, ignored);
++    }
++};
++
++struct Restore {
++    CSaveData *save = SaveData;
++    int current_mode = mode;
++    int map_no = MapNo;
++    int next_map_no = NextMapNo;
++    int selected_dungeon = selectMapNo;
++    ~Restore() {
++        moonmod::SharedRuntime().Stop();
++        SaveData = save;
++        mode = current_mode;
++        MapNo = map_no;
++        NextMapNo = next_map_no;
++        selectMapNo = selected_dungeon;
++        moonmod::ResetTitleModesForTests();
++        moonmod::ResetChronicleDungeonsForTests();
++    }
++};
++
++std::vector<std::string> EntryIds(const moonmod::TitleMode &mode) {
++    std::vector<std::string> ids;
++    for (const auto &entry : mode.entries) ids.push_back(entry.id);
++    return ids;
++}
++
++} // namespace
++
++TEST(MoonModRoguelikePackage, TitleModeStartsASandboxRunAndADefeatReturnsToIt) {
++#if !defined(MOONFACTORY_ROGUELIKE_PATH)
++    GTEST_SKIP() << "The MoonFactory checkout (mods/moonmod.roguelike) is not beside this game checkout.";
++#else
++    Restore restore;
++    moonmod::SharedRuntime().Stop();
++    moonmod::ResetTitleModesForTests();
++    moonmod::ResetChronicleDungeonsForTests();
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    mode = GAME_MODE_TITLE;
++    MapNo = 800;
++    NextMapNo = -1;
++
++    TempRoot root;
++    const fs::path package = root.path / "mods" / "moonmod.roguelike";
++    fs::create_directories(package.parent_path());
++    fs::copy(MOONFACTORY_ROGUELIKE_PATH, package, fs::copy_options::recursive);
++    fs::create_directories(root.path / "save" / "moonmod");
++    {
++        std::ofstream profile(root.path / "save" / "moonmod" / "profile.json", std::ios::binary | std::ios::trunc);
++        profile << R"json({"format_version":1,"enabled":{"moonmod.roguelike":true},"settings":{}})json";
++    }
++    moonmod::RuntimeConfig config;
++    config.game_id = MOONMOD_TEST_GAME_ID;
++    config.game_name = "Chronicle";
++    config.mod_directories = {root.path / "mods"};
++    config.save_root = root.path / "save";
++    moonmod::ConfigureChronicleApi(config);
++    std::vector<std::string> logs;
++    config.log = [&logs](std::string_view, std::string_view level, std::string_view message) {
++        logs.push_back(std::string(level) + ": " + std::string(message));
++    };
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(std::move(config), error)) << error;
++    ASSERT_EQ(moonmod::SharedRuntime().Mods().size(), 1u);
++    if (moonmod::SharedRuntime().Mods()[0].state != moonmod::ModState::Loaded) {
++        for (const std::string &message : logs) ADD_FAILURE() << message;
++    }
++    ASSERT_EQ(moonmod::SharedRuntime().Mods()[0].state, moonmod::ModState::Loaded);
++    bool ready = false;
++    for (const std::string &message : logs) {
++        EXPECT_EQ(message.find("warn"), std::string::npos) << message;
++        if (message.find("Moon Gauntlet ready: 5 of 5 biomes") != std::string::npos) ready = true;
++    }
++    EXPECT_TRUE(ready);
++
++    // The title mode and its root page.
++    ASSERT_EQ(moonmod::TitleModes().size(), 1u);
++    const moonmod::TitleMode &gauntlet = moonmod::TitleModes()[0];
++    EXPECT_EQ(gauntlet.id, "moonmod.roguelike:gauntlet");
++    EXPECT_EQ(gauntlet.label, "Dark Genie's Gauntlet");
++    EXPECT_EQ(EntryIds(gauntlet), (std::vector<std::string>{"start", "character", "eternal", "records"}));
++
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    using moonmod::TitleModeInput;
++    using moonmod::TitleModeOutcome;
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Down), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Confirm), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::TitleModes()[0].entries.at(1).label, "Starting Character: Xiao");
++    EXPECT_EQ(moonmod::TitleModes()[0].cursor, 1u);
++
++    // Norune Eternal is a sub-page; Circle comes back to the root page.
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Down), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Confirm), TitleModeOutcome::Stay);
++    EXPECT_FALSE(moonmod::TitleModes()[0].root);
++    EXPECT_EQ(moonmod::TitleModes()[0].entries.size(), 7u);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Back), TitleModeOutcome::Stay);
++    EXPECT_TRUE(moonmod::TitleModes()[0].root);
++
++    // Start Run: a sandbox session on Divine Beast Cave's first run floor with all six joined.
++    while (moonmod::TitleModes()[0].cursor != 0) moonmod::HandleTitleModeInput(TitleModeInput::Up);
++    ASSERT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Confirm), TitleModeOutcome::StartSession);
++    ASSERT_TRUE(moonmod::StartPendingChronicleSandbox());
++    EXPECT_TRUE(moonmod::SandboxActive());
++    CDngStatusData *status = save->GetDngStatus();
++    EXPECT_EQ(status->GetPartySize(), 6);
++    EXPECT_EQ(status->cur_chara, 1); // Xiao, chosen above
++    EXPECT_EQ(NextMapNo, 200);
++    moonmod::SharedRuntime().Pump();
++
++    // A game over: the session ends, the run is recorded as a defeat and the title shows it.
++    mode = GAME_MODE_DUNGEON;
++    moonmod::NoteChronicleSandboxDefeat();
++    NextMapNo = 0;
++    ASSERT_TRUE(moonmod::RedirectChronicleSandboxMapJump());
++    EXPECT_EQ(NextMapNo, 800);
++    moonmod::SharedRuntime().Pump();
++    const auto reopen = moonmod::TakeTitleModeReturn();
++    ASSERT_TRUE(reopen.has_value());
++    EXPECT_EQ(*reopen, "moonmod.roguelike:gauntlet");
++    bool shown = false;
++    for (const std::string &line : moonmod::TitleModes()[0].lines) {
++        if (line.find("Last run: Fell in Divine Beast Cave") != std::string::npos) shown = true;
++    }
++    EXPECT_TRUE(shown);
++    for (const std::string &message : logs) EXPECT_EQ(message.find("error"), std::string::npos) << message;
++#endif
++}
 diff --git a/port/src/tests/moonmod_signature_api_test.cpp b/port/src/tests/moonmod_signature_api_test.cpp
 new file mode 100644
 index 00000000..5891a907
@@ -39314,6 +40208,332 @@ index 00000000..5891a907
 +
 +
 +
+diff --git a/port/src/tests/moonmod_title_modes_test.cpp b/port/src/tests/moonmod_title_modes_test.cpp
+new file mode 100644
+index 00000000..1f1230af
+--- /dev/null
++++ b/port/src/tests/moonmod_title_modes_test.cpp
+@@ -0,0 +1,320 @@
++#include <gtest/gtest.h>
++
++#include <memory>
++#include <ranges>
++
++#include "dngstatusdata.hpp"
++#include "gameloop.hpp"
++#include "dun/gameloop.hpp"
++#include "gamemode.hpp"
++#include "itemdata.hpp"
++#include "main.hpp"
++#include "mainselect.hpp"
++#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/title_modes.hpp"
++#include "savedata.hpp"
++
++extern s32 mode;
++
++namespace {
++
++struct SavedGameState {
++    CSaveData *save = SaveData;
++    int current_mode = mode;
++    int map_no = MapNo;
++    int next_map_no = NextMapNo;
++    int start_event_no = StartEventNo;
++    int selected_dungeon = selectMapNo;
++
++    ~SavedGameState() {
++        SaveData = save;
++        mode = current_mode;
++        MapNo = map_no;
++        NextMapNo = next_map_no;
++        StartEventNo = start_event_no;
++        selectMapNo = selected_dungeon;
++        moonmod::ResetTitleModesForTests();
++        moonmod::ResetChronicleDungeonsForTests();
++    }
++};
++
++struct Api {
++    moonmod::RuntimeConfig config;
++    Api() { moonmod::ConfigureChronicleApi(config); }
++    moonmod::ApiCallResult operator()(std::string_view mod, std::string_view path, moonmod::Json argument) {
++        const moonmod::ApiOperationSpec *operation = moonmod::FindApiOperation(path);
++        EXPECT_NE(operation, nullptr) << path;
++        if (operation == nullptr) return {};
++        moonmod::Json args = argument.is_null() ? moonmod::Json::array() : moonmod::Json::array({argument});
++        return config.api_handler(mod, *operation, args);
++    }
++};
++
++moonmod::Json GauntletPage() {
++    return {{"id", "gauntlet"}, {"label", "Dark Genie's Gauntlet"}, {"title", "DARK GENIE'S GAUNTLET"},
++            {"subtitle", "A run that is not in any save"}, {"lines", {"Moon Shards 12", "Best depth 7"}},
++            {"entries", {{{"id", "start"}, {"label", "Start Run"}},
++                         {{"id", "eternal"}, {"label", "Norune Eternal"}},
++                         {{"id", "locked"}, {"label", "Ascension (locked)"}, {"enabled", false}}}}};
++}
++
++} // namespace
++
++TEST(MoonModTitleModes, CatalogAndCapabilities) {
++    Api api;
++    for (const char *path : {"title.mode_register", "title.mode_set", "title.mode_remove", "session.get", "session.start", "session.finish"}) {
++        ASSERT_NE(moonmod::FindApiOperation(path), nullptr) << path;
++        const auto capability = std::ranges::find(api.config.api_capabilities, std::string_view(path), &moonmod::ApiCapability::path);
++        ASSERT_NE(capability, api.config.api_capabilities.end()) << path;
++        EXPECT_TRUE(capability->supported) << path;
++    }
++    for (const char *event : {"game.title.opened", "game.title.selected", "game.session.started", "game.session.ended"}) {
++        EXPECT_NE(std::ranges::find(moonmod::EventCatalog(), std::string_view(event), &moonmod::EventSpec::name),
++                  moonmod::EventCatalog().end()) << event;
++    }
++}
++
++TEST(MoonModTitleModes, RegistersUpdatesAndRemovesOwnedModes) {
++    SavedGameState saved;
++    moonmod::ResetTitleModesForTests();
++    Api api;
++
++    const auto registered = api("mod.a", "title.mode_register", GauntletPage());
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++    EXPECT_EQ(registered.value.at("id"), "mod.a:gauntlet");
++    EXPECT_EQ(registered.value.at("entries").size(), 3u);
++    ASSERT_EQ(moonmod::TitleModes().size(), 1u);
++
++    // Registering the same id again updates it in place.
++    moonmod::Json again = GauntletPage();
++    again["label"] = "Gauntlet";
++    ASSERT_EQ(api("mod.a", "title.mode_register", again).status, moonmod::ApiCallStatus::Ok);
++    ASSERT_EQ(moonmod::TitleModes().size(), 1u);
++    EXPECT_EQ(moonmod::TitleModes()[0].label, "Gauntlet");
++
++    // Validation.
++    EXPECT_EQ(api("mod.a", "title.mode_register", {{"id", "x"}, {"label", "X"}}).status, moonmod::ApiCallStatus::InvalidArgument);
++    moonmod::Json too_many = GauntletPage();
++    too_many["id"] = "many";
++    too_many["entries"] = moonmod::Json::array();
++    for (int i = 0; i < 8; ++i) too_many["entries"].push_back({{"id", "e" + std::to_string(i)}, {"label", "E"}});
++    EXPECT_EQ(api("mod.a", "title.mode_register", too_many).status, moonmod::ApiCallStatus::InvalidArgument);
++    moonmod::Json back_entry = GauntletPage();
++    back_entry["id"] = "back-entry";
++    back_entry["entries"] = moonmod::Json::array({{{"id", "back"}, {"label", "Back"}}});
++    EXPECT_EQ(api("mod.a", "title.mode_register", back_entry).status, moonmod::ApiCallStatus::InvalidArgument);
++    moonmod::Json control = GauntletPage();
++    control["id"] = "control";
++    control["title"] = "bad\ntitle";
++    EXPECT_EQ(api("mod.a", "title.mode_register", control).status, moonmod::ApiCallStatus::InvalidArgument);
++
++    // Two modes at most.
++    moonmod::Json second = GauntletPage();
++    second["id"] = "second";
++    ASSERT_EQ(api("mod.b", "title.mode_register", second).status, moonmod::ApiCallStatus::Ok);
++    moonmod::Json third = GauntletPage();
++    third["id"] = "third";
++    EXPECT_EQ(api("mod.c", "title.mode_register", third).status, moonmod::ApiCallStatus::Failed);
++
++    // Only the owner changes or removes a mode.
++    EXPECT_EQ(api("mod.b", "title.mode_set", {{"id", "gauntlet"}, {"title", "MINE"}}).status, moonmod::ApiCallStatus::Failed);
++    const auto set = api("mod.a", "title.mode_set", {{"id", "gauntlet"}, {"lines", {"Moon Shards 40"}}, {"cursor", 1}});
++    ASSERT_EQ(set.status, moonmod::ApiCallStatus::Ok) << set.message;
++    EXPECT_EQ(moonmod::TitleModes()[0].lines.size(), 1u);
++    EXPECT_EQ(moonmod::TitleModes()[0].cursor, 1u);
++    EXPECT_EQ(api("mod.b", "title.mode_remove", {{"id", "mod.a:gauntlet"}}).status, moonmod::ApiCallStatus::Failed);
++
++    // Unloading the owner removes its mode.
++    api.config.api_owner_unloaded("mod.b");
++    ASSERT_EQ(moonmod::TitleModes().size(), 1u);
++    ASSERT_EQ(api("mod.a", "title.mode_remove", {{"id", "gauntlet"}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_TRUE(moonmod::TitleModes().empty());
++}
++
++TEST(MoonModTitleModes, ScreenNavigationWrapsAndBacksOutFromTheRoot) {
++    SavedGameState saved;
++    moonmod::ResetTitleModesForTests();
++    Api api;
++    ASSERT_EQ(api("mod.a", "title.mode_register", GauntletPage()).status, moonmod::ApiCallStatus::Ok);
++
++    EXPECT_FALSE(moonmod::OpenTitleModeScreen(1));
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    ASSERT_NE(moonmod::OpenTitleModeScreenMode(), nullptr);
++    using moonmod::TitleModeInput;
++    using moonmod::TitleModeOutcome;
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Up), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::OpenTitleModeScreenMode()->cursor, 2u); // wraps to the last entry
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Confirm), TitleModeOutcome::Stay); // disabled entry
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Down), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::OpenTitleModeScreenMode()->cursor, 0u);
++
++    // A sub-page (root = false): Circle stays on the screen and the mod gets "back".
++    ASSERT_EQ(api("mod.a", "title.mode_set", {{"id", "gauntlet"}, {"root", false}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Back), TitleModeOutcome::Stay);
++    ASSERT_EQ(api("mod.a", "title.mode_set", {{"id", "gauntlet"}, {"root", true}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Back), TitleModeOutcome::ReturnToTitle);
++    EXPECT_EQ(moonmod::OpenTitleModeScreenMode(), nullptr);
++
++    // A sub-page whose mod never answers Circle still lets the player out on the third press.
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    ASSERT_EQ(api("mod.a", "title.mode_set", {{"id", "gauntlet"}, {"root", false}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Back), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Back), TitleModeOutcome::Stay);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(TitleModeInput::Back), TitleModeOutcome::ReturnToTitle);
++    EXPECT_EQ(moonmod::OpenTitleModeScreenMode(), nullptr);
++}
++
++TEST(MoonModTitleModes, AQueuedSessionNeverOutlivesItsScreen) {
++    SavedGameState saved;
++    moonmod::ResetTitleModesForTests();
++    Api api;
++    ASSERT_EQ(api("mod.a", "title.mode_register", GauntletPage()).status, moonmod::ApiCallStatus::Ok);
++    // A request queued outside an input (from game.tick) starts on the next frame, whatever was pressed.
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    moonmod::QueueSandboxRequest({"mod.a", "mod.a:gauntlet", "mod.a:x:i", 0, 15, 1, 0});
++    EXPECT_EQ(moonmod::HandleTitleModeInput(moonmod::TitleModeInput::Back), moonmod::TitleModeOutcome::StartSession);
++    // A start that cannot happen closes the screen and drops the request.
++    EXPECT_FALSE(moonmod::StartPendingChronicleSandbox());
++    EXPECT_EQ(moonmod::OpenTitleModeScreenMode(), nullptr);
++    EXPECT_FALSE(moonmod::SandboxRequestPending());
++    // Leaving the screen drops a request too.
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    moonmod::CloseTitleModeScreen();
++    moonmod::QueueSandboxRequest({"mod.a", "mod.a:gauntlet", "mod.a:x:i", 0, 15, 1, 0});
++    moonmod::CloseTitleModeScreen();
++    EXPECT_FALSE(moonmod::SandboxRequestPending());
++}
++
++TEST(MoonModTitleModes, SandboxSessionStartsFromTheOpenScreenAndReturnsToIt) {
++    SavedGameState saved;
++    moonmod::ResetTitleModesForTests();
++    moonmod::ResetChronicleDungeonsForTests();
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    Api api;
++
++    const auto registered = api("mod.a", "dungeons.register",
++        {{"id", "gauntlet-dbc"}, {"name", "Gauntlet"}, {"dungeon", 0},
++         {"floors", {{{"id", "i"}, {"source_floor", 2}}, {{"id", "ii"}, {"source_floor", 5}}}}});
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++    const std::string floor_id = registered.value.at("floors").at(0).at("id").get<std::string>();
++    ASSERT_EQ(api("mod.a", "title.mode_register", GauntletPage()).status, moonmod::ApiCallStatus::Ok);
++
++    const moonmod::Json start = {{"floor", floor_id}, {"party_size", 3}, {"character", "toan"}};
++    mode = GAME_MODE_TITLE;
++    MapNo = 800;
++    NextMapNo = -1;
++    // Not before the screen is open, and not by another mod.
++    EXPECT_EQ(api("mod.a", "session.start", start).status, moonmod::ApiCallStatus::Failed);
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    EXPECT_EQ(api("mod.b", "session.start", start).status, moonmod::ApiCallStatus::Failed);
++    EXPECT_EQ(api("mod.a", "session.start", {{"floor", "mod.a:nowhere:i"}}).status, moonmod::ApiCallStatus::Failed);
++    EXPECT_EQ(api("mod.a", "session.start", {{"floor", floor_id}, {"party_size", 1}, {"character", "goro"}}).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api("mod.a", "session.get", nullptr).value.at("kind"), "title");
++
++    const auto queued = api("mod.a", "session.start", start);
++    ASSERT_EQ(queued.status, moonmod::ApiCallStatus::Ok) << queued.message;
++    EXPECT_EQ(queued.value.at("native_floor_id"), 15);
++    EXPECT_EQ(moonmod::HandleTitleModeInput(moonmod::TitleModeInput::None), moonmod::TitleModeOutcome::StartSession);
++    EXPECT_EQ(api("mod.a", "session.start", start).status, moonmod::ApiCallStatus::Failed); // already starting
++
++    // The game loop starts it: a new game's save with three fighters, straight to the floor.
++    ASSERT_TRUE(moonmod::StartPendingChronicleSandbox());
++    EXPECT_FALSE(moonmod::StartPendingChronicleSandbox());
++    CDngStatusData *status = save->GetDngStatus();
++    EXPECT_EQ(status->GetPartySize(), 3);
++    for (int character = 0; character < 3; ++character) {
++        EXPECT_EQ(status->equipped_weapon_slot[character], 0) << character;
++        EXPECT_GE(status->chara_weapons[character][0].item_no, ITEM_WEAPON_START) << character;
++    }
++    EXPECT_EQ(status->chara_weapons[1][0].item_no, ITEM_WEAPON_WOODEN_SLINGSHOT);
++    EXPECT_EQ(status->equipped_weapon_slot[3], -1);
++    EXPECT_EQ(NextMapNo, 200);
++    EXPECT_EQ(status->cur_georama, 0);
++    EXPECT_TRUE(moonmod::SandboxActive());
++    const auto session = api("mod.a", "session.get", nullptr);
++    EXPECT_EQ(session.value.at("kind"), "sandbox");
++    EXPECT_EQ(session.value.at("mode"), "mod.a:gauntlet");
++    const auto slot = api("mod.a", "save.slot_id", nullptr);
++    ASSERT_EQ(slot.status, moonmod::ApiCallStatus::Ok);
++    EXPECT_TRUE(slot.value.at("slot_id").is_null());
++
++    // Moving between floors keeps the session.
++    EXPECT_FALSE(moonmod::RedirectChronicleSandboxMapJump());
++    mode = GAME_MODE_DUNGEON;
++    selectMapNo = 0;
++    ASSERT_TRUE(moonmod::PreparePendingChronicleDungeonEntry());
++    EXPECT_EQ(moonmod::TakePendingChronicleDungeonFloor(0), 15);
++    NextMapNo = 201;
++    EXPECT_FALSE(moonmod::RedirectChronicleSandboxMapJump());
++    EXPECT_EQ(NextMapNo, 201);
++    // The next biome: a transition into another dungeon moves the session's area with it.
++    const auto wof = api("mod.a", "dungeons.register",
++        {{"id", "gauntlet-wof"}, {"name", "Gauntlet"}, {"dungeon", 1}, {"floors", {{{"id", "i"}, {"source_floor", 2}}}}});
++    ASSERT_EQ(wof.status, moonmod::ApiCallStatus::Ok) << wof.message;
++    NextMapNo = -1;
++    ASSERT_EQ(api("mod.a", "world.transition", {{"id", wof.value.at("floors").at(0).at("id")}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(NextMapNo, 201);
++    selectMapNo = 1;
++    ASSERT_TRUE(moonmod::PreparePendingChronicleDungeonEntry());
++    EXPECT_EQ(status->cur_georama, 1);
++    EXPECT_EQ(api("mod.a", "world.get", nullptr).status, moonmod::ApiCallStatus::Ok);
++
++    // A game over sends the run back to the title screen of its mode.
++    NextMapNo = -1;
++    moonmod::NoteChronicleSandboxDefeat();
++    EXPECT_EQ(api("mod.a", "session.get", nullptr).value.at("ending"), "defeat");
++    NextMapNo = 0; // the dungeon's exit to Norune
++    EXPECT_TRUE(moonmod::RedirectChronicleSandboxMapJump());
++    EXPECT_EQ(NextMapNo, 800);
++    EXPECT_FALSE(moonmod::SandboxActive());
++    const auto reopen = moonmod::TakeTitleModeReturn();
++    ASSERT_TRUE(reopen.has_value());
++    EXPECT_EQ(*reopen, "mod.a:gauntlet");
++    EXPECT_FALSE(moonmod::TakeTitleModeReturn().has_value());
++}
++
++TEST(MoonModTitleModes, SessionEndIsTheOwnersAndLoadingASaveEndsItInPlace) {
++    SavedGameState saved;
++    moonmod::ResetTitleModesForTests();
++    moonmod::ResetChronicleDungeonsForTests();
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    Api api;
++    const auto registered = api("mod.a", "dungeons.register",
++        {{"id", "gauntlet-wof"}, {"name", "Gauntlet"}, {"dungeon", 1}, {"floors", {{{"id", "i"}, {"source_floor", 2}}}}});
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++    ASSERT_EQ(api("mod.a", "title.mode_register", GauntletPage()).status, moonmod::ApiCallStatus::Ok);
++    mode = GAME_MODE_TITLE;
++    NextMapNo = -1;
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    ASSERT_EQ(api("mod.a", "session.start", {{"floor", registered.value.at("floors").at(0).at("id")}}).status,
++              moonmod::ApiCallStatus::Ok);
++    ASSERT_TRUE(moonmod::StartPendingChronicleSandbox());
++    EXPECT_EQ(NextMapNo, 201);
++
++    mode = GAME_MODE_DUNGEON;
++    NextMapNo = -1;
++    EXPECT_EQ(api("mod.b", "session.finish", nullptr).status, moonmod::ApiCallStatus::Failed);
++    const auto ended = api("mod.a", "session.finish", nullptr);
++    ASSERT_EQ(ended.status, moonmod::ApiCallStatus::Ok) << ended.message;
++    EXPECT_EQ(NextMapNo, 800);
++    EXPECT_EQ(api("mod.a", "session.get", nullptr).value.at("ending"), "ended");
++    EXPECT_TRUE(moonmod::RedirectChronicleSandboxMapJump());
++    EXPECT_FALSE(moonmod::SandboxActive());
++    EXPECT_TRUE(moonmod::TakeTitleModeReturn().has_value());
++
++    // Loading a real save from the battle menu ends the session without reopening the mode.
++    mode = GAME_MODE_TITLE;
++    NextMapNo = -1;
++    ASSERT_TRUE(moonmod::OpenTitleModeScreen(0));
++    ASSERT_EQ(api("mod.a", "session.start", {{"floor", registered.value.at("floors").at(0).at("id")}}).status,
++              moonmod::ApiCallStatus::Ok);
++    ASSERT_TRUE(moonmod::StartPendingChronicleSandbox());
++    moonmod::EndChronicleSandboxInPlace("loaded_save");
++    EXPECT_FALSE(moonmod::SandboxActive());
++    EXPECT_FALSE(moonmod::TakeTitleModeReturn().has_value());
++}
 diff --git a/port/src/tests/moonmod_weapon_api_test.cpp b/port/src/tests/moonmod_weapon_api_test.cpp
 new file mode 100644
 index 00000000..ad0a7266
@@ -40611,6 +41831,327 @@ index dc7232e7..5af21332 100644
          caption::PreparePainted(name, decoded);
          MakeGroundPeriodic(name, decoded);
          DumpTexture(name, decoded);
+diff --git a/port/src/title/title_port.hpp b/port/src/title/title_port.hpp
+index cecfd554..a6a1ddd4 100644
+--- a/port/src/title/title_port.hpp
++++ b/port/src/title/title_port.hpp
+@@ -37,3 +37,7 @@ void TitlePortCard(CTexture *texture, float angle);
+ // Constructs the title overlay's objects the port defines with host classes, as the overlay's
+ // static constructors did each time retail loaded TITLE.BIN.
+ void TitleOverlayConstruct();
++
++// Opens the title mode screen of the mod whose sandbox session just ended (moonmod/title_modes.hpp), if any;
++// called right after TitleInit.
++void TitlePortReopenMode();
+diff --git a/port/src/title/titleloop.cpp b/port/src/title/titleloop.cpp
+index c537cd3f..a43b7e2a 100644
+--- a/port/src/title/titleloop.cpp
++++ b/port/src/title/titleloop.cpp
+@@ -3,6 +3,7 @@
+ #include <libgraph.h>
+ #include <libvu0.h>
+ 
++#include <algorithm>
+ #include <bit>
+ 
+ #include "camerafollow.hpp"
+@@ -29,6 +30,8 @@
+ #include "title/title.hpp"
+ #include "title/titleloop.hpp"
+ #include "title_port.hpp"
++#include "moonmod/title_modes.hpp"
++#include "ui_framework.hpp"
+ 
+ // The bodies are retail's, which pass string literals as char *.
+ #pragma clang diagnostic ignored "-Wwritable-strings"
+@@ -43,9 +46,79 @@ int  OpeningBookKey();
+ void OpeningBookDraw();
+ void TiPlayVolSE(int group, int no, int voice, float volume);
+ 
++/* A title menu row's height on screen, laid out for NTSC's picture and lowered to stay centred in
++   the taller PAL one. */
++#define MENU_Y(y) ((y) + (SCREEN_HEIGHT - 448) / 2)
++
+ namespace {
+ MenuPointer title_pointer;
+ 
++// Mod title modes (moonmod/title_modes.hpp): their rows follow OPTION on the title menu, and choosing one
++// shows the mode's own screen in these two steps. The values sit past retail's TITLE_STEP_EXIT.
++constexpr int kTitleStepModMode = 40;
++constexpr int kTitleStepModFadeOut = 41;
++constexpr int kRetailMenuRows = 3;
++constexpr int kModRowTop = 376;
++constexpr int kModRowHeight = 28;
++
++int TitleMenuRows() { return kRetailMenuRows + static_cast<int>(moonmod::TitleModes().size()); }
++
++// The sky and clouds fade with the mode screen: out when a session starts, in when the title reopens on it.
++bool TitleModeBackdropFading() {
++    return CProcess.no == kTitleStepModFadeOut || (CProcess.no == kTitleStepModMode && CFade.Get(128) < 128);
++}
++int ModRowTop(int index) { return kModRowTop + index * kModRowHeight; }
++
++// The mod rows under OPTION, drawn with the game font like the retail rows' textures: the selected row
++// bright (blinking while chosen), the others dimmed.
++void DrawTitleModeRows(int selected, int bright, int fade) {
++    const auto &modes = moonmod::TitleModes();
++    for (std::size_t i = 0; i < modes.size(); ++i) {
++        const bool chosen = selected == kRetailMenuRows + static_cast<int>(i);
++        UI::Label label(modes[i].label, chosen ? UI::ColorGold : UI::ColorWhite, UI::Alignment::Center, true, 1.0f,
++                        UI::FontWeight::Bold);
++        label.Draw(321, MENU_Y(ModRowTop(static_cast<int>(i))) + 4, (chosen ? bright : 48) * fade / 128);
++    }
++}
++
++// A mod title mode's screen: heading, subtitle, info lines and hint on a stone plate, then the entries
++// with the title's pointing hand beside the selected one.
++void DrawTitleModeScreen(int alpha) {
++    const moonmod::TitleMode *mode = moonmod::OpenTitleModeScreenMode();
++    if (mode == nullptr || alpha <= 0) return;
++    UI::Window::Draw(60, MENU_Y(24), 520, 236, alpha * 3 / 4, UI::WindowPreset::DarkTranslucent);
++    UI::Label heading(mode->title, UI::ColorGold, UI::Alignment::Center, true, 1.5f, UI::FontWeight::Bold);
++    heading.SetOutline(2.0f);
++    heading.Draw(320, MENU_Y(36), alpha);
++    if (!mode->subtitle.empty()) {
++        UI::Label(mode->subtitle, UI::ColorWhite, UI::Alignment::Center, true, 0.9f).Draw(320, MENU_Y(82), alpha);
++    }
++    for (std::size_t i = 0; i < mode->lines.size(); ++i) {
++        UI::Label(mode->lines[i], UI::ColorWhite, UI::Alignment::Center, true, 0.8f)
++            .Draw(320, MENU_Y(116 + static_cast<int>(i) * 22), alpha);
++    }
++    const std::string hint = mode->hint.empty() ? std::string("{cross} Choose    {circle} Back") : mode->hint;
++    UI::Label(hint, UI::ColorWhite, UI::Alignment::Center, true, 0.7f).Draw(320, MENU_Y(238), alpha * 3 / 4);
++    for (std::size_t i = 0; i < mode->entries.size(); ++i) {
++        const auto &entry = mode->entries[i];
++        const bool selected = i == mode->cursor;
++        const int y = MENU_Y(272 + static_cast<int>(i) * 24);
++        const int entry_alpha = !entry.enabled ? 40 : (selected ? 128 : 80);
++        UI::Label label(entry.label, selected ? UI::ColorGold : UI::ColorWhite, UI::Alignment::Center, true, 1.0f,
++                        selected ? UI::FontWeight::Bold : UI::FontWeight::Normal);
++        label.Draw(320, y, entry_alpha * alpha / 128);
++        if (selected) {
++            const int width = label.GetWidth();
++            RECT rect = {0, 0, 32, 32};
++            setbilinear(0);
++            CursorVibeCnt++;
++            DrawObjectVibe(static_cast<float>(320 - width / 2 - 34), static_cast<float>(y - 4),
++                           TexManager.GetTexture("icon01", -1), rect, 128, alpha);
++            setbilinear(1);
++        }
++    }
++}
++
+ struct TitlePointerAction {
+     bool start = false;
+     bool confirm = false;
+@@ -56,7 +129,8 @@ struct TitlePointerAction {
+ TitlePointerAction TakeTitlePointer() {
+     TitlePointerAction action;
+     if (CProcess.no == TITLE_STEP_OPTION_INIT || CProcess.no == TITLE_STEP_OPTION ||
+-        CProcess.no == TITLE_STEP_SAVE_INIT || CProcess.no == TITLE_STEP_SAVE) {
++        CProcess.no == TITLE_STEP_SAVE_INIT || CProcess.no == TITLE_STEP_SAVE ||
++        CProcess.no == kTitleStepModMode || CProcess.no == kTitleStepModFadeOut) {
+         // The child screen owns pointer capture, including a button held through the fade.
+         title_pointer.Abandon();
+         return action;
+@@ -79,8 +153,10 @@ TitlePointerAction TakeTitlePointer() {
+         action.start = (take.clicked & 1) && x >= 64 && x < 576 && y >= 296 && y < 360;
+     } else {
+         action.back = (take.clicked & 2) != 0;
+-        if (x >= 193 && x < 449 && y >= 280 && y < 376) {
+-            int row = static_cast<int>((y - 280) / 32);
++        const int mod_rows = TitleMenuRows() - kRetailMenuRows;
++        if (x >= 193 && x < 449 && y >= 280 && y < ModRowTop(mod_rows)) {
++            int row = y < 376 ? static_cast<int>((y - 280) / 32)
++                              : kRetailMenuRows + static_cast<int>((y - kModRowTop) / kModRowHeight);
+             if (CCursol.select != row) {
+                 CCursol.select = row;
+                 TiPlayVolSE(MIDI_PORT_UNK_D, 122, 24, 1.0f);
+@@ -214,10 +290,10 @@ PORT_OVERRIDE int TitleLoop() {
+                 }
+ 
+                 if (CCursol.select < 0) {
+-                    CCursol.select = TITLE_MENU_OPTION;
++                    CCursol.select = TitleMenuRows() - 1;
+                 }
+ 
+-                if (CCursol.select > 2) {
++                if (CCursol.select > TitleMenuRows() - 1) {
+                     CCursol.select = TITLE_MENU_NEW_GAME;
+                 }
+ 
+@@ -231,12 +307,22 @@ PORT_OVERRIDE int TitleLoop() {
+                     case TITLE_MENU_OPTION:
+                         CCursol.Set(364.0f);
+                         break;
++                    default:
++                        CCursol.Set(static_cast<float>(MENU_Y(ModRowTop(CCursol.select - kRetailMenuRows)) + 6));
++                        break;
+                 }
+ 
+                 if (GamePad.Down(PAD_START) || GamePad.Down(PAD_CROSS) || pointer.confirm) {
+                     TiPlayVolSE(MIDI_PORT_SE_DEFAULT, 38, 20, 1.0f);
+-                    CProcess.no = TITLE_STEP_MENU_BLINK;
+                     opcnt = 0;
++                    if (CCursol.select >= kRetailMenuRows) {
++                        // A mod title mode: its screen replaces the logo and menu.
++                        if (moonmod::OpenTitleModeScreen(static_cast<std::size_t>(CCursol.select - kRetailMenuRows))) {
++                            CProcess.no = kTitleStepModMode;
++                        }
++                    } else {
++                        CProcess.no = TITLE_STEP_MENU_BLINK;
++                    }
+                 }
+ 
+                 if (GamePad.Down(PAD_CIRCLE) || pointer.back) {
+@@ -366,6 +452,51 @@ PORT_OVERRIDE int TitleLoop() {
+ 
+             break;
+ 
++        case kTitleStepModMode: {
++            CFade.In();
++            opcnt = 0;
++            moonmod::TitleModeInput input = moonmod::TitleModeInput::None;
++            if (GamePad.Down(PAD_UP)) {
++                input = moonmod::TitleModeInput::Up;
++            } else if (GamePad.Down(PAD_DOWN)) {
++                input = moonmod::TitleModeInput::Down;
++            } else if (GamePad.Down(PAD_CROSS) || GamePad.Down(PAD_START)) {
++                input = moonmod::TitleModeInput::Confirm;
++            } else if (GamePad.Down(PAD_CIRCLE)) {
++                input = moonmod::TitleModeInput::Back;
++            }
++            if (input == moonmod::TitleModeInput::Up || input == moonmod::TitleModeInput::Down) {
++                TiPlayVolSE(MIDI_PORT_UNK_D, 122, 24, 1.0f);
++            } else if (input == moonmod::TitleModeInput::Confirm) {
++                TiPlayVolSE(MIDI_PORT_SE_DEFAULT, 38, 20, 1.0f);
++            }
++            switch (moonmod::HandleTitleModeInput(input)) {
++                case moonmod::TitleModeOutcome::Stay:
++                    break;
++                case moonmod::TitleModeOutcome::ReturnToTitle:
++                    CProcess.no = TITLE_STEP_MENU;
++                    if (CCursol.select >= TitleMenuRows()) {
++                        CCursol.select = TITLE_MENU_NEW_GAME;
++                        CCursol.Set(304.0f);
++                    }
++                    break;
++                case moonmod::TitleModeOutcome::StartSession:
++                    CProcess.no = kTitleStepModFadeOut;
++                    break;
++            }
++            break;
++        }
++
++        case kTitleStepModFadeOut:
++            if (CFade.Out()) {
++                SndStopAllSe();
++                CSnd.Stop(MIDI_PORT_BGM);
++                CSnd.StopVoice(0);
++                CCursol.select = moonmod::kTitleMenuSandbox;
++                CProcess.no = TITLE_STEP_EXIT;
++            }
++            break;
++
+         case TITLE_STEP_EXIT:
+             SndStopAllSe();
+             CSnd.Stop(MIDI_PORT_BGM);
+@@ -378,9 +509,6 @@ PORT_OVERRIDE int TitleLoop() {
+     return 0;
+ }
+ 
+-/* A title menu row's height on screen, laid out for NTSC's picture and lowered to stay centred in
+-   the taller PAL one. */
+-#define MENU_Y(y) ((y) + (SCREEN_HEIGHT - 448) / 2)
+ 
+ PORT_OVERRIDE void TitleDraw() {
+     sceVu0FVECTOR light0 = {2.4578f, 9.9294f, -2.8074f, 0.0f};
+@@ -405,7 +533,7 @@ PORT_OVERRIDE void TitleDraw() {
+     };
+     sceVu0FVECTOR ambient = {0.0f, 0.0f, 0.0f, 100.0f};
+ 
+-    if (CProcess.no == TITLE_STEP_FADE_IN || (CProcess.no == TITLE_STEP_MENU_FADE_OUT && CCursol.GetSelect() == TITLE_MENU_NEW_GAME) || CProcess.no == TITLE_STEP_ATTRACT_FADE_OUT) {
++    if (CProcess.no == TITLE_STEP_FADE_IN || (CProcess.no == TITLE_STEP_MENU_FADE_OUT && CCursol.GetSelect() == TITLE_MENU_NEW_GAME) || CProcess.no == TITLE_STEP_ATTRACT_FADE_OUT || TitleModeBackdropFading()) {
+         ambient[3] = (float) CFade.Get(128);
+     } else {
+         ambient[3] = 128.0f;
+@@ -437,7 +565,7 @@ PORT_OVERRIDE void TitleDraw() {
+     if (CProcess.no != TITLE_STEP_OPENING_BOOK && CProcess.no != TITLE_STEP_EXIT) {
+         TexManager.ReloadTexture(GetVif1Packet(), 1);
+ 
+-        if (CProcess.no == TITLE_STEP_FADE_IN || (CProcess.no == TITLE_STEP_MENU_FADE_OUT && CCursol.GetSelect() == TITLE_MENU_NEW_GAME) || CProcess.no == TITLE_STEP_ATTRACT_FADE_OUT) {
++        if (CProcess.no == TITLE_STEP_FADE_IN || (CProcess.no == TITLE_STEP_MENU_FADE_OUT && CCursol.GetSelect() == TITLE_MENU_NEW_GAME) || CProcess.no == TITLE_STEP_ATTRACT_FADE_OUT || TitleModeBackdropFading()) {
+             ambient[3] = (float) CFade.Get(100);
+         } else {
+             ambient[3] = 100.0f;
+@@ -507,7 +635,13 @@ PORT_OVERRIDE void TitleDraw() {
+                 CSprite.Draw();
+             }
+ 
+-            set2DSprite(GetVif1Packet(), TexManager.GetTexture("start", -1), CRect_i_(64, MENU_Y(362), 512, 64), CRect_i_(0, 64, 512, 64), (u_char) CFade.Get(Fade1));
++            {
++                // The mod title rows sit under OPTION, so the banner below the menu moves down past them, as far
++                // as the frame allows (its lower rows are clear), in the logo step too so it does not jump.
++                const int mod_rows = TitleMenuRows() - kRetailMenuRows;
++                const int banner_y = mod_rows == 0 ? MENU_Y(362) : std::min(MENU_Y(362) + kModRowHeight * mod_rows, SCREEN_HEIGHT - 48);
++                set2DSprite(GetVif1Packet(), TexManager.GetTexture("start", -1), CRect_i_(64, banner_y, 512, 64), CRect_i_(0, 64, 512, 64), (u_char) CFade.Get(Fade1));
++            }
+ 
+             if (CProcess.no == TITLE_STEP_LOGO) {
+                 set2DSprite(GetVif1Packet(), TexManager.GetTexture("start", -1), CRect_i_(64, MENU_Y(296), 512, 64), CRect_i_(0, 0, 512, 64), (u_char) CFade.Get(Fade2));
+@@ -542,7 +676,15 @@ PORT_OVERRIDE void TitleDraw() {
+                         set2DSprite(GetVif1Packet(), TexManager.GetTexture("start3", -1), CRect_i_(193, MENU_Y(312), 256, 32), CRect_i_(0, 32, 256, 32), (u_char) CFade.Get(32));
+                         set2DSprite(GetVif1Packet(), TexManager.GetTexture("start3", -1), CRect_i_(193, MENU_Y(344), 256, 32), CRect_i_(0, 64, 256, 32), (u_char) CFade.Get(br));
+                         break;
++
++                    default:
++                        // A mod row is selected: the three retail rows are all dimmed.
++                        set2DSprite(GetVif1Packet(), TexManager.GetTexture("start3", -1), CRect_i_(193, MENU_Y(280), 256, 32), CRect_i_(0, 0, 256, 32), (u_char) CFade.Get(32));
++                        set2DSprite(GetVif1Packet(), TexManager.GetTexture("start3", -1), CRect_i_(193, MENU_Y(312), 256, 32), CRect_i_(0, 32, 256, 32), (u_char) CFade.Get(32));
++                        set2DSprite(GetVif1Packet(), TexManager.GetTexture("start3", -1), CRect_i_(193, MENU_Y(344), 256, 32), CRect_i_(0, 64, 256, 32), (u_char) CFade.Get(32));
++                        break;
+                 }
++                DrawTitleModeRows(CCursol.GetSelect(), br, CFade.Get(128));
+ 
+                 if (CProcess.no != TITLE_STEP_ATTRACT_FADE_OUT) {
+                     setbilinear(0);
+@@ -574,6 +716,12 @@ PORT_OVERRIDE void TitleDraw() {
+             TexManager.ReloadTexture(GetVif1Packet(), 2);
+             DrawMenuOption();
+             break;
++
++        case kTitleStepModMode:
++        case kTitleStepModFadeOut:
++            TexManager.ReloadTexture(GetVif1Packet(), 2);
++            DrawTitleModeScreen(CFade.Get(128));
++            break;
+     }
+ 
+     if (CProcess.no == TITLE_STEP_LOGO && title_pointer.pointing) {
+@@ -587,3 +735,23 @@ PORT_OVERRIDE void TitleDraw() {
+     }
+     TitlePortFeedback(35);
+ }
++
++// Back from a mod's sandbox session: open that mod's title mode screen instead of the logo.
++void TitlePortReopenMode() {
++    // Nothing from an earlier title visit stays open or queued.
++    moonmod::CloseTitleModeScreen();
++    const std::optional<std::string> id = moonmod::TakeTitleModeReturn();
++    if (!id) return;
++    const auto &modes = moonmod::TitleModes();
++    for (std::size_t i = 0; i < modes.size(); ++i) {
++        if (modes[i].id != *id || !moonmod::OpenTitleModeScreen(i)) continue;
++        CCursol.select = kRetailMenuRows + static_cast<int>(i);
++        CCursol.Set(static_cast<float>(MENU_Y(ModRowTop(static_cast<int>(i))) + 6));
++        // As if Start skipped the logo's animation, so Circle back to the menu finds it finished.
++        Logo.motion_type.state.time = 116.0f;
++        CSprite.x[0] = 700.0f;
++        Fade1 = Fade2 = Fade3 = Fade4 = 128;
++        CProcess.no = kTitleStepModMode;
++        return;
++    }
++}
 diff --git a/port/src/visualvu1.cpp b/port/src/visualvu1.cpp
 index e0926d59..57c3c472 100644
 --- a/port/src/visualvu1.cpp

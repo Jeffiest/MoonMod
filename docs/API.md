@@ -1383,6 +1383,57 @@ end
 
 `world.transition` requires `game.write` and accepts a stable location id or native map name from the loaded catalog. It queues a built-in Georama town or registered MoonFactory interior map destination from the active town or dungeon scene; requesting the current map is a no-op. ChronicleTwo also accepts the stable id of a registered floor after that floor has been materialized in the native dungeon graph, but only during active gameplay in the matching native dungeon, outside menus and event scripts. It queues the native floor transition and returns a no-op when already on that floor. Other inactive contexts, unmaterialized floors, and floors belonging to another dungeon fail cleanly. Chronicle implements built-in settlement and registered-floor transitions; ChronicleTwo implements built-in town, registered interior-map, and same-dungeon registered-floor transitions. A compatible copied map has passed a retail-data scene-load/render and return-trip smoke; authored map asset formats remain unverified.
 
+### Chronicle title modes and sandbox sessions (`title.*`, `session.*`)
+
+A mod can add its own game mode to the title menu. `game.title.mode_register` adds a row under NEW GAME, LOAD and
+OPTION (two mod modes at most). Choosing the row replaces the logo and menu with the mode's screen, which the mod
+drives: a heading, a subtitle, up to six info lines, a hint and up to seven entries.
+
+```lua
+assert(game.title.mode_register({
+  id = "gauntlet", label = "Dark Genie's Gauntlet",          -- the title-menu row (1-32 bytes)
+  title = "DARK GENIE'S GAUNTLET",                          -- the screen's heading (1-40 bytes)
+  subtitle = "Five biomes. No saves.", hint = "",           -- 0-64 bytes; an empty hint shows Cross/Circle
+  lines = {"Moon Shards 12"},                               -- up to 6 lines of 0-64 bytes
+  entries = {{id = "start", label = "Start Run"},           -- up to 7; label 1-64 bytes
+             {id = "records", label = "Records", enabled = false}},
+  root = true,                                              -- Circle on a root page goes back to the title menu
+}))
+moonmod.on("game.title.selected", function(e)               -- e.mode, e.entry ("back" for Circle), e.index
+  if e.entry == "records" then game.title.mode_set({id = "gauntlet", lines = {"..."}, entries = {...}, root = false}) end
+end)
+```
+
+- `title.mode_register` (`content.register`) registers or updates a mode. `title.mode_set` (`game.write`) changes
+  any page field: `label`, `title`, `subtitle`, `hint`, `lines`, `entries`, `cursor` (0-based) or `root`.
+  A new `entries` list resets the cursor unless `cursor` is given. `title.mode_remove` (`content.register`) removes
+  the mode. Only the owner can change or remove it, and unloading the mod removes it. Entry ids follow the action-id
+  rules; `back` is reserved. Text may use the game font's glyph tokens such as `{cross}`.
+- `game.title.opened` is sent to the owner when the player opens the mode's screen. `game.title.selected` is sent
+  when the player confirms an enabled entry, or presses Circle (`entry = "back"`, `closed = true` on a root page).
+  Up and Down move the cursor without an event. On a sub-page the mod answers Circle, usually with `title.mode_set`.
+  If it leaves three presses in a row unanswered, Circle returns to the title menu anyway. The screen takes the
+  keyboard and controller; the mouse does not click its entries yet.
+- `session.start({floor, party_size?, character?})` (`game.write`) works only while the caller's mode screen is
+  open on the title. A queued start goes ahead on the next frame. Leaving the screen, or a start that cannot happen,
+  drops it. `floor` is the stable id of a floor registered with `dungeons.register`. The screen fades out,
+  the save data is reset as for a new game (the configuration is kept), and the player starts on that floor. The
+  first `party_size` characters (1-6, default 1) have joined. Each of them is equipped with their first weapon (a new
+  game gives only Toan one). `character` (default `"toan"`) is the active one and must be within the party. The
+  session belongs to no save slot: `save.slot_id` returns nil, and native saving never happens, because the session
+  never reaches a town or the save screen.
+- A session ends when it leaves its dungeons. The dungeon exit, Escape Powder and a game over all redirect to the
+  title, never to a town. `session.finish()` (`game.write`, the owner, from its dungeon) also ends it. Loading a
+  real save, or a developer-menu jump, ends it in place. `game.session.started` and `game.session.ended` are published
+  to every mod as they happen, with `owner`, `mode` and, on the end, `reason`: `defeat`, `left_dungeon`, `ended`,
+  `loaded_save` or `developer_jump`. The save data is reset again on the way to the title. The title then opens on the
+  mode's screen, and `game.title.opened` follows.
+- `session.get()` returns `{kind = "title" | "story" | "sandbox", owner, mode}`.
+- `world.transition` to another registered floor, in the same dungeon or another one, keeps the session going, and
+  the session's area follows the dungeon it enters.
+
+The bundled Dark Genie's Gauntlet (`mods/moonmod.roguelike`) is built on these. Chronicle Two has no title modes yet.
+
 ### Shared quest lifecycle
 
 Inventory mutation events support API-driven progression without polling. After `game.items.remove` removes one or more items successfully, the runtime queues `game.item_removed` for the next pump; its payload includes the stable item `id`, `source_mod`, `frame`, and the adapter's `requested`, `removed`, and `remaining` values when present. A zero-removal result emits no event. Quests can subscribe with an exact `match` filter on `id`. Removal through the game's own menus is not currently observed.

@@ -6,7 +6,9 @@ local destinations = {
   {id="controls_settings", label="Controls: Shortcuts", mod_id="moonmod.controls", tab="settings"},
   {id="autosave_settings", label="Autosave: Settings", mod_id="moonmod.autosave", tab="settings"},
   {id="town_camera_settings", label="Expanded Town: Settings", mod_id="moonmod.expanded-town", tab="settings"},
-  {id="town_camera_actions", label="Expanded Town: Actions", mod_id="moonmod.expanded-town", tab="actions"}
+  {id="town_camera_actions", label="Expanded Town: Actions", mod_id="moonmod.expanded-town", tab="actions"},
+  {id="gauntlet_actions", label="Gauntlet: Run Actions", mod_id="moonmod.roguelike", tab="actions"},
+  {id="gauntlet_skills", label="Gauntlet: Diorama and Eternal", mod_id="moonmod.roguelike", tab="skills"}
 }
 
 local by_action = {}
