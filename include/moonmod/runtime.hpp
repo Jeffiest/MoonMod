@@ -68,6 +68,8 @@ struct RuntimeConfig {
     std::string build_id = "development";
     std::vector<std::filesystem::path> mod_directories;
     std::filesystem::path save_root;
+    // No mod loads this run (MOONMOD_NO_MODS=1 sets it); profile.json, with the player's choices, is kept.
+    bool mods_off = false;
     std::size_t lua_memory_limit = 16 * 1024 * 1024;
     int         lua_instructions_per_callback = 150000;
     std::vector<ApiCapability> api_capabilities;

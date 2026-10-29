@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <fstream>
 #include <iterator>
@@ -378,6 +379,10 @@ struct Runtime::Impl {
                     record.enabled = EnabledFromProfile(record.id);
                     record.enabled_next_launch = profile["enabled"].value(record.id, false);
                     record.restart_required = record.enabled != record.enabled_next_launch;
+                    if (config.mods_off && record.enabled_next_launch) {
+                        record.restart_required = false;
+                        record.status_message = "Off for this run: the game was started with mods off";
+                    }
                     record.native_trusted = NativeTrustedFromProfile(record);
                     record.state = record.enabled ? ModState::Ready : ModState::Disabled;
                     if (record.manifest.framework_api > config.framework_api ||
@@ -969,7 +974,13 @@ bool Runtime::Start(RuntimeConfig config, std::string &error) {
     impl_->observed_world_location = nullptr;
     std::string profile_error;
     if (!impl_->LoadProfile(profile_error)) impl_->Log("warning", "", profile_error);
-    impl_->session_enabled = impl_->profile["enabled"];
+    // MOONMOD_NO_MODS=1 (the Chronicle Launcher's Mods switch, off) starts every mod off for this run only: the
+    // profile, with the player's choices, is read and kept as it is.
+    if (const char *off = std::getenv("MOONMOD_NO_MODS"); off != nullptr && std::string_view(off) == "1") {
+        impl_->config.mods_off = true;
+    }
+    impl_->session_enabled = impl_->config.mods_off ? Json::object() : impl_->profile["enabled"];
+    if (impl_->config.mods_off) impl_->Log("info", "", "mods are off for this run (MOONMOD_NO_MODS=1)");
     impl_->Discover();
     impl_->LoadEnabled();
     impl_->running = true;

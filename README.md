@@ -36,6 +36,9 @@ image; nothing from either game is included here.
   enable or disable it and to open its pages: **Settings** (the typed options the mod declares), **Actions**
   (buttons and commands the mod registers), **Quests**, **Skills** and **Journal** (the mod's own progression).
   Enable state and settings are saved per game in `<save>/moonmod/profile.json`.
+- **Play without mods.** Start the game with `MOONMOD_NO_MODS=1` in its environment and no mod loads for that
+  run; the Mod Manager shows the ones you turned on as "Off for this run", and `profile.json` is left as it is. The
+  [Chronicle Launcher](https://github.com/Jeffiest/Chronicle-Launcher)'s Mods switch under Play uses it.
 - **Play.** Mods react to the game through verified events (ticks, scene changes, item pickups, kills, floor
   generation, Georama changes, and so on) and show their state through the manager's notices and pages. A mod that
   errors is disabled on its own and says so in the game's log; the other mods keep running.
