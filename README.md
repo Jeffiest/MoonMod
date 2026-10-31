@@ -11,8 +11,9 @@ image; nothing from either game is included here.
 
 1. Build the port with MoonFactory in it. Each port folder has the exact steps and pins the upstream commit it
    supports:
-   - [Chronicle (Dark Cloud)](ports/chronicle/README.md): download the release `MoonMod-<commit>`, named after the
-     Chronicle commit it is made for. Clone Chronicle at that commit, copy the release folder's contents into it
+   - [Chronicle (Dark Cloud)](ports/chronicle/README.md): download the
+     [latest release](https://github.com/Jeffiest/MoonMod/releases/latest) `MoonMod-<commit>`, named after the
+     Chronicle commit it is made for; its page has the full how-to. Clone Chronicle at that commit, copy the release folder's contents into it
      (replace the files), then run Chronicle's own `build.bat windows-x64-release` and `run.bat`. Or apply the
      patch yourself with `ports\chronicle\apply-moonfactory.ps1`.
    - [Chronicle Two (Dark Chronicle)](ports/chronicle-two/README.md): clone ChronicleTwo, run

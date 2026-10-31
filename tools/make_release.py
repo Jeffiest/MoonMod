@@ -12,6 +12,7 @@ commit it is made for (ports/chronicle/CHRONICLE_COMMIT), shortened to 8 charact
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -95,10 +96,13 @@ def build(chronicle: str | None, output: Path, make_zip: bool) -> Path:
     for mod in bundled:
         shutil.copytree(mod, mods / mod.name)
     (mods / "README.txt").write_text(MODS_README, encoding="utf-8", newline="\r\n")
-    (destination / "MoonMod-README.txt").write_text(
-        README.format(version=version, commit=commit, mods="\n".join(f"  {mod.name}" for mod in bundled),
-                      files="\n".join(f"  {path.as_posix()}" for path in files)),
-        encoding="utf-8", newline="\r\n")
+    how_to = HOW_TO.format(version=version, commit=commit, mods="\n".join(mod_line(mod) for mod in bundled))
+    listing = "\n".join(f"- `{path.as_posix()}`" for path in files)
+    (destination / "MoonMod-README.txt").write_text(how_to + FILES.format(files=listing), encoding="utf-8",
+                                                    newline="\r\n")
+    # The GitHub release page: the same how-to, with the file list folded away.
+    notes = how_to + f"\n<details><summary>Files this release replaces or adds ({len(files)})</summary>\n\n{listing}\n\n</details>\n"
+    (output / f"{name}-notes.md").write_text(notes, encoding="utf-8")
 
     print(f"{destination}: {len(files)} Chronicle files, {len(bundled)} mods")
     if make_zip:
@@ -111,58 +115,130 @@ def build(chronicle: str | None, output: Path, make_zip: bool) -> Path:
     return destination
 
 
-README = """MoonMod {version}
-==================
+HOW_TO = r"""# MoonMod {version}
 
-MoonMod (MoonFactory) for Chronicle, the Dark Cloud PC port. This version is made for Chronicle commit
-{commit}. MoonMod versions are named after the Chronicle commit they are made for.
+MoonMod (MoonFactory) adds mods to **Chronicle**, the PC port of _Dark Cloud_: an in-game Mod Manager, Lua mods
+and the bundled mods below. This release is made for Chronicle commit `{commit}`; every MoonMod version is named
+after the Chronicle commit it is made for. Nothing from the game is included: you build Chronicle yourself from
+your own disc.
 
-Install
--------
+## What you need
 
-1. Get Chronicle at that commit (Git for Windows, in PowerShell):
+- Windows 10 or 11, 64-bit.
+- [Git for Windows](https://git-scm.com/download/win).
+- Your own _Dark Cloud_ disc image, PAL version.
+- `MoonMod-{version}.zip` from this release.
 
-     git clone --recurse-submodules https://github.com/TheMoonPeople/Chronicle.git
-     cd Chronicle
-     git checkout {commit}
-     git submodule update --init --recursive
+## Install
 
-2. Copy everything inside this MoonMod-{version} folder into the Chronicle folder. When Windows asks, choose
-   "Replace the files in the destination". The replaced files are Chronicle's own files with MoonMod's changes
-   already in them; the rest are new.
+1. **Get Chronicle at the matching commit.** Open PowerShell in the folder that should hold Chronicle and run:
 
-3. Put your Dark Cloud disc image where Chronicle expects it (rom\\pal\\Dark Cloud (PAL).iso), then build and run
-   with Chronicle's own scripts:
+   ```powershell
+   git clone --recurse-submodules https://github.com/TheMoonPeople/Chronicle.git
+   cd Chronicle
+   git checkout {commit}
+   git submodule update --init --recursive
+   ```
 
-     .\\build.bat windows-x64-release
-     .\\run.bat windows-x64-release
+2. **Copy MoonMod into it.** Unzip `MoonMod-{version}.zip`. Open the `MoonMod-{version}` folder inside it, select
+   everything (Ctrl+A), copy it, and paste it into the `Chronicle` folder. When Windows asks, choose **Replace the
+   files in the destination**, for all of them. The replaced files are Chronicle's own files with MoonMod's changes
+   already made; the rest are new, including the `mods` folder.
 
-   If the build warns that MoonMod is made for another Chronicle commit, the checkout is not at {commit}.
+3. **Add your disc image** as `Chronicle\rom\pal\Dark Cloud (PAL).iso`.
 
-Mods
-----
+4. **Build** from the `Chronicle` folder:
 
-Each mod is a folder in Chronicle\\mods. Drop new ones in there; they start disabled. Turn them on in the game
-under Options > Game > Mod Manager. Changing or adding mods needs only a restart of the game, not a rebuild.
+   ```powershell
+   .\build.bat windows-x64-release
+   ```
+
+   The first build downloads Chronicle's toolchain into `.kazarov\windows` and takes a while; later builds are
+   quicker. If the output warns that _MoonMod is made for Chronicle ..._, the checkout is at the wrong commit: see
+   Troubleshooting.
+
+5. **Play:**
+
+   ```powershell
+   .\run.bat windows-x64-release
+   ```
+
+   The first start extracts the game data from your disc image into `port\run\data`.
+
+## Turn mods on
+
+Mods start **off**. In the game open **Options > Game > Mod Manager** (also **MODS** on the pause ring). Pick a mod,
+turn it on, and look through its **Settings** and **Actions**. Restart the game for the change to take effect.
+
+## Add more mods
+
+Each mod is a folder in `Chronicle\mods`, named after the mod's id, holding its `mod.json` and Lua script. Drop a
+new mod folder in there and start the game; it shows up in the Mod Manager, turned off. Adding, changing or removing
+mods needs only a game restart, never a rebuild.
 
 Bundled mods:
+
 {mods}
 
-Updating Chronicle
-------------------
+## Update to a new MoonMod
 
-Do not pull a newer Chronicle over a MoonMod install: wait for the MoonMod release named after that commit. To go
-back to plain Chronicle, run "git checkout -- ." in Chronicle and in Chronicle\\tools\\kazarov.
+A new MoonMod version normally means Chronicle moved and MoonMod was reworked for it. In the `Chronicle` folder:
 
-Files this release replaces or adds
------------------------------------
+```powershell
+git checkout -- .
+git -C tools\kazarov checkout -- .
+git fetch
+git checkout <the new release's Chronicle commit>
+git submodule update --init --recursive
+```
+
+Then paste the new release over it as in step 2, and build again. Your saves (`port\run\save`) and any mods you
+added to `mods` stay. Do not update Chronicle on its own while MoonMod is installed: wait for the MoonMod release
+made for the newer commit.
+
+## Go back to plain Chronicle
+
+In the `Chronicle` folder run `git checkout -- .` and `git -C tools\kazarov checkout -- .`, then `git clean -n` to
+list the files MoonMod added and `git clean -f` to delete them (it leaves ignored files, such as your saves and the
+build, alone). Delete the `mods` folder if you no longer want it, and build again.
+
+## Troubleshooting
+
+- **The build warns that MoonMod is made for another Chronicle commit.** Run `git checkout -- .` and
+  `git -C tools\kazarov checkout -- .`, then `git checkout {commit}` and
+  `git submodule update --init --recursive`, paste the release again and rebuild.
+- **The build fails after pasting.** Make sure every file was replaced (step 2), then build from scratch:
+  `$env:CLEAN=1; .\build.bat windows-x64-release`.
+- **The Mod Manager says no mods were found.** Each mod needs its own folder directly in `Chronicle\mods` with
+  `mod.json` inside (`Chronicle\mods\moonmod.rpg\mod.json`, not `Chronicle\mods\moonmod.rpg\moonmod.rpg\mod.json`).
+  The game's console output names the folder it reads, in the line `moonmod: mods folder ...`.
+- **A mod turned itself off.** It hit an error; the console output says which and why. The other mods keep running.
+- **The game asks for its data.** The disc image is not at `rom\pal\Dark Cloud (PAL).iso`.
+
+More: [MoonMod on GitHub](https://github.com/Jeffiest/MoonMod), and Chronicle's own README for the build itself.
+"""
+
+FILES = """
+## Files this release replaces or adds
 
 {files}
 """
 
 MODS_README = """Each mod goes in its own folder here, named after the mod's id, holding its mod.json and Lua script.
-New mods start disabled: turn them on in the game under Options > Game > Mod Manager, then restart the game.
+New mods start off: turn them on in the game under Options > Game > Mod Manager, then restart the game.
 """
+
+
+def mod_line(mod: Path) -> str:
+    """One line per bundled mod: its row in the README's table of bundled mods, else its manifest's first sentence."""
+    manifest = json.loads((mod / "mod.json").read_text(encoding="utf-8"))
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    row = re.search(rf"^\s*\| `{re.escape(mod.name)}` [^|]*\| (.+?) \|\s*$", readme, re.MULTILINE)
+    if row:
+        summary = re.sub(r"\s*\(\[[^]]*\]\([^)]*\)\)", "", row.group(1))  # drop "([guide](relative/link))"
+    else:
+        summary = re.split(r"(?<=[.!?])\s", manifest.get("description", "").strip(), maxsplit=1)[0]
+    return f"- **{manifest.get('name', mod.name)}** (`{mod.name}`): {summary}"
 
 
 def main() -> int:
