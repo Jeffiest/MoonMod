@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.vigil",
+  "name": "Vigil",
+  "version": "0.1.0",
+  "author": "Jeffiest",
+  "description": "Souls-lite combat for the story game, first prototype (S1). L2 evades (a roll, or a backstep at rest) spend the weapon gauge, so stamina gates them. Enemies hit harder, and a hit stuns you for less time and so protects you for less. Holding the guard slows the gauge's recovery. See VIGIL_PLAN.md.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"],
+  "settings": [
+    {"id": "evades", "name": "L2 evades (roll and backstep)", "type": "boolean", "default": true},
+    {"id": "evade_cost", "name": "Evade cost (weapon gauge, of 100)", "type": "integer", "default": 25, "min": 0, "max": 100, "step": 5},
+    {"id": "evade_cooldown", "name": "Evade cooldown (frames)", "type": "integer", "default": 30, "min": 0, "max": 120, "step": 2},
+    {"id": "evade_commit", "name": "Frames after a blow before an evade can cut the swing", "type": "integer", "default": 6, "min": 0, "max": 60, "step": 1},
+    {"id": "enemy_damage", "name": "Enemy damage (%)", "type": "integer", "default": 250, "min": 100, "max": 500, "step": 25},
+    {"id": "recoil", "name": "Hit stun and its protection (% of normal)", "type": "integer", "default": 40, "min": 25, "max": 100, "step": 5},
+    {"id": "gauge_refill", "name": "Weapon gauge recovery (%)", "type": "integer", "default": 100, "min": 25, "max": 200, "step": 5},
+    {"id": "guard_refill", "name": "Gauge recovery while guarding (% of normal)", "type": "integer", "default": 25, "min": 25, "max": 100, "step": 5},
+    {"id": "guard_key", "name": "Keyboard key you guard with (R1), if any", "type": "choice", "default": "None", "choices": ["None", "Q", "E", "R", "F", "C", "V", "Left Shift", "Right Shift", "Mouse2"]},
+    {"id": "swap_delay", "name": "Character switch wait (%)", "type": "integer", "default": 200, "min": 0, "max": 400, "step": 25},
+    {"id": "no_power_up", "name": "Enemies can't hand you the Stamina power-up", "type": "boolean", "default": true},
+    {"id": "no_minimap", "name": "No minimap", "type": "boolean", "default": false},
+    {"id": "tips", "name": "Show the controls once", "type": "boolean", "default": true}
+  ]
+}

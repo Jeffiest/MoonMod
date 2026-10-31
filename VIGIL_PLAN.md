@@ -160,19 +160,24 @@ Each gate needs its automated checks green and a playtest checklist ticked befor
   start (the anchor for E2). The move runner's combo-cancel hook is a good lead.
 - **Output:** §7. The source half is done; the in-game half still needs the game.
 
-### S1: Lua prototype on PR 15's API
-- `mods/moonmod.vigil/`, scaffolded with `tools/moonfactory.py new` and following *Your first mod* (`try` and `call` guards).
-- Evades: Roll and Backstep with a `gauge` cost, longer cooldowns and a later `cancel_after`. Copy the motion JSON
-  rather than depending on the Gauntlet.
-- A Lua stamina pool shown with `render.bar_register`. Swings are charged from the attack button's press edge, moves
-  from `game.player.move`, and blocked hits from HP drops while R1 is held (`input.bind` on `Gamepad:rightshoulder`).
-- Heavier enemy damage and recoil, and the exhausted state.
-- Sitting out other mods' game modes: `moves_clear`, `tuning_clear` and formulas back to ×1 during a sandbox session
-  (Cookbook, *Share the game with other mods*). The Gauntlet owns the same L2 triggers.
-- Tests: the fake adapter (*Testing mods* §1) in `tools/tests/vigil/`, covering the stamina maths, the gauge gate,
-  exhausted timing, and sitting out a session.
-- **Gate:** Divine Beast Cave floors 1-3 as Toan. Trading hits is clearly worse than blocking or rolling, and the bar
-  makes you pause.
+### S1: Lua prototype on PR 15's API (built; awaiting the playtest)
+Built in `mods/moonmod.vigil/` ([README](mods/moonmod.vigil/README.md)), tested by `tools/tests/vigil/test_vigil.lua`
+(45 checks).
+- **Evades for all six**: roll or tumble with the stick, backstep or hop back at rest. Untouchable, `gauge` 25 (the
+  native gauge is the stamina bar, so an empty one stops them), cooldown 30, `cancel_after` 6. The motions are copied
+  from the Gauntlet. If they can't load, it falls back to the engine's shove dodge (`dodge_power`).
+- **Enemy damage ×2.5** (`register_player_formula`). **Recoil ×0.4** (shorter stun, and shorter post-hit protection).
+- **Guarding slows the gauge**: R1 read through `input.bind` (plus an optional keyboard key), and `gauge_refill` set
+  again on each press and release.
+- Switches ×2 (`swap_delay`), no "Stamina" power-ups from enemies (`status_immune`), and an optional no-minimap.
+- Sits out the Gauntlet (`moves_clear`, `tuning_clear`, the formula back to ×1), including when loaded mid-run.
+- **Dropped from this stage:** a separate Lua stamina bar (S0 showed the native gauge is the bar), and charging
+  blocked hits from HP drops (a blocked hit takes no HP, so there's nothing to see). Both wait for E1-E3.
+- Found while building it: `input.block_native({buttons, frames})` hides pad buttons from the game. Guard break can use
+  it (no R1 for N frames) before E1. It's one mask for the whole game, last writer wins (RPG and Ascension use it while
+  L2 is held), so it needs care.
+- **Gate:** the playtest checklist in the mod's README. Divine Beast Cave floors 1-3 as Toan: trading hits is clearly
+  worse than guarding or evading, and the gauge makes you pause.
 
 ### S2: Engine (E1-E3)
 - Following *Extending the engine*: E1 first, since it's the critical path, then E2 and E3.
