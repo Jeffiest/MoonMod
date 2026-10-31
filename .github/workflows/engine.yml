@@ -1,0 +1,105 @@
+# Builds Chronicle with the MoonFactory patches and runs the MoonMod engine tests (darkcloud_tests MoonMod*), on
+# Linux and on Windows, the way Chronicle's own .github/workflows/pc.yml builds the port. Chronicle is cloned at
+# ports/chronicle/CHRONICLE_COMMIT beside this repository, which is checked out as MoonFactory: the package tests
+# (MoonModRoguelikePackage and friends) read the bundled mods from ../MoonFactory.
+name: engine
+
+on:
+  push:
+    paths: ['ports/chronicle/**', 'mods/**', '.github/workflows/engine.yml']
+  pull_request:
+    paths: ['ports/chronicle/**', 'mods/**', '.github/workflows/engine.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Build and test (Linux x64)
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: MoonFactory
+
+      - name: Fetch Chronicle and apply the patches
+        run: |
+          commit=$(cat MoonFactory/ports/chronicle/CHRONICLE_COMMIT)
+          git clone --quiet https://github.com/TheMoonPeople/Chronicle.git Chronicle
+          git -C Chronicle checkout --quiet "$commit"
+          git -C Chronicle submodule update --quiet --init --recursive
+          git -C Chronicle apply --whitespace=nowarn ../MoonFactory/ports/chronicle/moonfactory-chronicle.patch
+          git -C Chronicle/tools/kazarov apply --whitespace=nowarn ../../../MoonFactory/ports/chronicle/moonfactory-kazarov.patch
+
+      - name: Install the toolchain and libraries
+        working-directory: Chronicle
+        run: |
+          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
+          sudo apt-get update
+          sudo apt-get install -y clang-22 lld-22 llvm-22 libclang1-22 python3-clang-22 cmake ninja-build glslang-tools \
+            mesa-vulkan-drivers vulkan-validationlayers libsdl3-dev libvulkan-dev libgtest-dev nlohmann-json3-dev
+          echo "/usr/lib/llvm-22/bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup default 1.99.0
+          tools/ci/prebuilt-deps.sh linux-x64
+
+      - name: Configure
+        working-directory: Chronicle
+        run: |
+          cmake -S . -B port/build/pc -G Ninja -DPLATFORM=PC -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++-22 -DDC_TEST_TIMEOUT=60 -DDC_GPU_TEST_TIMEOUT=300
+
+      - name: Build
+        working-directory: Chronicle
+        run: cmake --build port/build/pc
+
+      - name: MoonMod engine tests
+        working-directory: Chronicle/port/build/pc
+        run: env -u DC_DATA ./darkcloud_tests --gtest_filter='MoonMod*'
+
+  windows:
+    name: Build and test (Windows x64)
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: MoonFactory
+
+      - name: Fetch Chronicle and apply the patches
+        run: |
+          $commit = (Get-Content MoonFactory/ports/chronicle/CHRONICLE_COMMIT -Raw).Trim()
+          git clone --quiet https://github.com/TheMoonPeople/Chronicle.git Chronicle
+          git -C Chronicle checkout --quiet $commit
+          git -C Chronicle submodule update --quiet --init --recursive
+          git -C Chronicle apply --whitespace=nowarn ../MoonFactory/ports/chronicle/moonfactory-chronicle.patch
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C Chronicle/tools/kazarov apply --whitespace=nowarn ../../../MoonFactory/ports/chronicle/moonfactory-kazarov.patch
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Install the toolchain and libraries
+        working-directory: Chronicle
+        run: |
+          ./tools/windows/acquire.ps1 -Root $env:RUNNER_TEMP -VulkanLoader
+          "VULKAN_RUNTIME=$env:RUNNER_TEMP/deps/vulkan-runtime/VulkanRT-X64-1.4.363.0-Components/x64" >> $env:GITHUB_ENV
+
+      - name: Configure
+        working-directory: Chronicle
+        run: |
+          ./tools/windows/configure.ps1 -Root $env:RUNNER_TEMP -BuildDirectory $env:GITHUB_WORKSPACE/Chronicle/port/build/windows -Tests `
+            -VulkanLibrary $env:VULKAN_RUNTIME/vulkan-1.dll
+
+      - name: Build
+        working-directory: Chronicle
+        run: |
+          ./tools/windows/build.ps1 -Root $env:RUNNER_TEMP -BuildDirectory $env:GITHUB_WORKSPACE/Chronicle/port/build/windows -Tests
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item $env:VULKAN_RUNTIME/vulkan-1.dll port/build/windows
+
+      # The runner has a Vulkan loader but no driver: the cases that need a device (label gpu) cannot start here.
+      - name: MoonMod engine tests
+        working-directory: Chronicle
+        run: ctest --test-dir port/build/windows --output-on-failure -j4 -LE gpu -R MoonMod
