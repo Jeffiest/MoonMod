@@ -78,8 +78,13 @@ local BIOMES = {
   {key = "temple", dungeon = 3, name = "Sun and Moon Temple", sources = {2, 5, 11}, warden = 14}, -- the overlay font has no "&"
   {key = "sea", dungeon = 4, name = "Moon Sea", sources = {2, 5, 10}, warden = 12},
 }
-local FLOOR_LABEL = {"I", "II", "III", "WARDEN"}
+-- Each biome registers five floors: I, II, III, the Warden and IV, in that native order. A run visits I, II, III
+-- and the Warden; with Endless Maze it visits IV before the Warden (floor links steer the exit gate there).
+local FLOOR_LABEL = {"I", "II", "III", "WARDEN", "IV"}
 local WARDEN_SLOT = 4
+local MAZE_SLOT = 5
+local ORDER = {1, 2, 3, 4}
+local MAZE_ORDER = {1, 2, 3, 5, 4}
 local CHARACTERS = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
 local MODE = "gauntlet"
 local HUD_CACHE_IMAGE = "moonmod/roguelike/hud/cache.png" -- resources/hud/cache.png, the Miracle cache chest
@@ -106,6 +111,7 @@ local BLESSINGS = {
   lucky = {name = "Lucky Star", text = "10% of hits deal double"},
   scholar = {name = "Scholar's Eye", text = "+25% weapon ABS"},
   mender = {name = "Mender's Charm", text = "regain 2 HP every 3 s"},
+  sight = {name = "Atla Sight", text = "every floor is mapped, monsters shown"}, -- Atlamillia's Chosen only
 }
 local BLESSING_IDS = {"moonlit", "stride", "ward", "tempered", "flask", "breath", "lucky", "scholar", "mender"}
 
@@ -129,8 +135,7 @@ local BASE_PLOTS = 6
 -- Signature sky per character. A node needs one of its links owned. Costs are Moon Shards, Genie Sigils (Keystones
 -- and the deep nodes) or Character Marks (Signature skies). Every owned node can be switched off and set to any rank
 -- owned; two Keystones can be on at once (three with Third Star). Pact nodes make runs harder and add Heat, and each
--- point of Heat pays +10% Moon Shards. ETERNAL_TREE.md is the design. Nodes marked soon are shown but not sold yet:
--- they need engine work still to come.
+-- point of Heat pays +10% Moon Shards. ETERNAL_TREE.md is the design.
 local SKY_GROUPS = {
   {id = "norune", name = "Norune Eternal", colour = {255, 240, 190}, angle = nil},
   {id = "arms", name = "Arms", colour = {248, 206, 92}, angle = -90},
@@ -164,13 +169,13 @@ local function K(extra) local t = {cur = "sigil", key = true}; for k, v in pairs
 N("norune", "norune", 0, "Norune Eternal", 0, {}, {}, "crystal",
   "Moon Shards from every run, Genie Sigils from Wardens and wins at Heat 5+, Marks for the character who ran.")
 N("third_star", "norune", 1, "Third Star", 1, {5}, {}, "crystal", "A third Keystone can be on at once.", {cur = "sigil", pos = {-120, 60}})
-N("loadouts", "norune", 1, "Loadouts", 1, {20}, {}, "map", "Save sets of switches by name.", {soon = true, pos = {120, 60}})
+N("loadouts", "norune", 1, "Loadouts", 1, {20}, {}, "map", "Four saved sets of switches, on the title screen's Loadouts page.", {pos = {120, 60}})
 
 -- Arms
 N("whetstone", "arms", 0, "Whetstone", 3, {2, 4, 6}, {}, "sword", "+10 maximum durability on the starting weapon per rank.")
 N("keen", "arms", 1, "Keen Edge", 3, {5, 10, 15}, {"whetstone"}, "sword", "+5% damage per rank.", {path_name = "Edge"})
 N("smith", "arms", 1, "Smith's Start", 3, {5, 10, 15}, {"keen"}, "sword", "The starting weapon starts one level up per rank.")
-N("charged", "arms", 1, "Charged Fury", 1, {12}, {"smith"}, "sword", "Charged attacks deal 30% more.", {soon = true})
+N("charged", "arms", 1, "Charged Fury", 1, {12}, {"smith"}, "sword", "Charged swings deal 30% more.")
 N("moonstrike", "arms", 1, "Moon Strike", 2, {15, 25}, {"smith", "charged"}, "crystal", "5% of hits deal double damage per rank.")
 N("moonblade", "arms", 1, "Moonblade", 1, {3}, {"moonstrike"}, "sword", "The first hit on each enemy deals triple damage.", K())
 N("oil", "arms", 2, "Gaffer's Oil", 2, {3, 6}, {"whetstone"}, "drop", "Weapons wear 10% slower per rank.", {path_name = "Endurance"})
@@ -193,13 +198,13 @@ N("spoils", "allies", 1, "Shared Spoils", 2, {4, 8}, {"golden"}, "heart", "Bench
 N("rally", "allies", 1, "Rally", 1, {10}, {"spoils"}, "heart", "Switching characters heals the new one 10%.")
 N("fullparty", "allies", 1, "Full Party", 1, {3}, {"rally"}, "heart", "All six are drafted from the start; Moon Shards -10%.", K())
 N("companion", "allies", 2, "Companion", 1, {25}, {"embassy"}, "heart",
-  "A drafted ally fights beside you: can't be hurt, its weapon's base damage, your lock-on target.", {soon = true, path_name = "Companion"})
-N("stances", "allies", 2, "Stances", 1, {8}, {"companion"}, "heart", "Set the companion aggressive or passive in Actions.", {soon = true})
-N("keenpartner", "allies", 2, "Keen Partner", 1, {12}, {"stances"}, "sword", "Companion damage +25%.", {soon = true})
-N("twinstrike", "allies", 2, "Twin Strike", 1, {15}, {"keenpartner"}, "sword", "Hitting what the companion hits: +10% damage.", {soon = true})
-N("soulbond", "allies", 2, "Soul Bond", 1, {3}, {"twinstrike"}, "heart", "The companion's kills feed your weapon's ABS.", K({soon = true}))
+  "A drafted ally on the bench fights beside you: it strikes enemies near you for its weapon's attack and can't be hurt.", {path_name = "Companion"})
+N("stances", "allies", 2, "Stances", 1, {8}, {"companion"}, "heart", "Set the companion aggressive or passive (Actions).")
+N("keenpartner", "allies", 2, "Keen Partner", 1, {12}, {"stances"}, "sword", "Companion damage +25%.")
+N("twinstrike", "allies", 2, "Twin Strike", 1, {15}, {"keenpartner"}, "sword", "Hitting what the companion hits: +10% damage.")
+N("soulbond", "allies", 2, "Soul Bond", 1, {3}, {"twinstrike"}, "heart", "The companion's kills feed your weapon's ABS.", K())
 N("benchrest", "allies", 3, "Bench Rest", 1, {6}, {"embassy"}, "flask", "Benched allies regain 5% HP on each floor cleared.", {path_name = "Bench"})
-N("swift", "allies", 3, "Swift Swap", 1, {10}, {"benchrest"}, "drop", "No wait between switches.", {soon = true})
+N("swift", "allies", 3, "Swift Swap", 1, {10}, {"benchrest"}, "drop", "R2 (or V) switches to the next drafted ally at once, no ring menu.")
 N("relay", "allies", 3, "Relay", 1, {2}, {"benchrest", "swift"}, "shield", "Each switch gives the new character 3 seconds of invincibility.", K())
 
 -- Fortune
@@ -209,9 +214,9 @@ N("cachesense", "fortune", 1, "Cache Sense", 1, {8}, {"lens"}, HUD_CACHE_IMAGE, 
 N("luckyfind", "fortune", 1, "Lucky Find", 1, {15}, {"cachesense"}, "crystal", "5% of kills drop a Moon Shard.")
 N("tithe", "fortune", 1, "Moon Tithe", 1, {3}, {"luckyfind"}, "crystal", "Wardens pay double Moon Shards.", K())
 N("moon", "fortune", 2, "Moon Blessing", 1, {15}, {"shrine"}, "crystal", "Every run starts with a random blessing.", {path_name = "Blessings"})
-N("choice", "fortune", 2, "Blessed Choice", 1, {15}, {"moon"}, "crystal", "Choose the starting blessing from three.", {soon = true})
+N("choice", "fortune", 2, "Blessed Choice", 1, {15}, {"moon"}, "crystal", "Choose the starting blessing from three.")
 N("second", "fortune", 2, "Second Blessing", 1, {20}, {"moon", "choice"}, "crystal", "A second blessing at the start.")
-N("chosen", "fortune", 2, "Chosen of the Moon", 1, {4}, {"second"}, "crystal", "Every blessing counts twice.", K({soon = true}))
+N("chosen", "fortune", 2, "Chosen of the Moon", 1, {4}, {"second"}, "crystal", "Every blessing counts twice.", K())
 N("purse", "fortune", 3, "Coin Purse", 1, {5}, {"shrine"}, "map", "Start with 300 Gilda.", {path_name = "Gilda"})
 N("carts", "fortune", 3, "Carts Count", 1, {10}, {"purse"}, "map", "Carts pay 40% each instead of 20%.")
 N("floorspay", "fortune", 3, "Gilda Floors", 1, {12}, {"carts"}, "map", "Floors pay 60 Gilda per depth instead of 40.")
@@ -232,14 +237,14 @@ N("beacon", "diorama", 3, "Beacon", 1, {2}, {"plots"}, "crystal", "Lamps add 8% 
 -- Spirit
 N("heart", "spirit", 0, "Steady Heart", 3, {4, 8, 12}, {}, "heart", "+10 maximum HP per rank.")
 N("thick", "spirit", 1, "Thick Skin", 2, {8, 14}, {"heart"}, "shield", "-5% damage taken per rank.", {path_name = "Guard"})
-N("secondwind", "spirit", 1, "Second Wind", 1, {20}, {"thick"}, "heart", "Once a floor, a fatal hit leaves 1 HP.", {soon = true})
+N("secondwind", "spirit", 1, "Second Wind", 1, {20}, {"thick"}, "heart", "Once a floor, a fatal hit leaves 1 HP.")
 N("laststand", "spirit", 1, "Last Stand", 1, {3}, {"thick", "secondwind"}, "sword", "Below 25% HP you deal double damage.", K())
 N("lightstep", "spirit", 2, "Light Step", 1, {8}, {"heart"}, "drop", "Run 8% faster.", {path_name = "Speed"})
 N("gauge", "spirit", 2, "Quick Gauge", 1, {12}, {"lightstep"}, "sword", "The attack gauge refills 20% faster.")
-N("moonwalker", "spirit", 2, "Moonwalker", 1, {4}, {"gauge"}, "drop", "A dodge roll on Circle, with a moment of invincibility.", K({soon = true}))
+N("moonwalker", "spirit", 2, "Moonwalker", 1, {4}, {"gauge"}, "drop", "Circle (or C) dodges: a burst of speed with a moment of invincibility.", K())
 N("antidote", "spirit", 3, "Antidote Kit", 1, {4}, {"heart"}, "flask", "Start with two Antidotes.", {path_name = "Ailments"})
-N("hardy", "spirit", 3, "Hardy", 1, {10}, {"antidote"}, "shield", "Ailments last half as long.", {soon = true})
-N("clearmind", "spirit", 3, "Clear Mind", 1, {2}, {"hardy"}, "crystal", "Immune to Freeze and Stamina.", K({soon = true}))
+N("hardy", "spirit", 3, "Hardy", 1, {10}, {"antidote"}, "shield", "Freeze and Stamina last half as long.")
+N("clearmind", "spirit", 3, "Clear Mind", 1, {2}, {"hardy"}, "crystal", "Immune to Freeze and Stamina.", K())
 
 -- Provisions
 N("kit", "provisions", 0, "Repair Kit", 2, {2, 4}, {}, "flask", "+1 Repair Powder in the starter kit per rank.")
@@ -264,42 +269,48 @@ N("claws", "pacts", 1, "Sharp Claws", 2, {5, 10}, {"hardened"}, "curse", "Enemie
 N("deeper", "pacts", 1, "Deeper Dark", 1, {15}, {"claws"}, "goo", "Enemies are as strong as five floors deeper.", {heat = 3})
 N("champions", "pacts", 1, "Genie's Champions", 1, {2}, {"deeper"}, "freeze", "Every floor's key holder is a lesser Warden.", K({heat = 3, pact = true}))
 N("sprawl", "pacts", 2, "Sprawling Floors", 2, {5, 10}, {"crowded"}, "map", "Floors have 30% more rooms per rank.", {heat = 1, path_name = "Labyrinth"})
-N("blind", "pacts", 2, "Blind Halls", 1, {8}, {"sprawl"}, "map", "No floor map.", {heat = 1, soon = true})
-N("twinkeys", "pacts", 2, "Twin Keys", 1, {12}, {"sprawl", "blind"}, "map", "Every exit needs two keys.", {heat = 2, soon = true})
-N("maze", "pacts", 2, "Endless Maze", 1, {2}, {"twinkeys"}, "map", "Every biome has a fourth floor.", K({heat = 3, pact = true, soon = true}))
+N("blind", "pacts", 2, "Blind Halls", 1, {8}, {"sprawl"}, "map", "No floor map.", {heat = 1})
+N("twinkeys", "pacts", 2, "Twin Keys", 1, {12}, {"sprawl", "blind"}, "map", "Every exit needs two keys.", {heat = 2})
+N("maze", "pacts", 2, "Endless Maze", 1, {2}, {"twinkeys"}, "map", "Every biome has a fourth floor.", K({heat = 3, pact = true}))
 N("parched", "pacts", 3, "Parched Road", 1, {6}, {"crowded"}, "drop", "Water drains twice as fast.", {heat = 1, path_name = "Scarcity"})
 N("brittle", "pacts", 3, "Brittle Steel", 1, {6}, {"parched"}, "shield", "Weapons wear 50% faster.", {heat = 2})
 N("lean", "pacts", 3, "Lean Start", 1, {4}, {"brittle"}, "flask", "No starter kit.", {heat = 1})
-N("barren", "pacts", 3, "Barren", 1, {2}, {"lean"}, "curse", "No chests on floors I to III.", K({heat = 3, pact = true, soon = true}))
-N("twinwardens", "pacts", 4, "Twin Wardens", 2, {8, 16}, {"crowded"}, "goo", "Warden floors hold two Wardens; rank 2, three.", {heat = 2, soon = true, path_name = "Wardens"})
+N("barren", "pacts", 3, "Barren", 1, {2}, {"lean"}, "curse", "No chests on the floors before the Warden.", K({heat = 3, pact = true}))
+N("twinwardens", "pacts", 4, "Twin Wardens", 2, {8, 16}, {"crowded"}, "goo", "Warden floors hold two Wardens; rank 2, three.", {heat = 2, path_name = "Wardens"})
 N("rage", "pacts", 4, "Warden's Rage", 1, {12}, {"crowded", "twinwardens"}, "curse", "On Warden floors enemies hit 50% harder.", {heat = 2})
 N("mark", "pacts", 4, "The Genie's Mark", 1, {10}, {"rage"}, "curse", "Every third floor is cursed, chosen or not.", {heat = 2})
-N("court", "pacts", 4, "Warden's Court", 1, {3}, {"mark"}, "goo", "The last Warden is all five Wardens at once.", K({heat = 4, pact = true, soon = true}))
+N("court", "pacts", 4, "Warden's Court", 1, {3}, {"mark"}, "goo", "The last Warden floor holds five Wardens at once.", K({heat = 4, pact = true}))
 
 -- Signature skies (Character Marks): one per character, a fork after the second node.
 local SIGNATURES = {
-  toan = {{"Dagger Dance", "+15% speed with daggers."}, {"Lightning Fang", "Charged attacks shock."},
-          {"Swordsman", "+1 attachment slot on swords."}, {"Wanderer", "+8% run speed."}, {"Atlamillia's Chosen", "Start with a blessing of Atla Sight."}},
-  xiao = {{"Quick Draw", "Slingshots fire faster."}, {"Pebble Storm", "Slingshots fire two shots."},
-          {"Sniper", "+20% damage from range."}, {"Tumbler", "A hop that dodges."}, {"Cat's Nine Lives", "Survive one fall each biome."}},
-  goro = {{"Iron Grip", "Hammers can't be knocked away."}, {"Ground Pound", "Charged attacks shake the room."},
-          {"Bulwark", "-15% damage taken."}, {"Berserker", "+15% damage."}, {"Mountain's Might", "Charged attacks stagger Wardens."}},
-  ruby = {{"Flame Rings", "Rings add fire damage."}, {"Orb Split", "Magic orbs split in two."},
-          {"Pyromancer", "+20% magic damage."}, {"Moonsinger", "Orbs heal you a little."}, {"Genie's Daughter", "Magic pierces enemies."}},
-  ungaga = {{"Spear Reach", "+20% spear reach."}, {"Totem Guard", "A totem guards you."},
-            {"Warrior", "+15% damage."}, {"Shaman", "Totems heal."}, {"Spirit of the Woods", "Allies take less damage."}},
-  osmond = {{"Steady Aim", "Guns fire steadier."}, {"Rocket Boost", "A jetpack dash."},
-            {"Gunner", "+20% gun damage."}, {"Scholar", "+20% ABS."}, {"Moon People's Gift", "Start with a Moon blessing."}},
+  toan = {{"Dagger Dance", "Toan swings 15% faster."}, {"Lightning Fang", "Charged swings shock: the enemy stops and takes 25% more."},
+          {"Swordsman", "Toan's weapon gains an attachment socket for the run."}, {"Wanderer", "Toan runs 8% faster."},
+          {"Atlamillia's Chosen", "Runs started as Toan begin with Atla Sight: every floor mapped, monsters shown."}},
+  xiao = {{"Quick Draw", "Xiao's slingshot reloads 25% faster."}, {"Pebble Storm", "Xiao's slingshot fires a second pebble."},
+          {"Sniper", "+20% damage from range."}, {"Tumbler", "Circle (or C): a hop that dodges."},
+          {"Cat's Nine Lives", "Once a biome, a fatal hit leaves Xiao at 1 HP."}},
+  goro = {{"Iron Grip", "Goro shrugs off knock-back."}, {"Ground Pound", "Charged swings shake the room: enemies near take half."},
+          {"Bulwark", "Goro takes 15% less damage."}, {"Berserker", "Goro deals 15% more damage."},
+          {"Mountain's Might", "Charged swings stagger Wardens."}},
+  ruby = {{"Flame Rings", "Ruby's ring gains fire."}, {"Orb Split", "Ruby's orbs split: half damage to a second enemy nearby."},
+          {"Pyromancer", "Ruby's magic deals 20% more."}, {"Moonsinger", "Ruby's hits heal 1 HP, twice a second at most."},
+          {"Genie's Daughter", "Ruby's magic pierces: two enemies near the target take 60%."}},
+  ungaga = {{"Spear Reach", "Ungaga's spear hits reach 20% farther."}, {"Totem Guard", "A hit on Ungaga calls a totem: 2 s of guard, every 20 s."},
+            {"Warrior", "Ungaga deals 15% more damage."}, {"Shaman", "Totems heal: Ungaga regains HP over time."},
+            {"Spirit of the Woods", "While Ungaga is drafted, the others take 15% less damage."}},
+  osmond = {{"Steady Aim", "Osmond takes half the knock-back."}, {"Rocket Boost", "Circle (or C): a jetpack dash."},
+            {"Gunner", "Osmond's guns deal 20% more."}, {"Scholar", "+20% ABS on Osmond's kills."},
+            {"Moon People's Gift", "Runs started as Osmond begin with a Moon blessing."}},
 }
 for _, c in ipairs(SIGNATURE_CHARS) do
   local sig = SIGNATURES[c]
   local g = "sig_" .. c
-  N(c .. "_1", g, 0, sig[1][1], 1, {1}, {}, "sword", sig[1][2], {cur = "mark", char = c, soon = true, pos = {0, 110}})
-  N(c .. "_2", g, 0, sig[2][1], 1, {2}, {c .. "_1"}, "sword", sig[2][2], {cur = "mark", char = c, soon = true, pos = {0, 50}})
-  N(c .. "_3", g, 0, sig[3][1], 1, {3}, {c .. "_2"}, "sword", sig[3][2], {cur = "mark", char = c, soon = true, pos = {-120, -10}})
-  N(c .. "_4", g, 0, sig[4][1], 1, {3}, {c .. "_2"}, "drop", sig[4][2], {cur = "mark", char = c, soon = true, pos = {120, -10}})
+  N(c .. "_1", g, 0, sig[1][1], 1, {1}, {}, "sword", sig[1][2], {cur = "mark", char = c, pos = {0, 110}})
+  N(c .. "_2", g, 0, sig[2][1], 1, {2}, {c .. "_1"}, "sword", sig[2][2], {cur = "mark", char = c, pos = {0, 50}})
+  N(c .. "_3", g, 0, sig[3][1], 1, {3}, {c .. "_2"}, "sword", sig[3][2], {cur = "mark", char = c, pos = {-120, -10}})
+  N(c .. "_4", g, 0, sig[4][1], 1, {3}, {c .. "_2"}, "drop", sig[4][2], {cur = "mark", char = c, pos = {120, -10}})
   N(c .. "_5", g, 0, sig[5][1], 1, {6}, {c .. "_3", c .. "_4"}, "crystal", sig[5][2],
-    {cur = "mark", char = c, soon = true, key = true, signature_key = true, pos = {0, -80}})
+    {cur = "mark", char = c, key = true, signature_key = true, pos = {0, -80}})
 end
 
 local ETERNAL_NODE = {}
@@ -362,11 +373,11 @@ local ROUTE, FLOOR_AT = {}, {}
 local function adopt_floors(index, record)
   local floors = {}
   for slot, f in ipairs(type(record) == "table" and record.floors or {}) do
-    if type(f) == "table" and type(f.id) == "string" and type(f.native_floor_id) == "number" and slot <= WARDEN_SLOT then
+    if type(f) == "table" and type(f.id) == "string" and type(f.native_floor_id) == "number" and slot <= MAZE_SLOT then
       floors[slot] = {id = f.id, native = f.native_floor_id}
     end
   end
-  if #floors ~= WARDEN_SLOT then return false end
+  if #floors < WARDEN_SLOT then return false end
   ROUTE[index] = {floors = floors}
   for slot, f in ipairs(floors) do FLOOR_AT[BIOMES[index].dungeon .. ":" .. f.native] = {biome = index, slot = slot} end
   return true
@@ -378,6 +389,7 @@ for index, biome in ipairs(BIOMES) do
     {id = "ii", name = biome.name .. " II", source_floor = biome.sources[2]},
     {id = "iii", name = biome.name .. " III", source_floor = biome.sources[3]},
     {id = "warden", name = biome.name .. " Warden", source_floor = biome.warden},
+    {id = "iv", name = biome.name .. " IV", source_floor = biome.sources[3]}, -- Endless Maze's fourth floor
   }}
   local registered, err = call(game.dungeons.register, definition)
   if not (registered and adopt_floors(index, registered)) then
@@ -389,6 +401,37 @@ for index, biome in ipairs(BIOMES) do
   end
 end
 local function route_ready(index) return ROUTE[index] ~= nil end
+
+-- Floor links steer each biome's exit gate (dungeons.floor_link_set): with Endless Maze, III leads to IV and IV to
+-- the Warden; without it III leads to the Warden as it does natively. The Warden's exit always stays on its floor,
+-- since IV is natively the floor after it. Returns false when the engine has no floor links.
+local function set_floor_links(maze)
+  local supported = true
+  for index, route in pairs(ROUTE) do
+    local d, f = BIOMES[index].dungeon, route.floors
+    if f[MAZE_SLOT] then
+      local function link(from, to)
+        local request = {dungeon_id = d, floor_id = f[from].native}
+        local _, err
+        if to then request.next_floor_id = f[to].native; _, err = call(game.dungeons.floor_link_set, request)
+        else _, err = call(game.dungeons.floor_link_clear, request) end
+        if err then supported = false end
+      end
+      if maze then link(3, MAZE_SLOT); link(MAZE_SLOT, WARDEN_SLOT) else link(3, nil); link(MAZE_SLOT, nil) end
+      link(WARDEN_SLOT, WARDEN_SLOT)
+    else
+      supported = false
+    end
+  end
+  return supported
+end
+local function clear_floor_links()
+  for index, route in pairs(ROUTE) do
+    for _, slot in ipairs({3, WARDEN_SLOT, MAZE_SLOT}) do
+      if route.floors[slot] then try(game.dungeons.floor_link_clear, {dungeon_id = BIOMES[index].dungeon, floor_id = route.floors[slot].native}) end
+    end
+  end
+end
 
 -- Meta (kept across runs and saves) and run state -----------------------------------------------------
 local function load_meta()
@@ -438,20 +481,36 @@ local function save_run() moonmod.storage.set("run", run or false) end
 
 -- Per-floor state (not saved) --------------------------------------------------------------------------
 local frame = 0
-local floor = nil          -- {token, biome, slot, back, cursed, curses, scaled, warden, warden_max, seen, swept, entered, atla}
+local floor = nil          -- {token, biome, slot, back, cursed, curses, scaled, warden (the key holder), wardens = {{handle, max, dead}},
+                           --  key_down, seen, swept, entered, atla, second_key}
 local pending_transition = nil   -- {id, at, tries, why}
 local effects_on = false
 local hud_text = nil
 local hud_native = nil       -- the engine draws the floor label and HUD icons (false: fall back to a text line)
-local choice = nil         -- an open weapon choice: {character, keep, take, pick = 1 keep | 2 take, armed, token}
+local choice = nil         -- an open choice window: kind "weapon" {character, keep, take, pick = 1 keep | 2 take}
+                           -- or kind "blessing" {options = blessing ids, pick}; both {armed, token}
+local open_blessing_pick   -- defined with the choice window below
+local fight = {}           -- the fight's companion, guards, dodge and Signature hooks (defined further down)
 
 local function on_route() return run and run.phase == "active" and floor ~= nil and not run.suspended end
 local function biome_def(pos) return run and BIOMES[run.biomes[pos]] end
-local function total_floors() return run and (#run.biomes * WARDEN_SLOT) or 0 end
+local function order() return run and run.order or ORDER end
+local function total_floors() return run and (#run.biomes * #order()) or 0 end
+-- The floor after `slot` in this run's order (nil after the Warden), and a floor's number in it (1-based).
+local function next_slot(slot)
+  local o = order()
+  for i, v in ipairs(o) do if v == slot then return o[i + 1] end end
+end
+local function floor_number(slot)
+  for i, v in ipairs(order()) do if v == slot then return i end end
+  return slot
+end
 
 -- Effects ------------------------------------------------------------------------------------------------
 local function placed(id) return run and math.floor(tonumber(run.diorama[id]) or 0) or 0 end
 local function blessed(id) return run and contains(run.blessings, id) end
+-- How many times a blessing counts: once, twice with Chosen of the Moon.
+local function boon(id) return blessed(id) and (eternal("chosen") > 0 and 2 or 1) or 0 end
 local function cursed(id) return floor and floor.cursed and contains(floor.curses, id) end
 local function plots() return BASE_PLOTS + eternal("well") + (eternal("plots") > 0 and 2 or 0) end
 local function placed_total() local n = 0; for _, id in ipairs(TILE_IDS) do n = n + placed(id) end; return n end
@@ -468,7 +527,7 @@ end
 local function abs_multiplier()
   local pairs_built = math.min(placed("windmill"), placed("storehouse"))
   local m = setting("abs_rate", 6) * (1 + (eternal("mills") > 0 and 0.35 or 0.25) * pairs_built) * (1 + 0.1 * eternal("shrine"))
-  if blessed("scholar") then m = m * 1.25 end
+  m = m * 1.25 ^ boon("scholar")
   if floor and floor.cursed then m = m * 1.5 end
   if floor and floor.back then m = m * 1.5 end
   return m
@@ -478,8 +537,42 @@ end
 local function wear_scale()
   -- Tempered Grip: no wear for the first 30 seconds of a floor
   if eternal("grip") > 0 and floor and frame - (floor.entered or 0) < 1800 then return 0 end
-  return clamp(((eternal("smiths") > 0 and 0.82 or 0.88) ^ placed("smithy")) * (0.9 ^ eternal("oil")) * (blessed("tempered") and 0.75 or 1) *
+  return clamp(((eternal("smiths") > 0 and 0.82 or 0.88) ^ placed("smithy")) * (0.9 ^ eternal("oil")) * (0.75 ^ boon("tempered")) *
       (cursed("brittle") and 2 or 1) * (eternal("brittle") > 0 and 1.5 or 1), 0.25, 4)
+end
+
+-- Signature skies: a character's nodes work while that character is the one fighting (or, for the run-start ones,
+-- when they start the run). Native character ids follow CHARACTERS (Toan 0 ... Osmond 5).
+local CHAR_ID = {}
+for i, c in ipairs(CHARACTERS) do CHAR_ID[c] = i - 1 end
+local function sig(id) return eternal(id) > 0 end
+-- Formulas filtered by character: {id, signature node, multiplier, player-side?}
+local SIG_FORMULAS = {
+  {"sig_berserker", "goro_4", 1.15, false, "goro"}, {"sig_warrior", "ungaga_3", 1.15, false, "ungaga"},
+  {"sig_gunner", "osmond_3", 1.2, false, "osmond"}, {"sig_pyromancer", "ruby_3", 1.2, false, "ruby"},
+  {"sig_bulwark", "goro_3", 0.85, true, "goro"},
+}
+-- Fields an engine older than this mod's may not know: a call carrying one it rejects is sent again without them.
+local NEW_TUNING = {"ailment_duration", "map_hidden", "attack_reach"}
+local tuning_extras = true
+local effect_out = 1       -- the run's damage multiplier, so scripted extra hits can leave it out
+local function set_formulas(on)
+  for _, f in ipairs(SIG_FORMULAS) do
+    local value = (on and sig(f[2])) and f[3] or 1
+    local request = {id = f[1], operation = "multiply", value = value, priority = 122, character_id = CHAR_ID[f[5]]}
+    try(f[4] and game.combat.register_player_formula or game.combat.register_formula, request)
+  end
+  -- Spirit of the Woods: while Ungaga is drafted, the others take 15% less
+  local woods = on and sig("ungaga_5") and run and contains(run.drafted, "ungaga")
+  for _, c in ipairs(CHARACTERS) do
+    if c ~= "ungaga" then
+      try(game.combat.register_player_formula, {id = "sig_woods_" .. c, operation = "multiply", value = woods and 0.85 or 1,
+          priority = 122, character_id = CHAR_ID[c]})
+    end
+  end
+  -- Charged Fury: charged attacks deal 30% more (an engine that cannot tell a charged hit refuses the filter)
+  try(game.combat.register_formula, {id = "gauntlet_charged", operation = "multiply", value = (on and eternal("charged") > 0) and 1.3 or 1,
+      priority = 123, charged = true})
 end
 
 local function apply_effects()
@@ -490,32 +583,54 @@ local function apply_effects()
       try(game.combat.register_formula, {id = "gauntlet_out", operation = "multiply", value = 1, priority = 120})
       try(game.combat.register_formula, {id = "gauntlet_lucky", operation = "chance_multiply", value = 2, chance = 0, priority = 121})
       try(game.combat.register_player_formula, {id = "gauntlet_in", operation = "multiply", value = 1, priority = 120})
+      set_formulas(false)
+      effect_out = 1
       effects_on = false
     end
     return
   end
-  local out = (1 + (eternal("beacon") > 0 and 0.08 or 0.04) * placed("lamp")) * (blessed("moonlit") and 1.15 or 1) *
+  local out = (1 + (eternal("beacon") > 0 and 0.08 or 0.04) * placed("lamp")) * (1.15 ^ boon("moonlit")) *
       (1 + 0.05 * eternal("keen"))
   local p = try(game.player.get)
+  local who = p and p.character
   if eternal("laststand") > 0 and p and (p.max_hp or 0) > 0 and (p.hp or 0) * 4 < p.max_hp then out = out * 2 end
-  local incoming = ((eternal("houses") > 0 and 0.91 or 0.94) ^ placed("house")) * (blessed("ward") and 0.85 or 1) * (cursed("glass") and 1.5 or 1) *
+  local incoming = ((eternal("houses") > 0 and 0.91 or 0.94) ^ placed("house")) * (0.85 ^ boon("ward")) * (cursed("glass") and 1.5 or 1) *
       (0.95 ^ eternal("thick")) * (1.2 ^ eternal("claws")) * ((eternal("rage") > 0 and floor and floor.slot == WARDEN_SLOT) and 1.5 or 1)
   local shuffle = shuffle_scale()
   if shuffle < 1 then incoming = incoming * math.max(0.5, shuffle) end
+  effect_out = clamp(out, 0.01, 100)
   try(game.combat.register_formula, {id = "gauntlet_out", operation = "multiply", value = clamp(out, 0, 100), priority = 120})
-  try(game.combat.register_formula, {id = "gauntlet_lucky", operation = "chance_multiply", value = 2, chance = (blessed("lucky") and 10 or 0) + 5 * eternal("moonstrike"), priority = 121})
+  try(game.combat.register_formula, {id = "gauntlet_lucky", operation = "chance_multiply", value = 2, chance = 10 * boon("lucky") + 5 * eternal("moonstrike"), priority = 121})
   try(game.combat.register_player_formula, {id = "gauntlet_in", operation = "multiply", value = clamp(incoming, 0, 100), priority = 120})
+  set_formulas(true)
+  local blind = eternal("blind") > 0
+  local sight = boon("sight") > 0
   local tuning = {
-    thirst_drain = clamp((0.88 ^ placed("river")) * (blessed("flask") and 0.75 or 1) * (cursed("parched") and 3 or 1) *
+    thirst_drain = clamp((0.88 ^ placed("river")) * (0.75 ^ boon("flask")) * (cursed("parched") and 3 or 1) *
         (0.9 ^ eternal("waterskin")) * (eternal("endless") > 0 and 0.5 or 1) * (eternal("parched") > 0 and 2 or 1), 0.25, 4),
     durability_wear = wear_scale(),
-    run_speed = (blessed("stride") and 1.15 or 1) * (eternal("lightstep") > 0 and 1.08 or 1),
-    gauge_refill = eternal("gauge") > 0 and 1.2 or 1,
-    invincible_bonus_frames = blessed("breath") and 12 or 0,
-    map_reveal = placed("lamp") >= 1,
-    monster_reveal = placed("lamp") >= 2 or (eternal("lampoil") > 0 and placed("lamp") >= 1),
+    run_speed = clamp((1.15 ^ boon("stride")) * (eternal("lightstep") > 0 and 1.08 or 1) * ((who == "toan" and sig("toan_4")) and 1.08 or 1), 0.25, 4),
+    -- Quick Gauge for anyone; Quick Draw (Xiao) reloads her slingshot faster
+    gauge_refill = clamp((eternal("gauge") > 0 and 1.2 or 1) * ((who == "xiao" and sig("xiao_1")) and 1.25 or 1), 0.25, 4),
+    invincible_bonus_frames = math.min(120, 12 * boon("breath")),
+    -- Dagger Dance (Toan): faster swings
+    attack_anim_speed = (who == "toan" and sig("toan_1")) and 1.15 or 1,
+    -- Iron Grip (Goro) shrugs off the knock-back; Steady Aim (Osmond) half of it
+    recoil_scale = (who == "goro" and sig("goro_1")) and 0.25 or ((who == "osmond" and sig("osmond_1")) and 0.5 or 1),
+    map_reveal = not blind and (placed("lamp") >= 1 or sight),
+    monster_reveal = not blind and (placed("lamp") >= 2 or (eternal("lampoil") > 0 and placed("lamp") >= 1) or sight),
   }
+  if tuning_extras then
+    tuning.ailment_duration = eternal("hardy") > 0 and 0.5 or 1        -- Hardy
+    tuning.map_hidden = blind                                          -- Blind Halls
+    tuning.attack_reach = (who == "ungaga" and sig("ungaga_1")) and 1.2 or 1 -- Spear Reach
+  end
   local _, err = call(game.player.tuning_set, tuning)
+  if err and err.code == "invalid_argument" and tuning_extras then
+    tuning_extras = false
+    for _, k in ipairs(NEW_TUNING) do tuning[k] = nil end
+    _, err = call(game.player.tuning_set, tuning)
+  end
   if err and err.code ~= "unsupported" then moonmod.log("warn", "tuning: " .. errmsg(err)) end
   effects_on = true
 end
@@ -558,7 +673,7 @@ end
 local function hud_state()
   if not (run and run.phase == "active" and floor) or run.suspended then return nil end
   -- Digits: the game font's capital I reads as a lower-case l.
-  local s = {label = run.slot < WARDEN_SLOT and (run.pos .. "-" .. run.slot) or nil, icons = {}}
+  local s = {label = run.slot ~= WARDEN_SLOT and (run.pos .. "-" .. floor_number(run.slot)) or nil, icons = {}}
   if floor.cursed then
     s.icons[#s.icons + 1] = {id = "curse", icon = "curse"}
     s.icons[#s.icons + 1] = {id = "cache", image = HUD_CACHE_IMAGE}
@@ -638,11 +753,16 @@ local function earn_shards(n)
   run.shards = run.shards + n
 end
 
-local function bless(why)
-  if not run then return end
+-- The blessings not yet held, from the random pool.
+local function open_blessings()
   local open = {}
   for _, id in ipairs(BLESSING_IDS) do if not contains(run.blessings, id) then open[#open + 1] = id end end
-  local id = pick(open)
+  return open
+end
+
+local function bless(why, chosen)
+  if not run then return end
+  local id = chosen or pick(open_blessings())
   if not id then earn_shards(2); toast("Every blessing held: +2 Moon Shards."); return end
   run.blessings[#run.blessings + 1] = id
   toast("Blessing: " .. BLESSINGS[id].name .. ". " .. BLESSINGS[id].text:gsub("^%l", string.upper) .. ".")
@@ -789,7 +909,7 @@ end
 
 -- Title screen pages ------------------------------------------------------------------------------------
 -- The Gauntlet's title screen is a page the engine draws: heading, up to six lines, up to seven entries.
-local page = "root"          -- "root", "eternal" or "records"
+local page = "root"          -- "root", "eternal", "records" or "loadouts"
 local last_result = nil      -- a line about the run that just ended
 local title_ready = false
 local start_run              -- defined below
@@ -810,6 +930,7 @@ local function root_page()
             {id = "character", label = "Starting Character: " .. title(meta.start_char)},
             {id = "eternal", label = "Norune Eternal"},
             {id = "records", label = "Records"},
+            owned("loadouts") > 0 and {id = "loadouts", label = "Loadouts"} or nil,
           }}
 end
 
@@ -954,9 +1075,60 @@ local function records_page()
           }, entries = {{id = "done", label = "Back"}}}
 end
 
+-- Loadouts: four saved sets of switches (which bought nodes are on, and at which rank).
+local LOADOUT_SLOTS = 4
+local loadout_saving = false
+local function copy(t) local out = {}; for k, v in pairs(t or {}) do out[k] = v end; return out end
+local function loadout_line(i)
+  local l = type(meta.loadouts) == "table" and meta.loadouts[i]
+  if type(l) ~= "table" then return "Slot " .. i .. ": empty" end
+  local on, h, keys = 0, 0, {}
+  for _, n in ipairs(ETERNAL) do
+    if owned(n.id) > 0 and n.max_rank > 0 and not l.off[n.id] then
+      on = on + 1
+      local r = math.min(owned(n.id), tonumber(l.set[n.id]) or owned(n.id))
+      if n.heat then h = h + n.heat * r end
+      if counts_as_keystone(n) then keys[#keys + 1] = n.title end
+    end
+  end
+  return string.format("Slot %d: %d on, Heat %d%s", i, on, h, #keys > 0 and (", " .. table.concat(keys, ", ")) or ""):sub(1, 64)
+end
+local function loadouts_page()
+  local entries = {}
+  for i = 1, LOADOUT_SLOTS do entries[i] = {id = "slot" .. i, label = (loadout_saving and "Save to " or "Use ") .. loadout_line(i)} end
+  entries[#entries + 1] = {id = "mode", label = loadout_saving and "Saving: choose a slot (switch to using)" or "Using: choose a slot (switch to saving)"}
+  return {title = "LOADOUTS", subtitle = "Sets of Norune Eternal switches", root = false, hint = "{circle} Back",
+          lines = {"Save the nodes switched on now, or use a saved set.", "Nodes bought since are left as they are."}, entries = entries}
+end
+local function loadout_act(i)
+  meta.loadouts = type(meta.loadouts) == "table" and meta.loadouts or {}
+  if loadout_saving then
+    local saw = {}
+    for _, n in ipairs(ETERNAL) do if owned(n.id) > 0 then saw[n.id] = true end end
+    meta.loadouts[i] = {off = copy(meta.off), set = copy(meta.set), saw = saw}
+    loadout_saving = false
+  else
+    local l = meta.loadouts[i]
+    if type(l) ~= "table" then return end
+    -- switches for the nodes the loadout knew; a node bought since keeps its own switch
+    for _, n in ipairs(ETERNAL) do
+      if owned(n.id) > 0 and type(l.saw) == "table" and l.saw[n.id] then
+        meta.off[n.id] = l.off and l.off[n.id] or nil
+        meta.set[n.id] = l.set and l.set[n.id] or nil
+      end
+    end
+    -- more Keystones than slots (a slot node switched off): the extras go off
+    for _, n in ipairs(ETERNAL) do
+      if counts_as_keystone(n) and eternal(n.id) > 0 and keystones_on(n.id) >= keystone_slots() then meta.off[n.id] = true end
+    end
+  end
+  save_meta()
+end
+
 local function show_page(name, cursor)
   page = name
-  local data = name == "eternal" and eternal_page() or (name == "records" and records_page() or root_page())
+  local data = name == "eternal" and eternal_page() or (name == "records" and records_page() or
+      (name == "loadouts" and loadouts_page() or root_page()))
   data.id = MODE
   data.cursor = cursor
   local _, err = call(game.title.mode_set, data)
@@ -994,6 +1166,7 @@ moonmod.on("game.title.selected", function(e)
       show_page("root", 1)
     elseif entry == "eternal" then eternal_msg = nil; show_page("eternal", 0)
     elseif entry == "records" then show_page("records", 0)
+    elseif entry == "loadouts" then loadout_saving = false; show_page("loadouts", 0)
     end
   elseif page == "eternal" then
     if entry == "back" then eternal_msg = nil; show_page("root", 2); return end
@@ -1001,6 +1174,11 @@ moonmod.on("game.title.selected", function(e)
     show_page("eternal", 0)
   elseif page == "records" then
     show_page("root", 3)
+  elseif page == "loadouts" then
+    if entry == "back" then loadout_saving = false; show_page("root", 4); return end
+    if entry == "mode" then loadout_saving = not loadout_saving; show_page("loadouts", LOADOUT_SLOTS); return end
+    local i = tonumber(tostring(entry):match("^slot(%d)$"))
+    if i then loadout_act(i); show_page("loadouts", i - 1) end
   end
 end)
 
@@ -1026,6 +1204,10 @@ start_run = function()
     run.drafted[#run.drafted + 1] = pick(others)
   end
   run.heat = heat()
+  local maze = eternal("maze") > 0
+  local linked = set_floor_links(maze)
+  run.order = (maze and linked) and MAZE_ORDER or ORDER
+  run.maze_missing = maze and not linked or nil
   for _, id in ipairs(TILE_IDS) do run.diorama[id] = 0; run.stock[id] = 0 end
   local result, err = call(game.session.start, {floor = ROUTE[biomes[1]].floors[1].id, party_size = 6, character = start})
   if not result then
@@ -1093,17 +1275,23 @@ local function first_floor_setup()
   if eternal("living") > 0 then
     for _ = 1, 2 do local id = pick(TILE_IDS); run.diorama[id] = placed(id) + 1 end
   end
-  if eternal("moon") > 0 then bless("Moon Blessing") end
   if eternal("second") > 0 then bless("Second Blessing") end
+  if start == "toan" and sig("toan_5") then bless("Atlamillia's Chosen", "sight") end
+  if start == "osmond" and sig("osmond_5") then bless("Moon People's Gift") end
+  -- the Moon Blessing last, so Blessed Choice offers three not yet held
+  if eternal("moon") > 0 and not (eternal("choice") > 0 and open_blessing_pick()) then bless("Moon Blessing") end
   cache_weapons()
   prepare_floor_rules()
   push_diorama_ranks()
   toast(biome_def(1).name .. " 1-1. " .. title(start) .. (#run.drafted > 1 and (" and " .. title(run.drafted[2]) .. " set") or " sets") .. " out.")
   if #notes > 0 then toast(table.concat(notes, ". ") .. ".") end
+  if run.maze_missing then toast("Endless Maze needs a newer MoonMod engine: this run has three floors a biome.") end
 end
 
 local function end_run(outcome)
   if not run then return end
+  fight.restore_sockets()
+  for _, c in ipairs(CHARACTERS) do try(game.player.guard_set, {character = c, armed = false}) end
   local depth = run.depth
   local earned = run.shards
   if outcome == "victory" then earned = earned + 10 end
@@ -1125,7 +1313,7 @@ local function end_run(outcome)
   else meta.retreats = meta.retreats + 1 end
   save_meta()
   local b = biome_def(run.pos)
-  local where = b and (b.name .. (run.slot >= WARDEN_SLOT and " Warden" or (" " .. run.pos .. "-" .. run.slot))) or "?"
+  local where = b and (b.name .. (run.slot == WARDEN_SLOT and " Warden" or (" " .. run.pos .. "-" .. floor_number(run.slot)))) or "?"
   local headline = outcome == "victory" and "CONQUERED" or (outcome == "death" and "Fell in " .. where or
       (outcome == "broken" and "Weapon broke in " .. where or "Left at " .. where))
   last_result = string.format("Last run: %s, depth %d, +%d", headline, depth, earned):sub(1, 64) -- Moon Shards are on the line above
@@ -1135,6 +1323,7 @@ local function end_run(outcome)
   save_run()
   try(game.render.bar_remove, {id = "warden"})
   try(game.dungeons.set_modifiers, {})
+  clear_floor_links()
   for _, id in ipairs(TILE_IDS) do try(game.skills.set_rank, {id = node_id("diorama", id), rank = 0}) end
   refresh()
   if title_ready then show_page("root", 0) end
@@ -1160,6 +1349,7 @@ local function draft_ally(why)
   try(game.player.set, {hp = max_hp_of(ally), character = ally})
   run.weapons[ally] = equipped_weapon(ally)
   toast(why .. ": " .. title(ally) .. " joins the run!")
+  fight.arm_guards()
 end
 
 local function complete_floor(prev)
@@ -1235,7 +1425,7 @@ local function enter_floor(world)
   if pos then
     if run.phase == "launch" then expected = pos == 1 and hit.slot == 1
     elseif pos == run.pos and hit.slot == run.slot then expected = true                 -- same floor (its back side, or a reload)
-    elseif pos == run.pos and hit.slot == run.slot + 1 then expected = true             -- the native exit gate
+    elseif pos == run.pos and hit.slot == next_slot(run.slot) then expected = true      -- the native exit gate
     elseif run.awaiting and pos == run.awaiting and hit.slot == 1 then expected = true  -- the next biome
     end
   end
@@ -1257,16 +1447,17 @@ local function enter_floor(world)
   if first then run.phase = "active" end
   if advanced then run.depth = run.depth + 1 end
   run.pos, run.slot, run.awaiting = pos, hit.slot, nil
-  local cursing = advanced and run.next_cursed and hit.slot < WARDEN_SLOT
+  local cursing = advanced and run.next_cursed and hit.slot ~= WARDEN_SLOT
   floor = {token = world.token, biome = pos, slot = hit.slot, back = world.back_floor == true, scaled = {}, seen = 0,
            entered = frame, swept = false, atla = nil,
            cursed = cursing or (not advanced and prev and prev.cursed) or false,
            curses = cursing and roll_curses() or (not advanced and prev and prev.curses) or {}}
   if advanced then run.next_cursed = false end
+  floor.wind = eternal("secondwind") > 0 and (advanced or (prev and prev.wind)) or false
   meta.best_depth = math.max(meta.best_depth, run.depth)
   local b = biome_def(pos)
   local intro = hit.slot == WARDEN_SLOT and (b.name .. " Warden. The key holder guards the gate.") or
-      string.format("%s %d-%d.", b.name, pos, hit.slot)
+      string.format("%s %d-%d.", b.name, pos, floor_number(hit.slot))
   if floor.back then intro = intro .. " A Vault: tougher, richer." end
   if floor.cursed then
     local list = {}
@@ -1292,8 +1483,9 @@ local function enter_floor(world)
     if hit.slot == 1 and eternal("unbreakable") > 0 then try(game.items.give, {id = "chronicle:item:" .. ITEM.auto_repair, count = 1}) end
   end
   -- The Genie's Mark: every third floor is cursed, chosen or not
-  if advanced and eternal("mark") > 0 and (run.depth + 1) % 3 == 0 and hit.slot + 1 < WARDEN_SLOT then run.next_cursed = true end
+  if advanced and eternal("mark") > 0 and (run.depth + 1) % 3 == 0 and next_slot(hit.slot) ~= WARDEN_SLOT then run.next_cursed = true end
   if advanced and hit.slot == 1 then cache_weapons() end
+  fight.arm_guards()
   save_meta()
   save_run()
   refresh()
@@ -1305,18 +1497,27 @@ moonmod.on("game.dungeon.generating", function(e)
   local hit = FLOOR_AT[tostring(e.dungeon_id) .. ":" .. tostring(e.floor_id)]
   -- The floor may be built just after the run has arrived on it (and spent next_cursed).
   local arrived = floor and floor.cursed and floor.slot == (hit and hit.slot) and run.biomes[floor.biome] == (hit and hit.biome)
-  local cursing = hit and hit.slot < WARDEN_SLOT and (run.next_cursed or arrived)
+  local cursing = hit and hit.slot ~= WARDEN_SLOT and (run.next_cursed or arrived)
   local mods = cursing and {chests = 50, chest_value = 100} or {}
   if eternal("crowded") > 0 then mods.monsters = 25 * eternal("crowded") end
   if eternal("sprawl") > 0 then mods.rooms = 30 * eternal("sprawl") end
   if eternal("hoard") > 0 then mods.chest_value = math.min(300, (mods.chest_value or 0) + 50) end
-  try(game.dungeons.set_modifiers, mods)
+  -- Barren: no chests on the floors before the Warden (an engine without negative chest bonuses keeps them)
+  if eternal("barren") > 0 and hit and hit.slot ~= WARDEN_SLOT then mods.chests = -100 end
+  local _, err = call(game.dungeons.set_modifiers, mods)
+  if err and mods.chests == -100 then mods.chests = nil; try(game.dungeons.set_modifiers, mods) end
 end)
 
 -- Enemies ------------------------------------------------------------------------------------------------
 local function drop_of(e)
   local d = (e.combat and e.combat.drop_item) or (e.definition and e.definition.drop_item)
   return tonumber(d)
+end
+
+-- How many Wardens hold this Warden floor: one, more with Twin Wardens, five on the last with Warden's Court.
+local function wardens_wanted()
+  if eternal("court") > 0 and run.pos >= #run.biomes then return 5 end
+  return 1 + eternal("twinwardens")
 end
 
 local function scale_enemies(roster)
@@ -1334,7 +1535,11 @@ local function scale_enemies(roster)
       local hp = e.health and tonumber(e.health.maximum) or 0
       local combat = e.combat or {}
       if hp > 0 then
-        local warden = floor.slot == WARDEN_SLOT and not floor.warden and (drop_of(e) or -1) >= 0
+        -- the key holder is the Warden; Twin Wardens and Warden's Court raise others beside it until it falls
+        local holder = (drop_of(e) or -1) >= 0
+        floor.wardens = floor.wardens or {}
+        local warden = floor.slot == WARDEN_SLOT and not floor.warden_done and
+            ((holder and not floor.warden) or (not holder and not floor.key_down and #floor.wardens - (floor.warden and 1 or 0) < wardens_wanted() - 1))
         -- Genie's Champions: every other floor's key holder is a lesser Warden (twice the HP)
         local champion = not warden and eternal("champions") > 0 and (drop_of(e) or -1) >= 0
         local mult = hp_mult * (warden and setting("warden_hp", 6) or (champion and 2 or 1))
@@ -1347,9 +1552,14 @@ local function scale_enemies(roster)
         if try(game.entities.set_stats, request) then
           floor.scaled[key] = true
           if warden then
-            floor.warden, floor.warden_max = handle, request.max_hp
-            try(game.entities.scale_set, {entity = handle, scale = 1.8})
-            toast("The Warden awakens!")
+            if holder then floor.warden = handle end
+            floor.wardens[#floor.wardens + 1] = {handle = handle, max = request.max_hp}
+            try(game.entities.scale_set, {entity = handle, scale = holder and 1.8 or 1.6})
+            local wanted = wardens_wanted()
+            if #floor.wardens == 1 then
+              toast(wanted >= 5 and "The Warden's Court convenes: five Wardens guard the last gate." or
+                  (wanted > 1 and ("The Wardens awaken: " .. wanted .. " guard this gate.") or "The Warden awakens!"))
+            end
           end
         end
       end
@@ -1372,15 +1582,26 @@ local function moonblade(roster)
   end
 end
 
+-- One bar for every Warden on the floor; the biome is cleared when the key holder and every Warden beside it are down.
 local function update_warden_bar()
-  if not floor.warden or floor.warden_done then return end
-  local e = try(game.entities.get, floor.warden)
-  if not e or e.status ~= "alive" then
-    if e and e.status == "dead" then warden_cleared() end
-    return
+  if not floor.wardens or #floor.wardens == 0 or floor.warden_done then return end
+  local current, max, alive = 0, 0, 0
+  for _, w in ipairs(floor.wardens) do
+    if not w.dead then
+      local e = try(game.entities.get, w.handle)
+      if e and e.status == "alive" then
+        alive = alive + 1
+        current = current + (e.health and tonumber(e.health.current) or 0)
+      elseif e and (e.status == "dead" or e.status == "expired") then
+        w.dead = true
+      end
+    end
+    max = max + (w.max or 0)
+    if w.handle == floor.warden and w.dead then floor.key_down = true end
   end
-  local current = e.health and tonumber(e.health.current) or 0
-  try(game.render.bar_register, {id = "warden", label = "WARDEN", current = current, max = floor.warden_max or current})
+  if floor.key_down and alive == 0 then warden_cleared(); return end
+  if alive == 0 then return end
+  try(game.render.bar_register, {id = "warden", label = alive > 1 and ("WARDENS " .. alive) or "WARDEN", current = math.min(current, max), max = math.max(1, max)})
 end
 
 moonmod.on("game.enemy_defeated", function(e)
@@ -1390,8 +1611,231 @@ moonmod.on("game.enemy_defeated", function(e)
   local p = try(game.player.get)
   if exp > 0 then share_abs(exp, p and p.character) end
   if eternal("luckyfind") > 0 and math.random(100) <= 5 then earn_shards(1) end
-  if floor.warden and e.entity and tostring(e.entity) == tostring(floor.warden) then warden_cleared() end
+  -- Scholar (Osmond): +20% ABS on his kills
+  if exp > 0 and p and p.character == "osmond" and eternal("osmond_4") > 0 and p.weapon and p.weapon.id then
+    try(game.weapons.abs_add, {id = p.weapon.id, character = "osmond", slot = p.weapon.slot, amount = math.max(1, math.floor(exp * 0.2))})
+  end
+  if e.entity and floor.wardens then
+    for _, w in ipairs(floor.wardens) do if tostring(w.handle) == tostring(e.entity) then w.dead = true end end
+    if floor.warden and tostring(e.entity) == tostring(floor.warden) then floor.key_down = true end
+    update_warden_bar()
+  end
 end)
+
+-- The fight: the companion, hits and Signature moves ---------------------------------------------------------
+do
+-- An extra hit the mod deals (combat.damage runs the run's damage formulas again, so they are taken out first).
+local function strike(handle, amount)
+  if not handle or (tonumber(amount) or 0) <= 0 then return nil end
+  return try(game.combat.damage, {entity = handle, amount = math.floor(clamp(amount / effect_out, 1, 1000000))})
+end
+local function distance(a, b)
+  if type(a) ~= "table" or type(b) ~= "table" then return nil end
+  local dx, dy, dz = (a.x or 0) - (b.x or 0), (a.y or 0) - (b.y or 0), (a.z or 0) - (b.z or 0)
+  return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+-- Living, revealed enemies: {handle, pos, exp}.
+local function foes()
+  local out = {}
+  local result = try(game.entities.query, {type = "monster"})
+  for _, e in ipairs(result and result.entities or {}) do
+    local handle = e.entity_id or e.id
+    if handle and e.revealed == true and (e.health and tonumber(e.health.current) or 0) > 0 then
+      out[#out + 1] = {handle = handle, pos = e.position, exp = e.combat and tonumber(e.combat.reward_exp) or 0}
+    end
+  end
+  return out
+end
+-- Up to `n` enemies other than `except`, nearest to `pos` and within `radius` (unknown positions count as near).
+local function near(pos, radius, n, except)
+  local list = {}
+  for _, f in ipairs(foes()) do
+    if tostring(f.handle) ~= tostring(except) then
+      local d = distance(pos, f.pos)
+      if d == nil or d <= radius then f.d = d or 0; list[#list + 1] = f end
+    end
+  end
+  table.sort(list, function(a, b) return a.d < b.d end)
+  while #list > n do table.remove(list) end
+  return list, foes
+end
+local function foe(handle)
+  for _, f in ipairs(foes()) do if tostring(f.handle) == tostring(handle) then return f end end
+end
+local function is_warden(handle)
+  for _, w in ipairs(floor and floor.wardens or {}) do if tostring(w.handle) == tostring(handle) then return true end end
+  return false
+end
+
+-- Companion: a drafted ally on the bench fights beside you. The game has no AI partner, so the companion is the
+-- mod's own: it can't be hurt, and every so often strikes an enemy near you for its weapon's attack. Switching
+-- characters trades places: the one you switched from becomes the companion. Stances (Actions): aggressive strikes
+-- more often and anything near; passive only what you last hit.
+local function companion_of(p)
+  if eternal("companion") == 0 or not p then return nil end
+  if run.companion and run.companion ~= p.character and contains(run.drafted, run.companion) then return run.companion end
+  for _, c in ipairs(run.drafted) do if c ~= p.character then return c end end
+end
+local function companion_attack(c)
+  local w = run.weapons and run.weapons[c]
+  local info = w and weapon_info(w.id, c, w.slot)
+  local attack = info and tonumber(info.stats.attack) or 10
+  return math.max(1, attack) * (eternal("keenpartner") > 0 and 1.25 or 1)
+end
+local function companion_turn(p)
+  local c = companion_of(p)
+  if not c then return end
+  if run.companion_told ~= c then
+    run.companion_told = c
+    toast("Companion: " .. title(c) .. " fights beside you.")
+  end
+  local passive = eternal("stances") > 0 and run.stance == "passive"
+  if frame < (run.companion_next or 0) then return end
+  run.companion_next = frame + (passive and 90 or 50)
+  local target = floor.last_hit and foe(floor.last_hit)
+  if not target and not passive then target = near(p.position, 300, 1)[1] end
+  if not target then return end
+  local hit = strike(target.handle, companion_attack(c))
+  if not hit then return end
+  floor.companion_target, floor.companion_at = target.handle, frame
+  -- Soul Bond: the companion's kills feed your weapon's ABS
+  local killed = hit.death_queued or (tonumber(hit.hp_after) or 1) <= 0
+  if killed and eternal("soulbond") > 0 and p.weapon and p.weapon.id and target.exp > 0 then
+    local selector = {id = p.weapon.id, character = p.character, slot = p.weapon.slot}
+    local added = try(game.weapons.abs_add, {id = p.weapon.id, character = p.character, slot = p.weapon.slot, amount = math.min(32767, math.floor(target.exp))})
+    if added and (added.abs or 0) >= (added.abs_max or math.huge) then try(game.weapons.upgrade, selector) end
+  end
+end
+
+-- Your hits: the companion's mark, and the Signature moves that ride on a hit.
+local heal_at = 0
+moonmod.on("game.enemy_hit", function(e)
+  if not on_route() or not e or not e.entity then return end
+  local p = try(game.player.get)
+  local c = p and p.character
+  local target, dealt = e.entity, tonumber(e.damage) or 0
+  floor.last_hit = target
+  -- Twin Strike: hitting what the companion hits lands 10% more
+  if eternal("twinstrike") > 0 and floor.companion_target and tostring(floor.companion_target) == tostring(target) and
+      frame - (floor.companion_at or 0) < 180 then
+    strike(target, dealt * 0.1 * effect_out)
+  end
+  local here = foe(target)
+  local at = here and here.pos
+  if c == "xiao" then
+    if sig("xiao_2") then strike(target, dealt) end                                     -- Pebble Storm: a second pebble
+    local d = p.position and distance(p.position, at)
+    if sig("xiao_3") and d and d >= 150 then strike(target, dealt * 0.2) end            -- Sniper
+  elseif c == "ruby" then
+    if sig("ruby_2") then for _, f in ipairs(near(at, 200, 1, target)) do strike(f.handle, dealt * 0.5) end end      -- Orb Split
+    if sig("ruby_5") then for _, f in ipairs(near(at, 150, 2, target)) do strike(f.handle, dealt * 0.6) end end      -- Genie's Daughter
+    if sig("ruby_4") and frame >= heal_at then heal_at = frame + 30; try(game.player.heal, {amount = 1}) end        -- Moonsinger
+  end
+  if e.charged == true then
+    if c == "toan" and sig("toan_2") then                                               -- Lightning Fang
+      try(game.combat.status_add, {entity = target, status = "stop", duration_frames = 45})
+      strike(target, dealt * 0.25)
+    elseif c == "goro" then
+      if sig("goro_2") then for _, f in ipairs(near(p.position, 220, 6, target)) do strike(f.handle, dealt * 0.5) end end -- Ground Pound
+      if sig("goro_5") and is_warden(target) then try(game.combat.status_add, {entity = target, status = "stop", duration_frames = 90}) end -- Mountain's Might
+    end
+  end
+end)
+
+-- Dodge (Circle, or the dodge key): Moonwalker's roll for anyone, Xiao's Tumbler hop, Osmond's Rocket Boost.
+-- A dodge is a burst of speed in the direction you move (player.dash keeps the native movement and its walls),
+-- with a moment of invincibility.
+local DODGES = {
+  rocket = {node = "osmond_2", who = "osmond", speed = 3.2, frames = 14, invincible = 16, name = "Rocket Boost"},
+  tumble = {node = "xiao_4", who = "xiao", speed = 2.2, frames = 12, invincible = 26, name = "Tumbler"},
+  roll = {node = "moonwalker", speed = 2.6, frames = 12, invincible = 20, name = "Moonwalker"},
+}
+local dodge_at = 0
+local function dodge(p)
+  local move = nil
+  for _, id in ipairs({"rocket", "tumble", "roll"}) do
+    local d = DODGES[id]
+    if not move and eternal(d.node) > 0 and (not d.who or d.who == p.character) then move = d end
+  end
+  if not move or frame < dodge_at then return end
+  dodge_at = frame + 40
+  -- an engine without the dash still gives the moment of invincibility
+  if not try(game.player.dash, {speed = move.speed, frames = move.frames, invincible_frames = move.invincible}) then
+    try(game.player.invincible, {frames = move.invincible})
+  end
+end
+
+-- Second Wind (once a floor, anyone) and Cat's Nine Lives (Xiao, once a biome): a fatal hit leaves 1 HP. The engine
+-- holds one guard per character (player.guard_set) and reports a save with game.player.guarded.
+local function arm_guards()
+  for _, c in ipairs(CHARACTERS) do
+    local armed = contains(run.drafted, c) and ((floor and floor.wind) or
+        (c == "xiao" and sig("xiao_5") and run.nine_lives ~= run.pos))
+    try(game.player.guard_set, {character = c, armed = armed == true})
+  end
+end
+moonmod.on("game.player.guarded", function(e)
+  if not on_route() then return end
+  local c = e and e.character
+  if floor.wind then
+    floor.wind = false
+    toast("Second Wind: " .. title(c) .. " holds on at 1 HP.")
+  elseif c == "xiao" then
+    run.nine_lives = run.pos
+    toast("Cat's Nine Lives: Xiao lands on her feet.")
+  end
+  arm_guards()
+  save_run()
+end)
+
+-- Weapons the Signature skies touch: Swordsman widens Toan's weapon by a socket (its definition, put back when the
+-- run ends); Flame Rings give Ruby's ring fire.
+local function signature_weapons()
+  local t = run.weapons and run.weapons.toan
+  if sig("toan_3") and t and contains(run.drafted, "toan") then
+    run.sockets = run.sockets or {}
+    local no = tonumber(tostring(t.id):match("(%d+)$"))
+    local def = no and run.sockets[tostring(no)] == nil and try(game.weapons.get, t.id)
+    local n = def and tonumber(def.socket_count)
+    if n then
+      run.sockets[tostring(no)] = n
+      if n < 6 and try(game.weapons.definition_set, {id = no, hole_num = n + 1}) then toast("Swordsman: Toan's weapon gains a socket.") end
+    end
+  end
+  local r = run.weapons and run.weapons.ruby
+  if sig("ruby_1") and r and contains(run.drafted, "ruby") then
+    run.flamed = run.flamed or {}
+    local key = tostring(r.id) .. ":" .. tostring(r.slot)
+    local info = not run.flamed[key] and weapon_info(r.id, "ruby", r.slot)
+    if info then
+      run.flamed[key] = true
+      local elem = {}
+      for i = 1, 5 do elem[i] = math.floor(tonumber(info.elements[i]) or 0) end
+      elem[1] = math.min(127, elem[1] + 20)
+      try(game.weapons.stats_set, {id = r.id, character = "ruby", slot = r.slot, elem = elem})
+    end
+  end
+end
+local function restore_sockets()
+  for no, n in pairs(run and run.sockets or {}) do try(game.weapons.definition_set, {id = tonumber(no), hole_num = n}) end
+end
+
+-- Ungaga: the Totem Guard answers a hit with a moment of invincibility (every 20 s); Shaman totems heal.
+local function ungaga_totems(p)
+  if p.character ~= "ungaga" then run.ungaga_hp = nil; return end
+  if sig("ungaga_2") and run.ungaga_hp and p.hp < run.ungaga_hp and frame >= (run.totem_at or 0) then
+    run.totem_at = frame + 1200
+    try(game.player.invincible, {frames = 120})
+    if sig("ungaga_4") and p.max_hp then try(game.player.heal, {amount = math.max(1, math.floor(p.max_hp / 20))}) end
+    if not run.totem_told then run.totem_told = true; toast("The totem guards Ungaga.") end
+  end
+  if sig("ungaga_4") and frame % 120 == 0 and p.hp > 0 and p.hp < p.max_hp then try(game.player.heal, {amount = 1}) end
+  run.ungaga_hp = p.hp
+end
+
+fight.strike, fight.companion_turn, fight.dodge, fight.arm_guards = strike, companion_turn, dodge, arm_guards
+fight.signature_weapons, fight.restore_sockets, fight.ungaga_totems = signature_weapons, restore_sockets, ungaga_totems
+end
 
 -- One weapon each -------------------------------------------------------------------------------------------
 -- Each character carries one weapon for the whole run. A found weapon opens a choice: keep the one in hand or
@@ -1430,19 +1874,36 @@ local function choice_line(tag, chosen, w, s)
 end
 
 local function draw_choice()
+  if choice.kind == "blessing" then
+    local id = choice.options[choice.pick]
+    try(game.render.layer_register, {id = "choice_a", text = "CHOOSE A BLESSING: L1/R1 PICK, X TAKES"})
+    try(game.render.layer_register, {id = "choice_b", text = (choice.pick .. "/" .. #choice.options .. " " .. BLESSINGS[id].name):sub(1, 48)})
+    try(game.render.layer_register, {id = "choice_c", text = BLESSINGS[id].text:gsub("^%l", string.upper):sub(1, 48)})
+    return
+  end
   local k, t = choice.keep, choice.take
   try(game.render.layer_register, {id = "choice_a", text = ("ONE WEAPON FOR " .. choice.character:upper() .. ": L1/R1 PICK, X KEEPS"):sub(1, 48)})
   try(game.render.layer_register, {id = "choice_b", text = choice_line("KEEP HELD", choice.pick == 1, k, absorbed(k, t))})
   try(game.render.layer_register, {id = "choice_c", text = choice_line("TAKE FOUND", choice.pick == 2, t, absorbed(t, k))})
 end
 
-local function open_choice(character, keep, take)
-  choice = {character = character, keep = keep, take = take, pick = 1, armed = frame + 20}
+local function open_window(c)
+  choice = c
+  choice.pick, choice.armed = 1, frame + 20
   local ctx = try(game.input.context_push, {id = "choice"})
   choice.token = ctx and ctx.token
   for _, id in ipairs({"choice_prev", "choice_next", "choice_ok"}) do try(game.input.consume, {id = id}) end
   refresh() -- hides the HUD line to make room
   draw_choice()
+end
+local function open_choice(character, keep, take) open_window({kind = "weapon", character = character, keep = keep, take = take}) end
+-- Blessed Choice: three blessings not yet held, one to take.
+open_blessing_pick = function()
+  local open, options = open_blessings(), {}
+  while #open > 0 and #options < 3 do options[#options + 1] = table.remove(open, math.random(#open)) end
+  if #options == 0 then return false end
+  open_window({kind = "blessing", options = options})
+  return true
 end
 
 local function close_choice()
@@ -1453,6 +1914,14 @@ local function close_choice()
 end
 
 local function confirm_choice()
+  if choice.kind == "blessing" then
+    local id = choice.options[choice.pick]
+    close_choice()
+    bless("Blessed Choice", id)
+    save_run()
+    refresh()
+    return
+  end
   local c, k, t = choice.character, choice.keep, choice.take
   if choice.pick == 2 then
     local ok, err = call(game.weapons.equip, {id = t.id, character = c, slot = t.slot})
@@ -1473,7 +1942,11 @@ local function poll_choice()
   try(game.player.invincible, {frames = 30})
   local prev, nxt = try(game.input.consume, {id = "choice_prev"}), try(game.input.consume, {id = "choice_next"})
   local ok = try(game.input.consume, {id = "choice_ok"})
-  if (prev and prev.pressed) or (nxt and nxt.pressed) then choice.pick = 3 - choice.pick; draw_choice() end
+  if (prev and prev.pressed) or (nxt and nxt.pressed) then
+    local n = choice.kind == "blessing" and #choice.options or 2
+    choice.pick = (choice.pick - 1 + ((nxt and nxt.pressed) and 1 or -1)) % n + 1
+    draw_choice()
+  end
   if ok and ok.pressed and frame >= choice.armed then confirm_choice() end
 end
 
@@ -1520,6 +1993,38 @@ local function check_break(p)
   queue_transition("end", 180, "weapon broke")
 end
 
+-- Twin Keys: the exit needs two keys. The first key picked up on a floor goes to another monster to carry;
+-- the second one stays. (Warden floors are left out: the Warden's fall moves the run on.)
+local function poll_twin_keys()
+  if floor.slot == WARDEN_SLOT or floor.second_key then return end
+  local b = try(game.dungeons.back_floor_get)
+  local key = b and b.gate_key
+  if not (key and key.held and (tonumber(key.native_item_no) or 0) > 0) then return end
+  local result = try(game.entities.query, {type = "monster"})
+  for _, e in ipairs(result and result.entities or {}) do
+    local handle = e.entity_id or e.id
+    if handle and e.revealed == true and (e.health and tonumber(e.health.current) or 0) > 0 and (drop_of(e) or -1) < 0 then
+      if try(game.entities.set_stats, {entity = handle, drop_item = key.native_item_no}) then
+        try(game.items.remove, {id = key.id ~= "" and key.id or key.native_item_no, count = 1})
+        floor.second_key = true
+        toast("Twin Keys: one key of two. Another monster now carries the second.")
+        return
+      end
+    end
+  end
+end
+
+-- Clear Mind: Freeze and Stamina never take hold (removed within a few frames of landing).
+local function clear_mind()
+  for _, status in ipairs({"freeze", "stamina"}) do
+    local r = try(game.player.status_remove, {status = status})
+    if r and r.removed and not floor.calm then
+      floor.calm = true
+      toast("Clear Mind shrugs off " .. title(status) .. ".")
+    end
+  end
+end
+
 -- Atla: each sphere picked up on a run floor gives a Diorama tile ----------------------------------------
 local function atla_ids()
   local list = try(game.georama.atla_list)
@@ -1556,7 +2061,7 @@ end
 -- Cursed Gate toggle -------------------------------------------------------------------------------------
 local function toggle_curse()
   if not on_route() then toast("The Cursed Gate works on Gauntlet floors."); return end
-  if run.slot == WARDEN_SLOT - 1 then toast("The Warden's floor can't be cursed.", "curse"); return end
+  if next_slot(run.slot) == WARDEN_SLOT then toast("The Warden's floor can't be cursed.", "curse"); return end
   run.next_cursed = not run.next_cursed
   if run.next_cursed then toast("Next floor is cursed. Survive it for a Miracle cache.", "curse")
   else toast("The curse is lifted. The next floor is normal.") end
@@ -1573,7 +2078,29 @@ call(game.resources.override, {path = "resources/hud/cache.png", game_path = HUD
 call(game.input.bind, {id = "choice_prev", context = "choice", keys = {"Gamepad:leftshoulder", "Left"}})
 call(game.input.bind, {id = "choice_next", context = "choice", keys = {"Gamepad:rightshoulder", "Right"}})
 call(game.input.bind, {id = "choice_ok", context = "choice", keys = {"Gamepad:a", "Return"}})
+call(game.input.bind, {id = "dodge", keys = {"Gamepad:b", setting("dodge_key", "C")}})
+call(game.input.bind, {id = "swap", keys = {"Gamepad:righttrigger", setting("swap_key", "V")}})
+-- Swift Swap: one button changes to the next drafted ally standing, with no ring menu to wait through.
+local function swift_swap()
+  local p = try(game.player.get)
+  if not p then return end
+  local hp = {}
+  for _, m in ipairs(try(game.party.list) or {}) do if type(m) == "table" then hp[m.id] = tonumber(m.hp) or 0 end end
+  local at = 1
+  for i, c in ipairs(run.drafted) do if c == p.character then at = i end end
+  for step = 1, #run.drafted - 1 do
+    local c = run.drafted[(at - 1 + step) % #run.drafted + 1]
+    if (hp[c] or 0) > 0 and try(game.party.set_active, {id = c}) then return end
+  end
+end
 local function poll_input()
+  local d = try(game.input.consume, {id = "dodge"})
+  if d and d.pressed and on_route() and not choice then
+    local p = try(game.player.get)
+    if p and p.position then fight.dodge(p) end
+  end
+  local sw = try(game.input.consume, {id = "swap"})
+  if sw and sw.pressed and on_route() and not choice and eternal("swift") > 0 then swift_swap() end
   local key = try(game.input.consume, {id = "curse_key"})
   local back = try(game.input.consume, {id = "curse_pad_back"})
   local l1 = try(game.input.state, {id = "curse_pad_l1"})
@@ -1626,6 +2153,7 @@ moonmod.on("game.tick", function(e)
   if run.phase == "active" and floor then
     local p = try(game.player.get)
     if p then check_break(p) end
+    if eternal("clearmind") > 0 and frame % 4 == 0 and not run.suspended then clear_mind() end
   end
   if frame % 15 ~= 0 then return end
   local session = try(game.session.get)
@@ -1637,14 +2165,20 @@ moonmod.on("game.tick", function(e)
     if frame % 60 == 0 then enforce_draft(p) end
     if p.weapon and p.weapon.id then run.weapons[p.character] = {id = p.weapon.id, slot = p.weapon.slot} end
     if contains(run.drafted, p.character) then run.leader = p.character end
-    local regen = placed("tree") + (blessed("mender") and 2 or 0)
+    local regen = placed("tree") + 2 * boon("mender")
     if regen > 0 and frame % (eternal("trees") > 0 and 90 or 180) == 0 and (p.hp or 0) > 0 and p.hp < p.max_hp then try(game.player.heal, {amount = regen}) end
     -- Rally and Relay: a switch heals the new character and gives a moment of invincibility
     if run.last_active and run.last_active ~= p.character and contains(run.drafted, p.character) then
       if eternal("rally") > 0 and p.max_hp then try(game.player.heal, {amount = math.max(1, math.floor(p.max_hp / 10))}) end
       if eternal("relay") > 0 then try(game.player.invincible, {frames = 180}) end
+      -- the one switched from becomes the companion, and the Signature moves follow the one now fighting
+      if contains(run.drafted, run.last_active) then run.companion = run.last_active end
+      apply_effects()
     end
     run.last_active = p.character
+    fight.companion_turn(p)
+    fight.ungaga_totems(p)
+    if frame % 60 == 0 then fight.signature_weapons() end
     if frame % 60 == 0 and (eternal("laststand") > 0 or eternal("grip") > 0) then apply_effects() end
   end
   local result = try(game.entities.query, {type = "monster"})
@@ -1652,6 +2186,7 @@ moonmod.on("game.tick", function(e)
   moonblade(result and result.entities or {})
   update_warden_bar()
   if frame % 60 == 0 then poll_atla() end
+  if eternal("twinkeys") > 0 then poll_twin_keys() end
   if frame - floor.entered > 180 and not floor.swept then
     local combat = try(game.combat.get)
     local alive = combat and tonumber(combat.remaining)
@@ -1693,6 +2228,7 @@ local ACTIONS = {
   {"gaffer_repair", "Gaffer: Repair Powder", "Floor II of each biome with Gaffer's Wagon: 2 Repair Powder"},
   {"gaffer_food", "Gaffer: Bread & Water", "Floor II of each biome with Gaffer's Wagon: 2 Bread, 2 Tasty Water"},
   {"gaffer_attach", "Gaffer: Attachments", "With Gaffer's Stock: two random attachments (400 G)"},
+  {"stance", "Companion Stance", "With Stances: switch the companion between aggressive and passive"},
   {"abandon", "Abandon Run", "Leave the Gauntlet now (a retreat): back to its title screen"},
   {"records", "Eternal Records", "Moon Shards, runs, wins, best depth and the Heirloom"},
 }
@@ -1745,6 +2281,12 @@ moonmod.on("ui.action", function(a)
     toast(string.format("%s %d-%d, depth %d/%d. Curses: %s. Diorama %d/%d, %d blessings, +%d shards.",
         b and b.name or "?", run.pos, run.slot, run.depth, total_floors(), curses, placed_total(), plots(), #run.blessings, run.shards))
   elseif a.id == "curse" then toggle_curse()
+  elseif a.id == "stance" then
+    if eternal("stances") == 0 then toast("Unlock Stances in Norune Eternal first."); return end
+    if not run then toast("No run is under way."); return end
+    run.stance = run.stance == "passive" and "aggressive" or "passive"
+    save_run()
+    toast("Companion stance: " .. run.stance .. (run.stance == "passive" and ". It strikes only what you hit." or ". It strikes anything near."))
   elseif a.id == "heirloom" then bank_heirloom()
   elseif a.id == "gaffer_repair" then gaffer({{ITEM.repair, 2}}, 300)
   elseif a.id == "gaffer_food" then gaffer({{ITEM.bread, 2}, {ITEM.water, 2}}, 240)

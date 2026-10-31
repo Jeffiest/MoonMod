@@ -594,10 +594,10 @@ index 00000000..8c2f7839
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..1371942a
+index 00000000..0ade15e2
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,170 @@
 +#pragma once
 +
 +#include <string>
@@ -670,7 +670,8 @@ index 00000000..1371942a
 +void QueueChronicleMonsterDamageResult(dc::game::CMonstorUnit *unit, int slot, int result);
 +int TakeChronicleMonsterDamageResult(dc::game::CMonstorUnit *unit, int slot);
 +float ApplyChronicleCombatDamageFormula(float damage, int weapon_id = -1, int native_model_id = -1,
-+                                        int character_id = -1, int target_hp = -1, int target_max_hp = -1);
++                                        int character_id = -1, int target_hp = -1, int target_max_hp = -1,
++                                        int charged = -1);
 +void ResetChronicleCombatFormulasForTests();
 +// Player tuning (player.tuning_set): every loaded owner's request combined, read by the dungeon loop.
 +// Multipliers multiply across owners, invincible frames add (cap 120), the reveal flags OR.
@@ -684,6 +685,9 @@ index 00000000..1371942a
 +    float durability_wear = 1.0f;       // scales weapon wear per hit
 +    bool  map_reveal = false;           // the floor map acts as if the Map item were held
 +    bool  monster_reveal = false;       // monsters show on the map as if the Magical Crystal were held
++    float ailment_duration = 1.0f;      // scales how long Freeze and Stamina last
++    bool  map_hidden = false;           // the floor map is not drawn at all
++    float attack_reach = 1.0f;          // scales the hit spheres of Toan's, Goro's and Ungaga's swings
 +};
 +const ChroniclePlayerTuning &ChroniclePlayerTuningGet();
 +void ClearChroniclePlayerTuning(std::string_view owner);
@@ -695,6 +699,13 @@ index 00000000..1371942a
 +float ChroniclePlayerAttackAnimSpeed();
 +bool ChroniclePlayerMapReveal();
 +bool ChroniclePlayerMonsterReveal();
++float ChroniclePlayerAilmentDuration();
++bool ChroniclePlayerMapHidden();
++float ChroniclePlayerAttackReach();
++float ChroniclePlayerDashScale();
++bool ChronicleTakeFatalGuard(int chara_no);
++void ResetChroniclePlayerGuardsForTests();
++void ResetChronicleFloorLinksForTests();
 +void ChronicleMonsterDefeated(dc::game::CMonstorUnit *unit, int slot, bool scripted);
 +void ChronicleNativeItemPickedUp(int item_no, int count, int character = -1, int slot = -1);
 +void ResetChronicleItemsForTests();
@@ -759,10 +770,10 @@ index 00000000..1371942a
 +
 diff --git a/port/include/moonmod/combat_formula.hpp b/port/include/moonmod/combat_formula.hpp
 new file mode 100644
-index 00000000..da69f15d
+index 00000000..9741e46b
 --- /dev/null
 +++ b/port/include/moonmod/combat_formula.hpp
-@@ -0,0 +1,336 @@
+@@ -0,0 +1,345 @@
 +#pragma once
 +
 +#include <random>
@@ -811,7 +822,8 @@ index 00000000..da69f15d
 +                field.key() != "priority" && field.key() != "chance" && field.key() != "min_value" &&
 +                field.key() != "max_value" && field.key() != "rate_per_second" &&
 +                field.key() != "reset_after_frames" && field.key() != "target_hp_below_percent" &&
-+                field.key() != "weapon_id" && field.key() != "native_model_id" && field.key() != "character_id") {
++                field.key() != "weapon_id" && field.key() != "native_model_id" && field.key() != "character_id" &&
++                field.key() != "charged") {
 +                return Invalid("formula contains an unsupported field");
 +            }
 +        }
@@ -930,6 +942,10 @@ index 00000000..da69f15d
 +        if (request.contains("weapon_id")) formula.weapon_id = request.at("weapon_id").get<int>();
 +        if (request.contains("native_model_id")) formula.native_model_id = request.at("native_model_id").get<int>();
 +        if (request.contains("character_id")) formula.character_id = request.at("character_id").get<int>();
++        if (request.contains("charged")) {
++            if (!request.at("charged").is_boolean()) return Invalid("charged must be true or false");
++            formula.charged = request.at("charged").get<bool>();
++        }
 +        if (formula.operation == "add") {
 +            if (formula.value < -1000000.0 || formula.value > 1000000.0) {
 +                return Invalid("add value must be in [-1000000, 1000000]");
@@ -984,8 +1000,9 @@ index 00000000..da69f15d
 +                 {"value", formula.value}, {"priority", formula.priority}, {"idempotent", false}}, {}};
 +    }
 +
++    // charged: 1 for a charged attack, 0 for any other hit, -1 when the caller cannot tell (a charged filter skips).
 +    float Apply(float damage, int weapon_id = -1, int native_model_id = -1, int character_id = -1,
-+                int target_hp = -1, int target_max_hp = -1, std::uint64_t frame = 0) const {
++                int target_hp = -1, int target_max_hp = -1, std::uint64_t frame = 0, int charged = -1) const {
 +        if (!std::isfinite(damage) || damage <= 0.0f) return 0.0f;
 +        double result = std::min<double>(damage, 1000000.0);
 +        for (const auto &[key, formula] : formulas_) {
@@ -993,6 +1010,7 @@ index 00000000..da69f15d
 +            if (formula.weapon_id && *formula.weapon_id != weapon_id) continue;
 +            if (formula.native_model_id && *formula.native_model_id != native_model_id) continue;
 +            if (formula.character_id && *formula.character_id != character_id) continue;
++            if (formula.charged && (charged < 0 || *formula.charged != (charged != 0))) continue;
 +            if (formula.target_hp_below_percent &&
 +                (target_hp < 0 || target_max_hp <= 0 ||
 +                 100.0 * static_cast<double>(target_hp) / target_max_hp >= *formula.target_hp_below_percent)) continue;
@@ -1044,6 +1062,7 @@ index 00000000..da69f15d
 +        std::optional<int> weapon_id;
 +        std::optional<int> native_model_id;
 +        std::optional<int> character_id;
++        std::optional<bool> charged;
 +
 +        bool SameDefinition(const Formula &other) const {
 +            return owner == other.owner && id == other.id && operation == other.operation &&
@@ -1051,7 +1070,8 @@ index 00000000..da69f15d
 +                   max_value == other.max_value && rate_per_second == other.rate_per_second &&
 +                   reset_after_frames == other.reset_after_frames && target_hp_below_percent == other.target_hp_below_percent &&
 +                   priority == other.priority && weapon_id == other.weapon_id &&
-+                   native_model_id == other.native_model_id && character_id == other.character_id;
++                   native_model_id == other.native_model_id && character_id == other.character_id &&
++                   charged == other.charged;
 +        }
 +    };
 +
@@ -1229,10 +1249,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..76ced2e4
+index 00000000..a711f3c8
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,87 @@
 +#pragma once
 +
 +/**
@@ -1259,7 +1279,18 @@ index 00000000..76ced2e4
 +float ChroniclePlayerDurabilityWearScale();
 +bool  ChroniclePlayerMonsterReveal();
 +bool  ChroniclePlayerMapReveal();
++float ChroniclePlayerAilmentDuration();
++bool  ChroniclePlayerMapHidden();
++float ChroniclePlayerAttackReach();
++float ChroniclePlayerDashScale();
 +float ApplyChroniclePlayerDamageFormula(float damage, int character, int weapon_id);
++// player.tuning_set ailment_duration applied to a native ailment's frames (at least one).
++inline short ChronicleAilmentFrames(int frames) {
++    const float scaled = static_cast<float>(frames) * ChroniclePlayerAilmentDuration();
++    return static_cast<short>(scaled < 1.0f ? 1 : (scaled > 32767.0f ? 32767 : static_cast<int>(scaled + 0.5f)));
++}
++// player.guard_set: true (and the guard spent) when a fatal hit on chara_no should leave 1 HP instead.
++bool  ChronicleTakeFatalGuard(int chara_no);
 +
 +// The menus and the town.
 +bool TakeManagerMenuOpenRequest();
@@ -1282,9 +1313,10 @@ index 00000000..76ced2e4
 +void  QueueChronicleMonsterDamageResult(CMonstorUnit *unit, int slot, int result);
 +int   TakeChronicleMonsterDamageResult(CMonstorUnit *unit, int slot);
 +float ApplyChronicleCombatDamageFormula(float damage, int weapon_id, int native_model_id, int character_id,
-+                                        int target_hp, int target_max_hp);
++                                        int target_hp, int target_max_hp, int charged);
 +int   ChronicleNativeMonsterModelId(CMonstorUnit *unit, int slot);
-+void  QueueChronicleMonsterHit(CMonstorUnit *unit, int slot, int attacker, int weapon_id, int damage, int element);
++void  QueueChronicleMonsterHit(CMonstorUnit *unit, int slot, int attacker, int weapon_id, int damage, int element,
++                                bool charged);
 +void  ChronicleMonsterDefeated(CMonstorUnit *unit, int slot, bool scripted);
 +bool  ChronicleTryEnemyVarietySurvival(CMonstorUnit *unit, int slot, int &damage);
 +
@@ -3063,6 +3095,124 @@ index f377d189..c5fd0408 100644
  
      if (motion_no < 0) {
          return;
+diff --git a/port/src/game/charakey.cpp b/port/src/game/charakey.cpp
+index 5afc86c9..b0b8bfd0 100644
+--- a/port/src/game/charakey.cpp
++++ b/port/src/game/charakey.cpp
+@@ -23,6 +23,7 @@
+ #include "shot_freefuncs.hpp"
+ #include "snd.hpp"
+ #include "userstatus.hpp"
++#include "moonmod/game_hooks.hpp"
+ #include "weaponeffect.hpp"
+ 
+ namespace dc::game {
+@@ -107,46 +108,46 @@ void ToanKey_Play() {
+     sceVu0CopyVector(chara_pos, CharaMain.pos);
+ 
+     if (time >= 825 && time <= 828.0f) {
+-        NowColData->Set(hit_pos, damage, 1, 2.8f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 2.8f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 0);
+         NowColData->SetKickBack(chara_pos, 1.2f, 0.2f, 2);
+     }
+ 
+     if (time >= 833 && time <= 835) {
+-        NowColData->Set(hit_pos, damage, 1, 5.3f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 5.3f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 0);
+         NowColData->SetKickBack(chara_pos, 1.2f, 0.2f, 2);
+     }
+ 
+     if (time >= 842 && time <= 844.0f) {
+-        NowColData->Set(hit_pos, damage, 1, 6.2f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 6.2f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 0);
+         NowColData->SetKickBack(chara_pos, 1.5f, 0.3f, 2);
+     }
+ 
+     if (time >= 851 && time <= 854) {
+-        NowColData->Set(hit_pos, damage, 1, 6.2f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 6.2f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 0);
+         NowColData->SetKickBack(chara_pos, 2.0f, 0.4f, 2);
+     }
+ 
+     if (time >= 862 && time <= 866) {
+         damage = static_cast<int>(static_cast<float>(damage) * 1.8f);
+-        NowColData->Set(hit_pos, damage, 1, 6.2f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 6.2f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 0);
+         NowColData->SetKickBack(chara_pos, 3.0f, 0.3f, 2);
+     }
+ 
+     if (time >= 193.0f && time <= 196.0f) {
+         damage = static_cast<int>(damage * 1.5);
+-        NowColData->Set(hit_pos, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(2, 0);
+         NowColData->SetKickBack(chara_pos, 3.0f, 0.3f, 2);
+     }
+ 
+     if (time >= 720.0f && time <= 722) {
+         damage = static_cast<int>(damage * 1.5);
+-        NowColData->Set(hit_pos, damage, 1, 12.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 12.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(3, 0);
+         NowColData->SetKickBack(chara_pos, 3.0f, 0.3f, 2);
+     }
+@@ -641,28 +642,28 @@ void UngagaKey_Play() {
+     }
+ 
+     if (time >= 674 && time <= 677) {
+-        NowColData->Set(hit_left, damage, 1, 6.0f, 0, 2, 2, 0, 0);
++        NowColData->Set(hit_left, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0, 2, 2, 0, 0);
+         basic_damage(0, 4);
+         NowColData->SetKickBack(chara_pos, 1.2f, 0.1f, 2);
+-        NowColData->Set(hit_right, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_right, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 4);
+         NowColData->SetKickBack(chara_pos, 1.2f, 0.1f, 2);
+     }
+ 
+     if (time >= 686 && time <= 692.0f) {
+-        NowColData->Set(hit_left, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_left, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 4);
+         NowColData->SetKickBack(chara_pos, 1.5f, 0.1f, 2);
+-        NowColData->Set(hit_right, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_right, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 4);
+         NowColData->SetKickBack(chara_pos, 1.5f, 0.1f, 2);
+     }
+ 
+     if (time >= 700.0f && time <= 704.0f) {
+-        NowColData->Set(hit_left, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_left, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 4);
+         NowColData->SetKickBack(chara_pos, 2.0f, 0.1f, 2);
+-        NowColData->Set(hit_right, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_right, damage, 1, 6.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 4);
+         NowColData->SetKickBack(chara_pos, 2.0f, 0.1f, 2);
+     }
+@@ -952,14 +953,14 @@ void GoroKey_Play() {
+     sceVu0CopyVector(chara_pos, CharaMain.pos);
+ 
+     if (time >= 99.0f && time <= 102.0f) {
+-        NowColData->Set(hit_pos, damage, 1, 5.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 5.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+         basic_damage(0, 2);
+         NowColData->SetKickBack(chara_pos, 2.5f, 0.1f, 2);
+     }
+ 
+     if (time >= 462.0f && time <= 482.0f) {
+         damage = static_cast<int>(damage * 1.5);
+-        NowColData->Set(hit_pos, damage, 1, 5.0f, 0.0f, 2, 2, 0, 0);
++        NowColData->Set(hit_pos, damage, 1, 5.0f * moonmod::ChroniclePlayerAttackReach(), 0.0f, 2, 2, 0, 0);
+ 
+         basic_damage(1, 2);
+     }
 diff --git a/port/src/game/collisiondata.cpp b/port/src/game/collisiondata.cpp
 index de785f39..ec46e49c 100644
 --- a/port/src/game/collisiondata.cpp
@@ -3410,7 +3560,7 @@ index 370281e3..e59c1aef 100644
          *out_size = size;
      }
 diff --git a/port/src/game/dngstatusdata.cpp b/port/src/game/dngstatusdata.cpp
-index f708584c..485d43ad 100644
+index f708584c..4b0f5ac8 100644
 --- a/port/src/game/dngstatusdata.cpp
 +++ b/port/src/game/dngstatusdata.cpp
 @@ -1,3 +1,4 @@
@@ -3453,7 +3603,7 @@ index f708584c..485d43ad 100644
  
          for (int slot = 0; slot < WEAPON_SLOTS; slot++) {
              if (this->chara_weapons[chara_no][slot].item_no >= ITEM_WEAPON_START) {
-@@ -393,6 +407,21 @@ void CUserStatus::AddDrink(int chara_no, s16 amount, float ratio) {
+@@ -393,6 +407,26 @@ void CUserStatus::AddDrink(int chara_no, s16 amount, float ratio) {
  }
  
  void CUserStatus::AddNowLife(int chara_no, s16 amount, float ratio) {
@@ -3470,12 +3620,17 @@ index f708584c..485d43ad 100644
 +        amount = static_cast<s16>(-std::clamp<int>(
 +            static_cast<int>(std::lround(moonmod::ApplyChroniclePlayerDamageFormula(-static_cast<float>(amount), chara_no, weapon_id))),
 +            1, 32767));
++        // MoonMod player.guard_set: a fatal hit on a guarded character leaves 1 HP
++        const int current = this->life_step[chara_no] != 0 ? this->next_hp[chara_no] : this->hp[chara_no];
++        if (current > 0 && current + amount <= 0 && moonmod::ChronicleTakeFatalGuard(chara_no)) {
++            amount = static_cast<s16>(1 - current);
++        }
 +    }
 +
      if (this->life_step[chara_no] != 0) {
          this->hp[chara_no] = this->next_hp[chara_no];
          this->life_step[chara_no] = 0;
-@@ -497,6 +526,8 @@ void CUserStatus::Step(int mode) {
+@@ -497,6 +531,8 @@ void CUserStatus::Step(int mode) {
                  drain *= 2.0f;
              }
  
@@ -3716,7 +3871,7 @@ index 0e33bf79..8b57eb90 100644
  
          CMonstorUnit *monsters = NowMonstorUnit;
 diff --git a/port/src/game/dun/movechara.cpp b/port/src/game/dun/movechara.cpp
-index f0d0e889..86dece8c 100644
+index f0d0e889..2b2b9a3d 100644
 --- a/port/src/game/dun/movechara.cpp
 +++ b/port/src/game/dun/movechara.cpp
 @@ -61,6 +61,8 @@
@@ -3780,7 +3935,7 @@ index f0d0e889..86dece8c 100644
                          run_speed = 1.45f;
                      }
  
-+                    run_speed *= moonmod::ChroniclePlayerTuningGet().run_speed; // MoonMod player.tuning_set
++                    run_speed *= moonmod::ChroniclePlayerTuningGet().run_speed * moonmod::ChroniclePlayerDashScale(); // MoonMod player.tuning_set, player.dash
 +
                      velo__2[0] = move_x * run_speed;
                      velo__2[2] = move_z * run_speed;
@@ -4018,7 +4173,7 @@ index 94ac1201..d25f9b5f 100644
                      CDungeonEvent *definition = SearchPartsID(slot_no, parts_id);
  
 diff --git a/port/src/game/dungeonmap.cpp b/port/src/game/dungeonmap.cpp
-index d84b3a67..6a4d0ed8 100644
+index d84b3a67..1a384b47 100644
 --- a/port/src/game/dungeonmap.cpp
 +++ b/port/src/game/dungeonmap.cpp
 @@ -1,5 +1,8 @@
@@ -4131,19 +4286,21 @@ index d84b3a67..6a4d0ed8 100644
      int           status;
      unsigned char red;
      int           saved_map;
-@@ -621,13 +674,23 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -621,13 +674,24 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
      CRect_i_      atra_src;
      status = UserStatus->minimap_status;
  
 -    if (status == 3) {
 -        return;
 -    }
-+    if (status == 3) return;
-+    status = std::clamp(status, 0, 2);
- 
+-
 -    constexpr std::array<unsigned char, 3> red_table = {0x20, 0x40, 0x60};
 -    constexpr std::array<unsigned char, 3> green_table = {0x60, 0x80, 0xA2};
 -    constexpr std::array<unsigned char, 3> blue_table = {0x40, 0x60, 0xA2};
++    if (status == 3) return;
++    if (moonmod::ChroniclePlayerMapHidden()) return; // MoonMod player.tuning_set map_hidden
++    status = std::clamp(status, 0, 2);
++
 +    if (aerial && max_x>=min_x) {
 +        // Back only the map, not the gameplay viewport. The previous full-screen
 +        // 0x68 black wash obscured the dungeon while the explored map was small.
@@ -4161,7 +4318,7 @@ index d84b3a67..6a4d0ed8 100644
  
      red = red_table[status];
      green = green_table[status];
-@@ -640,13 +703,22 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -640,13 +704,22 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
          BtEquipMasuisyou = 1;
      }
  
@@ -4187,7 +4344,7 @@ index d84b3a67..6a4d0ed8 100644
              masked = this->mask[cell_no];
              show = masked;
  
-@@ -663,28 +735,28 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -663,28 +736,28 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
                  map_src.y = (direction / 8) * 16;
                  map_src.width = 16;
                  map_src.height = 16;
@@ -4229,7 +4386,7 @@ index d84b3a67..6a4d0ed8 100644
      set2DSprite(Vif1Packet, symbol_texture, player_dst, player_src, 7, 7, angle);
  
      for (int i = 0; i < 3; i++) {
-@@ -694,10 +766,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -694,10 +767,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              continue;
          }
  
@@ -4245,7 +4402,7 @@ index d84b3a67..6a4d0ed8 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -709,25 +782,26 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -709,25 +783,26 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              trap_src.y = 112;
              trap_src.width = 8;
              trap_src.height = 8;
@@ -4281,7 +4438,7 @@ index d84b3a67..6a4d0ed8 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -739,10 +813,10 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -739,10 +814,10 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              box_src.y = 96;
              box_src.width = 8;
              box_src.height = 8;
@@ -4296,7 +4453,7 @@ index d84b3a67..6a4d0ed8 100644
              set2DSprite(Vif1Packet, symbol_texture, box_dst, box_src, blue);
          }
      }
-@@ -754,10 +828,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -754,10 +829,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              continue;
          }
  
@@ -4312,7 +4469,7 @@ index d84b3a67..6a4d0ed8 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -769,10 +844,10 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -769,10 +845,10 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              atra_src.y = 104;
              atra_src.width = 8;
              atra_src.height = 8;
@@ -4327,7 +4484,7 @@ index d84b3a67..6a4d0ed8 100644
              set2DSprite(Vif1Packet, symbol_texture, atra_dst, atra_src, blue);
          }
      }
-@@ -810,31 +885,31 @@ void CDungeonMap::checkMask(float x, float z) {
+@@ -810,31 +886,31 @@ void CDungeonMap::checkMask(float x, float z) {
  
                  for (row = this->rooms[room].y; row < this->rooms[room].y + this->rooms[room].height; row++) {
                      for (col = this->rooms[room].x; col < this->rooms[room].x + this->rooms[room].width; col++) {
@@ -4366,7 +4523,7 @@ index d84b3a67..6a4d0ed8 100644
              this->mask[i] = 1;
          }
      }
-@@ -963,12 +1038,19 @@ void CDungeonMap::DrawFire(CFrameVu1 *frame, CCameraFollow *camera) {
+@@ -963,12 +1039,19 @@ void CDungeonMap::DrawFire(CFrameVu1 *frame, CCameraFollow *camera) {
      // Only the cells around the camera show their fires.
      for (row = cam_row - 5; row < cam_row + 5; row++) {
          for (col = cam_col - 5; col < cam_col + 5; col++) {
@@ -4388,7 +4545,7 @@ index d84b3a67..6a4d0ed8 100644
                      for (j = 0; j < (part = &this->parts[this->cells[cell_no].parts_no])->fire_num; j++) {
                          float turn;
                          float rot_x;
-@@ -1046,8 +1128,8 @@ void CDungeonMap::DrawRaster(CFrameVu1 *frame) {
+@@ -1046,8 +1129,8 @@ void CDungeonMap::DrawRaster(CFrameVu1 *frame) {
      // Only the cells around the player cast a raster.
      for (row = cell_z - 4; row < cell_z + 4; row++) {
          for (col = cell_x - 4; col < cell_x + 4; col++) {
@@ -4399,7 +4556,7 @@ index d84b3a67..6a4d0ed8 100644
  
                  if (this->cells[cell_no].parts_no != MAP_PARTS_NONE && this->cells[cell_no].camera_dist <= 240.0f && this->cells[cell_no].visible == 1) {
                      CDungeonParts *part;
-@@ -1130,9 +1212,9 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
+@@ -1130,9 +1213,9 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
      }
  
      // One surface draws for the whole floor: the one nearest to the player.
@@ -4412,7 +4569,7 @@ index d84b3a67..6a4d0ed8 100644
              float dist;
  
              if (this->cells[cell_no].parts_no == MAP_PARTS_NONE) {
-@@ -1240,7 +1322,7 @@ void CDungeonMap::DrawItemBox(float *pos) {
+@@ -1240,7 +1323,7 @@ void CDungeonMap::DrawItemBox(float *pos) {
          return;
      }
  
@@ -4421,7 +4578,7 @@ index d84b3a67..6a4d0ed8 100644
          if (this->boxes[i].used == 0) {
              continue;
          }
-@@ -1334,16 +1416,20 @@ int CDungeonMap::CreateCollision(CCPoly *poly, CBoxVu0 box, int num) {
+@@ -1334,16 +1417,20 @@ int CDungeonMap::CreateCollision(CCPoly *poly, CBoxVu0 box, int num) {
  // they stay plain globals with external linkage, defined in this order.
  
  /** Labels each room while a special linked room is selected. */
@@ -4447,7 +4604,7 @@ index d84b3a67..6a4d0ed8 100644
  
  /** Gives the number of rooms that the builder placed. */
  s32 roomStackCnt;
-@@ -1359,8 +1445,8 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1359,8 +1446,8 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
      // that two rooms never come out sharing a wall.
      for (j = -1; j < h + 2; j++) {
          for (i = -1; i < w + 2; i++) {
@@ -4458,7 +4615,7 @@ index d84b3a67..6a4d0ed8 100644
                      ok = 0;
                  }
              }
-@@ -1373,9 +1459,9 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1373,9 +1460,9 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
  
      for (j = 0; j < h; j++) {
          for (i = 0; i < w; i++) {
@@ -4471,7 +4628,7 @@ index d84b3a67..6a4d0ed8 100644
          }
      }
  
-@@ -1394,15 +1480,15 @@ void mapPartsFilter() {
+@@ -1394,15 +1481,15 @@ void mapPartsFilter() {
      int east;
      int west;
  
@@ -4494,7 +4651,7 @@ index d84b3a67..6a4d0ed8 100644
  
                  int allow_north = 1;
  
-@@ -1410,7 +1496,7 @@ void mapPartsFilter() {
+@@ -1410,7 +1497,7 @@ void mapPartsFilter() {
                      allow_north = 0;
                  }
  
@@ -4503,7 +4660,7 @@ index d84b3a67..6a4d0ed8 100644
                      allow_north = 0;
                  }
  
-@@ -1420,7 +1506,7 @@ void mapPartsFilter() {
+@@ -1420,7 +1507,7 @@ void mapPartsFilter() {
                      allow_south = 0;
                  }
  
@@ -4512,7 +4669,7 @@ index d84b3a67..6a4d0ed8 100644
                      allow_south = 0;
                  }
  
-@@ -1430,7 +1516,7 @@ void mapPartsFilter() {
+@@ -1430,7 +1517,7 @@ void mapPartsFilter() {
                      allow_east = 0;
                  }
  
@@ -4521,7 +4678,7 @@ index d84b3a67..6a4d0ed8 100644
                      allow_east = 0;
                  }
  
-@@ -1440,25 +1526,25 @@ void mapPartsFilter() {
+@@ -1440,25 +1527,25 @@ void mapPartsFilter() {
                      allow_west = 0;
                  }
  
@@ -4554,7 +4711,7 @@ index d84b3a67..6a4d0ed8 100644
                              mask &= ~4;
                          }
                      }
-@@ -1466,19 +1552,42 @@ void mapPartsFilter() {
+@@ -1466,19 +1553,42 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 15; table_no++) {
                      if (mask == chainTableRoad[table_no][0]) {
@@ -4604,7 +4761,7 @@ index d84b3a67..6a4d0ed8 100644
  
                  if (north == BUILD_CELL_ROOM) {
                      mask &= ~1;
-@@ -1498,74 +1607,74 @@ void mapPartsFilter() {
+@@ -1498,74 +1608,74 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 8; table_no++) {
                      if (mask == chainTableRoom[table_no][0]) {
@@ -4701,7 +4858,7 @@ index d84b3a67..6a4d0ed8 100644
                  }
  
                  if ((north & BUILD_CELL_DIVIDING_WALL) == BUILD_CELL_DIVIDING_WALL) {
-@@ -1602,30 +1711,30 @@ void mapPartsFilter() {
+@@ -1602,30 +1712,30 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 6; table_no++) {
                      if (mask == chainTableDivid[table_no][0]) {
@@ -4740,7 +4897,7 @@ index d84b3a67..6a4d0ed8 100644
                  }
  
                  if ((north & BUILD_CELL_DIVIDING_WALL) == BUILD_CELL_DIVIDING_WALL) {
-@@ -1646,21 +1755,21 @@ void mapPartsFilter() {
+@@ -1646,21 +1756,21 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 2; table_no++) {
                      if (mask == chainTableDividDoor[table_no][0]) {
@@ -4769,7 +4926,7 @@ index d84b3a67..6a4d0ed8 100644
              }
          }
      }
-@@ -1669,10 +1778,10 @@ void mapPartsFilter() {
+@@ -1669,10 +1779,10 @@ void mapPartsFilter() {
  namespace {
  
  void copyMapInfo(BUILD_MAP_INFO *dst, const BUILD_MAP_INFO *src) {
@@ -4782,7 +4939,7 @@ index d84b3a67..6a4d0ed8 100644
              dst[i].link[j] = src[i].link[j];
          }
  
-@@ -1718,29 +1827,29 @@ int joinRoom(int from_room, int to_room) {
+@@ -1718,29 +1828,29 @@ int joinRoom(int from_room, int to_room) {
          case MAP_DIR_NORTH:
              cx = roomStack[from_room].x + (roomStack[from_room].width >> 1);
              cy = roomStack[from_room].y - 1;
@@ -4820,7 +4977,7 @@ index d84b3a67..6a4d0ed8 100644
              steps = roomStack[from_room].x - (roomStack[to_room].x + roomStack[to_room].width);
              break;
      }
-@@ -1770,10 +1879,10 @@ int joinRoom(int from_room, int to_room) {
+@@ -1770,10 +1880,10 @@ int joinRoom(int from_room, int to_room) {
  
      while (done == 0) {
          if (steps != 0) {
@@ -4835,7 +4992,7 @@ index d84b3a67..6a4d0ed8 100644
                  steps--;
  
                  if (steps != 0) {
-@@ -1793,11 +1902,11 @@ int joinRoom(int from_room, int to_room) {
+@@ -1793,11 +1903,11 @@ int joinRoom(int from_room, int to_room) {
                      }
                  }
              } else {
@@ -4851,7 +5008,7 @@ index d84b3a67..6a4d0ed8 100644
                  }
  
                  done = 1;
-@@ -1820,16 +1929,16 @@ int joinRoom(int from_room, int to_room) {
+@@ -1820,16 +1930,16 @@ int joinRoom(int from_room, int to_room) {
                      for (i = 0; i < distance; i++) {
                          cx += step;
  
@@ -4876,7 +5033,7 @@ index d84b3a67..6a4d0ed8 100644
                              }
  
                              done = 1;
-@@ -1851,16 +1960,16 @@ int joinRoom(int from_room, int to_room) {
+@@ -1851,16 +1961,16 @@ int joinRoom(int from_room, int to_room) {
                      for (i = 0; i < distance; i++) {
                          cy += step;
  
@@ -4901,7 +5058,7 @@ index d84b3a67..6a4d0ed8 100644
                              }
  
                              done = 1;
-@@ -1911,7 +2020,7 @@ void setRoomObject() {
+@@ -1911,7 +2021,7 @@ void setRoomObject() {
              found = 0;
  
              for (x = 1; x < roomStack[i].width - 1; x++) {
@@ -4910,7 +5067,7 @@ index d84b3a67..6a4d0ed8 100644
                      found_x = x + roomStack[i].x;
                      found_y = roomStack[i].y;
                      found = 1;
-@@ -1920,7 +2029,7 @@ void setRoomObject() {
+@@ -1920,7 +2030,7 @@ void setRoomObject() {
  
              if ((100.0f * static_cast<float>(rand())) / 2147483648.0f <= 30.0f) {
                  if (found == 1) {
@@ -4919,7 +5076,7 @@ index d84b3a67..6a4d0ed8 100644
                      num++;
                  }
              }
-@@ -1931,7 +2040,7 @@ void setRoomObject() {
+@@ -1931,7 +2041,7 @@ void setRoomObject() {
  
          for (y = 1; y < roomStack[i].height - 1; y++) {
              for (x = 1; x < roomStack[i].width - 1; x++) {
@@ -4928,7 +5085,7 @@ index d84b3a67..6a4d0ed8 100644
                      found_x = x + roomStack[i].x;
                      found_y = y + roomStack[i].y;
                      found = 1;
-@@ -1941,7 +2050,7 @@ void setRoomObject() {
+@@ -1941,7 +2051,7 @@ void setRoomObject() {
  
          if ((100.0f * static_cast<float>(rand())) / 2147483648.0f <= 30.0f) {
              if (found == 1) {
@@ -4937,7 +5094,7 @@ index d84b3a67..6a4d0ed8 100644
              }
          }
      }
-@@ -1967,7 +2076,7 @@ void setRoomDivid() {
+@@ -1967,7 +2077,7 @@ void setRoomDivid() {
              ok = 1;
  
              for (x = 0; x < roomStack[i].width; x++) {
@@ -4946,7 +5103,7 @@ index d84b3a67..6a4d0ed8 100644
                      ok = 0;
                  }
              }
-@@ -1986,7 +2095,7 @@ void setRoomDivid() {
+@@ -1986,7 +2096,7 @@ void setRoomDivid() {
              ok = 1;
  
              for (y = 0; y < roomStack[i].height; y++) {
@@ -4955,7 +5112,7 @@ index d84b3a67..6a4d0ed8 100644
                      ok = 0;
                  }
              }
-@@ -2013,17 +2122,17 @@ void setRoomDivid() {
+@@ -2013,17 +2123,17 @@ void setRoomDivid() {
  
          if (line_dir[line_no] == 0) {
              for (x = line_x[line_no]; x < line_x[line_no] + line_len[line_no]; x++) {
@@ -4977,7 +5134,7 @@ index d84b3a67..6a4d0ed8 100644
                  .content |= BUILD_CELL_DIVIDING_DOOR;
          }
      }
-@@ -2046,9 +2155,9 @@ void setUnderDungeonStart() {
+@@ -2046,9 +2156,9 @@ void setUnderDungeonStart() {
      }
  
      // A room cell with no door and no dividing wall can hold the way down.
@@ -4990,7 +5147,7 @@ index d84b3a67..6a4d0ed8 100644
                  safe[safe_num * 2] = x;
                  safe[safe_num * 2 + 1] = y;
                  safe_num++;
-@@ -2067,12 +2176,12 @@ void setUnderDungeonStart() {
+@@ -2067,12 +2177,12 @@ void setUnderDungeonStart() {
          x = safe[pick * 2];
          y = safe[pick * 2 + 1];
  
@@ -5009,7 +5166,7 @@ index d84b3a67..6a4d0ed8 100644
                      searching = 0;
                  }
              }
-@@ -2091,7 +2200,11 @@ void setUnderDungeonStart() {
+@@ -2091,7 +2201,11 @@ void setUnderDungeonStart() {
  }
  
  void setStair() {
@@ -5021,7 +5178,7 @@ index d84b3a67..6a4d0ed8 100644
      int safe_num;
      int i;
      int x;
-@@ -2105,10 +2218,10 @@ void setStair() {
+@@ -2105,10 +2219,10 @@ void setStair() {
          safe[i] = -1;
      }
  
@@ -5036,7 +5193,7 @@ index d84b3a67..6a4d0ed8 100644
                      safe[safe_num * 2] = x;
                      safe[safe_num * 2 + 1] = y;
                      safe_num++;
-@@ -2128,10 +2241,10 @@ void setStair() {
+@@ -2128,10 +2242,10 @@ void setStair() {
          y = safe[pick * 2 + 1];
      }
  
@@ -5051,7 +5208,7 @@ index d84b3a67..6a4d0ed8 100644
  
      // The stair up stands below one that has a free cell under it.
      safe_num = 0;
-@@ -2140,10 +2253,10 @@ void setStair() {
+@@ -2140,10 +2254,10 @@ void setStair() {
          safe[i] = -1;
      }
  
@@ -5066,7 +5223,7 @@ index d84b3a67..6a4d0ed8 100644
                      safe[safe_num * 2] = x;
                      safe[safe_num * 2 + 1] = y;
                      safe_num++;
-@@ -2163,10 +2276,10 @@ void setStair() {
+@@ -2163,10 +2277,10 @@ void setStair() {
          y = safe[pick * 2 + 1];
      }
  
@@ -5081,7 +5238,7 @@ index d84b3a67..6a4d0ed8 100644
  }
  
  // Returns the first free event slot; running out of slots stops the game.
-@@ -2282,7 +2395,8 @@ void CDungeonMap::StepTrapCircle() {
+@@ -2282,7 +2396,8 @@ void CDungeonMap::StepTrapCircle() {
  }
  
  int CDungeonMap::CheckTreasureBox(float *pos, float dist) {
@@ -5091,7 +5248,7 @@ index d84b3a67..6a4d0ed8 100644
          if (this->boxes[i].used != 0 && DistVector(this->boxes[i].pos, pos) < dist) {
              return 0;
          }
-@@ -2325,7 +2439,7 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
+@@ -2325,7 +2440,7 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
  int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no) {
      int box_no = -1;
  
@@ -5100,7 +5257,7 @@ index d84b3a67..6a4d0ed8 100644
          if (this->boxes[i].used == 0) {
              box_no = i;
              break;
-@@ -2341,6 +2455,7 @@ int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no)
+@@ -2341,6 +2456,7 @@ int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no)
      this->boxes[box_no].lid_angle = 0;
      this->boxes[box_no].kind = kind;
      this->boxes[box_no].item_no = item_no;
@@ -5108,7 +5265,7 @@ index d84b3a67..6a4d0ed8 100644
      this->boxes[box_no].closed = 1;
      this->boxes[box_no].trap_no = trap_no;
  
-@@ -2396,8 +2511,11 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2396,8 +2512,11 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
      object_count = 0;
      target_count = static_cast<int>((4.0f * static_cast<float>(rand())) / 2147483648.0f) + 1;
  
@@ -5122,7 +5279,7 @@ index d84b3a67..6a4d0ed8 100644
          valid = 1;
  
          if (this->CheckTreasureBox(box_pos, 20.0f) == 0) {
-@@ -2423,8 +2541,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2423,8 +2542,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                          trap_no = 1;
                      }
  
@@ -5134,7 +5291,7 @@ index d84b3a67..6a4d0ed8 100644
                  }
              } else {
                  int item_no = PresetSmallItemNo_Get(selectMapNo, floor_no, special, 1);
-@@ -2440,8 +2559,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2440,8 +2560,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                  }
  
                  if (item_no != -1) {
@@ -5146,7 +5303,7 @@ index d84b3a67..6a4d0ed8 100644
                  }
              }
          }
-@@ -2451,7 +2571,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2451,7 +2572,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
  
      for (int i = 0; i < 3; i++) {
          if (static_cast<int>((100.0f * static_cast<float>(rand())) / 2147483648.0f) < 21) {
@@ -5155,7 +5312,7 @@ index d84b3a67..6a4d0ed8 100644
              valid = 1;
  
              if (this->CheckTreasureBox(object_pos, 20.0f) == 0) {
-@@ -2477,7 +2597,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2477,7 +2598,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
          int atra_count = BtAtraFloorCyoice(selectMapNo, floor_no, atra_no);
  
          while (object_count < atra_count) {
@@ -5164,7 +5321,7 @@ index d84b3a67..6a4d0ed8 100644
              valid = 1;
  
              if (this->CheckTreasureBox(object_pos, 20.0f) == 0) {
-@@ -2523,7 +2643,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2523,7 +2644,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
  
      int box_no = -1;
  
@@ -5173,7 +5330,7 @@ index d84b3a67..6a4d0ed8 100644
          if (this->boxes[i].used == 0) {
              box_no = i;
              break;
-@@ -2546,6 +2666,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2546,6 +2667,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
      this->boxes[box_no].lid_angle = 0;
      this->boxes[box_no].kind = kind;
      this->boxes[box_no].item_no = item_no;
@@ -5181,7 +5338,7 @@ index d84b3a67..6a4d0ed8 100644
      this->boxes[box_no].closed = 1;
  
      switch (kind) {
-@@ -2565,7 +2686,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2565,7 +2687,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
  }
  
  void CDungeonMap::RsetMimicEvent() {
@@ -5190,7 +5347,7 @@ index d84b3a67..6a4d0ed8 100644
          if (this->events[i].kind != DNG_EVENT_NONE) {
              if (this->events[i].kind == DNG_EVENT_MIMIC) {
                  this->events[i].kind = DNG_EVENT_NONE;
-@@ -2580,7 +2701,7 @@ int CDungeonMap::GetActiveIvent(CFrameVu1 *frame) {
+@@ -2580,7 +2702,7 @@ int CDungeonMap::GetActiveIvent(CFrameVu1 *frame) {
  
      sceVu0CopyVector(pos, frame->position);
  
@@ -5199,7 +5356,7 @@ index d84b3a67..6a4d0ed8 100644
          if (this->events[i].kind != DNG_EVENT_NONE && DistVector(this->events[i].pos, pos) <= this->events[i].radius) {
              return i;
          }
-@@ -2619,7 +2740,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2619,7 +2741,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 2; j++) {
                      for (i = 0; i < 2; i++) {
@@ -5208,7 +5365,7 @@ index d84b3a67..6a4d0ed8 100644
                              kind = -1;
                          }
                      }
-@@ -2638,7 +2759,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2638,7 +2760,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 2; j++) {
                      for (i = 0; i < 2; i++) {
@@ -5217,7 +5374,7 @@ index d84b3a67..6a4d0ed8 100644
                              kind = -1;
                          }
                      }
-@@ -2657,7 +2778,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2657,7 +2779,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 3; j++) {
                      for (i = 0; i < 3; i++) {
@@ -5226,7 +5383,7 @@ index d84b3a67..6a4d0ed8 100644
                              kind = -1;
                          }
                      }
-@@ -2683,9 +2804,9 @@ void CDungeonMap::buildDummyModel() {
+@@ -2683,9 +2805,9 @@ void CDungeonMap::buildDummyModel() {
                  }
              }
  
@@ -5239,7 +5396,7 @@ index d84b3a67..6a4d0ed8 100644
                          stair_pos[0] = 80.0f + 160.0f * z;
                          stair_pos[1] = 0.0f;
                          stair_pos[2] = 80.0f + 160.0f * x;
-@@ -2721,7 +2842,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2721,7 +2843,7 @@ void CDungeonMap::buildDummyModel() {
  
  void CDungeonMap::GetRoomLinkInfo() {
      int   door_pos[32][2];
@@ -5248,7 +5405,7 @@ index d84b3a67..6a4d0ed8 100644
      float pos[4];
      int   door_count;
      int   stair_x;
-@@ -2741,16 +2862,16 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2741,16 +2863,16 @@ void CDungeonMap::GetRoomLinkInfo() {
          this->room_link[i].used = 0;
      }
  
@@ -5269,7 +5426,7 @@ index d84b3a67..6a4d0ed8 100644
                  stair_x = x;
                  stair_y = y;
                  break;
-@@ -2758,15 +2879,15 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2758,15 +2880,15 @@ void CDungeonMap::GetRoomLinkInfo() {
          }
      }
  
@@ -5289,7 +5446,7 @@ index d84b3a67..6a4d0ed8 100644
                      break;
                  }
              }
-@@ -2776,50 +2897,50 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2776,50 +2898,50 @@ void CDungeonMap::GetRoomLinkInfo() {
      int door_no = static_cast<int>((static_cast<float>(door_count) * static_cast<float>(rand())) / 2147483648.0f);
      x = door_pos[door_no][0];
      y = door_pos[door_no][1];
@@ -5354,7 +5511,7 @@ index d84b3a67..6a4d0ed8 100644
              break;
          default:
              std::println("ERROR !!");
-@@ -2832,13 +2953,13 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2832,13 +2954,13 @@ void CDungeonMap::GetRoomLinkInfo() {
      while (active != 0) {
          active = false;
  
@@ -5372,7 +5529,7 @@ index d84b3a67..6a4d0ed8 100644
                      case BUILD_CELL_CORRIDOR:
                          propagation_mask = BUILD_CELL_CORRIDOR | BUILD_CELL_DOOR | BUILD_CELL_STAIR_DOWN;
                          break;
-@@ -2853,62 +2974,62 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2853,62 +2975,62 @@ void CDungeonMap::GetRoomLinkInfo() {
                          break;
                  }
  
@@ -5451,7 +5608,7 @@ index d84b3a67..6a4d0ed8 100644
                          active = true;
                      }
                  }
-@@ -2917,12 +3038,12 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2917,12 +3039,12 @@ void CDungeonMap::GetRoomLinkInfo() {
      }
  
      // The item goes in a room on the stair's side of the door.
@@ -5466,7 +5623,7 @@ index d84b3a67..6a4d0ed8 100644
              room_list[room_count++] = i;
          }
      }
-@@ -2964,8 +3085,8 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2964,8 +3086,8 @@ void CDungeonMap::GetRoomLinkInfo() {
  
              this->room_link[0].item_x = (pos[0] + 80.0f) / 160.0f;
              this->room_link[0].item_y = (pos[2] + 80.0f) / 160.0f;
@@ -5477,7 +5634,7 @@ index d84b3a67..6a4d0ed8 100644
              this->room_link[0].used = 1;
              result_no++;
              active = false;
-@@ -2974,9 +3095,9 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2974,9 +3096,9 @@ void CDungeonMap::GetRoomLinkInfo() {
  }
  
  void CDungeonMap::SetUnderLoad() {
@@ -5490,7 +5647,7 @@ index d84b3a67..6a4d0ed8 100644
      }
  }
  
-@@ -2990,18 +3111,22 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -2990,18 +3112,22 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
      int free;
      int i;
  
@@ -5517,7 +5674,7 @@ index d84b3a67..6a4d0ed8 100644
                          break;
                      }
                  }
-@@ -3012,20 +3137,20 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -3012,20 +3138,20 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
                  for (i = 0; i < 4; i++) {
                      int dx = adjacent.offset[i][0];
                      int dy = adjacent.offset[i][1];
@@ -5541,7 +5698,7 @@ index d84b3a67..6a4d0ed8 100644
                          break;
                      }
                  }
-@@ -3228,6 +3353,9 @@ int CDungeonMap::SetCharaDoor(int chara_no) {
+@@ -3228,6 +3354,9 @@ int CDungeonMap::SetCharaDoor(int chara_no) {
      }
  }
  
@@ -5551,7 +5708,7 @@ index d84b3a67..6a4d0ed8 100644
  void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      int w;
      int h;
-@@ -3243,18 +3371,29 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3243,18 +3372,29 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      int near_no;
      int near_dist;
  
@@ -5583,7 +5740,7 @@ index d84b3a67..6a4d0ed8 100644
          this->boxes[i].used = 0;
          this->boxes[i].lid_angle = 0;
          this->boxes[i].trap_no = 0;
-@@ -3272,17 +3411,17 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3272,17 +3412,17 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          this->room_link[i].used = 0;
      }
  
@@ -5609,7 +5766,7 @@ index d84b3a67..6a4d0ed8 100644
          }
      }
  
-@@ -3295,10 +3434,10 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3295,10 +3435,10 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          retry = 0;
  
          while (done == 0) {
@@ -5624,7 +5781,7 @@ index d84b3a67..6a4d0ed8 100644
  
              if (buildRoom(x, y, w, h, roomStackCnt) == 1) {
                  roomStack[roomStackCnt].x = x;
-@@ -3325,10 +3464,10 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3325,10 +3465,10 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          retry = 0;
  
          while (done == 0) {
@@ -5639,7 +5796,7 @@ index d84b3a67..6a4d0ed8 100644
  
              if (buildRoom(x, y, w, h, roomStackCnt) == 1) {
                  roomStack[roomStackCnt].x = x;
-@@ -3376,14 +3515,21 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3376,14 +3516,21 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      }
  
      mapPartsFilter();
@@ -5665,7 +5822,7 @@ index d84b3a67..6a4d0ed8 100644
          }
      }
  
-@@ -3456,7 +3602,7 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3456,7 +3603,7 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
      this->chest_collision_model = nullptr;
      this->fall_model = nullptr;
  
@@ -5674,7 +5831,7 @@ index d84b3a67..6a4d0ed8 100644
          this->boxes[i].used = 0;
      }
  
-@@ -3473,14 +3619,14 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3473,14 +3620,14 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
          this->parts[i].initalize();
      }
  
@@ -5691,7 +5848,7 @@ index d84b3a67..6a4d0ed8 100644
          this->room_seen[i] = 0;
      }
  
-@@ -3490,12 +3636,12 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3490,12 +3637,12 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
          this->npc[i].draw_num = 0;
      }
  
@@ -5706,7 +5863,7 @@ index d84b3a67..6a4d0ed8 100644
          this->boxes[j].used = 0;
          this->boxes[j].lid_angle = 0;
          this->boxes[j].trap_no = 0;
-@@ -3534,7 +3680,7 @@ void CDungeonMap::initalize() {
+@@ -3534,7 +3681,7 @@ void CDungeonMap::initalize() {
      this->chest_collision_model = nullptr;
      this->fall_model = nullptr;
  
@@ -5715,7 +5872,7 @@ index d84b3a67..6a4d0ed8 100644
          this->boxes[i].used = 0;
      }
  
-@@ -3550,14 +3696,14 @@ void CDungeonMap::initalize() {
+@@ -3550,14 +3697,14 @@ void CDungeonMap::initalize() {
          this->parts[i].initalize();
      }
  
@@ -5732,7 +5889,7 @@ index d84b3a67..6a4d0ed8 100644
          this->room_seen[i] = 0;
      }
  
-@@ -3567,12 +3713,12 @@ void CDungeonMap::initalize() {
+@@ -3567,12 +3714,12 @@ void CDungeonMap::initalize() {
          this->npc[i].draw_num = 0;
      }
  
@@ -5747,7 +5904,7 @@ index d84b3a67..6a4d0ed8 100644
          this->boxes[j].used = 0;
          this->boxes[j].lid_angle = 0;
          this->boxes[j].trap_no = 0;
-@@ -3593,4 +3739,54 @@ void CDungeonMap::initalize() {
+@@ -3593,4 +3740,54 @@ void CDungeonMap::initalize() {
      this->draw_dist_scale = 4.0f;
  }
  
@@ -6925,7 +7082,7 @@ index 6f58f09f..5aa25b98 100644
  
              if (effect != nullptr) {
 diff --git a/port/src/game/monstorunit.cpp b/port/src/game/monstorunit.cpp
-index d645aa5a..f37c2dc8 100644
+index d645aa5a..d22c91c3 100644
 --- a/port/src/game/monstorunit.cpp
 +++ b/port/src/game/monstorunit.cpp
 @@ -1,5 +1,7 @@
@@ -7128,7 +7285,7 @@ index d645aa5a..f37c2dc8 100644
              }
  
              chara[current_monster][0].GetPosition(poison_position);
-@@ -1559,6 +1601,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1559,6 +1601,19 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          damage = 0;
                      }
  
@@ -7139,14 +7296,16 @@ index d645aa5a..f37c2dc8 100644
 +                            weapon_id = UserStatus->chara_weapons[owner][equipped].item_no;
 +                        }
 +                    }
++                    // MoonMod: a charged attack keeps its charge level until the next attack starts
++                    const bool charged = owner >= 0 && BtActStatus.charge_level > 0;
 +                    damage = moonmod::ApplyChronicleCombatDamageFormula(
 +                        damage, weapon_id, moonmod::ChronicleNativeMonsterModelId(this, current_monster), owner,
-+                        monster[current_monster].hp, monster[current_monster].max_hp);
++                        monster[current_monster].hp, monster[current_monster].max_hp, charged ? 1 : 0);
 +
                      auto amount = static_cast<int>(damage);
  
                      if (!(damage - static_cast<float>(amount) <= 0.0f)) {
-@@ -1578,12 +1631,20 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1578,12 +1633,20 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          amount = monster[current_monster].hp;
                      }
  
@@ -7162,12 +7321,12 @@ index d645aa5a..f37c2dc8 100644
                      BtActStatus.monstor_target = owner;
                      monster[current_monster].hp -= amount;
 +                    if (amount > 0) {
-+                        moonmod::QueueChronicleMonsterHit(this, current_monster, owner, weapon_id, amount, element);
++                        moonmod::QueueChronicleMonsterHit(this, current_monster, owner, weapon_id, amount, element, charged);
 +                    }
  
                      if (monster[current_monster].hp <= 0) {
                          monster[current_monster].last_attacker = owner;
-@@ -1622,6 +1683,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1622,6 +1685,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      }
  
                      if (result == MonsterDamageResult::Killed) {
@@ -7175,7 +7334,7 @@ index d645aa5a..f37c2dc8 100644
                          return MonsterDamageResult::Killed;
                      }
  
-@@ -1658,7 +1720,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
+@@ -1658,7 +1722,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
      float upper = top[1];
      float lower = end[1];
  
@@ -7184,7 +7343,7 @@ index d645aa5a..f37c2dc8 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              if (effect3[i].count == 0) {
                  CCharacter *character = &chara[i][0];
-@@ -1828,7 +1890,7 @@ void CMonstorUnit::MoveChecMonster() {
+@@ -1828,7 +1892,7 @@ void CMonstorUnit::MoveChecMonster() {
      sceVu0CopyVector(flat_next, next_position);
      flat_next[1] = 1;
  
@@ -7193,7 +7352,7 @@ index d645aa5a..f37c2dc8 100644
          if (monster[i].state == 2 && i != current_monster) {
              CCharacter *other = &chara[i][0];
              other->GetPosition(other_position);
-@@ -1880,7 +1942,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1880,7 +1944,7 @@ void CMonstorUnit::Step(int pause) {
      }
  
      if (paused != 0) {
@@ -7202,7 +7361,7 @@ index d645aa5a..f37c2dc8 100644
              if (monster[i].state == 2) {
                  monster[i].requested_motion_flags &= ~4;
  
-@@ -1921,7 +1983,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1921,7 +1985,7 @@ void CMonstorUnit::Step(int pause) {
  
      BtActStatus.monstor_target = -1;
  
@@ -7211,7 +7370,7 @@ index d645aa5a..f37c2dc8 100644
          if (monster[i].state == 2) {
              current_monster = i;
  
-@@ -1974,7 +2036,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1974,7 +2038,7 @@ void CMonstorUnit::Step(int pause) {
                  box.min[1] = position[1] - 80.0f;
                  box.min[2] = position[2] - 30.0f;
  
@@ -7220,7 +7379,7 @@ index d645aa5a..f37c2dc8 100644
                      if (j != current_monster && monster[j].state == 2) {
                          chara[j][0].GetPosition(other_position);
                          collision->SetPosition(other_position);
-@@ -1992,11 +2054,11 @@ void CMonstorUnit::Step(int pause) {
+@@ -1992,11 +2056,11 @@ void CMonstorUnit::Step(int pause) {
                      case MonsterDamageResult::None:
                          break;
                      case MonsterDamageResult::Hit:
@@ -7234,7 +7393,7 @@ index d645aa5a..f37c2dc8 100644
                          script_state[current_monster] = 1;
                          break;
                  }
-@@ -2010,10 +2072,10 @@ void CMonstorUnit::Step(int pause) {
+@@ -2010,10 +2074,10 @@ void CMonstorUnit::Step(int pause) {
                  } else {
                      if (script_state[current_monster] == 0) {
                          if (monster[current_monster].revealed == 1) {
@@ -7247,7 +7406,7 @@ index d645aa5a..f37c2dc8 100644
                          }
  
                          script_state[current_monster] = 1;
-@@ -2289,8 +2351,9 @@ void CMonstorUnit::Step(int pause) {
+@@ -2289,8 +2353,9 @@ void CMonstorUnit::Step(int pause) {
  }
  
  void CMonstorUnit::CleanViewMonstor(int back_floor) {
@@ -7258,7 +7417,7 @@ index d645aa5a..f37c2dc8 100644
          monster[i].stop_timer = 0;
          monster[i].poison_timer = 0;
          monster[i].anger_timer = 0;
-@@ -2379,10 +2442,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
+@@ -2379,10 +2444,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
  
      back_dungeon = back_floor;
      alive_count = 0;
@@ -7275,7 +7434,7 @@ index d645aa5a..f37c2dc8 100644
      CFrameAttr     attr;
      int            file_size = 0;
      attr.fog_enable = true;
-@@ -2446,7 +2514,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2446,7 +2516,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag) {
      current_monster = -1;
  
@@ -7284,7 +7443,7 @@ index d645aa5a..f37c2dc8 100644
          if (monster[i].state == -1) {
              current_monster = i;
              break;
-@@ -2480,6 +2548,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2480,6 +2550,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      monster[current_monster].state = 1;
@@ -7292,7 +7451,7 @@ index d645aa5a..f37c2dc8 100644
      monster[current_monster].base_model = model_no;
      monster[current_monster].max_hp = model[model_no].max_hp;
      monster[current_monster].hp = model[model_no].max_hp;
-@@ -2536,11 +2605,12 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2536,11 +2607,12 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      if (interpreter[current_monster].check_program(1) != 0) {
@@ -7379,7 +7538,7 @@ index 65af951a..d32264b7 100644
      {300,  150 },
      {300,  150 },
 diff --git a/port/src/game/shot_freefuncs.cpp b/port/src/game/shot_freefuncs.cpp
-index 73f3aac2..81986e0e 100644
+index 73f3aac2..d0eb3483 100644
 --- a/port/src/game/shot_freefuncs.cpp
 +++ b/port/src/game/shot_freefuncs.cpp
 @@ -7,6 +7,7 @@
@@ -7550,6 +7709,23 @@ index 73f3aac2..81986e0e 100644
      selected_item *= 40;
      set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0xFC, y, 0x10, 0x10), CRect_i_(0x4A, 0x48, 0x10, 0x10));
      set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0x113, y, 0x10, 0x10), CRect_i_(0x5A, 0x48, 0x10, 0x10));
+@@ -793,14 +875,14 @@ void BtSetStatusErr(int status) {
+         case AILMENT_FREEZE:
+             UserStatus->ailments[chara] |= status;
+             UserStatus->ailments[chara] &= ~(AILMENT_STAMINA | AILMENT_POISON | AILMENT_GOO);
+-            UserStatus->ailment_frames[chara] = 300;
++            UserStatus->ailment_frames[chara] = moonmod::ChronicleAilmentFrames(300); // MoonMod player.tuning_set
+             SndSePlay(SE_STATUS_AILMENT, -1, 0);
+             break;
+ 
+         case AILMENT_STAMINA:
+             if (!(UserStatus->ailments[chara] & AILMENT_FREEZE)) {
+                 UserStatus->ailments[chara] |= status;
+-                UserStatus->ailment_frames[chara] = 1800;
++                UserStatus->ailment_frames[chara] = moonmod::ChronicleAilmentFrames(1800); // MoonMod player.tuning_set
+             }
+ 
+             break;
 @@ -832,6 +914,85 @@ void BtSetStatusErr(int status) {
      }
  }
@@ -8692,10 +8868,10 @@ index 43dfe76a..4d9260b3 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..2fbfe83c
+index 00000000..ae690a5a
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,510 @@
+@@ -0,0 +1,515 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -8724,6 +8900,8 @@ index 00000000..2fbfe83c
 +    {"player.tuning_set", "player", "tuning_set", "simulation", "game.write", "Set this mod's Chronicle player tuning: run speed, swing recovery speed, hit invincibility and recoil, gauge refill, thirst drain, weapon wear, map and monster reveal; restored when the mod unloads."},
 +    {"player.tuning_clear", "player", "tuning_clear", "simulation", "game.write", "Take back this mod's Chronicle player tuning."},
 +    {"player.invincible", "player", "invincible", "simulation", "game.write", "Give the active Chronicle player one-shot invincibility frames in a dungeon."},
++    {"player.guard_set", "player", "guard_set", "simulation", "game.write", "Arm or disarm a Chronicle character's one-shot guard: the next fatal native hit leaves 1 HP and publishes game.player.guarded."},
++    {"player.dash", "player", "dash", "simulation", "game.write", "Give the active Chronicle player a short burst of movement speed, with optional invincibility, in a dungeon."},
 +    {"player.ridepod_get", "player", "ridepod_get", "any", "game.read", "Read the ridepod's energy, core capacity, defence, voice state, and fitted parts in Chronicle Two."},
 +    {"player.ridepod_set", "player", "ridepod_set", "simulation", "game.write", "Adjust the ridepod's energy, capacity, shield kits, voice state, or fitted parts in Chronicle Two."},
 +    {"player.transform_get", "player", "transform_get", "any", "game.read", "Read Monica's monster badge levels, experience, unlock state, and active form in Chronicle Two."},
@@ -8769,7 +8947,9 @@ index 00000000..2fbfe83c
 +    {"dungeons.selection", "dungeons", "selection", "any", "game.read", "Read the active Chronicle entrance floor selection, or nil."},
 +    {"dungeons.set_badges", "dungeons", "set_badges", "simulation", "game.write", "Publish owned native floor-list tier badges 0..5."},
 +    {"ui.open_skills", "ui", "open_skills", "simulation", "content.register", "Open the owning package skill tree in the manager."},
-+    {"dungeons.set_modifiers", "dungeons", "set_modifiers", "simulation", "game.write", "Set owned additive generation bonuses in percent (0..300): rooms, monsters, chests, chest_value; {} clears this owner."},
++    {"dungeons.set_modifiers", "dungeons", "set_modifiers", "simulation", "game.write", "Set owned additive generation bonuses in percent (0..300; chests -100..300): rooms, monsters, chests, chest_value; {} clears this owner."},
++    {"dungeons.floor_link_set", "dungeons", "floor_link_set", "simulation", "game.write", "Point a Chronicle floor's exit gate at another floor of the same dungeon; owner-scoped, removed when the mod unloads."},
++    {"dungeons.floor_link_clear", "dungeons", "floor_link_clear", "simulation", "game.write", "Remove this mod's exit link from a Chronicle floor."},
 +    {"dungeons.set_population", "dungeons", "set_population", "simulation", "game.write", "Scale generated monster and chest targets by realized room count using inclusive per-room min/max ratios; native minimums and engine slot limits still apply; {} clears this owner."},
 +    {"dungeons.set_enemy_survival", "dungeons", "set_enemy_survival", "simulation", "game.write", "Set this mod's chance for eligible ordinary Chronicle enemies to survive one lethal hit; {} clears this owner."},
 +    {"dungeons.set_layout", "dungeons", "set_layout", "simulation", "game.write", "Set room count, room area and room sizes for floors built after the call; an empty table restores the native layout."},
@@ -8972,7 +9152,8 @@ index 00000000..2fbfe83c
 +    {"game.shop.purchased", "shops", "both", "A shop purchase or shop inventory change completed."},
 +    {"game.enemy_spawned", "characters", "both", "A registered mod-owned enemy spawned successfully."},
 +    {"game.enemy_defeated", "combat", "both", "The game accepted an enemy death."},
-+    {"game.enemy_hit", "combat", "chronicle", "A native weapon hit damaged an enemy; includes attacker, weapon, target, model, element, and final damage."},
++    {"game.enemy_hit", "combat", "chronicle", "A native weapon hit damaged an enemy; includes attacker, weapon, target, model, element, whether the attack was charged, and final damage."},
++    {"game.player.guarded", "player", "chronicle", "A guard armed with player.guard_set turned a fatal hit into 1 HP."},
 +    {"game.weapon.upgraded", "weapons", "both", "A native weapon upgrade changed the weapon."},
 +    {"game.weapon.equipped", "weapons", "both", "The active weapon changed through a supported API."},
 +    {"game.weapon.abs_gained", "weapons", "both", "An owned weapon gained ABS experience or synthesis points."},
@@ -9745,10 +9926,10 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..730769f1
+index 00000000..ca06b4c6
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,9938 @@
+@@ -0,0 +1,10087 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -9857,14 +10038,25 @@ index 00000000..730769f1
 +        combined.durability_wear *= tuning.durability_wear;
 +        combined.map_reveal = combined.map_reveal || tuning.map_reveal;
 +        combined.monster_reveal = combined.monster_reveal || tuning.monster_reveal;
++        combined.ailment_duration *= tuning.ailment_duration;
++        combined.map_hidden = combined.map_hidden || tuning.map_hidden;
++        combined.attack_reach *= tuning.attack_reach;
 +    }
 +    // The combination stays inside the range one call may ask for.
 +    for (float *scale : {&combined.run_speed, &combined.attack_anim_speed, &combined.recoil_scale,
-+                         &combined.gauge_refill, &combined.thirst_drain, &combined.durability_wear}) {
++                         &combined.gauge_refill, &combined.thirst_drain, &combined.durability_wear,
++                         &combined.ailment_duration, &combined.attack_reach}) {
 +        *scale = std::clamp(*scale, 0.25f, 4.0f);
 +    }
 +    g_player_tuning = combined;
 +}
++// dungeons.floor_link_set: (dungeon, floor) -> (owner, the floor its exit gate leads to).
++std::map<std::pair<int, int>, std::pair<std::string, int>> g_floor_links;
++// player.guard_set: per character, the owner of an armed one-shot fatal-hit guard (empty: none).
++std::array<std::string, 6> g_fatal_guards;
++// player.dash: a burst of movement speed until this framework frame.
++std::uint64_t g_dash_until = 0;
++float g_dash_speed = 1.0f;
 +std::vector<std::pair<std::string, int>> g_wheel_mode_requests;
 +int g_town_character = CHARA_TOAN;
 +int g_town_loaded_character = CHARA_TOAN;
@@ -9887,7 +10079,7 @@ index 00000000..730769f1
 +void RefreshFloorModifiers() {
 +    std::array<int, 4> total{};
 +    for (const auto &[owner, values] : g_floor_modifiers)
-+        for (int i = 0; i < 4; ++i) total[i] = std::min(300, total[i] + values[i]);
++        for (int i = 0; i < 4; ++i) total[i] = std::clamp(total[i] + values[i], i == 2 ? -100 : 0, 300);
 +    DngRoomBonusPercent = total[0]; DngMonsterBonusPercent = total[1];
 +    DngChestBonusPercent = total[2]; DngChestValuePercent = total[3];
 +}
@@ -9899,7 +10091,11 @@ index 00000000..730769f1
 +        const auto found = std::find(names.begin(), names.end(), field.key());
 +        if (found == names.end() || !field.value().is_number_integer()) return {ApiCallStatus::InvalidArgument, nullptr, "unknown field or noninteger percentage"};
 +        const auto number = field.value().get<std::int64_t>();
-+        if (number < 0 || number > 300) return {ApiCallStatus::InvalidArgument, nullptr, "percentage must be 0..300"};
++        // chests alone may be negative: -100 builds a floor with no regular chests
++        const int minimum = found - names.begin() == 2 ? -100 : 0;
++        if (number < minimum || number > 300) {
++            return {ApiCallStatus::InvalidArgument, nullptr, "percentage must be 0..300 (chests -100..300)"};
++        }
 +        values[found - names.begin()] = static_cast<int>(number);
 +    }
 +    g_floor_modifiers[std::string(owner)] = values;
@@ -17176,14 +17372,18 @@ index 00000000..730769f1
 +            {"thirst_drain", tuning.thirst_drain},
 +            {"durability_wear", tuning.durability_wear},
 +            {"map_reveal", tuning.map_reveal},
-+            {"monster_reveal", tuning.monster_reveal}};
++            {"monster_reveal", tuning.monster_reveal},
++            {"ailment_duration", tuning.ailment_duration},
++            {"map_hidden", tuning.map_hidden},
++            {"attack_reach", tuning.attack_reach}};
 +}
 +
 +// player.tuning_set: one owner-scoped request; fields left out mean retail for that owner.
 +ApiCallResult SetPlayerTuning(std::string_view owner, const Json &args) {
 +    if (owner.empty() || !args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected a tuning object: run_speed, attack_anim_speed, recoil_scale, gauge_refill, thirst_drain, "
-+                       "durability_wear (0.25 to 4), invincible_bonus_frames (0 to 120), map_reveal, monster_reveal (booleans)");
++                       "durability_wear, ailment_duration, attack_reach (0.25 to 4), invincible_bonus_frames (0 to 120), "
++                       "map_reveal, monster_reveal, map_hidden (booleans)");
 +    }
 +    const Json &definition = args[0];
 +    ChroniclePlayerTuning tuning;
@@ -17197,6 +17397,8 @@ index 00000000..730769f1
 +        else if (key == "gauge_refill") multiplier = &tuning.gauge_refill;
 +        else if (key == "thirst_drain") multiplier = &tuning.thirst_drain;
 +        else if (key == "durability_wear") multiplier = &tuning.durability_wear;
++        else if (key == "ailment_duration") multiplier = &tuning.ailment_duration;
++        else if (key == "attack_reach") multiplier = &tuning.attack_reach;
 +        if (multiplier != nullptr) {
 +            if (!value.is_number()) return Invalid(key + " must be a number from 0.25 to 4");
 +            const float scale = value.get<float>();
@@ -17213,9 +17415,10 @@ index 00000000..730769f1
 +            tuning.invincible_bonus_frames = static_cast<int>(frames);
 +            continue;
 +        }
-+        if (key == "map_reveal" || key == "monster_reveal") {
++        if (key == "map_reveal" || key == "monster_reveal" || key == "map_hidden") {
 +            if (!value.is_boolean()) return Invalid(key + " must be a boolean");
-+            (key == "map_reveal" ? tuning.map_reveal : tuning.monster_reveal) = value.get<bool>();
++            (key == "map_reveal" ? tuning.map_reveal : (key == "monster_reveal" ? tuning.monster_reveal : tuning.map_hidden)) =
++                value.get<bool>();
 +            continue;
 +        }
 +        return Invalid("player.tuning_set received an unsupported field: " + key);
@@ -17259,6 +17462,116 @@ index 00000000..730769f1
 +    if (BtActStatus.invincible_frames < static_cast<int>(frames)) BtActStatus.invincible_frames = static_cast<int>(frames);
 +    return {ApiCallStatus::Ok, {{"frames", BtActStatus.invincible_frames}, {"previous", previous}}, {}};
 +}
++
++// player.guard_set: arm or disarm one character's one-shot guard. The next fatal native hit on that character
++// leaves 1 HP, spends the guard and publishes game.player.guarded.
++ApiCallResult SetPlayerGuard(std::string_view owner, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected {character = character id or 'active', armed = boolean}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "character" && field.key() != "armed") return Invalid("player.guard_set received an unsupported field: " + field.key());
++    }
++    const auto armed = request.find("armed");
++    if (armed == request.end() || !armed->is_boolean()) return Invalid("armed must be a boolean");
++    const auto character = request.find("character");
++    int chara_no = -1;
++    if (character == request.end() || (character->is_string() && character->get<std::string>() == "active")) {
++        CDngStatusData *status = CurrentStatus();
++        if (status == nullptr) return Failed("the game has no active save data");
++        chara_no = status->cur_chara;
++    } else if (character->is_string()) {
++        const auto found = std::ranges::find(kCharacterIds, character->get<std::string>());
++        if (found != kCharacterIds.end()) chara_no = static_cast<int>(found - kCharacterIds.begin());
++    }
++    if (chara_no < 0 || chara_no >= 6) return Invalid("character must be a Chronicle character id or 'active'");
++    std::string &guard = g_fatal_guards[static_cast<std::size_t>(chara_no)];
++    if (!guard.empty() && guard != owner) return Failed("another mod holds this character's guard");
++    guard = armed->get<bool>() ? std::string(owner) : std::string();
++    return {ApiCallStatus::Ok, {{"character", kCharacterIds[chara_no]}, {"armed", !guard.empty()}}, {}};
++}
++
++bool ChronicleTakeFatalGuard(int chara_no) {
++    if (chara_no < 0 || chara_no >= 6 || g_fatal_guards[static_cast<std::size_t>(chara_no)].empty()) return false;
++    g_fatal_guards[static_cast<std::size_t>(chara_no)].clear();
++    if (BtActStatus.invincible_frames < 60) BtActStatus.invincible_frames = 60;
++    SharedRuntime().QueueEvent("game.player.guarded", {{"character", kCharacterIds[chara_no]}, {"character_id", chara_no},
++                                                       {"frame", SharedRuntime().Frame()}});
++    return true;
++}
++
++void ResetChroniclePlayerGuardsForTests() {
++    for (std::string &guard : g_fatal_guards) guard.clear();
++    g_dash_until = 0;
++    g_dash_speed = 1.0f;
++}
++
++// player.dash: for `frames`, the dungeon walk and dash speed run `speed` times faster (the native movement and its
++// collision still apply), with `invincible_frames` of invincibility from the start.
++ApiCallResult SetPlayerDash(const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected {frames = 1..60, speed = 1..4, invincible_frames = optional 0..120}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "frames" && field.key() != "speed" && field.key() != "invincible_frames") {
++            return Invalid("player.dash received an unsupported field: " + field.key());
++        }
++    }
++    int frames = 0;
++    int invincible = 0;
++    if (!ReadBoundedInt(request, "frames", 1, 60, frames)) return Invalid("frames must be an integer from 1 to 60");
++    if (request.contains("invincible_frames") && !ReadBoundedInt(request, "invincible_frames", 0, 120, invincible)) {
++        return Invalid("invincible_frames must be an integer from 0 to 120");
++    }
++    const auto speed_field = request.find("speed");
++    if (speed_field == request.end() || !speed_field->is_number()) return Invalid("speed must be a number from 1 to 4");
++    const float speed = speed_field->get<float>();
++    if (!std::isfinite(speed) || speed < 1.0f || speed > 4.0f) return Invalid("speed must be a number from 1 to 4");
++    if (mode != GAME_MODE_DUNGEON) return Failed("player.dash needs an active dungeon");
++    g_dash_until = SharedRuntime().Frame() + static_cast<std::uint64_t>(frames);
++    g_dash_speed = speed;
++    if (BtActStatus.invincible_frames < invincible) BtActStatus.invincible_frames = invincible;
++    return {ApiCallStatus::Ok, {{"frames", frames}, {"speed", speed}, {"invincible_frames", BtActStatus.invincible_frames}}, {}};
++}
++
++// dungeons.floor_link_set / floor_link_clear: the exit gate on a floor leads to another floor of the same dungeon
++// (ChronicleScriptFloorLevel reads the links). One owner per floor; unloading the owner removes its links.
++bool ReadFloorLinkFloor(const Json &request, const char *key, int dungeon_id, int &floor) {
++    return ReadBoundedInt(request, key, 0, maxFloorTbl__3[dungeon_id] - 1, floor);
++}
++ApiCallResult SetFloorLink(std::string_view owner, const Json &args, bool clear) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid(clear ? "expected {dungeon_id, floor_id}" : "expected {dungeon_id, floor_id, next_floor_id}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "dungeon_id" && field.key() != "floor_id" && (clear || field.key() != "next_floor_id")) {
++            return Invalid("unsupported floor link field: " + field.key());
++        }
++    }
++    int dungeon_id = -1;
++    int floor_id = -1;
++    int next = -1;
++    if (!ReadBoundedInt(request, "dungeon_id", 0, DUNGEON_COUNT - 1, dungeon_id)) return Invalid("dungeon_id must be a Chronicle dungeon");
++    if (!ReadFloorLinkFloor(request, "floor_id", dungeon_id, floor_id)) return Invalid("floor_id must be a floor of that dungeon");
++    if (!clear && !ReadFloorLinkFloor(request, "next_floor_id", dungeon_id, next)) {
++        return Invalid("next_floor_id must be a floor of that dungeon");
++    }
++    const auto key = std::make_pair(dungeon_id, floor_id);
++    const auto existing = g_floor_links.find(key);
++    if (existing != g_floor_links.end() && existing->second.first != owner) return Failed("another mod links this floor");
++    if (clear) {
++        const bool removed = existing != g_floor_links.end();
++        if (removed) g_floor_links.erase(existing);
++        return {ApiCallStatus::Ok, {{"dungeon_id", dungeon_id}, {"floor_id", floor_id}, {"removed", removed}}, {}};
++    }
++    g_floor_links[key] = {std::string(owner), next};
++    return {ApiCallStatus::Ok, {{"dungeon_id", dungeon_id}, {"floor_id", floor_id}, {"next_floor_id", next}}, {}};
++}
++
++void ResetChronicleFloorLinksForTests() { g_floor_links.clear(); }
 +
 +ApiCallResult UnbindInputAction(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
@@ -18759,6 +19072,10 @@ index 00000000..730769f1
 +    if (operation.path == "player.tuning_set") return SetPlayerTuning(mod_id, args);
 +    if (operation.path == "player.tuning_clear") return ClearPlayerTuning(mod_id, args);
 +    if (operation.path == "player.invincible") return SetPlayerInvincible(args);
++    if (operation.path == "player.guard_set") return SetPlayerGuard(mod_id, args);
++    if (operation.path == "player.dash") return SetPlayerDash(args);
++    if (operation.path == "dungeons.floor_link_set") return SetFloorLink(mod_id, args, false);
++    if (operation.path == "dungeons.floor_link_clear") return SetFloorLink(mod_id, args, true);
 +    if (operation.path == "player.status_add") return AddPlayerStatus(args);
 +    if (operation.path == "player.status_remove") return RemovePlayerStatus(args);
 +    if (operation.path == "party.list") {
@@ -19165,6 +19482,11 @@ index 00000000..730769f1
 +    // Retail's exit gate asks for the next floor with no check: on a mod's last registered floor (which, unlike
 +    // retail's last, has an exit) that is past the floor tables. Stay on the last floor instead.
 +    if (dungeon_id < 0 || dungeon_id >= DUNGEON_COUNT) return floor;
++    // A floor link (dungeons.floor_link_set) sends the exit gate on its floor somewhere else.
++    if (UserStatus != nullptr && floor == UserStatus->cur_floor + 1) {
++        const auto link = g_floor_links.find({dungeon_id, static_cast<int>(UserStatus->cur_floor)});
++        if (link != g_floor_links.end()) floor = link->second.second;
++    }
 +    return std::min(floor, maxFloorTbl__3[dungeon_id] - 1);
 +}
 +
@@ -19324,7 +19646,8 @@ index 00000000..730769f1
 +    return true;
 +}
 +
-+void QueueChronicleMonsterHit(dc::game::CMonstorUnit *unit, int slot, int attacker, int weapon_id, int damage, int element) {
++void QueueChronicleMonsterHit(dc::game::CMonstorUnit *unit, int slot, int attacker, int weapon_id, int damage, int element,
++                              bool charged) {
 +    if (unit == nullptr || slot < 0 || slot >= static_cast<int>(g_monster_handle_generations.size()) ||
 +        attacker < 0 || attacker >= 6 || weapon_id < ITEM_WEAPON_START || damage <= 0) return;
 +    PrepareMonsterHandleUnit(unit);
@@ -19336,7 +19659,7 @@ index 00000000..730769f1
 +    }
 +    Json payload = {{"entity", MonsterHandleId(slot, generation)}, {"slot", slot}, {"attacker", attacker},
 +                    {"weapon_id", weapon_stable_id}, {"native_weapon_id", weapon_id},
-+                    {"damage", damage}, {"element", element}, {"frame", SharedRuntime().Frame()}};
++                    {"damage", damage}, {"element", element}, {"charged", charged}, {"frame", SharedRuntime().Frame()}};
 +    if (monster.base_model >= 0 && monster.base_model < static_cast<int>(g_loaded_monster_model_ids.size())) {
 +        const int model_id = g_loaded_monster_model_ids[monster.base_model];
 +        if (model_id >= 0) payload["native_model_id"] = model_id;
@@ -19406,9 +19729,9 @@ index 00000000..730769f1
 +    SharedRuntime().Publish("game.dungeon.generating", {{"dungeon_id", selectMapNo}, {"floor_id", UserStatus->cur_floor}, {"back_floor", back_floor}});
 +}
 +float ApplyChronicleCombatDamageFormula(float damage, int weapon_id, int native_model_id, int character_id,
-+                                        int target_hp, int target_max_hp) {
++                                        int target_hp, int target_max_hp, int charged) {
 +    const float modified = g_combat_damage_formulas.Apply(damage, weapon_id, native_model_id, character_id,
-+                                                           target_hp, target_max_hp, SharedRuntime().Frame());
++                                                           target_hp, target_max_hp, SharedRuntime().Frame(), charged);
 +    const float final_damage = modified <= 0.0f ? modified : ApplyCombatDamageBonuses(modified, SharedRuntime().CombatDamageBonuses());
 +    return final_damage;
 +}
@@ -19440,6 +19763,10 @@ index 00000000..730769f1
 +float ChroniclePlayerDurabilityWearScale() { return g_player_tuning.durability_wear; }
 +float ChroniclePlayerAttackAnimSpeed() { return g_player_tuning.attack_anim_speed; }
 +bool ChroniclePlayerMapReveal() { return g_player_tuning.map_reveal; }
++float ChroniclePlayerAilmentDuration() { return g_player_tuning.ailment_duration; }
++bool ChroniclePlayerMapHidden() { return g_player_tuning.map_hidden; }
++float ChroniclePlayerAttackReach() { return g_player_tuning.attack_reach; }
++float ChroniclePlayerDashScale() { return SharedRuntime().Frame() < g_dash_until ? g_dash_speed : 1.0f; }
 +bool ChroniclePlayerMonsterReveal() { return g_player_tuning.monster_reveal; }
 +
 +void ConfigureChronicleApi(RuntimeConfig &config) {
@@ -19448,7 +19775,8 @@ index 00000000..730769f1
 +    for (const char *path : {"player.get", "player.set", "player.heal", "player.damage", "party.list", "party.active", "party.set_active", "party.town_active", "party.town_set_active",
 +                             "save.slot_id",
 +                             "player.status_add", "player.status_remove", "player.thirst_get", "player.thirst_set",
-+                             "player.tuning_set", "player.tuning_clear", "player.invincible",
++                             "player.tuning_set", "player.tuning_clear", "player.invincible", "player.guard_set",
++                             "player.dash", "dungeons.floor_link_set", "dungeons.floor_link_clear",
 +                             "characters.list", "characters.get", "world.get", "world.transition", "world.set_time",
 +                             "world.story_flag_get", "world.story_flag_set", "world.map_flag_get", "world.map_flag_set",
 +                             "world.story_value_get", "world.story_value_set",
@@ -19544,6 +19872,8 @@ index 00000000..730769f1
 +        RestoreLayoutRequest();
 +        g_floor_modifiers.erase(std::string(mod_id));
 +        RefreshFloorModifiers();
++        std::erase_if(g_floor_links, [mod_id](const auto &entry) { return entry.second.first == mod_id; });
++        for (std::string &guard : g_fatal_guards) if (guard == mod_id) guard.clear();
 +        std::erase_if(g_population_requests, [mod_id](const auto &entry) { return entry.first == mod_id; });
 +        RestorePopulationRequest();
 +        std::erase_if(g_enemy_survival_requests, [mod_id](const auto &entry) { return entry.first == mod_id; });
@@ -34262,10 +34592,10 @@ index 00000000..e4dd803c
 +}
 diff --git a/port/src/tests/moonmod_combat_api_test.cpp b/port/src/tests/moonmod_combat_api_test.cpp
 new file mode 100644
-index 00000000..4ed19870
+index 00000000..23250d38
 --- /dev/null
 +++ b/port/src/tests/moonmod_combat_api_test.cpp
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,318 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -34347,6 +34677,33 @@ index 00000000..4ed19870
 +    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f), 11.0f);
 +    config.api_owner_unloaded(zeta_owner);
 +    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f), 10.0f);
++    moonmod::ResetChronicleCombatFormulasForTests();
++}
++
++TEST(MoonModCombatApi, AChargedFilterMatchesOnlyChargedAttacks) {
++    moonmod::ResetChronicleCombatFormulasForTests();
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleApi(config);
++    const moonmod::ApiOperationSpec *operation = moonmod::FindApiOperation("combat.register_formula");
++    ASSERT_NE(operation, nullptr);
++    const std::string owner = "test.moonmod.charged-probe";
++    const moonmod::ApiCallResult registered = config.api_handler(
++        owner, *operation, moonmod::Json::array({{{"id", "fury"}, {"operation", "multiply"}, {"value", 1.5}, {"charged", true}}}));
++    ASSERT_EQ(registered.status, moonmod::ApiCallStatus::Ok) << registered.message;
++    // a caller that cannot tell skips the filtered formula; a plain hit too; a charged hit takes it
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f), 10.0f);
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f, -1, -1, -1, -1, -1, 0), 10.0f);
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f, -1, -1, -1, -1, -1, 1), 15.0f);
++    // charged = false matches the other hits only
++    ASSERT_EQ(config.api_handler(owner, *operation,
++                                 moonmod::Json::array({{{"id", "plain"}, {"operation", "add"}, {"value", 1}, {"charged", false}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f, -1, -1, -1, -1, -1, 0), 11.0f);
++    EXPECT_FLOAT_EQ(moonmod::ApplyChronicleCombatDamageFormula(10.0f, -1, -1, -1, -1, -1, 1), 15.0f);
++    EXPECT_EQ(config.api_handler(owner, *operation,
++                                 moonmod::Json::array({{{"id", "bad"}, {"operation", "multiply"}, {"value", 2}, {"charged", 1}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    config.api_owner_unloaded(owner);
 +    moonmod::ResetChronicleCombatFormulasForTests();
 +}
 +
@@ -36083,6 +36440,229 @@ index 00000000..54ec82c2
 +    EXPECT_EQ(skills.value.at("skills").at(1).at("rank"), 0);
 +    EXPECT_DOUBLE_EQ(skills.value.at("skills").at(0).at("effects").at("enemy_damage_per_rank").get<double>(), 0.1);
 +#endif
++}
+diff --git a/port/src/tests/moonmod_gauntlet_engine_test.cpp b/port/src/tests/moonmod_gauntlet_engine_test.cpp
+new file mode 100644
+index 00000000..02ee6992
+--- /dev/null
++++ b/port/src/tests/moonmod_gauntlet_engine_test.cpp
+@@ -0,0 +1,217 @@
++#include <gtest/gtest.h>
++
++#include <memory>
++
++#include "btactstatus.hpp"
++#include "dun/gameloop.hpp"
++#include "main.hpp"
++#include "monstorunit.hpp"
++#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/game_hooks.hpp"
++#include "savedata.hpp"
++#include "userstatus.hpp"
++
++namespace dc::game {}
++using namespace dc::game;
++
++// The engine side of Dark Genie's Gauntlet's Norune Eternal nodes: the newer player tuning fields (Hardy, Blind
++// Halls, Spear Reach), the fatal-hit guard (Second Wind, Cat's Nine Lives), the dash (Moonwalker, Tumbler, Rocket
++// Boost), floor links (Endless Maze) and a negative chest bonus (Barren).
++
++namespace {
++
++struct SaveFixture {
++    CSaveData *previous_save = SaveData;
++    CUserStatus *previous_user_status = UserStatus;
++    s32 previous_mode = mode;
++    std::unique_ptr<CSaveData> save = std::make_unique<CSaveData>();
++    CDngStatusData *status = nullptr;
++    SaveFixture() {
++        save->Initialize();
++        SaveData = save.get();
++        status = save->GetDngStatus();
++        UserStatus = static_cast<CUserStatus *>(status);
++        mode = GAME_MODE_DUNGEON;
++    }
++    ~SaveFixture() {
++        SaveData = previous_save;
++        UserStatus = previous_user_status;
++        mode = previous_mode;
++        moonmod::ResetChroniclePlayerGuardsForTests();
++        moonmod::ResetChronicleFloorLinksForTests();
++        moonmod::ResetChroniclePlayerTuningForTests();
++    }
++};
++
++moonmod::ApiCallResult Call(moonmod::RuntimeConfig &config, std::string_view owner, const char *path,
++                            const moonmod::Json &args) {
++    const moonmod::ApiOperationSpec *operation = moonmod::FindApiOperation(path);
++    EXPECT_NE(operation, nullptr) << path;
++    if (operation == nullptr) return {moonmod::ApiCallStatus::Failed, nullptr, "missing"};
++    return config.api_handler(owner, *operation, args);
++}
++
++} // namespace
++
++TEST(MoonModGauntletEngine, TuningScalesAilmentsHidesTheMapAndWidensSwings) {
++    SaveFixture fixture;
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    moonmod::ConfigureChronicleApi(config);
++    using moonmod::Json;
++    EXPECT_EQ(moonmod::ChronicleAilmentFrames(300), 300);
++    ASSERT_EQ(Call(config, "test.gauntlet", "player.tuning_set",
++                   Json::array({Json{{"ailment_duration", 0.5}, {"map_hidden", true}, {"attack_reach", 1.2}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerAilmentDuration(), 0.5f);
++    EXPECT_TRUE(moonmod::ChroniclePlayerMapHidden());
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerAttackReach(), 1.2f);
++    EXPECT_EQ(moonmod::ChronicleAilmentFrames(300), 150);
++    EXPECT_EQ(moonmod::ChronicleAilmentFrames(1800), 900);
++    // owners combine: multipliers multiply, the flag ORs
++    ASSERT_EQ(Call(config, "test.other", "player.tuning_set", Json::array({Json{{"ailment_duration", 0.5}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerAilmentDuration(), 0.25f);
++    for (const Json &bad : {Json{{"ailment_duration", 0.1}}, Json{{"attack_reach", 5}}, Json{{"map_hidden", 1}}}) {
++        EXPECT_EQ(Call(config, "test.gauntlet", "player.tuning_set", Json::array({bad})).status,
++                  moonmod::ApiCallStatus::InvalidArgument) << bad.dump();
++    }
++    config.api_owner_unloaded("test.gauntlet");
++    config.api_owner_unloaded("test.other");
++    EXPECT_FALSE(moonmod::ChroniclePlayerMapHidden());
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerAttackReach(), 1.0f);
++}
++
++TEST(MoonModGauntletEngine, AGuardTurnsOneFatalHitIntoOneHp) {
++    SaveFixture fixture;
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    moonmod::ConfigureChronicleApi(config);
++    using moonmod::Json;
++    CDngStatusData *status = fixture.status;
++    status->cur_chara = 1; // Xiao
++    status->max_hp[1] = 80;
++    status->hp[1] = 20;
++    status->life_step[1] = 0;
++    BtActStatus.invincible_frames = 0;
++
++    auto guard = Call(config, "test.gauntlet", "player.guard_set", Json::array({Json{{"character", "xiao"}, {"armed", true}}}));
++    ASSERT_EQ(guard.status, moonmod::ApiCallStatus::Ok) << guard.message;
++    EXPECT_TRUE(guard.value.at("armed").get<bool>());
++    // another mod cannot take or drop it
++    EXPECT_EQ(Call(config, "test.other", "player.guard_set", Json::array({Json{{"character", "xiao"}, {"armed", false}}})).status,
++              moonmod::ApiCallStatus::Failed);
++
++    // a hit that would not kill leaves the guard alone
++    status->AddNowLife(1, -5, 0.0f);
++    EXPECT_EQ(status->hp[1], 15);
++    status->AddNowLife(1, -5, 255.0f);
++    status->hp[1] = status->next_hp[1];
++    status->life_step[1] = 0;
++    EXPECT_EQ(status->hp[1], 10);
++    // the fatal hit: 1 HP, the guard spent, a moment of invincibility
++    status->AddNowLife(1, -50, 255.0f);
++    EXPECT_EQ(status->next_hp[1], 1);
++    EXPECT_GE(BtActStatus.invincible_frames, 60);
++    status->hp[1] = status->next_hp[1];
++    status->life_step[1] = 0;
++    status->AddNowLife(1, -50, 255.0f);
++    EXPECT_EQ(status->next_hp[1], 0);
++
++    for (const Json &bad : {Json{{"character", "max"}, {"armed", true}}, Json{{"character", "xiao"}}, Json{{"armed", "yes"}},
++                            Json{{"character", "xiao"}, {"armed", true}, {"hp", 1}}}) {
++        EXPECT_EQ(Call(config, "test.gauntlet", "player.guard_set", Json::array({bad})).status,
++                  moonmod::ApiCallStatus::InvalidArgument) << bad.dump();
++    }
++    // unloading the owner disarms its guards
++    ASSERT_EQ(Call(config, "test.gauntlet", "player.guard_set", Json::array({Json{{"character", "active"}, {"armed", true}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    config.api_owner_unloaded("test.gauntlet");
++    EXPECT_FALSE(moonmod::ChronicleTakeFatalGuard(1));
++}
++
++TEST(MoonModGauntletEngine, ADashSpeedsMovementForItsFramesInADungeon) {
++    SaveFixture fixture;
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    moonmod::ConfigureChronicleApi(config);
++    using moonmod::Json;
++    BtActStatus.invincible_frames = 0;
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerDashScale(), 1.0f);
++    auto dash = Call(config, "test.gauntlet", "player.dash", Json::array({Json{{"frames", 12}, {"speed", 2.5}, {"invincible_frames", 20}}}));
++    ASSERT_EQ(dash.status, moonmod::ApiCallStatus::Ok) << dash.message;
++    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerDashScale(), 2.5f);
++    EXPECT_EQ(BtActStatus.invincible_frames, 20);
++    for (const Json &bad : {Json{{"frames", 0}, {"speed", 2}}, Json{{"frames", 12}, {"speed", 5}}, Json{{"frames", 12}},
++                            Json{{"frames", 12}, {"speed", 2}, {"distance", 3}}}) {
++        EXPECT_EQ(Call(config, "test.gauntlet", "player.dash", Json::array({bad})).status,
++                  moonmod::ApiCallStatus::InvalidArgument) << bad.dump();
++    }
++    mode = -1;
++    EXPECT_EQ(Call(config, "test.gauntlet", "player.dash", Json::array({Json{{"frames", 12}, {"speed", 2}}})).status,
++              moonmod::ApiCallStatus::Failed);
++}
++
++TEST(MoonModGauntletEngine, AFloorLinkSteersTheExitGate) {
++    SaveFixture fixture;
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    moonmod::ConfigureChronicleApi(config);
++    using moonmod::Json;
++    fixture.status->cur_floor = 3;
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 4), 4);
++    auto linked = Call(config, "test.gauntlet", "dungeons.floor_link_set",
++                       Json::array({Json{{"dungeon_id", 0}, {"floor_id", 3}, {"next_floor_id", 6}}}));
++    ASSERT_EQ(linked.status, moonmod::ApiCallStatus::Ok) << linked.message;
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 4), 6);  // the exit gate on floor 3
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 2), 2);  // any other floor change is left alone
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(1, 4), 4);  // and other dungeons
++    fixture.status->cur_floor = 6;
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 7), 7);
++    // one owner per floor
++    EXPECT_EQ(Call(config, "test.other", "dungeons.floor_link_set",
++                   Json::array({Json{{"dungeon_id", 0}, {"floor_id", 3}, {"next_floor_id", 5}}})).status,
++              moonmod::ApiCallStatus::Failed);
++    for (const Json &bad : {Json{{"dungeon_id", 9}, {"floor_id", 3}, {"next_floor_id", 5}},
++                            Json{{"dungeon_id", 0}, {"floor_id", 3}, {"next_floor_id", 99}},
++                            Json{{"dungeon_id", 0}, {"floor_id", 3}}}) {
++        EXPECT_EQ(Call(config, "test.gauntlet", "dungeons.floor_link_set", Json::array({bad})).status,
++                  moonmod::ApiCallStatus::InvalidArgument) << bad.dump();
++    }
++    fixture.status->cur_floor = 3;
++    auto cleared = Call(config, "test.gauntlet", "dungeons.floor_link_clear", Json::array({Json{{"dungeon_id", 0}, {"floor_id", 3}}}));
++    ASSERT_EQ(cleared.status, moonmod::ApiCallStatus::Ok) << cleared.message;
++    EXPECT_TRUE(cleared.value.at("removed").get<bool>());
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 4), 4);
++    // unloading the owner removes its links
++    ASSERT_EQ(Call(config, "test.gauntlet", "dungeons.floor_link_set",
++                   Json::array({Json{{"dungeon_id", 0}, {"floor_id", 3}, {"next_floor_id", 3}}})).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 4), 3);
++    config.api_owner_unloaded("test.gauntlet");
++    EXPECT_EQ(moonmod::ChronicleScriptFloorLevel(0, 4), 4);
++}
++
++TEST(MoonModGauntletEngine, AChestBonusOfMinusOneHundredBuildsNoChests) {
++    SaveFixture fixture;
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    moonmod::ConfigureChronicleApi(config);
++    using moonmod::Json;
++    auto barren = Call(config, "test.gauntlet", "dungeons.set_modifiers", Json::array({Json{{"chests", -100}}}));
++    ASSERT_EQ(barren.status, moonmod::ApiCallStatus::Ok) << barren.message;
++    EXPECT_EQ(barren.value.at("chests").get<int>(), -100);
++    EXPECT_EQ(Call(config, "test.gauntlet", "dungeons.set_modifiers", Json::array({Json{{"chests", -101}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(Call(config, "test.gauntlet", "dungeons.set_modifiers", Json::array({Json{{"rooms", -10}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    // another owner's bonus adds, and the total never drops below -100
++    auto both = Call(config, "test.other", "dungeons.set_modifiers", Json::array({Json{{"chests", 50}}}));
++    ASSERT_EQ(both.status, moonmod::ApiCallStatus::Ok) << both.message;
++    EXPECT_EQ(both.value.at("chests").get<int>(), -50);
++    config.api_owner_unloaded("test.other");
++    config.api_owner_unloaded("test.gauntlet");
++    auto cleared = Call(config, "test.gauntlet", "dungeons.set_modifiers", Json::array({Json::object()}));
++    ASSERT_EQ(cleared.status, moonmod::ApiCallStatus::Ok) << cleared.message;
++    EXPECT_EQ(cleared.value.at("chests").get<int>(), 0);
 +}
 diff --git a/port/src/tests/moonmod_georama_api_test.cpp b/port/src/tests/moonmod_georama_api_test.cpp
 new file mode 100644
