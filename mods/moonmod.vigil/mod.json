@@ -11,7 +11,7 @@
   "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"],
   "settings": [
     {"id": "evades", "name": "L2 evades (roll and backstep)", "type": "boolean", "default": true},
-    {"id": "evade_cost", "name": "Evade cost (weapon gauge, of 100)", "type": "integer", "default": 25, "min": 0, "max": 100, "step": 5},
+    {"id": "evade_cost", "name": "Evade cost (weapon gauge, of 100)", "type": "integer", "default": 35, "min": 0, "max": 100, "step": 5},
     {"id": "evade_cooldown", "name": "Evade cooldown (frames)", "type": "integer", "default": 30, "min": 0, "max": 120, "step": 2},
     {"id": "evade_commit", "name": "Frames after a blow before an evade can cut the swing", "type": "integer", "default": 6, "min": 0, "max": 60, "step": 1},
     {"id": "enemy_damage", "name": "Enemy damage (%)", "type": "integer", "default": 250, "min": 100, "max": 500, "step": 25},

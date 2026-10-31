@@ -241,13 +241,13 @@ do
   for c in pairs(CHARACTERS) do
     for _, trigger in ipairs({"dodge", "dodge_back"}) do
       local m = by[c .. "/" .. trigger]
-      if not (m and m.invincible == true and m.gauge == 25 and m.cooldown == 30 and m.cancel == true and m.cancel_after == 6 and m.wear == 0
+      if not (m and m.invincible == true and m.gauge == 35 and m.cooldown == 30 and m.cancel == true and m.cancel_after == 6 and m.wear == 0
               and m.hits == nil and S.animations[m.animation] and S.animations[m.animation].character == c) then
         all_ok = false
       end
     end
   end
-  check(all_ok, "each is untouchable, costs 25 gauge, cools down 30 frames, commits 6 frames, never attacks, uses its own motion")
+  check(all_ok, "each is untouchable, costs 35 gauge, cools down 30 frames, commits 6 frames, never attacks, uses its own motion")
   check(by["toan/dodge_back"].lunge_angle == 180 and by["toan/dodge"].lunge_angle == nil, "the backstep carries him back, the roll the way the stick points")
   check(by["xiao/dodge"].animation == "xiao_tumble" and by["xiao/dodge_back"].animation == "xiao_hop_shot", "Xiao tumbles and hops back")
   check(S.player_formulas["enemy-damage"] and S.player_formulas["enemy-damage"].value == 2.5, "enemies hit x2.5")

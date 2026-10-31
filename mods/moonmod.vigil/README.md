@@ -8,7 +8,7 @@ it and the engine work still to come are in [`VIGIL_PLAN.md`](../../VIGIL_PLAN.m
 
 | | |
 | --- | --- |
-| **L2: evade** | A roll the way the stick points, or a backstep with the stick at rest. Xiao, Ruby and Osmond tumble and hop back instead. You can't be hit while evading. Each evade costs **25 weapon gauge** and has a 30-frame cooldown, so an empty gauge means no evade. An evade can cut a swing short, but only 6 frames after its blow lands, so you commit to a swing. |
+| **L2: evade** | A roll the way the stick points, or a backstep with the stick at rest. Xiao, Ruby and Osmond tumble and hop back instead. You can't be hit while evading. Each evade costs **35 weapon gauge** and has a 30-frame cooldown. With the starting Dagger, four quick evades in a row empty the gauge, and L2 then waits for it to refill to 35. An evade can cut a swing short, but only 6 frames after its blow lands, so you commit to a swing. |
 | **The weapon gauge is your stamina** | It's the gauge under your weapon at the bottom left. Dark Cloud already spends it on combo swings (a follow-up needs 20 and costs 25), and refills it at your weapon's Speed. |
 | **Guard (lock on, then hold R1)** | The game's own guard. While you hold it, the gauge recovers at a quarter of its speed. |
 | **Enemies hit hard** | ×2.5 damage. |
@@ -34,7 +34,7 @@ again afterwards.
 Divine Beast Cave floors 1-3 as Toan, Vigil's defaults, nothing else gameplay-changing on.
 
 - [ ] L2 with the stick pushed rolls that way; at rest, he backsteps. Neither can be hit.
-- [ ] After four or five evades in a row the gauge is empty and L2 does nothing until it refills.
+- [ ] Four quick evades in a row empty the gauge, and L2 does nothing until it refills.
 - [ ] L2 right after a swing's blow cuts the swing. L2 before the blow doesn't.
 - [ ] Holding the guard visibly slows the gauge's refill.
 - [ ] Trading hits with a Skeleton Soldier loses. Evading or guarding and then hitting wins.

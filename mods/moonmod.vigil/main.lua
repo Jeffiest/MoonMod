@@ -91,7 +91,7 @@ local function evade_move(who, trigger, anim)
     id = "vigil_" .. anim, character = who, trigger = trigger, animation = anim,
     speed = shape.speed, lunge = shape.lunge, lunge_decay = shape.lunge_decay,
     invincible = true, wear = 0,
-    gauge = setting("evade_cost", 25),
+    gauge = setting("evade_cost", 35),
     cooldown = setting("evade_cooldown", 30),
     cancel = true, cancel_after = setting("evade_commit", 6),
     cues = {{at = 0, sound = "action"}},
