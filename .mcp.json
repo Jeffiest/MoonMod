@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "moonmod-animation-editor": {
+      "command": "python",
+      "args": ["tools/anim/editor/mcp_server.py"]
+    }
+  }
+}

@@ -8,6 +8,9 @@ through moonanim's own bake and motion_document, so a file from the editor is th
 authoring scripts. Only 127.0.0.1 is served, and files are written only under the repository's mods/ and examples/.
 
 Poses travel as glTF values in the rig's channel order: rotations (x, y, z, w), translations and scales (x, y, z).
+
+The bridge (/api/bridge/...) carries commands from mcp_server.py to the open page and its answers back, so an
+assistant poses and looks at the same page you are watching.
 """
 
 import argparse
@@ -17,6 +20,8 @@ import os
 import re
 import shutil
 import sys
+import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -163,9 +168,75 @@ def writable(rel):
     return full if inside and full.endswith(".json") else None
 
 
+class Bridge:
+    """Commands for the open page. Each page (an id per load) long-polls next() and posts each answer to answer();
+    call() queues a command and waits for its answer. A page that goes away says bye(), and what it took and hadn't
+    answered goes back on the queue for the next page."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.queue = []
+        self.taken = {}  # command id -> (page, command)
+        self.answers = {}
+        self.pages = {}  # page -> {"polls": open long-polls, "seen": time of the last}
+        self.gone = set()
+        self.last_id = 0
+
+    def connected(self):
+        now = time.time()
+        live = [p for p, v in self.pages.items() if p not in self.gone and (v["polls"] or now - v["seen"] < 5)]
+        return bool(live) or any(page not in self.gone for page, _ in self.taken.values())
+
+    def next(self, page, wait=20):
+        with self.cond:
+            info = self.pages.setdefault(page, {"polls": 0, "seen": 0.0})
+            info["polls"] += 1
+            try:
+                self.cond.wait_for(lambda: self.queue or page in self.gone, wait)
+            finally:
+                info["polls"] -= 1
+                info["seen"] = time.time()
+            if page in self.gone or not self.queue:
+                return None
+            cmd = self.queue.pop(0)
+            self.taken[cmd["id"]] = (page, cmd)
+            return cmd
+
+    def bye(self, page):
+        with self.cond:
+            self.gone.add(page)
+            self.pages.pop(page, None)
+            back = [cmd for cid, (p, cmd) in self.taken.items() if p == page and cid not in self.answers]
+            for cmd in back:
+                del self.taken[cmd["id"]]
+            self.queue[:0] = back
+            self.cond.notify_all()
+
+    def answer(self, reply):
+        with self.cond:
+            if self.taken.pop(reply.get("id"), None):
+                self.answers[reply["id"]] = reply
+                self.cond.notify_all()
+
+    def call(self, cmd, args, wait=90):
+        """The page's answer {ok, result | error}, or None if no page is open."""
+        with self.cond:
+            if not self.connected():
+                return None
+            self.last_id += 1
+            cid = self.last_id
+            self.queue.append({"id": cid, "cmd": cmd, "args": args})
+            self.cond.notify_all()
+            self.cond.wait_for(lambda: cid in self.answers, wait)
+            self.queue = [c for c in self.queue if c["id"] != cid]
+            self.taken.pop(cid, None)
+            return self.answers.pop(cid, None) or {"ok": False, "error": "the page didn't answer in %d s" % wait}
+
+
 class Handler(BaseHTTPRequestHandler):
     catalog = None
     play = None
+    bridge = Bridge()
 
     def log_message(self, fmt, *args):
         pass
@@ -204,6 +275,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not full or not os.path.exists(full):
                     return self.fail(404, "no such motion file")
                 return self.send(200, document_frames(self.catalog.rig(q["id"]), json.load(open(full, encoding="utf-8"))))
+            if url.path == "/api/bridge/next":
+                cmd = self.bridge.next(q.get("page", ""))
+                return self.send(200, cmd) if cmd else self.send(204, b"")
+            if url.path == "/api/bridge/state":
+                return self.send(200, {"connected": self.bridge.connected()})
             if url.path.startswith("/model/"):
                 return self.model(url.path[len("/model/"):])
             if url.path.startswith("/raw/"):
@@ -220,8 +296,20 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(403, "cross-origin request")
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-            if urllib.parse.urlparse(self.path).path == "/api/save":
+            path = urllib.parse.urlparse(self.path).path
+            if path == "/api/save":
                 return self.save(body)
+            if path == "/api/bridge/bye":
+                self.bridge.bye(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("page", [""])[0])
+                return self.send(200, {})
+            if path == "/api/bridge/result":
+                self.bridge.answer(body)
+                return self.send(200, {})
+            if path == "/api/bridge/call":
+                reply = self.bridge.call(body["cmd"], body.get("args") or {})
+                if reply is None:
+                    return self.fail(409, "no editor page is open")
+                return self.send(200, reply)
             return self.fail(404, "not found")
         except Exception as e:  # noqa: BLE001
             return self.fail(500, "%s: %s" % (type(e).__name__, e))

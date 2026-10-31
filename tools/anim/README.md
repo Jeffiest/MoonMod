@@ -16,7 +16,8 @@ follow [docs/ANIMATION_GUIDE.md](../../docs/ANIMATION_GUIDE.md) (a full walkthro
 - `party_moves.py`: Goro's and Ungaga's melee set and Ruby's and Osmond's caster set from one spec per rig and one
   recipe per kind of fighter (`python party_moves.py <mainchara> <out> [sheets] [goro,ungaga,ruby,osmond]`).
 - `editor/`: the animation editor, a page in your browser to pose, time and save motions by hand on any character
-  or monster (`python tools/anim/editor/server.py`; see its README).
+  or monster (`python tools/anim/editor/server.py`; see its README). `editor/mcp_server.py` lets an MCP client
+  (Claude Code reads the repository's `.mcp.json`) list, pose, retime, save and screenshot on the open page.
 - `vigil_moves.py`: Vigil's evades (Toan's dive roll).
 - `verify.py`: checks the conventions and the authored files against the game's data (any of the six characters).
 

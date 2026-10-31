@@ -22,7 +22,8 @@ Contents: [What you need](#what-you-need) · [How it works](#how-it-works-in-two
   the data creates them. Below, `<mainchara>` means that folder, for example `E:/DarkCloud/data/dun/mainchara`.
 - **Python 3.11 or newer.** No packages are needed. Blender isn't used (see [Other tools](#animations-from-other-tools)).
 - **Or pose by hand:** the [animation editor](../tools/anim/editor/README.md) opens any character or monster in your
-  browser, on the real model, and saves the same motion files.
+  browser, on the real model, and saves the same motion files. An assistant such as Claude Code can drive the same
+  page through the editor's MCP server (`tools/anim/editor/mcp_server.py`), posing and screenshotting while you watch.
 - The scripts in [`tools/anim`](../tools/anim):
 
 | Script | What it's for |
@@ -31,7 +32,7 @@ Contents: [What you need](#what-you-need) · [How it works](#how-it-works-in-two
 | `inspect_rig.py` | Lists a character's native motions and bones, and draws every native motion as a stick figure. Start here. |
 | `verify.py` | Checks your motion files against the game's data before you ship them. |
 | `toan_moves.py` | The Gauntlet's five Toan motions. A full, worked set to copy from. |
-| `editor/` | The animation editor: pose, time and save motions by hand in your browser. |
+| `editor/` | The animation editor: pose, time and save motions by hand in your browser, or have an assistant do it over MCP. |
 
 ## How it works, in two minutes
 

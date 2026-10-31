@@ -208,10 +208,15 @@ function fillSelect(sel, items) {
   }
 }
 
-// Frames the posed model: its bones, and its meshes as posed (a skinned mesh's own box is its bind pose).
+// Frames the posed model.
 function frameCamera() {
+  placeCamera(posedBox());
+}
+
+// The posed model's box: its bones, and its meshes as posed (a skinned mesh's own box is its bind pose). Some packs
+// keep helper nodes well away from the body; `meshesOnly` leaves the bones out.
+function posedBox(box = new THREE.Box3(), meshesOnly = false) {
   state.model.updateMatrixWorld(true);
-  const box = new THREE.Box3();
   const v = new THREE.Vector3();
   state.model.traverse((o) => {
     if (o.isSkinnedMesh) {
@@ -219,10 +224,14 @@ function frameCamera() {
       for (let i = 0; i < p.count; i += 7) box.expandByPoint(o.applyBoneTransform(i, v.fromBufferAttribute(p, i)).applyMatrix4(o.matrixWorld));
     } else if (o.isMesh) {
       box.expandByObject(o);
-    } else {
+    } else if (!meshesOnly) {
       box.expandByPoint(o.getWorldPosition(v));
     }
   });
+  return box;
+}
+
+function placeCamera(box) {
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const h = Math.max(size.y, size.x, size.z, 4);
@@ -469,8 +478,10 @@ async function save() {
     state.rig.files = info.files;
     fillSelect($("files"), info.files.map((f) => [f, f.replace(/^mods\//, "").replace("/resources/anims/", ": ")]));
     $("files").value = r.path;
+    return r;
   } catch (e) {
     status("Not saved: " + e.message, "bad");
+    throw e;
   }
 }
 
@@ -542,11 +553,25 @@ function onGizmoChange() {
   drawTimeline();
 }
 
+// The two bones a limb bends with. Dark Cloud's chains start on a bone at the same point as the joint below them
+// (Toan's chn18 and jnt18_1 are both the wrist), so bones on one spot count once; and a hand or foot point just past
+// its own bone (r_hand on the wrist) moves with that bone, bent by the two above it.
 function limbChain(i) {
   const end = state.nodes[i];
-  const knee = animatedAncestor(end);
-  const hip = knee && animatedAncestor(knee);
-  return hip ? { hip, knee, end } : null;
+  state.model.updateMatrixWorld(true);
+  const at = (o) => o.getWorldPosition(new THREE.Vector3());
+  const joints = [];
+  let last = at(end);
+  for (let o = animatedAncestor(end); o && joints.length < 3; o = animatedAncestor(o)) {
+    const p = at(o);
+    if (p.distanceTo(last) < 1e-3) continue;
+    joints.push({ o, p });
+    last = p;
+  }
+  if (joints.length < 2) return null;
+  const short = joints.length > 2 && at(end).distanceTo(joints[0].p) < 0.35 * joints[0].p.distanceTo(joints[1].p);
+  const [knee, hip] = short ? [joints[1].o, joints[2].o] : [joints[0].o, joints[1].o];
+  return { hip, knee, end };
 }
 
 function placeIkTarget() {
@@ -868,7 +893,7 @@ $("newMotion").onclick = () => {
   setMotion({ frames: [{ frame: 0, values }, { frame: 30, values: values.map((v) => v.slice()) }], length: 30, speed: 0.5 }, "new_move", null);
   status("A new motion: one pose held for 30 frames. Pose it and key it.", "good");
 };
-$("save").onclick = save;
+$("save").onclick = () => save().catch(() => {});
 $("play").onclick = () => togglePlay();
 $("loop").onclick = () => $("loop").classList.toggle("on");
 $("prev").onclick = () => { togglePlay(false); state.frame = Math.max(0, Math.round(state.frame) - 1); showFrame(); };
@@ -924,7 +949,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   const ctrl = e.ctrlKey || e.metaKey;
-  if (ctrl && e.key.toLowerCase() === "s") { e.preventDefault(); return save(); }
+  if (ctrl && e.key.toLowerCase() === "s") { e.preventDefault(); return save().catch(() => {}); }
   if (ctrl && e.key.toLowerCase() === "z") { e.preventDefault(); return restore(state.undo, state.redo); }
   if (ctrl && e.key.toLowerCase() === "y") { e.preventDefault(); return restore(state.redo, state.undo); }
   if (ctrl && e.key.toLowerCase() === "c") { state.clipboard = currentValues(); return status("Pose copied.", "good"); }
@@ -945,9 +970,324 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+// ---------------------------------------------------------------------------------------------------------------
+// Bridge: mcp_server.py's commands, through the server (/api/bridge). An assistant poses, keys, saves and looks at
+// this page while you watch it; every change it makes is one undo step. Bones are named as in the bone list (a name
+// the rig repeats gets "#node"); rotations are the bone panel's degrees (local, XYZ order); positions are in the
+// model's space (the travel preview's shift taken out), y up and the character facing +z.
+
+const r3 = (x) => Math.round(x * 1000) / 1000;
+const deg = (x) => Math.round(THREE.MathUtils.radToDeg(x) * 10) / 10;
+const EASE_NAMES = [null, "", "in", "out", "inout"];
+
+function boneLabels() {
+  const count = {};
+  state.nodes.forEach((o, i) => { if (pickable(i)) count[o.name] = (count[o.name] || 0) + 1; });
+  const labels = new Map();
+  state.nodes.forEach((o, i) => {
+    if (!pickable(i)) return;
+    const name = o.name || "node " + i;
+    labels.set(i, count[o.name] > 1 ? `${name}#${i}` : name);
+  });
+  return labels;
+}
+
+function findBone(ref, labels) {
+  if (typeof ref === "number" && labels.has(ref)) return ref;
+  const text = String(ref);
+  for (const [i, label] of labels) if (label === text) return i;
+  const lower = [...labels].filter(([, label]) => label.toLowerCase() === text.toLowerCase());
+  if (lower.length === 1) return lower[0][0];
+  throw new Error(`no bone "${ref}" on ${state.rig.id}; its bones: ${[...labels.values()].join(", ")}`);
+}
+
+function modelPosition(o) {
+  state.model.updateMatrixWorld(true);
+  return stage.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
+}
+
+function vec3(v, what) {
+  if (!Array.isArray(v) || v.length !== 3 || v.some((x) => typeof x !== "number" || !isFinite(x))) throw new Error(what + " takes [x, y, z]");
+  return v;
+}
+
+function goTo(frame) {
+  togglePlay(false);
+  const f = frame === undefined || frame === null ? Math.round(state.frame) : Math.round(frame);
+  if (!(f >= 0 && f <= state.length)) throw new Error(`frame ${frame} is outside the motion (0 to ${state.length})`);
+  state.frame = f;
+  showFrame();
+  return f;
+}
+
+function needRig() { if (!state.rig || !state.keys.length) throw new Error("the page is still loading"); }
+
+function summary() {
+  return {
+    rig: state.rig && { id: state.rig.id, name: state.rig.name, character: state.rig.character, playable: state.rig.playable },
+    motion: state.sourceName, path: $("path").value, length: state.length, speed: state.speed,
+    ticks: Math.round(state.length / state.speed), seconds: r3(state.length / state.speed / TICKS), frame: state.frame,
+    keys: state.keys.map((k) => (k.ease ? { frame: k.frame, ease: k.ease } : { frame: k.frame })),
+    undo_steps: state.undo.length,
+    travel: { show: $("travel").checked, lunge: Number($("lunge").value), decay: Number($("decay").value),
+      backward: $("backward").checked, distance: r3(travelAt(state.length / state.speed)) },
+  };
+}
+
+function poseOf(i, label) {
+  const o = state.nodes[i];
+  const ch = state.byNode.get(i) || {};
+  const out = { bone: label };
+  if (ch.rotation !== undefined) {
+    euler.setFromQuaternion(o.quaternion, "XYZ");
+    out.rotation = [deg(euler.x), deg(euler.y), deg(euler.z)];
+  }
+  if (ch.translation !== undefined) out.translation = [o.position.x, o.position.y, o.position.z].map(r3);
+  if (ch.scale !== undefined) out.scale = [o.scale.x, o.scale.y, o.scale.z].map(r3);
+  if (!state.byNode.has(i)) out.end = true; // a hand or foot: not animated itself, Limb reaches with it
+  out.position = modelPosition(o).toArray().map(r3);
+  return out;
+}
+
+const BRIDGE = {
+  status: async () => summary(),
+
+  open: async ({ rig, native, file, new: fresh, name, length }) => {
+    if (rig && rig !== state.rig?.id) {
+      if (![...$("rig").options].some((o) => o.value === rig)) throw new Error(`no rig "${rig}" (list_rigs names them)`);
+      $("rig").value = rig;
+      await openRig(rig);
+    }
+    needRig();
+    if (native !== undefined && native !== null) {
+      if (!state.rig.motions[native]) throw new Error(`${state.rig.id} has native motions 0 to ${state.rig.motions.length - 1}`);
+      $("native").value = native;
+      await openNative(Number(native));
+    } else if (file) {
+      await openFile(file);
+      $("files").value = file;
+    } else if (fresh) {
+      if (name) $("path").value = ""; // the default path follows the name
+      const n = Math.max(1, Math.round(length || 30));
+      const values = currentValues();
+      setMotion({ frames: [{ frame: 0, values }, { frame: n, values: values.map((v) => v.slice()) }], length: n, speed: 0.5 }, name || "new_move", null);
+    }
+    frameCamera();
+    status("Assistant opened " + state.sourceName, "good");
+    return summary();
+  },
+
+  get_pose: async ({ frame, bones }) => {
+    needRig();
+    const f = goTo(frame);
+    const labels = boneLabels();
+    const which = bones?.length ? bones.map((b) => findBone(b, labels)) : [...labels.keys()];
+    return { frame: f, key: keyIndexAt(f) >= 0, bones: which.map((i) => poseOf(i, labels.get(i))) };
+  },
+
+  set_pose: async ({ frame, from_native, bones = {}, reach = {}, ease }) => {
+    needRig();
+    const labels = boneLabels();
+    // check everything before changing anything
+    const sets = Object.entries(bones).map(([ref, v]) => {
+      const i = findBone(ref, labels);
+      const ch = state.byNode.get(i) || {};
+      for (const k of Object.keys(v)) if (!["rotation", "turn", "translation", "move"].includes(k)) throw new Error(`${labels.get(i)}: "${k}" isn't rotation, turn, translation or move`);
+      if ((v.rotation || v.turn) && ch.rotation === undefined) throw new Error(`${labels.get(i)} has no rotation of its own; reach with it instead`);
+      if ((v.translation || v.move) && ch.translation === undefined) throw new Error(`the motion doesn't move ${labels.get(i)}, only turns it`);
+      for (const k of ["rotation", "turn", "translation", "move"]) if (v[k]) vec3(v[k], `${labels.get(i)}.${k}`);
+      return [i, v];
+    });
+    const reaches = Object.entries(reach).map(([ref, at]) => {
+      const i = findBone(ref, labels);
+      const chain = limbChain(i);
+      if (!chain) throw new Error(`${labels.get(i)} needs two animated bones above it to reach`);
+      return [i, chain, new THREE.Vector3(...vec3(at, `reach.${labels.get(i)}`))];
+    });
+    if (ease !== undefined && !EASE_NAMES.includes(ease)) throw new Error('ease is null, "in", "out" or "inout"');
+    let base = null;
+    if (from_native) {
+      const data = await api(`/api/native?id=${state.rig.id}&motion=${from_native.motion}`);
+      const fr = data.frames[from_native.frame || 0];
+      if (!fr) throw new Error(`native motion ${from_native.motion} has frames 0 to ${data.frames.length - 1}`);
+      base = fr.values;
+    }
+    const f = goTo(frame);
+    pushUndo();
+    const key = keyHere();
+    if (base) { key.values = base.map((v) => v.slice()); showFrame(); }
+    if (ease !== undefined && f > 0) key.ease = ease || null;
+    const rad = (d) => d.map((x) => THREE.MathUtils.degToRad(x));
+    for (const [i, v] of sets) {
+      const o = state.nodes[i];
+      if (v.rotation) o.quaternion.setFromEuler(new THREE.Euler(...rad(v.rotation), "XYZ"));
+      if (v.turn) o.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(...rad(v.turn), "XYZ")));
+      if (v.translation) o.position.set(...v.translation);
+      if (v.move) o.position.add(new THREE.Vector3(...v.move));
+      storeNode(i);
+    }
+    const reached = [];
+    for (const [i, chain, at] of reaches) {
+      solveLimb(chain, stage.localToWorld(at.clone()));
+      storeNode(nodeIndex(chain.hip));
+      storeNode(nodeIndex(chain.knee));
+      const now = modelPosition(chain.end);
+      reached.push({ bone: labels.get(i), at: now.toArray().map(r3), off_by: r3(now.distanceTo(at)),
+        bent: [labels.get(nodeIndex(chain.hip)), labels.get(nodeIndex(chain.knee))] });
+    }
+    showFrame();
+    const touched = new Set([...sets.map(([i]) => i), ...reaches.flatMap(([, c]) => [nodeIndex(c.hip), nodeIndex(c.knee), nodeIndex(c.end)])]);
+    status(`Assistant keyed frame ${f}`, "good");
+    return { frame: f, keys: state.keys.length, bones: [...touched].map((i) => poseOf(i, labels.get(i))), reached };
+  },
+
+  edit: async ({ undo, redo, delete: del, move, ease, length, speed, thin, travel }) => {
+    needRig();
+    togglePlay(false);
+    const notes = [];
+    for (let n = 0; n < (undo || 0); n++) restore(state.undo, state.redo);
+    for (let n = 0; n < (redo || 0); n++) restore(state.redo, state.undo);
+    if (del?.length || move?.length || Object.keys(ease || {}).length || length) pushUndo();
+    for (const f of del || []) {
+      const i = keyIndexAt(f);
+      if (i <= 0) { notes.push(i === 0 ? "frame 0 always has a key" : `no key at ${f}`); continue; }
+      state.keys.splice(i, 1);
+    }
+    for (const [from, to] of move || []) {
+      const i = keyIndexAt(from);
+      if (i <= 0 || !(to > 0 && to <= state.length) || keyIndexAt(Math.round(to)) >= 0) { notes.push(`couldn't move the key at ${from} to ${to}`); continue; }
+      state.keys[i].frame = Math.round(to);
+      state.keys.sort((a, b) => a.frame - b.frame);
+    }
+    for (const [f, e] of Object.entries(ease || {})) {
+      const i = keyIndexAt(Number(f));
+      if (i <= 0 || !EASE_NAMES.includes(e)) { notes.push(`no ease set at ${f}`); continue; }
+      state.keys[i].ease = e || null;
+    }
+    if (length) {
+      const n = Math.max(1, Math.round(length));
+      const lastKey = state.keys[state.keys.length - 1].frame;
+      if (n < lastKey) notes.push(`a key sits at ${lastKey}, so the length stays ${state.length}`);
+      else state.length = n;
+      $("length").value = state.length;
+    }
+    if (speed) { state.speed = Math.max(0.05, Math.min(4, speed)); $("speed").value = state.speed; }
+    if (thin) thinKeys();
+    if (travel) {
+      if (travel.show !== undefined) $("travel").checked = !!travel.show;
+      if (travel.lunge !== undefined) $("lunge").value = travel.lunge;
+      if (travel.decay !== undefined) $("decay").value = travel.decay;
+      if (travel.backward !== undefined) $("backward").checked = !!travel.backward;
+    }
+    state.selectedKey = Math.max(0, Math.min(state.selectedKey, state.keys.length - 1));
+    state.frame = Math.min(state.frame, state.length);
+    updateTravelNote();
+    showFrame();
+    return { ...summary(), notes };
+  },
+
+  save: async ({ path, sync }) => {
+    needRig();
+    if (path) $("path").value = path;
+    if (sync !== undefined) $("sync").checked = !!sync;
+    return await save();
+  },
+
+  // Renders frames from a camera of its own (or yours, view "current") and gives them back as one PNG, tiled.
+  screenshot: async ({ frame, frames, view = "three-quarter", width, height, bones = false, columns }) => {
+    needRig();
+    togglePlay(false);
+    const list = (frames?.length ? frames : [frame ?? Math.round(state.frame)]).map((f) => Math.max(0, Math.min(state.length, Math.round(f))));
+    const many = list.length > 1;
+    const w = Math.round(Math.max(96, Math.min(1600, width || (many ? 320 : 720))));
+    const h = Math.round(Math.max(96, Math.min(1600, height || (many ? 360 : 640))));
+    const cols = Math.max(1, Math.min(list.length, columns || 6));
+    const rows = Math.ceil(list.length / cols);
+    const dirs = { front: [0, 0.15, 1], back: [0, 0.15, -1], left: [1, 0.15, 0], right: [-1, 0.15, 0], top: [0, 1, 0.001],
+      "three-quarter": [0.6, 0.3, 0.75] };
+    if (view !== "current" && !dirs[view]) throw new Error(`view is one of current, ${Object.keys(dirs).join(", ")}`);
+    const keep = { frame: state.frame, pos: camera.position.clone(), quat: camera.quaternion.clone(), target: orbit.target.clone(),
+      near: camera.near, far: camera.far, skel: $("showSkel").checked, gizmo: gizmo.visible, ratio: renderer.getPixelRatio() };
+    const sheet = document.createElement("canvas");
+    sheet.width = w * cols; sheet.height = h * rows;
+    const ctx = sheet.getContext("2d");
+    ctx.fillStyle = "#1a1c20";
+    ctx.fillRect(0, 0, sheet.width, sheet.height);
+    try {
+      $("showSkel").checked = !!bones;
+      gizmo.visible = false;
+      if (view !== "current") {
+        const box = new THREE.Box3();
+        for (const f of list) { state.frame = f; showFrame(); posedBox(box, true); }
+        const center = box.getCenter(new THREE.Vector3());
+        const radius = Math.max(2, box.getSize(new THREE.Vector3()).length() / 2);
+        const half = THREE.MathUtils.degToRad(camera.fov / 2);
+        const fit = Math.min(half, Math.atan(Math.tan(half) * w / h));
+        camera.position.copy(center).add(new THREE.Vector3(...dirs[view]).normalize().multiplyScalar(radius / Math.sin(fit) * 1.05));
+        camera.near = radius / 100; camera.far = radius * 100;
+        camera.lookAt(center);
+      }
+      renderer.setPixelRatio(1);
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      ctx.font = "bold 15px system-ui";
+      list.forEach((f, n) => {
+        state.frame = f;
+        showFrame();
+        renderer.render(scene, camera);
+        const x = (n % cols) * w, y = Math.floor(n / cols) * h;
+        ctx.drawImage(renderer.domElement, x, y);
+        if (many) {
+          ctx.fillStyle = keyIndexAt(f) >= 0 ? "#e0a63a" : "#f0f0f0";
+          ctx.fillText(String(f), x + 8, y + 20);
+        }
+      });
+    } finally {
+      $("showSkel").checked = keep.skel;
+      gizmo.visible = keep.gizmo;
+      camera.position.copy(keep.pos); camera.quaternion.copy(keep.quat); orbit.target.copy(keep.target);
+      camera.near = keep.near; camera.far = keep.far;
+      renderer.setPixelRatio(keep.ratio);
+      resize();
+      state.frame = keep.frame;
+      showFrame();
+    }
+    return { png: sheet.toDataURL("image/png").split(",")[1], frames: list, view, width: sheet.width, height: sheet.height };
+  },
+};
+
+// This load of the page: a reload or a closed tab says goodbye, so the server hands what it held to the next page.
+const PAGE = Math.random().toString(36).slice(2);
+window.addEventListener("pagehide", () => navigator.sendBeacon("/api/bridge/bye?page=" + PAGE));
+
+async function bridgeLoop() {
+  for (;;) {
+    let cmd;
+    try {
+      const res = await fetch("/api/bridge/next?page=" + PAGE);
+      if (res.status === 404) return; // a server from before the bridge
+      if (res.status !== 200) continue;
+      cmd = await res.json();
+    } catch (e) {
+      await new Promise((r) => setTimeout(r, 3000)); // the server is down or restarting
+      continue;
+    }
+    let reply;
+    try {
+      if (!BRIDGE[cmd.cmd]) throw new Error("unknown command " + cmd.cmd);
+      reply = { id: cmd.id, ok: true, result: await BRIDGE[cmd.cmd](cmd.args || {}) };
+    } catch (e) {
+      reply = { id: cmd.id, ok: false, error: e.message };
+      status("Assistant: " + e.message, "bad");
+    }
+    await fetch("/api/bridge/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reply) }).catch(() => {});
+  }
+}
+
 setMode("rotate");
 resize();
 requestAnimationFrame(tick);
-loadRigList().catch((e) => status("Couldn't load: " + e.message, "bad"));
+loadRigList().catch((e) => status("Couldn't load: " + e.message, "bad")).finally(bridgeLoop);
 // for inspecting from the console
-window.moonanimEditor = { state, valuesAt, applyValues, select, setMode, ikTarget, onGizmoChange, showFrame, openRig, openNative };
+window.moonanimEditor = { state, valuesAt, applyValues, select, setMode, ikTarget, onGizmoChange, showFrame, openRig, openNative, BRIDGE };
