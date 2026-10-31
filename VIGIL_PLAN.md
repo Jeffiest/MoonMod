@@ -49,13 +49,18 @@ PR 15 covers most of what the first version of this plan listed as missing engin
 ### What is still missing (the engine work Vigil adds)
 
 There is **no event or hook for the player being hit**. The only player-side hit signal is `game.player.guarded`, and
-it fires only for fatal hits. That is the one big addition. There are two smaller ones.
+it fires only for fatal hits. S0 (§7) found that the guard and the stamina bar both already exist natively. They only
+need their rules changed, so the engine work is smaller than first thought, and it can be **rule data instead of
+per-hit Lua callbacks**.
 
-| # | Operation | Why | Size |
+| # | Operation | Why | Where (S0) |
 | --- | --- | --- | --- |
-| E1 | **`native.player.hit` script hook** (or a `player.hit_filter`): runs before an enemy hit lands on the player. The context has the attacker's `entity`, raw `damage`, `heavy`, `element`, `angle` (attacker relative to the player's facing) and `guarding`. It returns `{damage?, recoil_frames?, cancel?}`. | A guard that only covers the front, stamina charged per blocked hit, guard break and the parry window. Without it, a blocked hit for 0 can't be seen at all. | The critical path. Damage resolves in the player code under `port/src/game/dun/` (S0 finds the exact spot). |
-| E2 | **A stamina gate on native combo swings**: a `combo` move trigger, or `tuning_set{attack_gauge}` so each native swing spends action gauge and won't start without it. | `gauge` already gates mod moves, but basic combo swings bypass it. Stamina can't truly be required until they don't. | Small. The move runner already intercepts combo swings for `cancel` and `combo_finisher`. |
-| E3 | **`player.gauge_get/set`** and a small **`player.state()`** (action, guarding, locked-on, frame in the action) | To show the action gauge as the stamina bar, refund it after a parry, and know when the player is guarding. | Small reads. |
+| E1 | **`player.guard_rules_set{arc, cost_base, cost_per_damage, chip, break_recoil, parry_frames, without_lock}`** (owner-scoped, cleared on unload), plus a **`game.player.hit`** event `{entity, damage, kind, blocked, parried, broke, angle}` after each hit. | The native guard blocks everything from every side for free. These rules give it a front-only arc, a gauge cost per blocked hit, chip damage, guard break and a parry window. The event lets Lua react (riposte window, death drop, stats). | `BtCheckDamageProc` in `port/src/game/dun/gameloop.cpp`: the block test is `action_on == 6` / `action_no == 9`. The guard is entered in `movechara.cpp` (R1 with `lockOnTargetFlag`). |
+| E2 | **`player.gauge_rules_set{hit_refill, first_swing_cost, min_to_swing, swing_cost, refill_delay}`** | The gauge already gates combo follow-ups (needs 20, costs 25), but **a hit refills it to 100** and the first swing is free. Souls needs the opposite on both. | The refill on hit is in `BtCheckDamageProc`. Swing costs are in `charakey.cpp` (`*Key_On` / `*Key_Play`), and regen is in `gameloop.cpp` near the `gauge_refill` scale. |
+| E3 | **`player.gauge_get/set`** and **`player.state()`** (`action_on`, `action_no`, guarding, locked on, recoil and invincible frames) | Refunds on a parry, spending from Lua (switching, items), and HUD and logic that know what the player is doing | `BtActStatus` (`include/game/btactstatus.hpp`) |
+
+A per-hit Lua hook (`native.player.hit`, like `native.monster.run`) stays an option if the data rules prove too
+rigid. Data rules are cheaper to run, easier to test, and can't stall a hit on a slow script.
 
 Each is added the way *Extending the engine* walks through `dungeons.set_rest_room`: catalog it in `api.cpp`, dispatch
 and handle it in `chronicle_adapter.cpp`, release it on unload, add engine tests, document it in `docs/API.md`, teach
@@ -68,13 +73,20 @@ the fake game, then regenerate the patch. Chronicle Two reports them unsupported
 These are first-pass numbers. Each one is a mod setting (*the rules the bundled mods follow*, rule 5).
 
 ### Stamina is the action gauge
-Use Dark Cloud's own action gauge as the stamina pool. Moves already spend it with `gauge`, `gauge_refill` already
-tunes its regen, and E2 makes native swings spend it too. Until E2 and E3 land, the S1 prototype keeps a Lua pool and
-draws it with `render.bar_register`.
+S0 settled this: **Dark Cloud already has a stamina bar.** It's the weapon gauge drawn bottom-left (`TEX_WepGage`).
+- Combo follow-ups need 20 and cost 25.
+- Goro needs a full bar to swing at all.
+- A held swing that becomes a charge empties it.
+- It refills at the weapon's **Speed** / 30 per frame. Toan and Ungaga refill at a quarter of that and not at all
+  mid-swing; Xiao and Ruby refill ×1.5.
+
+So heavy weapons already recover stamina slowly, like Souls equip weight, and the player already sees the bar. Vigil
+changes its rules (E2) instead of adding a second bar. Until E2 lands, the S1 prototype uses `gauge` on moves and
+`gauge_refill`.
 
 | Action | Cost (of 100) | How it's charged |
 | --- | --- | --- |
-| Light swing | 18 | E2 (prototype: a Lua charge on the attack button's press edge) |
+| Light swing | 25 (first swing too, via E2) | native for follow-ups; E2 adds the first swing |
 | Heavy (R2) / charge release | 35 | the move's `gauge` |
 | Roll / backstep | 25 | the move's `gauge`, so an empty bar means no evade |
 | Counter (guard + attack) | 20 | the move's `gauge` |
@@ -83,6 +95,8 @@ draws it with `render.bar_register`.
 | **Exhausted** at 0 | 1.5 s | no evade (the gauge gate), the guard breaks, swings do 30% damage (a formula) |
 
 ### Blocking (the native lock-on + R1 guard)
+- Natively it needs a lock-on target and blocks **everything**, from any side, for free (S0). E1 changes that.
+- Allow guarding without a lock-on (`without_lock`), as in Souls.
 - Covers about 120° in front. A hit from the side or behind gets through at full damage (E1's `angle`).
 - Stops 70-85% by weapon: Goro's hammers block best, Ruby and Osmond worst.
 - **Guard break**: a blocked hit that would empty the gauge knocks you down with a long recoil (`recoil_frames`).
@@ -144,7 +158,7 @@ Each gate needs its automated checks green and a playtest checklist ticked befor
   (and is it drawn anywhere)? What does the native `stamina` ailment do?
 - In `port/src/game/dun/`: find where enemy hits resolve on the player (the anchor for E1), and where combo swings
   start (the anchor for E2). The move runner's combo-cancel hook is a good lead.
-- **Output:** a findings note appended to this file.
+- **Output:** §7. The source half is done; the in-game half still needs the game.
 
 ### S1: Lua prototype on PR 15's API
 - `mods/moonmod.vigil/`, scaffolded with `tools/moonfactory.py new` and following *Your first mod* (`try` and `call` guards).
@@ -202,13 +216,92 @@ Each gate needs its automated checks green and a playtest checklist ticked befor
 - **One owner per trigger per character.** Vigil and the Gauntlet both want L2 and guard + attack. Releasing them
   during sandbox sessions handles this, but it needs a test.
 - **Native AI was never designed to be punished.** Fliers and ranged enemies may need full takeovers.
-- **The action gauge may already mean something** (Xiao's and the Gauntlet's moves spend 100 of it). S0 decides
-  whether to adopt it or keep a separate Lua pool.
+- **Changing the action gauge changes every character.** Its per-character rules (Goro's full-bar swing, Osmond's gun
+  modes, Jinn's special) all read it, so E2's rules need a pass for each character in S6.
 
-## 6. Open questions
+## 6. Decisions and open questions
 
-1. Should weapon durability stay? It's a second, slower resource on top of stamina.
-2. Should the death drop include weapon ABS, or only Gilda?
-3. How many floors between Rest floors: 3, or one per dungeon section?
-4. Should Vigil also offer a sandbox title mode, a "Vigil Trial" like the Gauntlet, for testing balance away from the
+**Decided:** weapon durability stays. It's the slow resource to stamina's fast one, and Dark Cloud's weapon that breaks
+for good is already Souls-grade punishment. Repair Powder is the scarce counterweight: limit how much is sold, and add
+it to Rest-floor shops.
+
+1. Should the death drop include weapon ABS, or only Gilda?
+2. How many floors between Rest floors: 3, or one per dungeon section?
+3. Should Vigil also offer a sandbox title mode, a "Vigil Trial" like the Gauntlet, for testing balance away from the
    story save?
+
+---
+
+## 7. S0 findings (source half)
+
+Read from Chronicle `9418a550` with PR 15's `moonfactory-chronicle.patch` applied. The in-game half still needs the
+disc image and a GPU (see the end of this section).
+
+### The guard (`movechara.cpp`, `BtCheckDamageProc`)
+- **Entering it:** R1 while **locked on** (`lockOnTargetFlag`), with movement and water free and no action running. It
+  runs `action_on = 6`: raise (action 8, motion 8), hold (action 9, `guard_mode = 5`), lower on release (action 0xA).
+  Losing the lock drops it. While holding, the walk is ×0.4 (motion 0x21).
+- **What it stops:** everything. A light hit (`kind` 2, 80 recoil) or a trap (`kind` 4) is blocked during **any** guard
+  phase, raising and lowering included. A heavy hit (`kind` 3, 160 recoil) is blocked only while the guard is
+  held (action 9). A blocked hit costs nothing, deals no damage, pushes the player back, and plays `SE_HIT_BLOCKED`.
+  **There's no angle test**, so attacks from behind are blocked too.
+- **What gets through anyway:** the ailment rolls (Freeze, Poison, Curse, Goo, and the hit that steals a fifth of your
+  Gilda) run **before** the block test, so a guard doesn't stop them. That's a ready-made Souls-style "guard doesn't
+  stop the poison".
+
+### The action gauge (`charakey.cpp`, `gameloop.cpp`)
+- It's the stamina bar described in §3: a follow-up needs 20 and costs 25 (Toan's line), and some lines need 40 and
+  cost 20. Goro needs 100. Jinn (the special) needs 100. A held swing becomes a charge and empties it.
+- Refill per frame = weapon Speed / 30 (at least 1), ×0.5 under Goo, ×2 under "Stamina", then the per-character
+  multipliers, then MoonMod's `gauge_refill`. `refill_frames` already counts frames since the last swing, which is the
+  hook for a regen delay.
+- **Any hit, blocked or not, refills it to 100** and clears `gauge_exhausted`. That's the opposite of Souls (E2).
+
+### Hits and recoil (`BtCheckDamageProc`)
+- Damage = the hit's damage (after MoonMod's monster `damage_scale`) − defense, at least 0. The player damage formulas
+  and `fatal_guard` apply inside `CUserStatus::AddNowLife` (`dngstatusdata.cpp`).
+- **Recoil frames are also invulnerability:** the whole check is skipped while `recoil_frames` or `invincible_frames`
+  is above 0. A heavy hit gives 160 frames (2.7 s) of both, a light one 80. That mercy is very un-Souls, but cutting
+  `recoil_scale` also shortens the stun, which is what we want: get hit, recover fast, and the next hit can land.
+  Tune `recoil_scale` to about 0.4 and measure in S1.
+- A light hit with the stick pushed hard doesn't stagger at all (`action_on = 0`, motion 0x1D): Dark Cloud's own
+  poise, of a sort.
+
+### The "Stamina" ailment is a buff
+In this code `AILMENT_STAMINA` **doubles** the player's swing damage, defense (`guard *= 2`) and gauge refill. Monsters
+inflict it at 65% on hits flagged `0x1000`. Either the name is a misreading, or Dark Cloud's "Stamina" status is
+Power Up. Vigil can't use it as an "Exhausted" state. Use the HUD's `stamina` badge for Exhausted, and consider
+`status_immune{stamina}` so enemies stop handing out buffs.
+
+### Durability (`hitvalue.cpp`, `shot_freefuncs.cpp`)
+Wear is per hit and warns at 10% and 5%. The rest is as documented in the API.
+
+### Still needs the game (the in-game half of S0)
+1. Does the Gauntlet's evade `gauge` cost read right against the native bar? The bar is drawn only below 100, so
+   watch it drain and refill.
+2. How a heavy hit against a raising guard (action 8) looks and feels.
+3. Recoil at `recoil_scale` 0.4: does a stun-lock become possible against packs?
+4. Which Divine Beast Cave enemies use heavy (`kind` 3) hits. Those are the ones a raised guard must be fully up for.
+
+---
+
+## 8. More Dark Souls (idea backlog, ranked)
+
+| # | Idea | Why it's Souls | How | Cost |
+| --- | --- | --- | --- | --- |
+| 1 | **Getting hit drains stamina instead of refilling it**, and the first swing costs | Trades and panic-mashing become wrong | E2 | engine, small |
+| 2 | **No pausing to heal.** The item menu pauses the game; Souls never does. In combat, heal only from quick slots, with a drink delay that leaves you open. | Healing becomes a read of the enemy, not a menu | Lock the pause menu's item use while `combat.get().in_combat`. The Controls mod's quick-item keys plus a move with a drink motion (`player.move_play`). | engine, small (menu lock) |
+| 3 | **Enemy poise.** Dark Cloud enemies flinch on every hit, so you can stun-lock them. Give each a poise value. Below it, a hit doesn't interrupt (skip program 110 in `native.monster.run`). Breaking it staggers (`stop`). | Enemies that trade back; you pick openings | Lua: monster takeover plus a per-entity poise table | Lua |
+| 4 | **Backstabs and ripostes.** Behind an enemy (its `GET_ROTATION` against your position) the attack becomes a critical, ×3. After a parry, Counter is the riposte. | The signature reward for reading and positioning | Lua: a `lock_attack` move plus a one-shot target formula | Lua, plus a motion |
+| 5 | **Shortcuts that open from one side** | Souls level design in a random dungeon | `set_shortcuts` already loops dead-ends back with keyed doors. Make the key drop on the far side. | Lua |
+| 6 | **Rest floors as bonfires**: resting refills heals and the ember, and you **level up only there** (spend Gilda on the skill tree) | Gilda becomes Souls: currency and XP at risk at once | Rest floor recipe plus `ui.sheet_set`, with spending gated to the rest floor | Lua |
+| 7 | **Fog-gate bosses with a name banner and a bottom HP bar** | The boss walk-in | Warden room plus `ui.boss_card` ("DRAN, THE SCORCHED BEAST"). An HP bar along the bottom of the screen is a small engine addition (`render.bar_register` is top-left only). | Lua, plus a small engine addition |
+| 8 | **Summon signs**: before a Warden, pay to call a party member as an AI companion | Co-op help, offline | `party.companion_set` (PR 15) | Lua |
+| 9 | **"YOU DIED"** | The ritual | `ui.boss_card` on defeat, before the game-over fade | Lua |
+| 10 | **No minimap** | Learning the space | `tuning_set{map_hidden = true}`, as a setting | Lua |
+| 11 | **Ailment build-up** instead of a 65% coin flip | Readable status threats | Replace the roll in `BtCheckDamageProc` with a per-ailment meter | engine, medium |
+| 12 | **Terse lore**: cryptic weapon cards and Rest-floor NPC lines | Souls tone | `weapons.style_set{details}`, `text.set`, `dungeon_npc_set` | writing |
+| 13 | **NG+**: after Dark Genie, a new cycle with harder floors | Replay | Dungeon+ tiers, or Vigil's own scaling | Lua |
+| 14 | **Heavy weapons as equip load**: low Speed already means slow gauge regen. Show it on the weapon card and lean on it in balance. | Build identity | Already native. Surface it with `weapons.style_set`. | writing |
+
+Recommended for the first pass: 1-6. They change how every fight plays. 7-10 are cheap feel wins for S5. 11-14 can wait.
