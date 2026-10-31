@@ -231,6 +231,10 @@ it to Rest-floor shops.
 dungeon (§9) they're **shrines**: the native healing-spring rooms (map parts 32-35) placed along the path. **Town is
 reachable only from a shrine.**
 
+**Decided (Vigil World):** chosen when a save is started, never toggled mid-game. Monsters respawn on rest and on
+death, as in Souls; the slow trickle stays a setting, off by default. Demon Shaft stays floor-by-floor as the endless
+challenge.
+
 1. Should Vigil also offer a sandbox title mode, a "Vigil Trial" like the Gauntlet, for testing balance away from the
    story save?
 
@@ -372,7 +376,7 @@ budget allows. *Extending the engine*'s rule is to raise the wall, not obey it, 
 ### Respawns
 - **On rest and on death**, everything respawns, as in Souls (W-d).
 - Optionally a **slow trickle**: a zone you've left refills one monster every few minutes, up to its roster. This is a
-  setting, default off.
+  setting, off by default (decided).
 - Key carriers and Wardens stay dead once beaten; their gates stay open.
 
 ### Difficulty that never goes soft ("floor scaling")
@@ -391,7 +395,8 @@ weapon's attack and max HP.
   option kept in the save), not a toggle mid-game. A save started without it stays a normal Dark Cloud save.
 - It owns `set_layout`, `set_zones` and the exit rules while active. Dungeon+ must stand down its layout and tier
   features in a Vigil World save; that needs a test.
-- Demon Shaft (100 floors, no atla) stays floor-by-floor, as the "endless" challenge, or becomes W2's stress test.
+- Demon Shaft (100 floors, no atla) stays floor-by-floor, as the endless challenge (decided). W2's stress test is a
+  regular dungeon instead.
 
 ### Order
 W1 comes after the combat core (S1-S3), since the world only matters if the fighting is right. Suggested gates:
