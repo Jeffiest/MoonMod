@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.opar-housetest",
+  "name": "Opar house scene test",
+  "version": "0.1.0",
+  "author": "Jeffiest",
+  "description": "For testing only: marks baby Opar's Atla as found and gives the item the cat's scene asks for, so the house scene (darkcloud --jump house:i01h01@150) plays with him in it.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write"]
+}

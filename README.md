@@ -60,6 +60,11 @@ image; nothing from either game is included here.
 A mod is a folder with a manifest and a Lua script, run in its own sandbox (no `io`, `os`, `debug` or `package`,
 a memory limit and an instruction budget per callback).
 
+**The [modder's guide](docs/modding/README.md) is the place to start.** It walks through a first mod, has recipes for
+what the bundled mods do (game modes, floors, rooms, bosses, NPCs, weapons, shops, new heroes), shows how to add an
+operation to the engine when Lua isn't enough, and how to test a mod outside and inside the game. The steps below are
+the short version.
+
 1. **Start from the template.** From this repository:
 
    ```powershell
@@ -91,7 +96,9 @@ a memory limit and an instruction budget per callback).
 5. **Go further.** [`examples/first-steps`](examples/first-steps/) is an event-driven quest and skill tree,
    [`examples/weapon-quest-reward`](examples/weapon-quest-reward/) hands out a native weapon,
    [`examples/horde-250`](examples/horde-250/) and [`examples/maze-50`](examples/maze-50/) show the raised monster
-   and floor limits, and the bundled mods in [`mods/`](mods/) are complete, shipping packages. Model and texture
+   and floor limits, [`examples/new-move`](examples/new-move/) gives Toan a new animated attack (walked through in
+   the [animation guide](docs/ANIMATION_GUIDE.md)), and the bundled mods in [`mods/`](mods/) are complete, shipping
+   packages. Model and texture
    replacements are covered in [docs/MODEL_REPLACEMENTS.md](docs/MODEL_REPLACEMENTS.md); native C plugins (opt-in,
    separately trusted by the player) in the [Native SDK](docs/NATIVE_SDK.md).
 
@@ -108,9 +115,9 @@ a memory limit and an instruction budget per callback).
 - Both ports expose an owned Lua override at the active scene event-program runner. Mods can inspect the hook, skip a selected program, or call that program's native implementation once from the override callback. Other native script interpreters remain unsupported.
 - Ready-to-copy [First Steps](examples/first-steps/) and [Weapon Quest Reward](examples/weapon-quest-reward/) examples for both ports. Native package tests load First Steps to verify its event-driven quest and skill tree; the weapon example shows game-specific native IDs and reports the payout result.
 
-The catalog is broader than the current adapters. Authored locations and independent dungeon graphs, authored Georama geometry/assets, mod-created playable characters, authored model and standalone animation assets, fighting styles, other native script interpreters, renderer hooks, Chronicle velocity writes, and collision queries remain unsupported and return explicit reasons. Chronicle supports data-only Georama variants that inherit a loaded native solid piece; authored geometry and custom model assets remain open. Fighting-style definitions, animation API expansion, authored animation assets, and rig work are deferred until model rigging is in scope. Existing embedded model-motion playback on mod-spawned enemies remains available as a frozen, verified baseline. Both games also support bounded orbit changes on an active dungeon follow camera; camera render callbacks and draw layers remain unsupported. Read the [delivery roadmap](docs/ROADMAP.md) for the active gaps.
+The catalog is broader than the current adapters. Authored locations and independent dungeon graphs, authored Georama geometry/assets, mod-created playable characters, authored model and standalone animation assets, fighting styles, other native script interpreters, renderer hooks, Chronicle velocity writes, and collision queries remain unsupported and return explicit reasons. Chronicle supports data-only Georama variants that inherit a loaded native solid piece; authored geometry and custom model assets remain open. Chronicle's playable characters can take authored motions (`animations.player_register` and `player.moves_set`; see the [animation guide](docs/ANIMATION_GUIDE.md)); fighting-style definitions and rig work for other models are deferred until model rigging is in scope. Existing embedded model-motion playback on mod-spawned enemies remains available as a frozen, verified baseline. Both games also support bounded orbit changes on an active dungeon follow camera; camera render callbacks and draw layers remain unsupported. Read the [delivery roadmap](docs/ROADMAP.md) for the active gaps.
 
-On Chronicle the runtime reads mods from one folder: `mods/` in the Chronicle checkout, else `mods/` beside the executable, else `<save>/mods`. Chronicle Two reads `<save>/mods` and `mods/` beside the executable. It reads the profile from `<save>/moonmod/profile.json`; that existing storage path and the `moonmod` Lua namespace stay stable for compatibility. MoonFactory does not use an online catalog.
+On Chronicle the runtime reads mods from one folder: `mods/` in the Chronicle checkout, else `mods/` beside the executable, else `<save>/mods`. Chronicle Two reads `<save>/mods` and `mods/` beside the executable. With `MOONMOD_NO_MODS=1` in its environment (a launcher's Mods switch off) every mod starts off for that run, and the profile keeps the player's choices for the next one. It reads the profile from `<save>/moonmod/profile.json`; that existing storage path and the `moonmod` Lua namespace stay stable for compatibility. MoonFactory does not use an online catalog.
 
 Lua is vendored at `vendor/lua-5.5.1/src` and in each port's `port/third_party/lua-5.5.1`. Upstream Lua is MIT licensed; see `vendor/LUA-LICENSE.txt`.
 
@@ -128,9 +135,13 @@ Add `-RetailGeoramaSmoke` to test Georama integration in both games with retail 
 
 See:
 
+- [Modder's guide](docs/modding/README.md): [first mod](docs/modding/FIRST_MOD.md),
+  [cookbook](docs/modding/COOKBOOK.md), [extending the engine](docs/modding/EXTENDING_THE_ENGINE.md),
+  [testing](docs/modding/TESTING.md), [Dark Cloud engine notes](docs/modding/DARK_CLOUD_NOTES.md)
 - [API map](docs/API.md)
 - [First Steps starter mod](examples/first-steps/)
 - [Weapon quest reward example](examples/weapon-quest-reward/)
+- [Animation guide](docs/ANIMATION_GUIDE.md) and its [New Move example](examples/new-move/)
 - [Native SDK](docs/NATIVE_SDK.md)
 - [ChronicleTwo-Script compatibility](docs/ChronicleTwo-Script.md)
 - [ChronicleTwo-Script bridge design](docs/CHRONICLETWO_SCRIPT_BRIDGE.md)

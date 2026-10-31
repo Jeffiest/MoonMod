@@ -3,6 +3,7 @@
 /build*/
 /test-saves/
 /artifacts/retail-georama-*
+/art/*/build/
 
 # Python
 __pycache__/
@@ -13,3 +14,6 @@ __pycache__/
 Thumbs.db
 *.swp
 *.bak
+
+# Blender auto-backups
+*.blend1

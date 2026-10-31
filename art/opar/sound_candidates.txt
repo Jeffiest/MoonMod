@@ -1,0 +1,13 @@
+Opar sound candidates (sound_candidates.wav): number, start time, sample
+ 1    0.0 s  e01a_c_00.wav
+ 2    2.9 s  e01a_c_01.wav
+ 3    6.5 s  e01a_c_02.wav
+ 4    8.8 s  e01a_e_00.wav
+ 5   10.1 s  e01a_e_01.wav
+ 6   13.4 s  e01a_e_02.wav
+ 7   16.3 s  e01a_e_03.wav
+ 8   17.7 s  e01a_e_04.wav
+ 9   18.9 s  e01a_e_05.wav
+10   20.2 s  e01a_e_06.wav
+11   21.6 s  e01a_e_07.wav
+12   24.2 s  e01a_e_08.wav
