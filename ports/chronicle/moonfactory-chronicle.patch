@@ -9926,10 +9926,10 @@ index 00000000..30832f24
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..ca06b4c6
+index 00000000..745606a8
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,10087 @@
+@@ -0,0 +1,10089 @@
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -17492,21 +17492,6 @@ index 00000000..ca06b4c6
 +    return {ApiCallStatus::Ok, {{"character", kCharacterIds[chara_no]}, {"armed", !guard.empty()}}, {}};
 +}
 +
-+bool ChronicleTakeFatalGuard(int chara_no) {
-+    if (chara_no < 0 || chara_no >= 6 || g_fatal_guards[static_cast<std::size_t>(chara_no)].empty()) return false;
-+    g_fatal_guards[static_cast<std::size_t>(chara_no)].clear();
-+    if (BtActStatus.invincible_frames < 60) BtActStatus.invincible_frames = 60;
-+    SharedRuntime().QueueEvent("game.player.guarded", {{"character", kCharacterIds[chara_no]}, {"character_id", chara_no},
-+                                                       {"frame", SharedRuntime().Frame()}});
-+    return true;
-+}
-+
-+void ResetChroniclePlayerGuardsForTests() {
-+    for (std::string &guard : g_fatal_guards) guard.clear();
-+    g_dash_until = 0;
-+    g_dash_speed = 1.0f;
-+}
-+
 +// player.dash: for `frames`, the dungeon walk and dash speed run `speed` times faster (the native movement and its
 +// collision still apply), with `invincible_frames` of invincibility from the start.
 +ApiCallResult SetPlayerDash(const Json &args) {
@@ -17570,8 +17555,6 @@ index 00000000..ca06b4c6
 +    g_floor_links[key] = {std::string(owner), next};
 +    return {ApiCallStatus::Ok, {{"dungeon_id", dungeon_id}, {"floor_id", floor_id}, {"next_floor_id", next}}, {}};
 +}
-+
-+void ResetChronicleFloorLinksForTests() { g_floor_links.clear(); }
 +
 +ApiCallResult UnbindInputAction(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
@@ -19763,6 +19746,25 @@ index 00000000..ca06b4c6
 +float ChroniclePlayerDurabilityWearScale() { return g_player_tuning.durability_wear; }
 +float ChroniclePlayerAttackAnimSpeed() { return g_player_tuning.attack_anim_speed; }
 +bool ChroniclePlayerMapReveal() { return g_player_tuning.map_reveal; }
++
++// Public hooks for the guard (dngstatusdata.cpp) and the tests; the state lives in the anonymous namespace above.
++bool ChronicleTakeFatalGuard(int chara_no) {
++    if (chara_no < 0 || chara_no >= 6 || g_fatal_guards[static_cast<std::size_t>(chara_no)].empty()) return false;
++    g_fatal_guards[static_cast<std::size_t>(chara_no)].clear();
++    if (BtActStatus.invincible_frames < 60) BtActStatus.invincible_frames = 60;
++    SharedRuntime().QueueEvent("game.player.guarded", {{"character", kCharacterIds[chara_no]}, {"character_id", chara_no},
++                                                       {"frame", SharedRuntime().Frame()}});
++    return true;
++}
++
++void ResetChroniclePlayerGuardsForTests() {
++    for (std::string &guard : g_fatal_guards) guard.clear();
++    g_dash_until = 0;
++    g_dash_speed = 1.0f;
++}
++
++void ResetChronicleFloorLinksForTests() { g_floor_links.clear(); }
++
 +float ChroniclePlayerAilmentDuration() { return g_player_tuning.ailment_duration; }
 +bool ChroniclePlayerMapHidden() { return g_player_tuning.map_hidden; }
 +float ChroniclePlayerAttackReach() { return g_player_tuning.attack_reach; }
