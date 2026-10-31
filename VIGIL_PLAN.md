@@ -225,9 +225,13 @@ Each gate needs its automated checks green and a playtest checklist ticked befor
 for good is already Souls-grade punishment. Repair Powder is the scarce counterweight: limit how much is sold, and add
 it to Rest-floor shops.
 
-1. Should the death drop include weapon ABS, or only Gilda?
-2. How many floors between Rest floors: 3, or one per dungeon section?
-3. Should Vigil also offer a sandbox title mode, a "Vigil Trial" like the Gauntlet, for testing balance away from the
+**Decided:** the death drop is carried Gilda **and** the equipped weapon's unspent ABS.
+
+**Decided:** rest points should feel like part of the dungeon, not a separate two-room floor. In the single-level
+dungeon (§9) they're **shrines**: the native healing-spring rooms (map parts 32-35) placed along the path. **Town is
+reachable only from a shrine.**
+
+1. Should Vigil also offer a sandbox title mode, a "Vigil Trial" like the Gauntlet, for testing balance away from the
    story save?
 
 ---
@@ -305,3 +309,96 @@ Wear is per hit and warns at 10% and 5%. The rest is as documented in the API.
 | 14 | **Heavy weapons as equip load**: low Speed already means slow gauge regen. Show it on the weapon card and lean on it in balance. | Build identity | Already native. Surface it with `weapons.style_set`. | writing |
 
 Recommended for the first pass: 1-6. They change how every fight plays. 7-10 are cheap feel wins for S5. 11-14 can wait.
+
+---
+
+## 9. The single-level dungeon ("Vigil World")
+
+**The idea:** each dungeon is one continuous map, not a stack of floors. You enter and you're in the whole dungeon.
+Each old "floor" is a **zone**, and the old exit gate is a locked door to the next zone, like the shortcut doors that
+seal rooms off today. There are no stair cutscenes and no "continue or exit" prompt. The map is generated **once per
+save** and kept. **Shrines** (bonfires) along the way are the only exits to town and the only fast-travel points.
+Monsters respawn when you rest, and they scale so nothing is ever trivial.
+
+### What the engine already has toward it (S0, Chronicle `9418a550` + PR 15)
+| Need | Status |
+| --- | --- |
+| The same map every visit | **Yes.** Floors are built from `map_seed`, and a rebuild from the same seed comes out the same (rest floors, shortcut doors and Warden rooms already rely on this). There's even a test hook (`DC_MAZE_SEED`). What's missing is an API to **set** the seed, so it can be kept in `game.save`. |
+| Big maps that still draw fast | **Mostly.** The map draws only cells within `draw_dist_scale` of the player and in front of the camera, so size costs memory more than draw time. |
+| Lots of monsters | **Yes.** 256 slots, and only the nearest few are awake (`set_active_limit`). |
+| Locked doors between parts of a map | **Yes**, in pieces: shortcut doors with coloured keys (items 216-222), room gates (parts 36-39), the Warden room's seal. |
+| Map size | **The wall.** A grid of 48 × 48 cells (`DNG_GRID`), and 64 rooms (`DNG_ROOM_MAX`). Retail floors have about 6 rooms, so 20 floors' worth is about 120 rooms. |
+| Monster kinds | **A wall.** At most 9 monster models per map; a dungeon's whole roster is more than that. |
+| Atla (Georama pieces) | Placed per floor, up to 8 per floor (`buildEventData`). Each zone must place its old floor's atla. |
+| Story bosses | Dran and the other story bosses fight on fixed, scripted maps (`dranmapfield.cpp`), not random ones. They stay separate: a boss door warps you into the arena, Souls fog-gate style. |
+
+### Recommended path: regions first, then one map
+Building straight to "one 20-floor map" means raising every limit at once. Instead:
+
+**W1, Regions (fits today's limits).** Each **shrine-to-shrine stretch** (4-5 old floors' worth, about 25-30 rooms) is
+one continuous map. You walk from zone to zone through locked gates with no loading. A load happens only at a shrine
+or a boss door. That gives most of the feel. It fits in 48 × 48 and 64 rooms, and a region's roster usually fits in 9
+monster kinds.
+
+**W2, One map per dungeon.** Raise `DNG_GRID` (to 96 or 128) and `DNG_ROOM_MAX` (to 160). Load monster models by zone
+(swap the 9-kind table when you cross a zone gate). Merge the regions. Do this only if W1 plays well and the memory
+budget allows. *Extending the engine*'s rule is to raise the wall, not obey it, but measure first.
+
+### The pieces (engine operations, in the *Extending the engine* style)
+| # | Operation | Does |
+| --- | --- | --- |
+| W-a | `dungeons.set_seed({seed})` / `floor_seed` in `world.get()` (already reported) | Build the next floor from this seed. Vigil keeps one seed per dungeon in `game.save`, so the layout is locked for the save. |
+| W-b | `dungeons.set_zones({zones = {{rooms, source_floor, level}, ...}, shrine_every})` | The generator lays out rooms in a chain of zones. Each zone is joined to the next by one **zone gate** (a sealed door, like a shortcut door). The gate opens with the key the zone's carrier drops, and stays open (saved). Each zone takes its monsters and atla from its `source_floor`, and a shrine room (a healing-spring part) goes at chosen zone boundaries. `dungeons.zones_get()` reports zones, gates, shrines and the player's current zone. |
+| W-c | `dungeons.set_exits({town = "shrines"})` | The entrance stair and Escape Powder no longer take you to town. Only a shrine does. |
+| W-d | `dungeons.repopulate({zones?})` | Respawn the dead monsters of the given zones, from their native rosters, at their rooms. Used when you rest at a shrine. |
+| W-e | Room state that persists: zone gates opened, chests opened, shrines lit | Kept with the seed in `game.save`, and re-applied when the map is built |
+
+### How it plays
+- **Entering a dungeon** from town puts you at the **last shrine you rested at**, or the entrance the first time.
+  Vigil holds the seed and the shrine, sets them before the build, and `world.transition` takes you there.
+- **Shrines**: light one the first time (`ui.notify`, the `heal` burst). Resting heals you, refills your heal charges
+  and the ember (`fatal_guard`), **respawns the monsters** (W-d), and opens a panel (`ui.choice_open`) with: Rest,
+  Level up (spend Gilda on the tree, the only place you can), Travel (to any lit shrine in this dungeon, or to town),
+  and Leave.
+- **Zone gates** replace stairs. The key carrier in each zone drops the gate key. Crossing a gate marks the old floor
+  as reached for the game's own bookkeeping (floor records, the dungeon entrance's floor list), so story progress
+  still advances.
+- **Back floors** (the native *ura* floors) become optional side branches off a zone, behind their own stairs.
+- **Bosses**: a Warden room guards some zone gates. The story boss is a fog door into its native arena, and back
+  through the door brings you to the zone you left.
+- **Death**: you wake at the last shrine. Gilda and ABS stay where you fell (`game.save` keeps zone and position).
+  The monsters have respawned, since a death counts as a rest.
+
+### Respawns
+- **On rest and on death**, everything respawns, as in Souls (W-d).
+- Optionally a **slow trickle**: a zone you've left refills one monster every few minutes, up to its roster. This is a
+  setting, default off.
+- Key carriers and Wardens stay dead once beaten; their gates stay open.
+
+### Difficulty that never goes soft ("floor scaling")
+Every zone has a **base level** that rises with depth. Vigil keeps a **player level** from its tree, the equipped
+weapon's attack and max HP.
+- **Monster level = max(zone base, player level − 2).** Deeper zones above you stay harder than you, and pushing
+  through without levelling hits a wall. Zones you've outgrown rise to just under you, so nothing becomes a one-hit
+  kill.
+- Applied when a monster spawns: `entities.set_stats` (HP, defense, rewards) and its `damage_scale`. Rewards scale
+  with the monster's level, so farming a lower zone still pays, a little less.
+- Bosses use the same rule, with a higher base.
+- The gap (−2), the base curve and an "old zones scale" on/off are settings.
+
+### Compatibility
+- Vigil World replaces Dark Cloud's floor structure. Make it a choice **when a save is started** (a story-mode
+  option kept in the save), not a toggle mid-game. A save started without it stays a normal Dark Cloud save.
+- It owns `set_layout`, `set_zones` and the exit rules while active. Dungeon+ must stand down its layout and tier
+  features in a Vigil World save; that needs a test.
+- Demon Shaft (100 floors, no atla) stays floor-by-floor, as the "endless" challenge, or becomes W2's stress test.
+
+### Order
+W1 comes after the combat core (S1-S3), since the world only matters if the fighting is right. Suggested gates:
+- **W1.0**: `set_seed` and keeping the seed per save. Re-entering Divine Beast Cave gives the same floor.
+- **W1.1**: `set_zones` with 2 zones and one gate on one map. Walk from zone 1 to zone 2 without a load.
+- **W1.2**: shrines (light, rest, respawn, travel, town only from shrines).
+- **W1.3**: a whole Divine Beast Cave as 3 regions (floors 1-4, 5-7 and Dran, then 9-15), with atla and the story
+  bookkeeping checked.
+- **W1.4**: floor scaling.
+- **W2**: raise the limits, and make Divine Beast Cave one map.
