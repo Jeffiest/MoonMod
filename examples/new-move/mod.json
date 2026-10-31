@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "example.new-move",
+  "name": "New Move (animation example)",
+  "version": "1.0.0",
+  "author": "MoonFactory Example",
+  "description": "Gives Toan a new animated attack: run, then attack, for an Overhead Chop. The motion is authored with tools/anim (see docs/ANIMATION_GUIDE.md).",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.write", "content.register"]
+}

@@ -3124,7 +3124,7 @@ new file mode 100644
 index 000000000..4deed04ae
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,472 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -3257,6 +3257,7 @@ index 000000000..4deed04ae
 +    {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon and supported behavior."},
 +    {"weapons.give", "weapons", "give", "simulation", "game.write", "Give a native or registered weapon to a compatible character."},
 +    {"weapons.equip", "weapons", "equip", "simulation", "game.write", "Equip a weapon through the game's equipment rules."},
++    {"weapons.remove", "weapons", "remove", "simulation", "game.write", "Remove one owned, unequipped Chronicle weapon instance."},
 +    {"weapons.upgrade", "weapons", "upgrade", "simulation", "game.write", "Upgrade a weapon through supported progression rules."},
 +    {"weapons.stats_set", "weapons", "stats_set", "simulation", "game.write", "Set bounded combat stats on one owned Chronicle weapon instance."},
 +    {"weapons.durability_set", "weapons", "durability_set", "simulation", "game.write", "Set current durability on one owned Chronicle weapon instance within its native capacity."},
@@ -17819,12 +17820,13 @@ new file mode 100644
 index 000000000..a114b524a
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
-@@ -0,0 +1,1459 @@
+@@ -0,0 +1,1468 @@
 +#include <chrono>
 +#include "moonmod/runtime.hpp"
 +
 +#include <algorithm>
 +#include <cmath>
++#include <cstdlib>
 +#include <cstdio>
 +#include <deque>
 +#include <fstream>
@@ -17903,6 +17905,8 @@ index 000000000..a114b524a
 +    RuntimeConfig config;
 +    Json profile = DefaultProfile();
 +    Json session_enabled = Json::object();
++    // MOONMOD_NO_MODS=1 (a launcher's Mods switch off): every mod is off for this run; the profile keeps the choices.
++    bool mods_off_this_run = false;
 +    std::filesystem::path profile_file;
 +    std::vector<ModRecord> records;
 +    std::vector<std::pair<std::string, std::unique_ptr<LuaMod>>> modules;
@@ -18199,7 +18203,7 @@ index 000000000..a114b524a
 +                    record.manifest = std::move(*manifest);
 +                    record.enabled = EnabledFromProfile(record.id);
 +                    record.enabled_next_launch = profile["enabled"].value(record.id, false);
-+                    record.restart_required = record.enabled != record.enabled_next_launch;
++                    record.restart_required = !mods_off_this_run && record.enabled != record.enabled_next_launch;
 +                    record.native_trusted = NativeTrustedFromProfile(record);
 +                    record.state = record.enabled ? ModState::Ready : ModState::Disabled;
 +                    if (record.manifest.framework_api > config.framework_api ||
@@ -18792,6 +18796,12 @@ index 000000000..a114b524a
 +    std::string profile_error;
 +    if (!impl_->LoadProfile(profile_error)) impl_->Log("warning", "", profile_error);
 +    impl_->session_enabled = impl_->profile["enabled"];
++    const char *no_mods = std::getenv("MOONMOD_NO_MODS");
++    impl_->mods_off_this_run = no_mods != nullptr && std::string_view(no_mods) == "1";
++    if (impl_->mods_off_this_run) {
++        impl_->session_enabled = Json::object();
++        impl_->Log("info", "", "MOONMOD_NO_MODS=1: every mod is off for this run (the profile keeps its choices)");
++    }
 +    impl_->Discover();
 +    impl_->LoadEnabled();
 +    impl_->running = true;

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <deque>
 #include <fstream>
@@ -81,6 +82,8 @@ struct Runtime::Impl {
     RuntimeConfig config;
     Json profile = DefaultProfile();
     Json session_enabled = Json::object();
+    // MOONMOD_NO_MODS=1 (a launcher's Mods switch off): every mod is off for this run; the profile keeps the choices.
+    bool mods_off_this_run = false;
     std::filesystem::path profile_file;
     std::vector<ModRecord> records;
     std::vector<std::pair<std::string, std::unique_ptr<LuaMod>>> modules;
@@ -377,7 +380,7 @@ struct Runtime::Impl {
                     record.manifest = std::move(*manifest);
                     record.enabled = EnabledFromProfile(record.id);
                     record.enabled_next_launch = profile["enabled"].value(record.id, false);
-                    record.restart_required = record.enabled != record.enabled_next_launch;
+                    record.restart_required = !mods_off_this_run && record.enabled != record.enabled_next_launch;
                     record.native_trusted = NativeTrustedFromProfile(record);
                     record.state = record.enabled ? ModState::Ready : ModState::Disabled;
                     if (record.manifest.framework_api > config.framework_api ||
@@ -970,6 +973,12 @@ bool Runtime::Start(RuntimeConfig config, std::string &error) {
     std::string profile_error;
     if (!impl_->LoadProfile(profile_error)) impl_->Log("warning", "", profile_error);
     impl_->session_enabled = impl_->profile["enabled"];
+    const char *no_mods = std::getenv("MOONMOD_NO_MODS");
+    impl_->mods_off_this_run = no_mods != nullptr && std::string_view(no_mods) == "1";
+    if (impl_->mods_off_this_run) {
+        impl_->session_enabled = Json::object();
+        impl_->Log("info", "", "MOONMOD_NO_MODS=1: every mod is off for this run (the profile keeps its choices)");
+    }
     impl_->Discover();
     impl_->LoadEnabled();
     impl_->running = true;

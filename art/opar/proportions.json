@@ -1,0 +1,7 @@
+{
+  "about": "Opar's own proportions on Toan's skeleton, read by make_opar.py (moves the bones in opar.blend) and by tools/chr/build_character.py (moves the pack's frames and bind pose). Each frame and everything below it moves by a world offset in Blender's axes: Z up, his left +X.",
+  "move": {
+    "chn5": [0.7, 0.0, 0.0],
+    "chn22": [-0.7, 0.0, 0.0]
+  }
+}

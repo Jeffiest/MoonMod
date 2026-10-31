@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.opar",
+  "name": "Opar in the Story",
+  "version": "0.1.0",
+  "author": "Jeffiest",
+  "description": "Opar, the frog mage, joins the story with Xiao. Baby Opar's Atla lies on the Divine Beast Cave's 8th floor, beside the cat's. Found, he waits in Toan's house beside the cat; in her scene he turns into Opar, and both join. Needs the MoonFactory engine with registered playable characters and mod Atla.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "optional_dependencies": ["moonmod.roguelike"],
+  "load_after": ["moonmod.roguelike"],
+  "permissions": ["game.read", "game.write", "content.register"]
+}

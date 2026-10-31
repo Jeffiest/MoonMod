@@ -387,7 +387,7 @@ local orbit = assert(game.render.camera_set({distance = 120, height = 15, angle 
 
 `render.camera_get()` takes no arguments and reads the currently active dungeon camera in both ports. It returns the camera `eye` and `target` coordinates, plus heading, pitch, and roll in the game's native angle units. It fails outside an active dungeon or if the native camera pose is invalid.
 
-`render.camera_set()` accepts any non-empty subset of `distance`, `height`, and `angle`. Distance must be 8–300 native units, height −80–150 units, and angle −1000–1000 radians; the angle is normalized before the native camera receives it. The game eases toward the requested orbit angle in follow mode. For Chronicle Two's player-controlled camera, distance and height must also fit the active native camera's own limits, and its normal collision correction remains in control. The call requires a supported dungeon orbit camera: Chronicle must be in follow mode, while Chronicle Two supports its native follow and player-controlled camera modes. Native scene or camera transitions can later replace these values. Bounded HUD text layers are supported on both games; arbitrary draw callbacks and world-space layers remain unsupported.
+`render.camera_set()` accepts any non-empty subset of `distance`, `height`, and `angle`, and returns the resulting `distance`, `height` and `angle` with the values they replaced under `previous`, so a caller can put the camera back. On Chronicle the native follow camera keeps its own reach: it eases a distance past 80 back to 80, and a height down toward 5. Distance must be 8–300 native units, height −80–150 units, and angle −1000–1000 radians; the angle is normalized before the native camera receives it. The game eases toward the requested orbit angle in follow mode. For Chronicle Two's player-controlled camera, distance and height must also fit the active native camera's own limits, and its normal collision correction remains in control. The call requires a supported dungeon orbit camera: Chronicle must be in follow mode, while Chronicle Two supports its native follow and player-controlled camera modes. Native scene or camera transitions can later replace these values. Bounded HUD text layers are supported on both games; arbitrary draw callbacks and world-space layers remain unsupported.
 
 Chronicle also supports `render.town_camera_set({enabled = true, height = 90, back = 22})` for a legacy-style overhead town view. Height is bounded to 40–500 and the forward/back offset to −200–200 native units. Requests are owned by the calling package and removed when it unloads. The native adapter applies the pose only in the main town walking loop with a valid player and the standard main camera; menus, events, dungeons, and camera transitions stay under native control. The `moonmod.expanded-town` package exposes the legacy O and L1+L3 toggles, offsets in Settings, and a Toggle action in the Mod Manager. ChronicleTwo reports this operation unsupported.
 
@@ -559,6 +559,15 @@ local blade = assert(game.weapons.register({
   must hold a `.cfg` with the template's name (for template 262, Toan's sixth weapon, `c01w05.cfg`). Without `model`
   the weapon draws its template's model. Native names (`cNNwNN`) are refused.
 - `icon` names `icons/<stem>.png`, any size, drawn into the 32x32 menu cell. `items.register` takes `icon` too.
+- `description` (a string, or up to 4 lines of 1-64 bytes) is what the weapon menu's card says of it. A registered
+  weapon a mod hasn't styled (`weapons.style_set`) goes by its own `name` in the menus and shows its `description` on
+  the card, in place of its template's name and text; a styled one shows its style.
+- `menu_scale` (0.1 to 4, default 1) is how big the weapon menu draws the model, against its holder's own weapons:
+  a model made bigger than the template's (Opar's staffs, 1.45 times a sword) is shrunk to fit the menu's frame.
+  In the hand it keeps its own size. `weapons.get()` reports it when it isn't 1.
+- `items.icon_set({id, icon})` (`content.register`) gives a built-in item (`chronicle:item:<n>`, a dungeon item) a
+  mod's own menu icon, `icons/<stem>.png`; leaving out `icon` puts the native one back. One mod per item; unloading
+  the mod puts the native icons back.
 - `weapons.get().assets` reports `model` and `icon` game paths.
 - The model shows once the weapon is equipped (`weapons.equip` in town or a dungeon, or the game's menus).
 
@@ -575,6 +584,191 @@ game.georama.register({id = "corner", name = "Corner", template_part_id = 0, tow
 (0 empty, other values as the template uses them); left out, every cell takes the template's most used non-empty
 value. The model and collision still come from the template (or `model = {scene, part}`). `georama.get().mod_pieces`
 reports `width_cells`/`height_cells`.
+
+### Chronicle run screens (choice panel, run menu, boss card)
+
+During dungeon play a mod can put up three screens of its own, each drawn by the engine in the game's own stone
+plates and lettering, driven by the pad or the mouse, and spread across a wide window:
+
+- `ui.choice_open({id, title, subtitle?, cancel?, cursor?, options = {{title, subtitle?, lines?}, ...}})` pauses the
+  dungeon (as the game's pause does) on 1-4 option cards side by side. A line is a string or `{text, tone}` with tone
+  `good`, `bad`, `dim` or `gold`. Left/right (or L1/R1) move, Cross takes, Circle backs out when `cancel` is set; the
+  mouse picks the card under it. The owner gets `ui.choice_made` `{id, index}` (index from 1) or `{id, cancelled =
+  true}`. One panel at a time; it waits for play to be free (not mid-chest) before it shows. Notices hold back while it
+  is up. `ui.choice_close()` takes it away.
+- `ui.run_menu_set({title, tabs = {{id, title, lines?, rows?}, ...}})` gives the mod a run menu: while it has one,
+  Start in a dungeon opens it in place of the bare pause. Up to 6 tabs (L1/R1) of up to 64 rows (`{id, label, value?,
+  detail?, tone?, enabled?}`); a side pane shows the tab's lines and the chosen row's detail. Cross on an enabled row
+  sends `ui.run_menu_action` `{tab, row}`; set the menu again to show the result (the cursor stays on the same tab and
+  row ids). `ui.run_menu_open({tab?})` opens it from the mod (when play is next free), `ui.run_menu_close()` and
+  `ui.run_menu_clear()` close and remove it; `ui.run_menu_shown` `{open, tab}` reports it opening and closing. Leave
+  out an empty `rows` or `lines` (or send none) rather than an empty table.
+- `ui.boss_card({name, kicker?, epithet?, frames = 30-600})` is a boss's entrance: letterbox bars, the kicker in red,
+  the name large in gold and the epithet under it, the scene held still while it shows.
+
+### Chronicle dungeon floor extras
+
+- `world.dungeon_npc_set({id, model = "gedit/e01/chara/p02a.chr", place = "exit" | "player"})` stands a town
+  villager's model on the floor, just inside the floor's exit gate (or beside the player), turning to face the player
+  as they come near. Walking up to it sends `game.dungeon_npc.near` `{id}` (again only after walking away). One figure
+  per mod; a new floor sends it away. `world.dungeon_npc_clear()` takes it off. It has its own model and texture
+  arenas.
+- `dungeons.set_weapon_drops({unique?, rare = 0-100, large_chests = 0-100})`: with `unique`, a chest never holds a
+  weapon the party already holds (or one already in a chest on the floor) and gets another of the same character's;
+  `rare` is the percent chance a chest weapon steps up to a stronger one for the same character (up to about half
+  again its attack); `large_chests` is the share of large chests, where weapons are (retail 12). `{}` restores retail.
+- `dungeons.set_backrooms({free, title?, text?, stay?, lines?})`: the back floor's stairs no longer ask for the gate key; walking onto
+  them puts up a choice panel (`title`, `text`, Enter / Not now) instead of the key window, and Enter goes down at
+  once. The key the stairs take is given back below. Acting at the back floor's entrance itself (the tram, the
+  rope) opens the same panel at once, Proceed / Not now, and Proceed goes down with no item at all. The entrance's
+  own script doesn't run then, so the engine stands the party one cell into the room from the back floor's way in
+  (the script would have placed it).
+  `game.dungeon.backroom` `{entered}` reports the answer. `lines` (up to two strings of 1-64 bytes) replaces the
+  Proceed option's warning lines. With `stay`, the panel's answer is only reported: Proceed goes nowhere and takes
+  no key, and the owner moves the run on itself (a rest floor's stairs, for one).
+- `dungeons.set_character_blocks({characters = {"toan", "xiao", ...}})`: the parts only one character opens (Xiao's
+  doors and jump spots, Goro's and Ruby's doors, Ungaga's and Osmond's parts) go on new floors only for the characters
+  listed, so a run never meets a lock its party can't open. They also go only where the whole floor, its exit and every
+  room, stays reachable without passing them: a detour for that character, never the only way on (a floor with no such
+  place gets none). `{}` restores the retail rule, which counts the party and may put a part on the only way.
+
+Floor building (Chronicle port) also never leaves a floor that can't be crossed: a corridor that reaches its room at a
+corner has its doorway moved one cell along the wall, and a floor whose rooms or exit still can't all be reached (rare)
+is built again from another seed. `darkcloud_tests --gtest_filter=DungeonReach.*` walks thousands of generated floors
+(`DC_REACH_SEEDS` sets how many per setup; `DC_REACH_DUMP=<seed>` prints one floor's grid).
+- `dungeons.set_warden_room({enabled, lock_in?})`: floors built from then on get a Warden room: one more room, 6x6
+  cells where it fits (never under 4x4), built after the others and joined to its nearest room only, so it is a dead
+  end and sealing it cuts nothing else off. It may stand a few cells past the area the other rooms keep to (the
+  full-screen map shrinks its tiles to fit). Its doorway is closed by a gate; no monster, character door or back
+  floor entrance is put in it, and the floor gets no native gated room. The gate opens once no monster is left
+  outside (a hidden mimic doesn't count), and the owner hears `game.dungeon.warden_room` `{state = "open", center}`.
+  Walking into the room sends `{state = "entered", center, size, shut}`; with `lock_in` the gate closes again behind
+  the player until `dungeons.warden_room_release()`. `dungeons.warden_room_get()` reads `{state = none | sealed |
+  open | shut | released, center, size}`. On the rare floor with no space for the room, the room behind the floor's
+  native room gate is used, and a floor with neither reports `none`. One mod at a time; unloading it opens the doors.
+- `dungeons.set_rest_room({enabled})`: floors built from then on are rest floors: a 6x6 hall with the native healing
+  spring against its top wall and a 4x4 antechamber with the back floor's stairs in its top wall, joined by one
+  corridor that holds the way in and the exit gate. Nothing else goes on them: no other rooms, pillars, character
+  parts, Warden room or exit room. Pair it with a registered floor whose `enemies` is empty and
+  `dungeons.set_modifiers({chests = -100})` for a floor with nothing to fight or open. `dungeons.rest_room_get()` reads
+  `{enabled, state = none | rest, spring, stairs, center, size}` (world units, 160 to a cell); `state` is `rest` only
+  on the rest floor the party stands on (not its back floor). The spring's own event doesn't heal on every dungeon's
+  theme, so a mod that wants the spring to heal watches the player's distance to `spring`. One mod at a time;
+  unloading it turns rest floors off. `DC_REST_TEST=spring|stairs|gate` stands the player, once per rest floor, in
+  front of the spring or on the stairs' or the exit gate's trigger (test builds).
+
+### Chronicle weapon styles, effect bursts, tints and shoves
+
+- `weapons.style_set({character, slot, name?, color = {r, g, b}?, glow = {r, g, b}?})` gives one owned weapon its own
+  name (up to 40 bytes) in the weapon menu, drawn in `color` on the name scroll, and makes its swing trail glow in
+  `glow` instead of its element's colour. The style follows the weapon in that slot: another weapon put there doesn't
+  inherit it. `weapons.style_clear({character, slot})` takes one back, `weapons.style_clear({})` all of the mod's.
+  `badge` (up to 3 lines) and `details` (up to 5) give the weapon a card: while the menu's cursor is on it, one panel
+  takes the place of the powder box and the description, with the badge on the left (a rarity, say) and the name
+  over the details on the right. Each line is a string or `{text, color = {r, g, b}?, scale = 0.5..1.6?}`, 64 bytes.
+  `weapons.get` and `weapons.list` report a retail weapon's own `name` in the game's language.
+- `effects.burst({kind, position = {x, y, z}, scale?})` plays one of the game's own effects at a point: `explosion`
+  (the bomb's), `heal` (the healing sparkles), `sparks` or `guard` (hit marks), `impact` (Osmond's bullet), `smoke` (a cloud of dust: the bomb's smoke puffs without the fire). Scale 0.1-4.
+- `entities.tint({entity, color = {r, g, b}, frames})` draws a live enemy in a colour for up to 3600 frames (0 ends it).
+- `entities.knockback({entity, direction = {x, z}, speed})` shoves a live enemy along a direction, slowing to a stop
+  (speed 0.5-40); pointing it at another enemy pulls it in.
+
+### Chronicle playable-character motions (`animations.player_register`)
+
+`animations.player_register({id, file})` adds a mod's own motion to a playable character. `file` is a `.json` file
+under the package's `resources/` (up to 4 MiB) in the `moonmod-motion` v1 format:
+`{format = "moonmod-motion", version = 1, character, length (1-600 frames), speed?, tracks = {{bone, type =
+"rotation"|"translation"|"scale", keys = {{frame, w, x, y, z}...} or {{frame, x, y, z}...}}}}`, rotations as the game
+stores them, frames rising from 0 to `length`. Whenever that character's model loads in a dungeon, each of its
+registered motions is appended after its last native frame (on the model and its shadow) and its first motion set
+grows by one motion number per file; bones a file leaves out hold their idle pose. A registration made while the
+character is loaded applies at once. `animations.player_unregister({id})` takes one back (unloading takes all);
+`animations.player_list()` lists the mod's motions with the motion number each has on the loaded character. Moves
+play them by name (`player.moves_set`, `animation`). A mod registers up to 64. The tools in `tools/anim` write
+these files from a character's own rig; see the [animation guide](ANIMATION_GUIDE.md) and
+[Gauntlet animations](GAUNTLET_ANIMATIONS.md).
+
+### Chronicle mod moves (`player.moves_set`)
+
+`player.moves_set({moves = {...}})` gives characters this mod's own attacks, up to 160, replacing the mod's earlier set;
+`player.moves_clear()` takes them back (and unloading does). A move replays a stretch of one of the character's own
+native motions at its own speed and brings its own lunge, spin, hits, bursts, sounds and trail, in place of the native
+action. Mods hear `game.player.move` ({id, owner, character, cancel}) as one starts.
+
+- `id` (1-40 bytes), `character` (one of the six), `trigger`:
+  - `run_attack`: the attack button after running for `run_frames` (1-300 game steps, two drawn frames each),
+    still running as attack is pressed (stick pushed hard, nothing locked on; locking on doesn't count as running).
+  - `guard_attack`: the attack button while guarding (locked on, R1 held).
+  - `dodge` / `dodge_back`: L2 with the stick pushed (the move turns the way it points) / at rest (he keeps his
+    facing). An evade takes L2 ahead of the tuning dodge (`dodge_power`). It also cuts an attack short: a swing of
+    the character's own combo, or one of the mod's attack moves, once its last blow is `cancel_after` steps past
+    (0-60, default 2). `cancel = false` turns that off. Specials (the jump slash, the wave), a charge being held and
+    another evade can't be cut. Evades keep their own cooldown, apart from the attack moves'. `game.player.move`
+    carries `cancel = true` for an evade that cut an attack short.
+  - `heavy`: R2 pressed at rest (the heavy attack). A character with an R2 move (`heavy` or `combo_finisher`) gives
+    up R2's first-person view in dungeons.
+  - `combo_finisher` with `chain` (1-6): R2 pressed partway through the attack combo, once `chain` swings in a row
+    have laid their blow (each within 150 steps of the last; a blow counts for a new swing when the action changes
+    or more than 6 steps have passed, so a long swing's several blows count once; for Xiao, Ruby and Osmond each
+    shot or cast counts). R2 cuts any native attack short while the chain is live, even the next swing before its
+    blow, or comes at rest within 60 steps of the last blow. Combo swings that run with the act flag down
+    (Ungaga's) can still be cut. The finisher with the
+    longest chain reached wins, so `chain = 2` and `chain = 3` sit side by side. A move (any of the mod's) ends the
+    chain.
+  - `lock_attack` with `direction` (`toward` or `away`): the attack button at rest while locked on, the stick pushed
+    (half way or more) within 60 degrees of the way to the target, or of the way from it. The move faces the target;
+    `lunge_angle = 180` carries an `away` move back off it.
+  - `evade_attack`: the attack button late in an evade (60% through or more; it cuts the rest short, with `cancel =
+    true` on `game.player.move`) or within 20 steps after one ends.
+  - `charge_release` (Toan): his charge let go at `min_charge` or more on the game's charge count (0-10; the native
+    jump slash comes at 0.5 and the wave at 1.5, a count of 1 being about two seconds held), ahead of the jump slash.
+    While Toan has the wave's skill, a charge at `max_charge` or more is left to the wave. His charge flashes orange
+    as it reaches `min_charge`.
+- `motion` (native motion number 0-63) or `animation` (a motion registered with `animations.player_register`: the
+  mod's own id, or `"mod:id"`), `from`/`to` (the stretch, fractions 0-1), `speed` (0.2-4, motion units a step).
+- `lunge` (0-6) and `lunge_decay` (0.01-2): a push the way the stick points (else the way the character faces). Every
+  move but `run_attack` and the evades faces the lock target if there is one (and pushes that way).
+  `lunge_angle` (-180 to 180): the push's angle from the way he faces (180 pushes him backward).
+  `spin` (-4 to 4): whole turns, made between `spin_from` and `spin_to` (fractions of the move, default the whole). `invincible`: no hits land during it. `gauge` (0-100): action gauge
+  spent, and the move needs that much. `wear` (0-5): weapon wear, as a swing's. `cooldown` (0-600 steps).
+- `hits` (up to 12): `{at (0-1 through the move), radius (1-40), reach (-20 to 40, ahead of the character), height,
+  damage (times the weapon's attack, 0-10), knockback (0-10), heavy?, charged? (enemy_hit reports it charged),
+  burst? (an effects.burst kind), burst_scale?}`. A hit strikes every enemy in its reach once.
+  A hit with `shot = true` fires projectiles instead: `count` (1-5) shots fanned `spread` degrees apart (0-45,
+  default 10) at `speed` (1-10, default 5), from the slingshot's tip (Xiao) or the weapon hand, toward the locked-on
+  target or the way the move faces, each for `damage` times the weapon's attack. Xiao fires her slingshot shots,
+  Ruby her magic orbs (damage on her attack and magic averaged) and Osmond his gun's bullets; a melee character's
+  shots are Xiao-style. They use the game's player shots
+  (12 at a time). A shot, the move's or a native one, counts as a blow for an evade's cancel. A Xiao-style shot can
+  have its own start and look: `from` (a frame of the character's model, e.g. `"jnt12_1"` the head; default the
+  weapon's tip), `from_ahead` and `from_rise` (-10 to 10: moved that far the way the move faces, and up), `cell` (0-15:
+  the `dun/effect/basefx01` picture's 32 x 32 cell it is drawn with, row by row; 8 is a glowing blue blob) and `size`
+  (0.3-4). A `burst` on a shot plays where each one lands (a wall, the floor or an enemy). Opar's spit is
+  `{shot = true, from = "jnt12_1", from_ahead = 2.6, from_rise = -0.4, cell = 8, size = 2.2, burst = "heal"}`.
+- `cues` (up to 12): `{at, sound? (swing, swing_heavy, voice, voice_2, voice_3, shout, shout_2, action),
+  trail? (light, wide, heavy, wave, slam)}`.
+
+Another mod's move on the same character and trigger is refused. Of a mod's own `charge_release` moves, the first in
+its list that the charge reaches plays, so a high `min_charge` listed ahead of a lower one takes the longer charges.
+
+### Chronicle player forms (`player.form_set`)
+
+`player.form_set({pack, frames?, hide_weapon?})` turns the active character into another model where he stands: his
+model reloads from `pack` (`dun/mainchara/<stem>.chr`, a mod's `resources.override`), a pack laid out like a player's
+(a `base.cfg` whose motion table lists the character's motions by the numbers his action plays; a monster's pack works
+once its `info.cfg` is renamed and its table remapped, see `art/opar/make_form.py`). His action, weapon stats, moves
+and health stay his. `frames` (up to 16) names stand-ins for the frames the player code looks up by name that the
+form's model lacks (`weapon` the grip, `item` the hand items are held in, `tukene1`, `jnt2_1`, and a shot's `from`),
+e.g. `{weapon = "r_hand"}`. `hide_weapon` (default true) leaves the weapon undrawn; its hits still swing from the
+grip. `scale` (0.1-4, default 1) draws the model that much its size (a monster's model is far bigger than a hero's). Mod motions (`animations.player_register`) are not added to a form's model; its moves use native `motion`
+numbers. `player.form_clear()` gives him his own model back. Either fails (try again) while an action or a scene holds
+the model, as a character switch does. A new floor, switching the character in and out, and unloading the mod also end
+it. Opar's Jump Slam turns him into the Opar monster this way, for one slam.
+
+`player.move_play({id})` starts one of the mod's own moves (`player.moves_set`) now, whatever its trigger: a
+chained move, such as the move a form makes as soon as it is taken. The move must be the active character's; like
+a trigger it needs him free to act and the move's gauge, but it doesn't wait on the moves' cooldown. It fails while
+he is in an action (try again).
 
 ### Chronicle town villagers (`characters.register` kind = "npc")
 
@@ -603,7 +797,7 @@ for _, entity in ipairs(result.entities) do
 end
 ```
 
-Both adapters currently support only `type = "monster"` while a dungeon is active. The query returns living monster slots with native definition, health, status, and position data. Chronicle also includes each actor's reveal state, combat stats and drop item, plus `native_model_id` when the floor's native model mapping is known. Chronicle keeps `id` as a slot label and returns a separate generation-checked `entity_id`; ChronicleTwo's `id` is already the generation-checked actor handle. Use those stable handles with `entities.get` to detect slot reuse. Chronicle updates actor generations from the native setup and floor-clear paths. ChronicleTwo assigns each returned entity a slot generation. Chronicle's `entities.set_stats({entity, hp?, max_hp?, defense?, reward_exp?, reward_money?, drop_item?})` changes one or more stats on a live revealed enemy. `hp` and `max_hp` are 1–1,000,000, and `hp` cannot exceed the resulting `max_hp`; `defense` is 0–32,767; `reward_exp` is 0–32,767; and `reward_money` is 0–2,147,483,647; `drop_item` is `-1` to clear or a valid built-in native item number. Chronicle also supports `entities.scale_set({entity, scale})`, an owner-scoped uniform visual multiplier from 0.5 to 3.0; it captures the native scale and restores it on actor reuse or mod unload. This operation only changes the live enemy model and shadow. If only `max_hp` changes, current HP keeps the same fraction. The operation rejects stale handles, unrevealed actors, and actors outside an active Chronicle dungeon; ChronicleTwo does not support it. Both ports support `entities.spawn` for registered enemy definitions; it shares the `characters.spawn` request shape and returns a mod-owned actor handle. Chronicle only spawns when the definition's exact native template has already been loaded for the current dungeon floor. ChronicleTwo reuses an already-loaded compatible template model/script; if the template is not loaded on the current floor, spawn returns a clean failure rather than loading assets dynamically. The `entities.despawn` API in both ports removes a live enemy spawned by the calling mod and clears per-actor runtime state and native collision/projectile references. It invalidates the generation-checked handle, updates floor alive counts, and skips kill credit and drops. Chronicle rejects mimics because the dungeon map retains their chest trigger; ChronicleTwo rejects actors held by a native interaction. Both adapters also attempt to despawn safe, live owned actors when their Lua mod unloads; native safety guards leave actors in place if despawn is unsafe. NPC/world-object spawning remains unsupported. Query calls outside an active dungeon fail instead of returning an empty list; handle lookups after leaving a dungeon return `status = "expired"`.
+Both adapters currently support only `type = "monster"` while a dungeon is active. The query returns living monster slots with native definition, health, status, and position data. Chronicle also includes each actor's reveal state, combat stats and drop item, plus `native_model_id` when the floor's native model mapping is known. Chronicle keeps `id` as a slot label and returns a separate generation-checked `entity_id`; ChronicleTwo's `id` is already the generation-checked actor handle. Use those stable handles with `entities.get` to detect slot reuse. Chronicle updates actor generations from the native setup and floor-clear paths. ChronicleTwo assigns each returned entity a slot generation. Chronicle's `entities.set_stats({entity, hp?, max_hp?, defense?, reward_exp?, reward_money?, drop_item?, damage_scale?, hit_reach?, hit_share?})` changes one or more stats on a live revealed enemy. `hp` and `max_hp` are 1–1,000,000, and `hp` cannot exceed the resulting `max_hp`; `defense` is 0–32,767; `reward_exp` is 0–32,767; and `reward_money` is 0–2,147,483,647; `drop_item` is `-1` to clear or a valid built-in native item number; on Chronicle, `damage_scale` (0–100) multiplies what that enemy's own attacks and the shots it fires take off the player, before the player's defense and `combat.register_player_formula` (a new actor in the slot, or a new floor, sets it back to 1); and `hit_reach` (0–200 game units) is added to each of that enemy's body hit-spheres when the player's blows are checked against it, for a weak point a blade cannot otherwise reach (it resets to 0 the same way); and `hit_share = true` makes each of the enemy's body hit-spheres take from every character the share of a blow it takes from the character it suits best. A story boss's scripts set a per-character damage percentage on each sphere, and many shut out whole heroes (the Ice Queen takes nothing from anyone but Ruby), so a boss met by a different party needs this to be beatable. It resets to false the same way. Chronicle also supports `entities.script_int_set({entity, index, value})` on a live member of a boss's cast (the boss or a helper it spawned through `characters.spawn` with `arena_slot`): it writes integer `index` (0–255) of the global block that cast's native scripts share, and returns `{entity, index, previous, value}`. A cast's scripts pass signals through that block (the pink Genie reads each hand's integer to learn it is broken), so a mod can hold one when its own spawning bypasses the native path. Chronicle also supports `entities.scale_set({entity, scale})`, an owner-scoped uniform visual multiplier from 0.5 to 3.0; it captures the native scale and restores it on actor reuse or mod unload. This operation only changes the live enemy model and shadow. If only `max_hp` changes, current HP keeps the same fraction. The operation rejects stale handles, unrevealed actors, and actors outside an active Chronicle dungeon; ChronicleTwo does not support it. Both ports support `entities.spawn` for registered enemy definitions; it shares the `characters.spawn` request shape and returns a mod-owned actor handle. Chronicle only spawns when the definition's exact native template has already been loaded for the current dungeon floor. ChronicleTwo reuses an already-loaded compatible template model/script; if the template is not loaded on the current floor, spawn returns a clean failure rather than loading assets dynamically. The `entities.despawn` API in both ports removes a live enemy spawned by the calling mod and clears per-actor runtime state and native collision/projectile references. It invalidates the generation-checked handle, updates floor alive counts, and skips kill credit and drops. Chronicle rejects mimics because the dungeon map retains their chest trigger; ChronicleTwo rejects actors held by a native interaction. Both adapters also attempt to despawn safe, live owned actors when their Lua mod unloads; native safety guards leave actors in place if despawn is unsafe. NPC/world-object spawning remains unsupported. Query calls outside an active dungeon fail instead of returning an empty list; handle lookups after leaving a dungeon return `status = "expired"`.
 
 ### Dungeon entity velocity
 
@@ -696,7 +890,10 @@ local formula = assert(game.combat.register_formula({
 
 `combat.register_formula` registers an owner-scoped damage modifier. The accepted fields are `id`, `operation`, `value`, optional integer `priority`, optional `chance` for `chance_multiply`, optional `min_value`/`max_value` for `random_multiply`, and optional native `weapon_id`, `native_model_id`, and `character_id` filters. `ramp_multiply` is Chronicle-only and additionally requires `rate_per_second` (0–10) and `reset_after_frames` (1–36,000); it ramps the multiplier from 1.0 up to `value` at the specified rate, based on matching-hit frame timestamps, then restarts after a gap longer than the reset interval. Chronicle also accepts `target_hp_below_percent` (0–100), which only matches a live weapon target whose current HP percentage is strictly below the threshold; non-hit calls lack this context and skip such a formula. `random_multiply` chooses a uniform multiplier from its inclusive bounds for each matching hit. `combat.register_player_formula` accepts optional `weapon_id` and `character_id` filters. These filters are native numeric IDs; when present, a formula only applies when every supplied filter matches. Chronicle supplies weapon, enemy-model, attacker-character, and target-HP context for real weapon hits, and weapon and character context for native incoming player damage. Unfiltered formulas retain their previous behavior. IDs are local 1–64 character ASCII identifiers; each mod may own up to 64 formulas, and the game retains at most 512. `add` accepts −1,000,000 through 1,000,000, `multiply`, `chance_multiply`, and `random_multiply` accept multipliers from 0 through 100, and `set` accepts 0 through 1,000,000. `chance_multiply` also requires a finite chance from 0 through 100 and independently rolls for each matching hit. Modifiers run in ascending priority, then owner ID and formula ID order; random effects roll independently. Re-registering an owned formula ID updates its definition; an identical definition is idempotent. Unloading a mod removes its formulas.
 
-Formulas modify positive damage after each game's native defense, elemental, and damage-block calculations in the native enemy-hit pipeline. Chronicle also publishes `game.enemy_hit` after an accepted positive native weapon hit. That event includes the generation-checked enemy `entity`, `slot`, player `attacker`, stable `weapon_id`, `native_weapon_id`, final `damage`, `element`, `frame`, and `native_model_id` when known. The event is informational and delivered on the next runtime pump; use the formula filters for damage changes. Formulas also modify explicit `combat.damage` requests when unfiltered. A zero or blocked base hit remains zero; final damage is clamped to 0–1,000,000, then rounded upward to a whole HP for scripted `combat.damage`. These formulas do not create new attack, animation, or collision behavior.
+Formulas modify positive damage after each game's native defense, elemental, and damage-block calculations in the native enemy-hit pipeline. Chronicle also publishes `game.enemy_hit` after an accepted positive native weapon hit. That event includes the generation-checked enemy `entity`, `slot`, player `attacker`, stable `weapon_id`, `native_weapon_id`, final `damage`, `element`, `frame`, and `native_model_id` when known. The event is informational and delivered on the next runtime pump; use the formula filters for damage changes. Chronicle's `game.enemy_hit` also carries `charged`: true when the hit lands within a second of a charged move
+(Toan's held charge, Xiao's full-gauge shot, Goro's swing held into a second spin, Ruby's full charge, Osmond's charged
+shot; Ungaga's combo has no charge). A formula with `charged = true` (or `false`) applies only to such (or other) real
+weapon hits; calls without hit context skip it. Formulas also modify explicit `combat.damage` requests when unfiltered. A zero or blocked base hit remains zero; final damage is clamped to 0–1,000,000, then rounded upward to a whole HP for scripted `combat.damage`. These formulas do not create new attack, animation, or collision behavior.
 
 ### Chronicle built-in item definitions
 
@@ -807,7 +1004,7 @@ local grant = assert(game.weapons.give({id = blade.id}))
 assert(grant.added and grant.native_item_no == blade.native_item_no)
 ```
 
-Chronicle lists its 120 retail weapons and registered definitions. `weapons.get()` accepts a `chronicle:weapon:<item_no>` ID for retail weapons, a mod-owned stable ID, native item number, or selector object. Results include base stats, caps, elements, monster effectiveness, socket count, experience/build-up metadata, and matching owned instances with equipped state. Each owned instance reports maximum `stats.durability`, live fractional `stats.durability_current`, per-instance `elements`, `vs_monster`, and `flags`. The ownership fields are `nil` without an active save. Registration allocates one of 32 appended native slots (377-408) and persists the stable ID to `moonmod/game-content/chronicle-weapon-slots.json`, so the same mod keeps the same native item number across launches. A definition inherits its template's owner, icon, name message, elements, sockets, experience, and build-up data; it may set `owner`, `stats.attack`, `stats.durability`, `stat_caps.attack`, and `stat_caps.magic`. `assets` must be empty. The API's `name` is available to Lua, but Chronicle's inventory menus still display the inherited native localized name. `weapons.give({id})` adds one copy through the game's inventory path and assigns it to the compatible character. `weapons.equip({id, character?, slot?})` equips one owned compatible weapon on a joined character. Chronicle changes the loadout in an active Georama town or dungeon; in a dungeon, equipping the active character's weapon reloads the character and weapon models through the native character-switch routine, and is refused during an attack or other locked action. `weapons.remove({id, character?, slot?})` deletes one owned instance that is not equipped (Chronicle only). The character defaults to the active member; `slot` is required when the character owns multiple copies. Repeating the current selection succeeds with `changed = false`. `weapons.stats_set({id, character?, slot?, attack?, endurance?, speed?, magic?, durability?, elem?, vs_monster?, flags?})` is Chronicle-only and updates exactly one owned native weapon instance. Scalar stats accept integers from 0 to 32767, `elem` takes five values and `vs_monster` takes ten values from 0 to 127, and flags accept a 16-bit value. Specify both `character` and `slot` when the weapon has multiple copies. A durability-maximum update preserves the current durability fraction; element and effectiveness writes update the native saved weapon data. `weapons.durability_set({id, durability, character?, slot?})` sets current durability from zero through that instance's native maximum without changing the maximum. New model/animation identities are not part of this registration path yet.
+Chronicle lists its 120 retail weapons and registered definitions. `weapons.get()` accepts a `chronicle:weapon:<item_no>` ID for retail weapons, a mod-owned stable ID, native item number, or selector object. Results include base stats, caps, elements, monster effectiveness, socket count, experience/build-up metadata, and matching owned instances with equipped state. Each owned instance reports maximum `stats.durability`, live fractional `stats.durability_current`, per-instance `elements`, `vs_monster`, and `flags`. The ownership fields are `nil` without an active save. Registration allocates one of 32 appended native slots (377-408) and persists the stable ID to `moonmod/game-content/chronicle-weapon-slots.json`, so the same mod keeps the same native item number across launches. A definition inherits its template's owner, icon, name message, elements, sockets, experience, and build-up data; it may set `owner`, `stats.attack`, `stats.durability`, `stat_caps.attack`, and `stat_caps.magic`. `owner` may be a registered playable character (`"opar"`): the weapon then belongs to the character he fights as (`owner` reads that one, so the combat code treats it as theirs) and sits in his own row of the weapon page, chests and pickups put it there, and only he can be given it; `weapons.get` reports him as `holder`. `assets` must be empty. The API's `name` is available to Lua, but Chronicle's inventory menus still display the inherited native localized name. `weapons.give({id, character?})` adds one copy through the game's inventory path and assigns it to the compatible character, or to `character` (a joined playable id) when given; a weapon fits its owner, and a registered playable character the weapons of the character he fights as (`fights_as`). `weapons.equip({id, character?, slot?})` equips one owned compatible weapon on a joined character. Chronicle changes the loadout in an active Georama town or dungeon; in a dungeon, equipping the active character's weapon reloads the character and weapon models through the native character-switch routine, and is refused during an attack or other locked action. `weapons.remove({id, character?, slot?})` deletes one owned instance that is not equipped (Chronicle only). The character defaults to the active member; `slot` is required when the character owns multiple copies. Repeating the current selection succeeds with `changed = false`. `weapons.stats_set({id, character?, slot?, attack?, endurance?, speed?, magic?, durability?, elem?, vs_monster?, flags?})` is Chronicle-only and updates exactly one owned native weapon instance. Scalar stats accept integers from 0 to 32767, `elem` takes five values and `vs_monster` takes ten values from 0 to 127, and flags accept a 16-bit value. Specify both `character` and `slot` when the weapon has multiple copies. A durability-maximum update preserves the current durability fraction; element and effectiveness writes update the native saved weapon data. `weapons.durability_set({id, durability, character?, slot?})` sets current durability from zero through that instance's native maximum without changing the maximum. New model/animation identities are not part of this registration path yet.
 
 `weapons.definition_set({id, ...fields})` is Chronicle-only and changes the live base definition of one built-in weapon so future native drops and purchases inherit the edited values. It supports attack, endurance, speed, magic, durability, owner, six socket types and socket count, five element values, ten monster-effectiveness values, ABS fields, flags, both build-up masks, attack/magic caps, and chain position. Another mod cannot override a weapon definition already owned by a different mod. Chronicle restores the complete original definition when the owner unloads. Existing weapons in saves keep their saved stats, matching the legacy Expanded Data mod. This operation does not alter localized names, model identities, shop inventories, or daily rotations; Chronicle Two does not expose this operation.
 
@@ -882,7 +1079,7 @@ local annex = assert(game.dungeons.register({
 print(annex.floors[1].native_floor_id, annex.floor_count)
 ```
 
-Chronicle's `game.dungeons.list()` returns the seven native dungeons plus mod-registered extensions. `game.dungeons.get(id)` reads either kind by stable ID; a local suffix resolves in the calling mod's namespace first and then against the built-in catalog. `game.dungeons.register()` and its `game.world.register_dungeon()` alias append floors to native dungeons 0-4. Each floor requires a local `id` and a `source_floor`: an integer selects an existing floor's enemy layout, while a string selects an earlier floor in the same registration. Registration copies both normal and back-side native enemy layouts into new native floor slots. An optional `enemies` array replaces that floor's roster with up to nine character IDs registered by the same mod; an empty array creates an empty encounter. Mod-owned custom model resources must be available when the floor is registered. The game's procedural map builder supplies the existing dungeon theme, room geometry, and item rules; floor names and stable IDs are queryable metadata while Chronicle's native floor display remains numeric. One registration can add at most eight floors, and each target dungeon can have at most 25 floors total, matching Chronicle's fixed save and restriction-zone tables. Gallery of Time is already at 25 floors and Demon Shaft uses a separate 100-floor path, so neither accepts additions. Asset overrides, custom geometry, and standalone dungeon maps remain unsupported. Registered floors remain active for the current game session.
+Chronicle's `game.dungeons.list()` returns the seven native dungeons plus mod-registered extensions. `game.dungeons.get(id)` reads either kind by stable ID; a local suffix resolves in the calling mod's namespace first and then against the built-in catalog. `game.dungeons.register()` and its `game.world.register_dungeon()` alias append floors to native dungeons 0-4. Each floor requires a local `id` and a `source_floor`: an integer selects an existing floor's enemy layout, while a string selects an earlier floor in the same registration. Registration copies both normal and back-side native enemy layouts into new native floor slots. An optional `enemies` array replaces that floor's roster with up to nine character IDs registered by the same mod; an empty array (which reaches the engine as an empty object from Lua) creates an empty encounter: no monster stands on the floor at all, nor carries its key. Mod-owned custom model resources must be available when the floor is registered. The game's procedural map builder supplies the existing dungeon theme, room geometry, and item rules; floor names and stable IDs are queryable metadata while Chronicle's native floor display remains numeric. One registration can add at most eight floors, and each target dungeon can have at most 25 floors total, matching Chronicle's fixed save and restriction-zone tables. Gallery of Time is already at 25 floors and Demon Shaft uses a separate 100-floor path, so neither accepts additions. Asset overrides, custom geometry, and standalone dungeon maps remain unsupported. Registered floors remain active for the current game session.
 
 ### Chronicle floors with their own map pack
 
@@ -1099,7 +1296,7 @@ local status = assert(game.player.status_add({status = "power", character = "max
 assert(game.player.status_remove({status = "power", character = "max"}))
 ```
 
-`player.get()` returns the active character id plus current and maximum HP and water. Chronicle also returns `character_id` (the native party slot) and the equipped `weapon` object when present (`id`, `item_no`, `slot`, `attack`, `endurance`, `speed`, `durability` and `durability_max`; a hit wears `(1.5 - endurance / 100)` times the swing's weight, up to 3 for a charged attack). During an active dungeon it also returns the active player's native world `position` (`x`, `y`, `z`) in both games. `player.set({hp = integer, character = optional_id})` sets current HP exactly through the native HP update path; `player.set({max_hp = integer, character = optional_id}) changes Chronicle's maximum HP from 1 through 999 and clamps current and pending HP down if needed; player.set({water = integer, character = optional_id}) sets Chronicle's current water gauge within its native range and clears any pending gauge interpolation. Each call sets exactly one field. Attempts to set max_water, multiple fields together, or unknown fields are rejected. Chronicle Two does not support max_hp or water. This call can target a benched character without switching the active character. `player.heal` and `player.damage` accept integer amounts from 1 through 32767 and use the game's native health state, which clamps at maximum and zero HP. The optional `character` accepts `"active"` or a playable character id: Chronicle supports Toan, Xiao, Goro, Ruby, Ungaga, and Osmond; ChronicleTwo supports Max, Monica, and the ridepod. These calls can update a benched character without switching the active character. Omitting `character` targets the active character, including ChronicleTwo's transformed monster when its live gauge is available. `player.damage` changes HP only; it does not synthesize damage formulas or knockback. `player.status_add/remove` use native ailment/status rules: Chronicle accepts `freeze`, `stamina`, `poison`, `curse`, and `goo` for the active character; ChronicleTwo accepts `poison`, `slow`, `curse`, `stop`, `power`, `stone`, and `dry` for Max or Monica. ChronicleTwo requires `duration_frames` from 1 through 32767 when adding a timed status (`slow`, `stop`, `power`, or `stone`) and rejects a duration for untimed statuses. Native interactions can reject a status (for example, ChronicleTwo power wards off poison and slow). Unsupported player mutations remain unsupported.
+`player.get()` returns the active character id plus current and maximum HP and water. Chronicle also returns `character_id` (the native party slot) and the equipped `weapon` object when present (`id`, `item_no`, `slot`, `attack`, `endurance`, `speed`, `durability` and `durability_max`; a hit wears `(1.5 - endurance / 100)` times the swing's weight, up to 3 for a charged attack). During an active dungeon it also returns the active player's native world `position` (`x`, `y`, `z`) in both games. `player.set({hp = integer, character = optional_id})` sets current HP exactly through the native HP update path; `player.set({max_hp = integer, character = optional_id}) changes Chronicle's maximum HP from 1 through 999 and clamps current and pending HP down if needed; player.set({water = integer, character = optional_id}) sets Chronicle's current water gauge within its native range and clears any pending gauge interpolation. Each call sets exactly one field. Attempts to set max_water, multiple fields together, or unknown fields are rejected. Chronicle Two does not support max_hp or water. This call can target a benched character without switching the active character. `player.heal` and `player.damage` accept integer amounts from 1 through 32767 and use the game's native health state, which clamps at maximum and zero HP. The optional `character` accepts `"active"` or a playable character id: Chronicle supports Toan, Xiao, Goro, Ruby, Ungaga, Osmond and the registered playable characters in the party (`characters.register_playable`); ChronicleTwo supports Max, Monica, and the ridepod. These calls can update a benched character without switching the active character. Omitting `character` targets the active character, including ChronicleTwo's transformed monster when its live gauge is available. `player.damage` changes HP only; it does not synthesize damage formulas or knockback. `player.status_add/remove` use native ailment/status rules: Chronicle accepts `freeze`, `stamina`, `poison`, `curse`, and `goo` for the active character; ChronicleTwo accepts `poison`, `slow`, `curse`, `stop`, `power`, `stone`, and `dry` for Max or Monica. ChronicleTwo requires `duration_frames` from 1 through 32767 when adding a timed status (`slow`, `stop`, `power`, or `stone`) and rejects a duration for untimed statuses. Native interactions can reject a status (for example, ChronicleTwo power wards off poison and slow). Unsupported player mutations remain unsupported.
 
 ### Player tuning (Chronicle)
 
@@ -1130,10 +1327,43 @@ set. Fields, all validated (a bad field rejects the whole call with `invalid_arg
 | `durability_wear` | 0.25 to 4 | scales the weapon wear per hit, after the weapon's own halving or doubling flags |
 | `map_reveal` | boolean | the floor map draws every cell as if the Map item were held (the HUD shows the Map icon too) |
 | `monster_reveal` | boolean | monsters show on the map as if the Magical Crystal were held |
+| `map_hidden` | boolean | no floor map or minimap at all (wins over `map_reveal`) |
+| `status_duration` | 0.25 to 4 | scales how long Freeze (300 frames) and Stamina (1800) last |
+| `status_immune` | list of `freeze`, `stamina`, `poison`, `curse`, `goo` | the active player never takes these ailments (owners' lists combine) |
+| `swap_delay` | 0 to 4 | scales the two 20-frame waits of a battle-menu character switch; 0 switches as soon as the model loads |
+| `dodge_power` | 0, or 0.25 to 4 | with a value, L2 throws the player forward (the push an attack lunge uses, so walls stop it); 45-frame cooldown; owners take the strongest |
+| `dodge_invincible_frames` | 0 to 60, integer | invincibility a dodge gives |
+| `dodge_hop` | boolean | the dodge leaves the ground |
+| `extra_shots` | 0 to 2, integer | Xiao's slingshot and Ruby's orbs fire this many more, fanned 8 degrees either side (owners add, capped at 2) |
+| `shots_pierce` | boolean | Ruby's orbs fly on through monsters (walls still stop them) |
+| `first_person` | boolean | `false` turns off R2's first-person view in dungeons |
+| `reach_scale` | 0.25 to 4 | Ungaga's spear hit points sit this much further out from him |
 
 `player.invincible({frames = 1..600})` sets the active player's native invincibility counter to at least `frames`
 during an active dungeon (it fails in town) and reports the counter and its previous value; it never shortens a
 longer run and counts down with the game. All three need `game.write`. Chronicle Two has no binding for them yet.
+
+`player.fatal_guard({charges = 0..99, character = optional id})` (Chronicle, `game.write`) sets how many fatal hits a
+character survives: an animated hit that would take its HP to 0 leaves 1 HP instead, spends a charge, gives 90
+invincible frames and sends `game.player.guarded` `{character, charges}` (the charges left). Without `character` it
+sets all six. Charges are not saved; the result lists every character's.
+
+### The companion (Chronicle)
+
+```lua
+assert(game.party.companion_set({character = "ruby", stance = "target", damage_scale = 1.0}))
+assert(game.party.companion_set({}))   -- send it back
+local out = game.party.companion_get() -- {character = "ruby" or nil, out = boolean}
+```
+
+`party.companion_set` (`game.write`) brings a party member out beside the player in a dungeon. The engine loads its
+model and equipped weapon into arenas of their own and drives it: it follows the player, runs to and attacks the
+player's lock-on target (`stance = "target"`, the default), any monster within 150 units of the player (`"aggressive"`), or
+nothing (`"passive"`). It cannot be hurt and monsters never target it; each blow deals its equipped weapon's base attack
+times `damage_scale` (0 to 10), with no damage formulas (Xiao, Ruby and Osmond fire a visible shot that lands on arrival), and is reported as `game.companion.hit` `{entity, character,
+damage, killed, reward_exp, frame}`. It catches up at once if it falls far behind. A companion can't be the active
+character: switching to it sends it back until the mod names another. Only one mod's companion is out at a time, and
+unloading the mod sends it back.
 
 ### Party queries
 
@@ -1143,7 +1373,44 @@ local active = assert(game.party.active())
 local npc = assert(game.party.recruit({npc_id = 7})) -- Chronicle Two
 ```
 
-These read party membership and the active character from the current save. ChronicleTwo reads the native membership mask and reports stable ids (`max`, `monica`, `ridepod`, or `monster`), the native character id, and an `active` flag; `party.list()` also reports townspeople with stable ids such as `chronicle-two:npc:7` and their joined/in-party status. Chronicle reports its joined playable roster from the native party-size field and fixed character order, plus the active member. `party.set_active({id = "toan"|"xiao"|"goro"|"ruby"|"ungaga"|"osmond"})` changes Chronicle's active member through its native character and weapon loading routine. It requires an active dungeon, a joined and living target, no current player action or movement lock, and compliance with the game's restricted-zone and Osmond ground rules. ChronicleTwo's `party.set_active({id = "max"|"monica"|"ridepod"})` checks the game's native quick-change state and changes the active character through the native setter; the game can reject a switch when the character is unavailable, locked, at zero HP, blocked by status, or barred by the current floor. A successful changed switch emits `game.party.active_changed` with `previous`, `active`, and `changed`. `party.recruit({npc_id = 1..32})` runs ChronicleTwo's native townsperson join and in-party routines. The game allows one townsperson companion at a time; recruiting another moves the previous one to the joined/waiting state. Re-recruiting the current companion is an idempotent no-op. Successful recruitment emits `game.party.recruited` with `id`, `npc_id`, `recruited`, `changed`, and `replaced`. Chronicle recruitment remains unsupported because its playable cast has no separate NPC companion roster.
+These read party membership and the active character from the current save. ChronicleTwo reads the native membership mask and reports stable ids (`max`, `monica`, `ridepod`, or `monster`), the native character id, and an `active` flag; `party.list()` also reports townspeople with stable ids such as `chronicle-two:npc:7` and their joined/in-party status. Chronicle reports its joined playable roster from the native party-size field and fixed character order, plus the active member. `party.set_active({id = "toan"|"xiao"|"goro"|"ruby"|"ungaga"|"osmond"|<registered id>})` changes Chronicle's active member through its native character and weapon loading routine. It requires an active dungeon, a joined and living target, no current player action or movement lock, no scene playing (a floor's entry scene, a gate: it picks its motions by the character it began with), and compliance with the game's restricted-zone and Osmond ground rules. ChronicleTwo's `party.set_active({id = "max"|"monica"|"ridepod"})` checks the game's native quick-change state and changes the active character through the native setter; the game can reject a switch when the character is unavailable, locked, at zero HP, blocked by status, or barred by the current floor. A successful changed switch emits `game.party.active_changed` with `previous`, `active`, and `changed`. `party.recruit({npc_id = 1..32})` runs ChronicleTwo's native townsperson join and in-party routines. The game allows one townsperson companion at a time; recruiting another moves the previous one to the joined/waiting state. Re-recruiting the current companion is an idempotent no-op. Successful recruitment emits `game.party.recruited` with `id`, `npc_id`, `recruited`, `changed`, and `replaced`. Chronicle recruitment remains unsupported because its playable cast has no separate NPC companion roster.
+
+**Playable characters past the six (Chronicle, sandbox sessions only).** A mod can add playable characters with
+`characters.register_playable` (`content.register`), usually while it loads:
+
+```lua
+game.characters.register_playable({
+  id = "opar", name = "Opar",                    -- API id (1-15 of a-z, 0-9, _); name 1-10 letters
+  pack = "dun/mainchara/c07d.chr",               -- his character pack, a file the mod supplies (resources.override)
+  portrait = "dun/mainchara/c07d_face.png",      -- optional 128 x 128 PNG for the menus' faces
+  title = "Moon Sea Frog Mage",                  -- optional: what the item menu says under his picture (default: name)
+  fights_as = "toan",                            -- optional (default toan): whose action, motions, weapons, voice
+  hp = 90, defense = 21,                         -- optional: start values (default: those of fights_as)
+})                                               -- returns {id, character_id, count}
+```
+
+Each takes the next native index from 6 (`character_id`) and keeps it while the game runs; there is room for ten
+(sixteen characters in all). Registering the same id again updates him in place; another mod's id is refused. A party
+holds the first `party_size` characters and every registered one who has joined. A sandbox party that reaches his
+index holds him by its size: `session.start({party_size = 7})` takes the first registered, 8 the first two. A story
+party takes him with `party.join({character = id})` (`game.write`), whatever its size (Opar joining with Xiao, at
+two), and `party.leave({character = id})` lets him go (not while he leads, nor from a party that holds him by its size);
+both return `{character, joined, changed, party_count}`. A new game has nobody joined. The save itself never holds
+one: it keeps its six (its layout is unchanged, so it loads without the mod), and writing a save image counts a party
+of six with Toan active. What is his goes beside it, in the save's folder as `characters.json` (written with the save
+and the autosave, read when it loads, deleted with it): for each registered character by id, whether he joined, led
+the party, his life, water, defence, ailments, skill, weapons and equipped slot. One the file names that no mod
+registers now is kept as it was; one it does not name starts afresh, out of the party. A weapon given to a character
+with nothing in hand (one just joined) goes in his hand (`weapons.give` returns `equipped = true`), as the story's own
+joins equip a first weapon. They appear in `party.list`, `characters.list` and `characters.get` (with `name`, `fights_as`, and
+`in_party` false outside a party that reaches them), `player.*`, `party.set_active`, `player.fatal_guard`,
+`dungeons.set_character_blocks`, the combat events' `attacker` and `game.item_picked_up`'s `character` (their index).
+A registered character fights as `fights_as`: that character's weapons (`weapons.give` with `character`), action,
+voice, motions, weapon models and menu poses. His pack is built on that character's skeleton (up to 16 MiB); his
+portrait is drawn on the switch wheel, the Allies ring and the weapon page, or the face of `fights_as` without one.
+The companion (`party.companion_set`) takes them too: his own model, moving and fighting as `fights_as`, and with
+`shot = {cell = 0..15, size = 0.3..4}` from range, throwing that `basefx01` cell (any companion can take one). The
+Gauntlet registers Opar this way (its **Opar** setting, or his star in Norune Eternal's Allies).
 
 Chronicle also provides `party.town_active()` and `party.town_set_active({id = "toan"|"xiao"|"goro"|"ruby"|"ungaga"|"osmond"})` for the visible town avatar. These calls require an active Chronicle town scene. Toan is always available; other characters require a positive native maximum-HP value, matching the legacy town selection check. Switching loads the character's native town-compatible model and animation resources, preserves position and rotation, and maps town motion IDs onto the selected character's motions. It does not change the saved dungeon-active character. `town_set_active` queues the model reload until the native scene is walking safely. These are Chronicle-only; ChronicleTwo does not expose town-avatar replacement.
 
@@ -1195,9 +1462,35 @@ local resolved = assert(game.characters.get(jacket.id))
 print(resolved.native_monster_id, resolved.model, resolved.script)
 ```
 
-Chronicle registers up to 32 enemy variants through its native monster-model resolver. A variant can inherit the selected template's model, AI script, effects, family, and drop rules while overriding `hp`, `defense`, `reward_exp`, and `reward_money`, or it can select a package-owned model binding through `models.register`. Chronicle's monster table has no per-definition display string, so `name` is returned by the API while the in-game lock-on label still uses the template's localized name.
+Chronicle registers up to 128 enemy variants through its native monster-model resolver. A variant can inherit the selected template's model, AI script, effects, family, and drop rules while overriding `hp`, `defense`, `reward_exp`, and `reward_money`, or it can select a package-owned model binding through `models.register`. Chronicle's monster table has no per-definition display string, so `name` is returned by the API while the in-game lock-on label still uses the template's localized name.
 
-`characters.spawn({character = id, position = {x, y, z}, rotation = optional {x, y, z}})` and its `entities.spawn` alias use the native actor initializer and inherited AI. Data-only variants require their exact template to be loaded on the current floor. A character using a registered custom model can load that model into a free slot in Chronicle's native nine-model floor table; spawning fails with a reason when the floor loader is not ready or all slots are occupied. The registering mod owns the definition and is the only mod allowed to spawn it. Nearby mod-owned enemies enter Chronicle's active native state immediately, and the view budget (4 awake enemies by default) prioritizes mod-owned enemies before filling remaining slots with vanilla actors. The response includes a generation-checked `entity_handle`, slot, position, and supported stats. Resolve it with `entities.get`; it reports `dead` after death and `expired` after native slot reuse or dungeon cleanup. `entities.despawn({id = entity_handle})` removes a live owned non-mimic enemy without kill credit or drops.
+`characters.spawn({character = id, position = {x, y, z}, rotation = optional {x, y, z}})` and its `entities.spawn` alias use the native actor initializer and inherited AI. Data-only variants require their exact template to be loaded on the current floor. A character using a registered custom model can load that model into a free slot of the floor's model table (24 models; the native game had 9); spawning fails with a reason when the floor loader is not ready or all slots are occupied. The registering mod owns the definition and is the only mod allowed to spawn it. Nearby mod-owned enemies enter Chronicle's active native state immediately, and the view budget (4 awake enemies by default) prioritizes mod-owned enemies before filling remaining slots with vanilla actors. The response includes a generation-checked `entity_handle`, slot, position, and supported stats. Resolve it with `entities.get`; it reports `dead` after death and `expired` after native slot reuse or dungeon cleanup. `entities.despawn({id = entity_handle})` removes a live owned non-mimic enemy without kill credit or drops.
+
+A data-only variant whose template the floor didn't load (a boss on an ordinary floor) has the template loaded into a
+free slot of the floor's model table when it spawns. The retail bosses (Dran 78, Master Utan 79, Ice Queen 80, King's
+Curse 81/82, Minotaur Joe 83, Dark Genie 84) run scripts written for their own arenas, centred on the world origin;
+`arena_origin = {x, y, z}` tells the engine where that arena's centre lies on this floor, and every position the
+boss's script reads or sets is moved by it. `grounded = true` (with `arena_origin`) also keeps every height the script
+asks for at the floor (Dran stays on the ground).
+
+`arena_slot = 0..15` (with `arena_origin`) makes the spawn a member of a boss's cast: the monsters its arena places
+beside it, whose scripts name each other by the slots they hold there (the boss in 0). Spawn the boss with
+`arena_slot = 0` and each helper with its native slot and the same `arena_origin`; the engine maps those slot numbers
+(monster positions, links, references, script IDs) onto the slots the cast holds on this floor, and the shared script
+values (`SET_GLOBAL_INT`) are the cast's own bank, apart from the floor's other monsters, which use the same numbers for their own ends, and start cleared for the cast's first member, as the arena's floor load leaves them. A boss (`arena_slot = 0`) always opens a new cast, even at an origin where another cast still stands (a second boss rising where the first fell, while it fades out): the helpers spawned after it at that origin join it, and the two casts never fade or name each other. A missing member leaves its
+part of the fight out. The native casts: Ice Queen 80 with Ice Barrier 101, Ice Arrow 76, Ice Prison 102, Ice Meteor
+103, Ice Aura 92 and three Ice Tornadoes 104 (slots 1-8); King's Curse coffin 81 (the part that dies) with the Curse
+82 in slot 1; Minotaur Joe 83 with three Wine Kegs 91; the pink Dark Genie 84 with his hands 85 and 86, light 87, wind
+88, beam 89 and 90 and shockwave 93 (slots 1-7; his eye opens to blows only once both hands are broken, and he waits on
+his beam, slot 5, so leave those in); the dark Genie 106 with
+shades 105 (slots 1-2), pillars 107 (3-4, each raising the shade below it), shockwaves 108 (5-6) and beam 109 and 110
+(7-8). The Genie's casts load more textures than a floor's share of the PS2's 4 MB; Chronicle's texture count, which
+is bookkeeping only, goes to four times that.
+
+The story scenes a boss's fight asks for don't run away from its arena. When a boss in an arena (any `arena_origin`
+spawn) asks for its defeat scene with its life gone, it fades out over a second and a half in its place and dies;
+other scene requests are skipped. When a cast's slot-0 member is defeated, by its scene request or its own script,
+the rest of its cast fades out with it.
 
 ### Native monster model resolution
 
@@ -1233,7 +1526,7 @@ local enemy = assert(game.characters.register({
 }))
 ```
 
-`models.register` requires the registering mod to own the `.chr` override. Chronicle's pack must provide `info.cfg`; Chronicle Two's pack must provide `<model>.cfg`. A custom `script` additionally requires an owned `.stb` override; when omitted, the template's native script is inherited. `models.unregister({id = local_model_id})` removes the logical model binding when no registered character or existing embedded-motion definition refers to it; it leaves the separately registered resource overrides in place for `resources.unoverride` or owner cleanup. The character's native table row points at these asset stems. Chronicle can load a custom model after floor entry when a slot is free in its native nine-model table; Chronicle Two loads it through the native monster manager. Chronicle bounds package `.chr` and `.stb` reads to 2 MiB after sector padding; Chronicle Two uses a 3 MiB limit. `models.replace({monster_id, model})` changes the `.chr` model stem on a native monster-table row, and `models.remove({monster_id})` restores the value captured before that mod's first replacement. Replacement requires the calling mod to own the matching `resources.override` path (`dun/monstor/<model>.chr` in Chronicle or `dungeon/monster/<model>.chr` in Chronicle Two), and another mod cannot replace or remove its binding. A row whose model is loaded on the active dungeon floor cannot be changed until that floor is left. Unloading the owning mod restores its native model binding. `resources.unoverride` refuses to remove a `.chr` path that an active native model replacement still uses, and it protects `.chr` and custom `.stb` paths held by a registered model because native model definitions persist until process exit. The API checks ownership and size but does not validate the model format or rig compatibility. Existing embedded-motion playback remains at its verified baseline; it is not expanded by model binding removal.
+`models.register` requires the registering mod to own the `.chr` override. Chronicle's pack must provide `info.cfg`; Chronicle Two's pack must provide `<model>.cfg`. A custom `script` additionally requires an owned `.stb` override; when omitted, the template's native script is inherited. `models.unregister({id = local_model_id})` removes the logical model binding when no registered character or existing embedded-motion definition refers to it; it leaves the separately registered resource overrides in place for `resources.unoverride` or owner cleanup. The character's native table row points at these asset stems. Chronicle can load a custom model after floor entry when a slot is free in its 24-model floor table; Chronicle Two loads it through the native monster manager. Chronicle bounds package `.chr` and `.stb` reads to 2 MiB after sector padding; Chronicle Two uses a 3 MiB limit. `models.replace({monster_id, model})` changes the `.chr` model stem on a native monster-table row, and `models.remove({monster_id})` restores the value captured before that mod's first replacement. Replacement requires the calling mod to own the matching `resources.override` path (`dun/monstor/<model>.chr` in Chronicle or `dungeon/monster/<model>.chr` in Chronicle Two), and another mod cannot replace or remove its binding. A row whose model is loaded on the active dungeon floor cannot be changed until that floor is left. Unloading the owning mod restores its native model binding. `resources.unoverride` refuses to remove a `.chr` path that an active native model replacement still uses, and it protects `.chr` and custom `.stb` paths held by a registered model because native model definitions persist until process exit. The API checks ownership and size but does not validate the model format or rig compatibility. Existing embedded-motion playback remains at its verified baseline; it is not expanded by model binding removal.
 
 ### Animations
 
@@ -1428,8 +1721,11 @@ end)
     reaches the engine as an object). Coordinates are sky units within ±8000; 640 units span the screen.
   - `texts`: up to 24 captions `{text, x, y, colour?}`; `top`: up to 3 lines of 64 bytes at the top right.
 
-  The D-pad moves to the nearest node in that direction and R2 or Triangle toggles the whole-sky map, both without an
-  event. Cross, Square, L1 and R1 on a node send `game.title.selected` with `entry` = the node id and `action` =
+  The D-pad moves to the nearest node in that direction (a node linked to the cursor's comes first), L2 and R2 jump
+  to the previous and next constellation, and Triangle toggles the whole-sky map, all without an event. The mouse
+  works too: the node under the hand takes the cursor, a left click buys it, a click on a button in the hint row, the
+  star map or a constellation's name at the edge does what it shows, the wheel turns through the constellations and
+  a right click goes back. The page spreads across a wide window. Cross, Square, L1 and R1 on a node send `game.title.selected` with `entry` = the node id and `action` =
   `"buy"`, `"toggle"`, `"rank_down"` or `"rank_up"`; Circle sends `entry = "back"` as on any sub-page. The view
   follows the cursor's constellation; the bottom plate shows the cursor node's `title`, `rank`, `tag`, `cost`, `text`
   and `needs`. A new sky keeps the cursor on the same node id and keeps the map view.
@@ -1437,8 +1733,9 @@ end)
   open on the title. A queued start goes ahead on the next frame. Leaving the screen, or a start that cannot happen,
   drops it. `floor` is the stable id of a floor registered with `dungeons.register`. The screen fades out,
   the save data is reset as for a new game (the configuration is kept), and the player starts on that floor. The
-  first `party_size` characters (1-6, default 1) have joined. Each of them is equipped with their first weapon (a new
-  game gives only Toan one). `character` (default `"toan"`) is the active one and must be within the party. The
+  first `party_size` characters (1 to 6 plus the registered playable characters, default 1) have joined; past six they
+  are the registered ones in order (below). Each of them is equipped with their first weapon (a new game gives only
+  Toan one; a registered character gets the first weapon of the character he fights as). `character` (default `"toan"`) is the active one and must be within the party. The
   session belongs to no save slot: `save.slot_id` returns nil, and native saving never happens, because the session
   never reaches a town or the save screen.
 - A session ends when it leaves its dungeons. The dungeon exit, Escape Powder and a game over all redirect to the
@@ -1519,16 +1816,36 @@ The Tier 2 expansion introduces high-utility gameplay hooks across both games:
 - **Shop Inventory & Pricing (`game.shops.*`)**:
   - `game.shops.list()`: Enumerates native shop catalogs, their NPC owners, and scene locations.
   - `game.shops.get({shop = shop_id_or_number})`: Retrieves shop items, stock counts, and purchase prices.
-  - `game.shops.register_item({shop = shop_id, item = item_id_or_number, price = optional, count = optional})`: Injects an item or weapon into a shop's stock.
-  - `game.shops.remove_item({shop = shop_id, item = item_id_or_number})`: Removes an item from a shop's inventory.
+  - `game.shops.register_item({shop_no = 0..17 or id = "chronicle:shop:N", item_id = item_id_or_number})`: Adds an item or weapon to a shop's stock (a shop holds at most 20 goods). Its price is the item's own (a registered weapon starts at its template's); set it with `set_price`, which reaches registered weapons too.
+  - `game.shops.remove_item({shop_no = 0..17 or id = "chronicle:shop:N", item_id = item_id_or_number})`: Removes an item from a shop's inventory.
   - `game.shops.set_items({shop_no = 0..17, items = [item_no, ...]})`: (*Chronicle only*) Replaces the native fixed-size list with up to 20 goods. Repeated IDs are preserved because native shops use duplicate entries for stock weighting. A shorter list retains its `-1` terminator; a full list uses every slot and is read by the game's bounded 20-entry loop. The list is owned by the calling mod and restores to its original contents when that mod unloads; another mod cannot claim the same shop while it is overridden.
   - `game.shops.set_price({item_id = item_id_or_number, buy_price = optional, sell_price = optional})`: Overrides the native global buy and/or sell price for an item or weapon. Chronicle restores the original price when the owning mod unloads.
 
-Chronicle's `register_item`, `remove_item`, and `set_items` changes share one owner claim per native shop. `set_price` uses one owner claim per native item price. Conflicting mods receive an error instead of overwriting another owner's data; unloading the owner restores the saved native value.
+Chronicle's `register_item` claims no shop: the goods it adds are kept apart and put back at the end of the list after any mod's `set_items` (while there is room), so a mod rotating a shop's stock and a mod adding to it both work. `remove_item` of the caller's own addition takes it back; otherwise `remove_item` and `set_items` share one owner claim per native shop. `set_price` uses one owner claim per native item price. Conflicting mods receive an error instead of overwriting another owner's data; unloading the owner restores the saved native value.
 
 - **Dungeon Floor Rules & Loot (`game.dungeons.*`)**:
   - `game.dungeons.floor_rules_get({dungeon = dungeon_id, floor = floor_num})`: Queries floor restriction rules (limited zones, character locks, red/white seals, back-floor keys).
   - `game.dungeons.floor_rules_set({dungeon = dungeon_id, floor = floor_num, rules = {...}})`: Overrides active or target floor rules.
+  - `game.dungeons.set_shortcuts({count = 0..7})` (Chronicle): new floors get up to `count` shortcut doors (the most
+    any mod asks for). The generator finds dead-end rooms (one doorway) and joins each to a room at least three joins
+    away, leaving by another side; the new doorway is locked with a gate and its key waits in a small chest in the dead
+    end, so the shortcut opens from inside, once the player has come the long way. Keys are items 216-222 (Bone Key to
+    Silver Key), one per door, skipping the floor's own gate key so no key fits two locks. Only a floor with more
+    than one shortcut colours its doors, and its first door stays native; the others are lit (softly) in their key's
+    colour. Walking up to a door with its key uses the key
+    and opens the doorway (`game.dungeon.door_opened` `{key, x, y}`); without it, `game.dungeon.door_locked` `{key, x,
+    y}` is sent once while the player stays there. Floors with shortcuts skip the native random locked room, which
+    uses the same keys. `game.dungeons.shortcuts_get()` lists the floor's doors `{x, y, key, key_item, locked}`.
+    Test hook: the environment variable `DC_SHORTCUT_VISIT` puts the player in the first door's dead end ten seconds
+    into a floor.
+  - `game.dungeons.floor_redirect({dungeon_id, floor_id, to_floor_id})` (Chronicle): an exit gate that would lead to
+    `floor_id` leads to `to_floor_id` instead; both must be floors added by `dungeons.register` in that dungeon. Leaving
+    out `to_floor_id` takes the redirect back; another mod's redirect on the same floor is refused; unloading the mod
+    takes its redirects back. (The Gauntlet skips its fourth floor this way in runs without Endless Maze.)
+  - `game.dungeons.set_modifiers({rooms, monsters, chests, chest_value})` (Chronicle): owner-scoped bonus percentages
+    (0 to 300); `chests` alone may go down to -100, which leaves a floor without regular chests. Gate keys picked up
+    are now reported as `game.item_picked_up` too. So is a weapon a dungeon script hands over (the clown's trapped chest).
+  - `game.dungeons.chest_weapons_add({item_id = weapon, dungeon_id = -1..6 (-1 any, default), floor_from = 0, percent = 10})` (Chronicle): a chest on that dungeon, from that floor on, that rolls a weapon holds this one instead `percent` of the time, unless one is already in a chest on the floor. For registered weapons (Opar's staffs). `game.dungeons.chest_weapons_clear()` takes back the calling mod's; unloading it does too.
   - `game.dungeons.loot_get({dungeon = dungeon_id, floor = floor_num})`: Inspects chest loot arrays and enemy drop tables.
   - `game.dungeons.loot_override({dungeon = dungeon_id, floor = floor_num, loot = {...}})`: Customizes chest contents or monster drop entries.
 
@@ -1558,7 +1875,8 @@ These operations bind each game's signature systems to native save or live engin
   - `game.player.thirst_changed` carries `character`, `character_id`, `previous_water`, `water`, `max_water`, `drain_per_frame`, `drained_out`, `dried_out`, `source` (`api` or `native`), `reason`, and `frame`. The adapter polls the native gauge once per runtime pump, so native drain, drinking, and drying out are observed even when no API call made the change. Native observations are emitted on whole-unit gauge boundaries and on dry-out rather than for every fractional frame, and a transition that starts and ends between two pumps is not reported.
 - **Chronicle Atla and town reconstruction (`game.georama.*`)**:
   - `game.georama.atla_list()` requires an active dungeon floor and returns the open Atla spheres with their live slot, native Atla registry index and id, registry floor/refcount, world position, and whether the contents are a Georama part or chip plus its saved obtained/placed/stock state.
-  - `game.georama.atla_collect({slot = 0..7})` requires an active dungeon floor and Toan as the controlled character. It uses the game's native Atla save routine (`getAtraToSaveData`), marks the live ball and matching dungeon event closed, and releases the part or chip into the same saved state as a native pickup. It does not transfer ownership of a mod-authored asset.
+  - `game.georama.atla_spawn({id, name, position?})` (`game.write`) puts a mod's own Atla sphere on the active dungeon floor: at `position` (`{x, y?, z}`), or a free spot as the floor's own spheres are put. Toan opens it as he does theirs, and the pickup says `"<name>" acquired`. It holds nothing of the game's (no Georama part or chip, no save record); `game.georama.atla_collected` tells the mods `{id, owner, name}`, and the mod keeps what it means (a story flag, say). It lasts for that floor; put it again on a later visit while the mod still wants it found. A floor holds 16 spheres (the game puts 8 at most), and one picked up leaves its place free; up to 16 mod spheres can be registered. `atla_list` shows them with `contents = {kind = "mod", id, owner, name}`.
+  - `game.georama.atla_collect({slot = 0..15})` requires an active dungeon floor and Toan as the controlled character. It uses the game's native Atla save routine (`getAtraToSaveData`), marks the live ball and matching dungeon event closed, and releases the part or chip into the same saved state as a native pickup. It does not transfer ownership of a mod-authored asset.
   - `game.georama.satisfaction_get({town_id = optional 0..4})` returns each requested Chronicle town with saved request completion, a rounded `satisfaction_percent` derived from completed native requests, and per-plot `obtained`, `placed_count`, `stock`, and element flags. The percentage is a framework view over native request state; retail has no separate satisfaction statistic.
 - **Chronicle back floors (`game.dungeons.back_floor_*`)**:
   - `game.dungeons.back_floor_get()` returns whether the active dungeon floor has a native back-floor enemy layout, whether the party is currently on it, the active floor and gate-key item identity, whether the key is held, and whether a request is pending. The key is the floor's native gate key, not a fabricated back-floor key table.

@@ -1,12 +1,17 @@
 # Norune Eternal: the unlock sky (design draft 2, built)
 
 *Built 2026-10-28.* The sky is on the title screen: 126 nodes in 14 constellations (the seven below, the heart and
-the six Signature skies). 75 nodes (104 ranks) work now, for 816 Moon Shards and 45 Genie Sigils; the rest show as
-*Coming soon* until the engine work behind them lands (the Companion, the Signature skies, Moonwalker's dodge roll, Twin
-Wardens, Warden's Court, Endless Maze, Blind Halls, Twin Keys, Barren, Loadouts, Blessed Choice, Chosen of the Moon,
-Second Wind, Hardy, Clear Mind, Charged Fury, Swift Swap). Differences from the draft below: costs and effects follow
-`main.lua`; Unbreakable Bond gives an Auto Repair Powder each biome (the game's own one-break save); Genie's Champions
-make each floor's key holder a lesser Warden with twice the HP.
+the six Signature skies), every one built: 155 ranks for 1,007 Moon Shards, 65 Genie Sigils and 90 Character Marks,
+Heat up to 40. Costs and effects follow `main.lua`. Where the build differs from the draft below:
+
+- Unbreakable Bond gives an Auto Repair Powder each biome (the game's own one-break save). Genie's Champions make each
+  floor's key holder a lesser Warden with twice the HP. The Warden's Court is five Wardens on the last Warden floor.
+- Moonwalker's dodge is on L2 (Circle is the lock-on). Hardy halves Freeze and Stamina.
+- Signature nodes were fitted to what each character's attacks can carry: Dagger Dance speeds Toan's swing recovery,
+  Quick Draw refills Xiao's gauge 50% faster, Iron Grip halves Goro's recoil, Flame Rings is +10% for Ruby, Totem Guard
+  turns aside one hit on Ungaga every 15 seconds and Shaman heals him 3% every 5, Steady Aim is a 10% double for Osmond.
+- Twin Keys: two monsters carry the gate key on floors I to III; the first key picked up is taken back until the second.
+- Endless Maze: every biome registers five floors; runs without it skip floor IV through an exit redirect.
 
 The Gauntlet's permanent progression: a night sky of **seven constellations** around Norune Eternal, each a trunk that
 forks into **build paths**, each path ending in a **Keystone** that defines a build. Plus a small **Signature** sky for each
@@ -55,18 +60,19 @@ Trunk: **Repair Kit** *(now)* I-II (2/4) → forks.
   thirst damage for 20 s after running dry; 12) → *Endless Spring: water drains half as fast* (2 S).
 - **Food**: Baker's Bundle (+2 bread; 3) → Hearty Bread (bread heals 50% more; 8) → Second Helping (+2 bread on each
   biome's floor I; 10) → *Feast: each floor starts with a 20% heal* (2 S).
-- **Merchant**: Gaffer's Wagon *(now)* I-II (6/10) → Haggler (Gaffer 20% cheaper; 8) → Gaffer's Stock (he sells
-  attachments; 15) → *Gaffer's Partner: the wagon stops on floors II and III* (3 S).
+- **Merchant** (Gaffer's Buggy pulls up on every swept floor on its own): Gaffer's Wagon I-II (one more ware; rank 2 a
+  third cheaper; 6/10) → Haggler (Gaffer 20% cheaper; 8) → Gaffer's Stock (attachments among his wares; 15) →
+  *Gaffer's Partner: Gaffer is waiting on every floor from the start* (3 S).
 
 ### 3. Allies: who fights with you
 Trunk: **Matataki Embassy** *(now)* (12) → forks.
 - **Draft**: Golden Atla's Call (drafts in biomes 2 and 4 too; 8) → Shared Spoils I-II (benched allies +25% ABS;
   4/8) → Rally (switching characters heals 10%; 10) → *Full Party: all six are drafted from the start; -10% Moon
   Shards* (3 S).
-- **Companion**: Companion (a drafted ally fights beside you: engine-controlled, can't be hurt, its weapon's base
+- **Companion**: Companion (with the Companion setting on, off by default, a drafted ally fights beside you: engine-controlled, can't be hurt, its weapon's base
   damage, your lock-on target; switching trades places; 25) → Stances (aggressive or passive; 8) → Keen Partner
-  (companion damage +25%; 12) → Twin Strike (hitting what the companion hits: +10% damage; 15) → *Soul Bond: the
-  companion's kills feed your weapon's ABS* (3 S).
+  (companion damage +25%; 12) → Twin Strike (hitting what the companion hits: +10% damage; 15) → *Soul Bond: each of
+  the companion's kills restores 3% of your HP* (3 S). The companion's kills never feed a weapon.
 - **Bench**: Bench Rest (benched allies regain 5% HP a floor; 6) → Swift Swap (no swap cooldown; 10) → *Relay: each
   switch gives the new character 3 s of invincibility* (2 S).
 

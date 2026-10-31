@@ -18,11 +18,21 @@
     {"id": "abs_rate", "name": "Weapon ABS multiplier", "type": "integer", "default": 6, "min": 1, "max": 12, "step": 1},
     {"id": "ally_abs_share", "name": "Benched allies' ABS share (%)", "type": "integer", "default": 50, "min": 0, "max": 100, "step": 10},
     {"id": "depth_hp", "name": "Enemy HP per floor of depth (%)", "type": "integer", "default": 6, "min": 0, "max": 40, "step": 2},
-    {"id": "warden_hp", "name": "Warden HP multiplier", "type": "integer", "default": 6, "min": 2, "max": 20, "step": 1},
+    {"id": "floor_shuffle", "name": "Shuffled floors: after 1-1 each floor is in a random dungeon", "type": "boolean", "default": true},
+    {"id": "new_moves", "name": "New moves", "type": "boolean", "default": true, "description": "New animated attacks, an L2 evade and combos. Toan: Dash Slash, Spinning Sweep, Counter Slash, roll and backstep. Xiao: Triple Shot, tumble and hop shot. Goro and Ungaga get a melee set, Ruby and Osmond a set of shots. R2 is a heavy attack; A,A,R2 and A,A,A,R2 are finishers; locked on, toward or away + A lunge in or strike backing off; A out of an evade follows it up. The evades also cut an attack short once its blow lands."},
+    {"id": "loot_rarity", "name": "Weapon rarity, touches and legendaries", "type": "boolean", "default": true, "description": "Found weapons roll Common to Legendary: stronger stats, a coloured name and glow, and touches such as Vampire, Poison or Thunder Chain."},
+    {"id": "boss_wardens", "name": "Chance a Warden is the dungeon's own boss (%)", "type": "integer", "default": 50, "min": 0, "max": 100, "step": 10, "description": "Dran, Master Utan, the Ice Queen, King's Curse or Minotaur Joe, each with its own cast; otherwise the floor's toughest monster grows into the Warden."},
+    {"id": "genie_finale", "name": "Finale: the Genie's Lair after the last Warden", "type": "boolean", "default": true, "description": "One more floor after the last biome's Warden. The Dark Genie fights there in his pink form and his dark elemental form: one after the other in either order, or both at once, each with a random share of its spells. Beating him wins the run."},
+    {"id": "rest_rooms", "name": "Rest floor between biomes", "type": "boolean", "default": true, "description": "After each Warden but the last: a hall with a healing spring and Gaffer's shop, then two ways on. The exit gate leads to the next biome as usual; the stairs in the side room take the Cursed Path, where every floor of that biome before its Warden is cursed (richer chests, a Miracle cache each, and a Warden that pays out twice)."},
+    {"id": "roaming_bosses", "name": "Chance a floor has a boss roaming it (%)", "type": "integer", "default": 25, "min": 0, "max": 100, "step": 5, "description": "One of the dungeons' bosses, with its cast, as a regular monster: smaller, with a modest HP pool. Never on a Warden floor."},
+    {"id": "warden_hp_scale", "name": "Warden HP (percent of the boss table: x10, x20, x35, x60, x100 by biome)", "type": "integer", "default": 100, "min": 25, "max": 200, "step": 25},
     {"id": "curse_hp", "name": "Cursed floor enemy HP (%)", "type": "integer", "default": 160, "min": 100, "max": 300, "step": 10},
     {"id": "preroll_weapons", "name": "Found weapons arrive pre-leveled", "type": "boolean", "default": true},
     {"id": "enforce_draft", "name": "Only drafted allies may fight", "type": "boolean", "default": true},
+    {"id": "move_tips", "name": "Move tips: each character's controls when they join a run", "type": "boolean", "default": true},
     {"id": "curse_key", "name": "Cursed Gate toggle key", "type": "choice", "default": "G", "choices": ["G", "H", "U", "F7", "F8", "F9"]},
-    {"id": "journal_page", "name": "Show the run on Journal > Character", "type": "boolean", "default": true}
+    {"id": "opar", "name": "Opar joins the roster (in development)", "type": "boolean", "default": false, "description": "A seventh hero for new runs: Opar, the frog mage, with his own staffs, moves and voice. He can be drafted or chosen as the starting character. Without this setting, he joins once his star in Norune Eternal's Allies is bought (it rises when a run beats the Moon Sea Warden). Runs only: he is never written to a save."},
+    {"id": "companion", "name": "Companion: a drafted ally fights beside you", "type": "boolean", "default": false, "description": "Needs the Eternal tree's Companion. Off: drafted allies wait on the bench until you switch to them."},
+    {"id": "journal_page", "name": "Also show the run on Journal > Character (Start opens the run menu)", "type": "boolean", "default": false}
   ]
 }
