@@ -156,6 +156,25 @@ in the engine before anything else is built.
 - [ ] After the run, load the story save: RPG levels, Ascension stats and Dungeon+ state are exactly as before.
 - [ ] Known carry-overs only: Dungeon+'s Expanded Data weapon balance and its kill-count trophies.
 
+### G6b — The rest of the sky (built 2026-10-31)
+*Automated:* scenarios 13-19 in `test_runs.lua` (Loadouts, Blessed Choice, Chosen of the Moon, Clear Mind, Hardy, Blind
+Halls, Charged Fury, Barren, Endless Maze, Twin Keys, Twin Wardens, Warden's Court, the Companion path, Swift Swap, the
+dodges, Second Wind, the Signature skies) and `MoonModGauntletEngine.*` plus the charged-filter case in
+`MoonModCombatApi` (engine CI).
+*Playtest:*
+- [ ] *(hands)* Circle dodges: Moonwalker's burst goes where the stick points and stops at walls; Xiao's hop and
+  Osmond's dash feel distinct.
+- [ ] *(hands)* A charged swing by Toan, Goro and Ungaga shows Charged Fury's damage and its Signature move (the stop,
+  the room shake, the Warden stagger); a plain swing does not.
+- [ ] *(hands)* Second Wind: a fatal hit leaves 1 HP once a floor; Cat's Nine Lives once a biome for Xiao.
+- [ ] *(hands)* The Companion strikes visibly (the enemy flinches) and its kills count; Stances change how often.
+- [ ] *(hands)* Swift Swap on R2 changes character without the ring menu.
+- [ ] *(hands)* Blind Halls: no map. Barren: no chests before the Warden. Endless Maze: III's exit lands on IV and IV's
+  on the Warden, in every biome.
+- [ ] *(hands)* Twin Keys: the first key picked up goes to another monster; the exit opens after the second.
+- [ ] *(hands)* Twin Wardens and Warden's Court: the bar counts the Wardens and the biome moves on only when all fall.
+- [ ] *(hands)* Swordsman's socket takes an attachment, and Toan's weapon has its old socket count after the run.
+
 ### G7 — Full run, end to end
 *Playtest:*
 - [ ] A cold player goes title → five Wardens → win screen. Time: ______. Target: 75–120 minutes.

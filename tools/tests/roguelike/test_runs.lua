@@ -387,6 +387,169 @@ local banked = S14.storage.meta.shards - before
 check(S14.storage.run == false and banked >= 1, "a fall at Heat 4 still banks shards", banked)
 check((S14.storage.meta.marks.toan or 0) == 0, "no Marks for a run that cleared no biome")
 
+-- 13. The nodes that were "Coming soon" -------------------------------------------------------------------------
+print("Scenario 13: Loadouts")
+do
+  local L = boot({storage = {meta = {shards = 100, eternal = {loadouts = 1, whetstone = 1, keen = 2, moonblade = 1}}}})
+  L.open_title_mode()
+  check(entry_ids(L):find("loadouts") ~= nil, "a Loadouts entry on the title once bought", entry_ids(L))
+  L.select("loadouts")
+  check(L.page().title == "LOADOUTS" and #L.page().entries == 5, "four slots and the mode switch")
+  L.select("mode"); L.select("slot1")
+  check(type(L.storage.meta.loadouts[1]) == "table", "slot 1 saved")
+  L.select("back"); L.select("eternal")
+  L.sky_act("keen", "toggle"); L.sky_act("moonblade", "toggle")
+  check(L.storage.meta.off.keen == true and L.storage.meta.off.moonblade == true, "two nodes switched off")
+  L.select("back"); L.select("loadouts"); L.select("slot1")
+  check(not L.storage.meta.off.keen and not L.storage.meta.off.moonblade, "using slot 1 switches them back on")
+  check(L.page().entries[1].label:find("Moonblade") ~= nil, "the slot names its Keystone", L.page().entries[1].label)
+end
+
+print("Scenario 14: Blessed Choice and Chosen of the Moon")
+do
+  local B = boot({storage = {meta = {eternal = {moon = 1, choice = 1, chosen = 1}}}})
+  start_run(B)
+  check(B.layers.choice_a and B.layers.choice_a:find("BLESSING") ~= nil, "the run opens on a choice of blessings", B.layers.choice_a)
+  local first = B.layers.choice_b
+  B.input_pressed.choice_next = true; B.tick(2)
+  check(B.layers.choice_b ~= first and B.layers.choice_b:find("^2/3") ~= nil, "R1 shows the second", B.layers.choice_b)
+  B.tick(30); B.input_pressed.choice_ok = true; B.tick(2)
+  local held = B.storage.run.blessings
+  check(#held == 1 and B.layers.choice_a == nil, "Cross takes it and closes the window", #held)
+  local id = held[1]
+  -- Chosen of the Moon: the blessing counts twice
+  local twice = {
+    moonlit = function() return math.abs(B.formulas.gauntlet_out.value - 1.15 ^ 2) < 1e-6 end,
+    ward = function() return math.abs(B.player_formulas.gauntlet_in.value - 0.85 ^ 2) < 1e-6 end,
+    stride = function() return math.abs(B.tuning.run_speed - 1.15 ^ 2) < 1e-6 end,
+    tempered = function() return math.abs(B.tuning.durability_wear - 0.75 ^ 2) < 1e-6 end,
+    flask = function() return math.abs(B.tuning.thirst_drain - 0.75 ^ 2) < 1e-6 end,
+    breath = function() return B.tuning.invincible_bonus_frames == 24 end,
+    lucky = function() return B.formulas.gauntlet_lucky.chance == 20 end,
+    scholar = function() return true end, mender = function() return true end,
+  }
+  check(twice[id] and twice[id](), "Chosen of the Moon: " .. tostring(id) .. " counts twice")
+end
+
+print("Scenario 15: Clear Mind, Hardy, Blind Halls, Charged Fury, Barren")
+do
+  local C = boot({storage = {meta = {eternal = {clearmind = 1, hardy = 1, blind = 1, charged = 1, barren = 1, lamp = 1}}}})
+  start_run(C); run_floor(C)
+  C.ailments.freeze = true; C.tick(8)
+  check(C.ailments.freeze == nil and C.find_toast("Clear Mind") ~= nil, "Clear Mind removes Freeze as it lands")
+  check(C.tuning.ailment_duration == 0.5 and C.tuning.map_hidden == true and C.tuning.map_reveal == false,
+        "Hardy halves ailments; Blind Halls hides the map", tostring(C.tuning.ailment_duration))
+  check(C.formulas.gauntlet_charged and C.formulas.gauntlet_charged.charged == true and C.formulas.gauntlet_charged.value == 1.3,
+        "Charged Fury: +30% on charged swings")
+  check(C.modifiers.chests == -100, "Barren: no chests before the Warden", C.modifiers.chests)
+  for _ = 2, 4 do C.exit_gate(); run_floor(C) end
+  check(C.modifiers.chests == nil, "the Warden floor keeps its chests", C.modifiers.chests)
+end
+
+print("Scenario 16: Endless Maze, Twin Keys and Twin Wardens")
+do
+  local M = boot({storage = {meta = {eternal = {maze = 1, twinkeys = 1, twinwardens = 1}}}})
+  start_run(M); run_floor(M)
+  check(M.storage.run.order and #M.storage.run.order == 5, "Endless Maze: five floors a biome")
+  -- Twin Keys: the first key goes to another monster
+  M.key_held = true; M.tick(16)
+  local carriers = 0
+  for _, m in ipairs(M.monsters) do if m.alive and m.drop == 180 then carriers = carriers + 1 end end
+  check(not M.key_held and carriers >= 2 and M.find_toast("Twin Keys") ~= nil, "the key goes back to a second carrier", carriers)
+  M.key_held = true; M.tick(16)
+  check(M.key_held, "the second key stays")
+  M.exit_gate(); run_floor(M); M.exit_gate(); run_floor(M)
+  check(M.storage.run.slot == 3, "on III", M.storage.run.slot)
+  M.exit_gate(); run_floor(M)
+  check(M.storage.run.slot == 5 and M.floor_label == "1-4", "III's exit leads to the fourth floor", tostring(M.floor_label))
+  M.exit_gate(); run_floor(M)
+  check(M.storage.run.slot == 4, "and IV's to the Warden", M.storage.run.slot)
+  local wardens = 0
+  for _, m in ipairs(M.monsters) do if m.max_hp >= 40 * 5 then wardens = wardens + 1 end end
+  check(wardens == 2 and M.bars.warden and M.bars.warden.label == "WARDENS 2", "Twin Wardens: two Wardens, one bar", wardens)
+  M.kill(M.monsters[6]); M.tick(20)
+  check(M.storage.run.pos == 1 and not M.find_toast("Warden felled"), "the key holder alone does not clear the biome")
+  for _, m in ipairs(M.monsters) do if m.alive and m.max_hp >= 40 * 5 then M.kill(m) end end
+  M.tick(20)
+  check(M.find_toast("Warden felled") ~= nil, "both down: the biome is cleared")
+end
+
+print("Scenario 17: Warden's Court")
+do
+  local W = boot({storage = {meta = {eternal = {court = 1}}}, overrides = {biome_count = 1}})
+  start_run(W); run_floor(W)
+  for _ = 2, 4 do W.exit_gate(); run_floor(W) end
+  local wardens = 0
+  for _, m in ipairs(W.monsters) do if m.max_hp >= 40 * 5 then wardens = wardens + 1 end end
+  check(wardens == 5 and W.find_toast("Court") ~= nil, "the last Warden floor holds five Wardens", wardens)
+end
+
+print("Scenario 18: the Companion, Swift Swap, the dodge and Second Wind")
+do
+  local P = boot({storage = {meta = {eternal = {fullparty = 1, companion = 1, stances = 1, keenpartner = 1, twinstrike = 1,
+                                                soulbond = 1, swift = 1, moonwalker = 1, secondwind = 1}}}})
+  start_run(P); run_floor(P)
+  P.tick(120)
+  check(#P.damaged > 0 and P.find_toast("Companion") ~= nil, "a benched ally strikes beside you", #P.damaged)
+  P.action("stance")
+  check(P.storage.run.stance == "passive", "Stances: passive")
+  -- Twin Strike: your hit on the companion's mark lands 10% more
+  local n = #P.damaged
+  local mark = P.monsters[1]; for _, m in ipairs(P.monsters) do if m.alive and m.handle == P.damaged[n].entity then mark = m end end
+  if mark.alive then P.hit(mark, 10) end
+  check(#P.damaged > n or not mark.alive, "Twin Strike adds to your hit on the companion's mark")
+  -- Swift Swap
+  local was = P.active
+  P.input_pressed.swap = true; P.tick(2)
+  check(P.active ~= was, "Swift Swap: one button to the next ally", P.active)
+  -- the dodge
+  P.input_pressed.dodge = true; P.tick(2)
+  check(#P.dashes == 1 and P.dashes[1].speed == 2.6, "Moonwalker: Circle dodges", #P.dashes)
+  -- Second Wind
+  check(P.guards[P.active] == true, "Second Wind arms the party's guards on the floor")
+  P.hurt(999); P.tick(3)
+  check(P.hp[P.active] == 1 and P.find_toast("Second Wind") ~= nil, "a fatal hit leaves 1 HP once a floor")
+  check(not P.guards[P.active], "and the guard is spent for the floor")
+  P.exit_gate(); run_floor(P)
+  check(P.guards[P.active] == true, "the next floor arms it again")
+end
+
+print("Scenario 19: the Signature skies")
+do
+  local G = boot({storage = {meta = {start_char = "toan", eternal = {fullparty = 1,
+      toan_1 = 1, toan_2 = 1, toan_3 = 1, toan_4 = 1, toan_5 = 1, goro_3 = 1, goro_4 = 1, ungaga_5 = 1, ruby_1 = 1,
+      xiao_1 = 1, xiao_2 = 1}}}})
+  start_run(G); run_floor(G)
+  check(G.formulas.sig_berserker.value == 1.15 and G.formulas.sig_berserker.character_id == 2, "Berserker: Goro +15%")
+  check(G.player_formulas.sig_bulwark.value == 0.85, "Bulwark: Goro takes 15% less")
+  check(G.player_formulas.sig_woods_toan.value == 0.85 and G.player_formulas.sig_woods_xiao.value == 0.85,
+        "Spirit of the Woods: the others take 15% less while Ungaga is drafted")
+  check(math.abs(G.tuning.run_speed - 1.08) < 1e-6 and G.tuning.attack_anim_speed == 1.15, "Wanderer and Dagger Dance for Toan",
+        G.tuning.run_speed)
+  check(G.tuning.map_reveal == true and G.find_toast("Atla Sight") ~= nil, "Atlamillia's Chosen: Atla Sight for a run started as Toan")
+  G.tick(60)
+  local toan_no = G.weapons.toan[G.equipped.toan].item_no
+  check(G.definitions[toan_no] and G.definitions[toan_no].hole_num == 4, "Swordsman: Toan's weapon gains a socket",
+        G.definitions[toan_no] and G.definitions[toan_no].hole_num)
+  check(G.weapons.ruby[G.equipped.ruby].elem[1] == 20, "Flame Rings: Ruby's ring gains fire", G.weapons.ruby[G.equipped.ruby].elem[1])
+  -- Lightning Fang: a charged swing stops the enemy and lands 25% more
+  local m; for _, x in ipairs(G.monsters) do if x.alive then m = x; break end end
+  local before = #G.damaged
+  G.hit(m, 8, true)
+  check(#G.statuses == 1 and G.statuses[1].status == "stop" and #G.damaged == before + 1, "Lightning Fang on a charged swing")
+  G.hit(m, 8, false)
+  check(#G.statuses == 1, "and not on a plain one")
+  -- Xiao: Quick Draw and Pebble Storm
+  G.game.party.set_active({id = "xiao"}); G.tick(15)
+  check(math.abs(G.tuning.gauge_refill - 1.25) < 1e-6, "Quick Draw: Xiao reloads faster", G.tuning.gauge_refill)
+  before = #G.damaged
+  G.hit(m, 6)
+  check(#G.damaged == before + 1, "Pebble Storm: a second pebble")
+  -- the run's end puts the socket back
+  G.game_over(); G.tick(30)
+  check(G.definitions[toan_no].hole_num == 3, "the socket goes back when the run ends")
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then
   print("Last toasts:"); for i = math.max(1, #S.toasts - 5), #S.toasts do print("  " .. S.toasts[i]) end

@@ -54,9 +54,10 @@ jobs:
         working-directory: Chronicle
         run: cmake --build port/build/pc
 
+      # One process per test, as Chronicle's own CI runs them: some cases share process-wide registries.
       - name: MoonMod engine tests
         working-directory: Chronicle/port/build/pc
-        run: env -u DC_DATA ./darkcloud_tests --gtest_filter='MoonMod*'
+        run: env -u DC_DATA ctest --output-on-failure -j4 -R MoonMod
 
   windows:
     name: Build and test (Windows x64)
@@ -100,6 +101,10 @@ jobs:
           Copy-Item $env:VULKAN_RUNTIME/vulkan-1.dll port/build/windows
 
       # The runner has a Vulkan loader but no driver: the cases that need a device (label gpu) cannot start here.
+      # The native plugin test loads a fixture DLL copied to a temp folder; its runtime DLLs (libc++ and friends)
+      # sit in the build folder, so that goes on PATH.
       - name: MoonMod engine tests
         working-directory: Chronicle
-        run: ctest --test-dir port/build/windows --output-on-failure -j4 -LE gpu -R MoonMod
+        run: |
+          $env:PATH = "$env:GITHUB_WORKSPACE\Chronicle\port\build\windows;$env:PATH"
+          ctest --test-dir port/build/windows --output-on-failure -j4 -LE gpu -R MoonMod

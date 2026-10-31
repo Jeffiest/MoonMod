@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.roguelike",
   "name": "Dark Genie's Gauntlet (Roguelike)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Jeffiest",
   "description": "A roguelike game mode on the title menu. Dark Genie's Gauntlet has its own title screen and its own progress: Start Run begins a fresh game that belongs to no save file and drops you onto the first floor of a forward-only run through five biomes, three floors and a Warden each. Cursed Gates, fast ABS, one weapon each (a broken one ends the run), an in-run Diorama, drafted allies and Moon Shards for the Norune Eternal unlocks. Needs the MoonFactory engine with title modes.",
   "framework_api": 1,
@@ -23,6 +23,8 @@
     {"id": "preroll_weapons", "name": "Found weapons arrive pre-leveled", "type": "boolean", "default": true},
     {"id": "enforce_draft", "name": "Only drafted allies may fight", "type": "boolean", "default": true},
     {"id": "curse_key", "name": "Cursed Gate toggle key", "type": "choice", "default": "G", "choices": ["G", "H", "U", "F7", "F8", "F9"]},
+    {"id": "dodge_key", "name": "Dodge key (with Moonwalker, Tumbler or Rocket Boost; also Circle)", "type": "choice", "default": "C", "choices": ["C", "B", "N", "F10"]},
+    {"id": "swap_key", "name": "Swift Swap key (also R2)", "type": "choice", "default": "V", "choices": ["V", "R", "T", "F11"]},
     {"id": "journal_page", "name": "Show the run on Journal > Character", "type": "boolean", "default": true}
   ]
 }

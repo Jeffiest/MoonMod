@@ -694,9 +694,9 @@ local formula = assert(game.combat.register_formula({
 }))
 ```
 
-`combat.register_formula` registers an owner-scoped damage modifier. The accepted fields are `id`, `operation`, `value`, optional integer `priority`, optional `chance` for `chance_multiply`, optional `min_value`/`max_value` for `random_multiply`, and optional native `weapon_id`, `native_model_id`, and `character_id` filters. `ramp_multiply` is Chronicle-only and additionally requires `rate_per_second` (0–10) and `reset_after_frames` (1–36,000); it ramps the multiplier from 1.0 up to `value` at the specified rate, based on matching-hit frame timestamps, then restarts after a gap longer than the reset interval. Chronicle also accepts `target_hp_below_percent` (0–100), which only matches a live weapon target whose current HP percentage is strictly below the threshold; non-hit calls lack this context and skip such a formula. `random_multiply` chooses a uniform multiplier from its inclusive bounds for each matching hit. `combat.register_player_formula` accepts optional `weapon_id` and `character_id` filters. These filters are native numeric IDs; when present, a formula only applies when every supplied filter matches. Chronicle supplies weapon, enemy-model, attacker-character, and target-HP context for real weapon hits, and weapon and character context for native incoming player damage. Unfiltered formulas retain their previous behavior. IDs are local 1–64 character ASCII identifiers; each mod may own up to 64 formulas, and the game retains at most 512. `add` accepts −1,000,000 through 1,000,000, `multiply`, `chance_multiply`, and `random_multiply` accept multipliers from 0 through 100, and `set` accepts 0 through 1,000,000. `chance_multiply` also requires a finite chance from 0 through 100 and independently rolls for each matching hit. Modifiers run in ascending priority, then owner ID and formula ID order; random effects roll independently. Re-registering an owned formula ID updates its definition; an identical definition is idempotent. Unloading a mod removes its formulas.
+`combat.register_formula` registers an owner-scoped damage modifier. The accepted fields are `id`, `operation`, `value`, optional integer `priority`, optional `chance` for `chance_multiply`, optional `min_value`/`max_value` for `random_multiply`, and optional native `weapon_id`, `native_model_id`, and `character_id` filters. `ramp_multiply` is Chronicle-only and additionally requires `rate_per_second` (0–10) and `reset_after_frames` (1–36,000); it ramps the multiplier from 1.0 up to `value` at the specified rate, based on matching-hit frame timestamps, then restarts after a gap longer than the reset interval. Chronicle also accepts `target_hp_below_percent` (0–100), which only matches a live weapon target whose current HP percentage is strictly below the threshold; non-hit calls lack this context and skip such a formula. Chronicle's `charged` (boolean) matches only charged attacks (`true`) or only other hits (`false`): a hit counts as charged while the attacker's swing still has a charge level (`BtActStatus.charge_level`), which Toan's, Goro's and Ungaga's charged swings set; calls without hit context skip such a formula. `random_multiply` chooses a uniform multiplier from its inclusive bounds for each matching hit. `combat.register_player_formula` accepts optional `weapon_id` and `character_id` filters. These filters are native numeric IDs; when present, a formula only applies when every supplied filter matches. Chronicle supplies weapon, enemy-model, attacker-character, and target-HP context for real weapon hits, and weapon and character context for native incoming player damage. Unfiltered formulas retain their previous behavior. IDs are local 1–64 character ASCII identifiers; each mod may own up to 64 formulas, and the game retains at most 512. `add` accepts −1,000,000 through 1,000,000, `multiply`, `chance_multiply`, and `random_multiply` accept multipliers from 0 through 100, and `set` accepts 0 through 1,000,000. `chance_multiply` also requires a finite chance from 0 through 100 and independently rolls for each matching hit. Modifiers run in ascending priority, then owner ID and formula ID order; random effects roll independently. Re-registering an owned formula ID updates its definition; an identical definition is idempotent. Unloading a mod removes its formulas.
 
-Formulas modify positive damage after each game's native defense, elemental, and damage-block calculations in the native enemy-hit pipeline. Chronicle also publishes `game.enemy_hit` after an accepted positive native weapon hit. That event includes the generation-checked enemy `entity`, `slot`, player `attacker`, stable `weapon_id`, `native_weapon_id`, final `damage`, `element`, `frame`, and `native_model_id` when known. The event is informational and delivered on the next runtime pump; use the formula filters for damage changes. Formulas also modify explicit `combat.damage` requests when unfiltered. A zero or blocked base hit remains zero; final damage is clamped to 0–1,000,000, then rounded upward to a whole HP for scripted `combat.damage`. These formulas do not create new attack, animation, or collision behavior.
+Formulas modify positive damage after each game's native defense, elemental, and damage-block calculations in the native enemy-hit pipeline. Chronicle also publishes `game.enemy_hit` after an accepted positive native weapon hit. That event includes the generation-checked enemy `entity`, `slot`, player `attacker`, stable `weapon_id`, `native_weapon_id`, final `damage`, `element`, `charged`, `frame`, and `native_model_id` when known. The event is informational and delivered on the next runtime pump; use the formula filters for damage changes. Formulas also modify explicit `combat.damage` requests when unfiltered. A zero or blocked base hit remains zero; final damage is clamped to 0–1,000,000, then rounded upward to a whole HP for scripted `combat.damage`. These formulas do not create new attack, animation, or collision behavior.
 
 ### Chronicle built-in item definitions
 
@@ -1066,6 +1066,13 @@ On a live eligible ordinary enemy's first lethal hit, Chronicle makes one chance
 
 Using the gate key on a floor's exit shows the native continue/leave window. Two replacements exist in the Chronicle patch but are switched off: a "seamless" mode (it never built a room and pushed the player straight onto the next floor) and a walk-through exit room built from map pieces (unfinished). `game.dungeons.set_exit_room({enabled = true})` turns the exit room on for floors built afterwards, for testing only.
 
+`game.dungeons.floor_link_set({dungeon_id, floor_id, next_floor_id})` points the exit gate on one floor at another
+floor of the same dungeon: when the gate asks for the floor after `floor_id`, it gets `next_floor_id` (the same floor
+keeps the player there). `floor_link_clear({dungeon_id, floor_id})` removes the link. A floor has one owner at a time,
+and unloading the mod removes its links. Dark Genie's Gauntlet uses them for Endless Maze. `dungeons.set_modifiers`
+takes `chests` down to -100: at -100 a floor is built with no regular chests (gate keys, mimics and event chests keep
+their own slots); the other bonuses stay 0 to 300.
+
 ### ChronicleTwo added dungeon floors
 
 
@@ -1130,10 +1137,27 @@ set. Fields, all validated (a bad field rejects the whole call with `invalid_arg
 | `durability_wear` | 0.25 to 4 | scales the weapon wear per hit, after the weapon's own halving or doubling flags |
 | `map_reveal` | boolean | the floor map draws every cell as if the Map item were held (the HUD shows the Map icon too) |
 | `monster_reveal` | boolean | monsters show on the map as if the Magical Crystal were held |
+| `ailment_duration` | 0.25 to 4 | scales how long the timed ailments last when they land (Freeze 300 frames, Stamina 1800) |
+| `map_hidden` | boolean | the floor map is not drawn at all (it wins over `map_reveal`) |
+| `attack_reach` | 0.25 to 4 | scales the hit spheres of Toan's, Goro's and Ungaga's swings |
 
 `player.invincible({frames = 1..600})` sets the active player's native invincibility counter to at least `frames`
 during an active dungeon (it fails in town) and reports the counter and its previous value; it never shortens a
 longer run and counts down with the game. All three need `game.write`. Chronicle Two has no binding for them yet.
+
+```lua
+assert(game.player.guard_set({character = "xiao", armed = true}))   -- or character = "active"
+moonmod.on("game.player.guarded", function(e) print(e.character .. " held on at 1 HP") end)
+assert(game.player.dash({frames = 12, speed = 2.6, invincible_frames = 20}))
+```
+
+`player.guard_set({character, armed})` arms or disarms one character's one-shot guard: the next native hit that would
+take that character to 0 HP leaves 1 HP instead, gives 60 frames of invincibility, spends the guard and publishes
+`game.player.guarded` (`character`, `character_id`, `frame`). Exact HP setters are not guarded. One mod owns a
+character's guard at a time, and unloading it disarms its guards. `player.dash({frames = 1..60, speed = 1..4,
+invincible_frames = optional 0..120})` multiplies the active player's walk and dash speed for `frames`, so the burst
+follows the stick and the native movement still stops at walls, and sets the invincibility counter to at least
+`invincible_frames`; it needs an active dungeon. Both need `game.write`.
 
 ### Party queries
 

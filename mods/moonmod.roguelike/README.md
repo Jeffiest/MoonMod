@@ -93,10 +93,37 @@ a trunk that forks into build paths, each path ending in a **Keystone** that cha
 - **Heat.** The Dark Genie's Pacts (more monsters, bigger floors, tougher enemies, thirst, wear, a lean start, angry
   Wardens, every third floor cursed) add Heat while on. Each point pays +10% Moon Shards at the end of the run.
 
-Built now: 75 nodes (104 ranks), 816 Moon Shards and 45 Genie Sigils in all, up to Heat 23. The sky also shows the
-nodes still to come (*Coming soon* on the plate): the Companion path, the Signature skies, a dodge roll, Twin Wardens
-and the Warden's Court, the fourth floor, Blind Halls and Twin Keys, Barren, Loadouts and a few more. Those need
-engine work first.
+Every node works: 125 to buy (155 ranks), 1,007 Moon Shards, 65 Genie Sigils and 90 Character Marks in all, up to
+Heat 40. How the ones that need more than a number play:
+
+- **Loadouts** (a title-screen page once bought): four slots. *Using* a slot sets the switches it saved; *saving*
+  stores the switches on now. A node bought after the slot was saved keeps its own switch.
+- **Blessed Choice** opens a choice at the start of the run: **L1/R1** between three blessings not yet held,
+  **Cross** to take one. **Chosen of the Moon** makes every blessing count twice (Moonlit Edge is +32%, and so on).
+- **The Companion** is a drafted ally on the bench who fights beside you: about once a second it strikes an enemy near
+  you for its own weapon's attack. It has no model and can't be hurt. Switching characters trades places: the one you
+  left becomes the companion. **Stances** (*Companion Stance* in Actions): passive strikes only what you last hit,
+  and less often. **Keen Partner** +25%, **Twin Strike** +10% on what it is hitting, **Soul Bond** gives its kills'
+  ABS to your weapon.
+- **Swift Swap**: **R2** (or the *Swift Swap key*) changes to the next drafted ally standing, without the ring menu.
+- **Dodges**: **Circle** (or the *Dodge key*) is a burst of speed in the direction you move, with a moment of
+  invincibility, every two-thirds of a second at most. Moonwalker is anyone's roll; Xiao's Tumbler and Osmond's Rocket
+  Boost are their own (a longer guard, a longer dash).
+- **Second Wind** (anyone, once a floor) and **Cat's Nine Lives** (Xiao, once a biome): a fatal hit leaves 1 HP.
+- **Hardy** halves Freeze and Stamina (the timed ailments); **Clear Mind** removes them as they land.
+- **Charged Fury** and the charged Signature moves (Lightning Fang, Ground Pound, Mountain's Might) work on Toan's,
+  Goro's and Ungaga's charged swings: the engine reads the swing's charge level when the hit lands.
+- **Pacts.** **Blind Halls** draws no floor map. **Twin Keys**: the first gate key you pick up on a floor goes to
+  another monster to carry, so the exit takes two. **Endless Maze** adds a fourth floor (IV) before each Warden.
+  **Barren** builds the floors before the Warden with no chests. **Twin Wardens** raises one (rank 2: two) more Warden
+  beside the key holder, and **Warden's Court** five on the last Warden floor; one bar shows them all, and the biome is
+  cleared when every one is down.
+- **Signature skies** work while that character fights (and the start-of-run ones when they start the run): Toan's
+  faster swings and run, a socket for his weapon, Atla Sight; Xiao's faster reload, second pebble, range bonus, hop,
+  nine lives; Goro's knock-back resistance, room-shaking charged swings, toughness, damage, Warden stagger; Ruby's fire
+  ring, splitting and piercing orbs, healing hits, magic damage; Ungaga's spear reach, totem guard and healing, damage,
+  and less damage for the others while he is drafted; Osmond's steady aim, jetpack dash, gun damage, ABS, a Moon
+  blessing.
 
 The run's own Moon Shards: 1 per floor, +2 for a cursed floor or Vault, +3 per Warden (6 with Moon Tithe), +10 for a
 win, times the Heat, Shard Lens and Full Party multipliers. A win earns about 45 at Heat 0, and a run that falls in the
@@ -114,9 +141,10 @@ and sandbox sessions* in [docs/API.md](../../docs/API.md).
   the title (`GameFollowMapJump`), resetting the save on the way.
 - `port/src/game/dun/movechara.cpp` marks a game over as a defeat.
 
-**Mod.** At load the mod uses `dungeons.register` to append four floors to each of dungeons 0-4: native floors 15-18
-in Divine Beast Cave, 17-20 in Wise Owl Forest, and so on. Each floor copies the enemy layout of a mid-dungeon floor
-that does not hold a story boss, so the native exit gate chains I → II → III → Warden. `title.mode_register` adds the
+**Mod.** At load the mod uses `dungeons.register` to append five floors to each of dungeons 0-4: native floors 15-19
+in Divine Beast Cave, 17-21 in Wise Owl Forest, and so on (I, II, III, the Warden, then IV for Endless Maze). Each
+floor copies the enemy layout of a mid-dungeon floor that does not hold a story boss, so the native exit gate chains
+I → II → III → Warden; with Endless Maze, `dungeons.floor_link_set` sends III's exit to IV and IV's to the Warden. `title.mode_register` adds the
 title mode, and `game.title.selected` drives its pages. `session.start` begins a run with `party_size = 6`, and the
 undrafted are set to 0 HP. Between biomes the run moves with `world.transition`; `session.finish` ends it after the last
 Warden, and `game.session.ended` reports how a run ended. Every other system works as in the earlier version: enemy

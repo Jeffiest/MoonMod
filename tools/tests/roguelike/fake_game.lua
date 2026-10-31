@@ -48,6 +48,14 @@ function F.new(opts)
     input_pressed = {}, input_down = {},
     calls = {},
     fail_ops = opts.fail_ops or {},
+    links = {},                -- "dungeon:floor" -> the floor its exit gate leads to (dungeons.floor_link_set)
+    guards = {},               -- character -> true while a fatal-hit guard is armed
+    ailments = {},             -- status name -> true on the active character
+    key_held = false,          -- the floor's gate key is in the bag
+    damaged = {},              -- combat.damage calls: {entity, amount}
+    statuses = {},             -- combat.status_add calls
+    dashes = {},               -- player.dash calls
+    definitions = {},          -- weapons.definition_set calls by native id
   }
   for _, c in ipairs({"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}) do
     S.hp[c], S.max_hp[c] = 120, 120
@@ -240,7 +248,16 @@ function F.new(opts)
     get = function(id) local r = S.registered["moonmod.roguelike:" .. id] or S.registered[id]; if not r then return fail("failed", "unknown") end; return deepcopy(r) end,
     floor_rules_get = function(a) local k = a.dungeon_id .. ":" .. a.floor_id; local z = S.limit_zones[k] or 0; return {limit_zone = z, limit_zone_name = z == -1 and "none" or "toan_only"} end,
     floor_rules_set = function(a) S.limit_zones[a.dungeon_id .. ":" .. a.floor_id] = a.limit_zone; return {limit_zone = a.limit_zone, limit_zone_name = a.limit_zone == -1 and "none" or "custom"} end,
-    set_modifiers = function(a) S.modifiers = deepcopy(a); return {} end,
+    set_modifiers = function(a)
+      for k, v in pairs(a) do assert(v >= (k == "chests" and -100 or 0) and v <= 300, "modifier " .. k) end
+      S.modifiers = deepcopy(a); return {}
+    end,
+    floor_link_set = function(a) S.links[a.dungeon_id .. ":" .. a.floor_id] = a.next_floor_id; return {next_floor_id = a.next_floor_id} end,
+    floor_link_clear = function(a) S.links[a.dungeon_id .. ":" .. a.floor_id] = nil; return {removed = true} end,
+    back_floor_get = function()
+      if not in_dungeon() then return fail("failed", "dungeon") end
+      return {gate_key = {native_item_no = 180, id = "chronicle:item:180", held = S.key_held, count = S.key_held and 1 or 0}}
+    end,
   })
   game.world = wrap("world", {
     get = function()
@@ -287,14 +304,26 @@ function F.new(opts)
     end,
     tuning_set = function(a)
       for k, v in pairs(a) do
-        if k == "map_reveal" or k == "monster_reveal" then assert(type(v) == "boolean")
+        if k == "map_reveal" or k == "monster_reveal" or k == "map_hidden" then assert(type(v) == "boolean", k)
         elseif k == "invincible_bonus_frames" then assert(math.type(v) == "integer" and v >= 0 and v <= 120, "inv frames")
         else assert(type(v) == "number" and v >= 0.25 and v <= 4, "tuning " .. k .. "=" .. tostring(v)) end
       end
       S.tuning = deepcopy(a); return {tuning = a}
     end,
     tuning_clear = function() S.tuning = nil; return {} end,
-    invincible = function(a) if not in_dungeon() then return fail("failed", "town") end; return {frames = a.frames} end,
+    invincible = function(a) if not in_dungeon() then return fail("failed", "town") end; S.invincible = a.frames; return {frames = a.frames} end,
+    status_remove = function(a)
+      local had = S.ailments[a.status] == true; S.ailments[a.status] = nil; return {removed = had}
+    end,
+    guard_set = function(a)
+      assert(type(a.armed) == "boolean", "guard_set armed")
+      S.guards[a.character] = a.armed or nil; return {character = a.character, armed = a.armed}
+    end,
+    dash = function(a)
+      if not in_dungeon() then return fail("failed", "dungeon") end
+      assert(a.frames >= 1 and a.frames <= 60 and a.speed >= 1 and a.speed <= 4, "dash bounds")
+      S.dashes[#S.dashes + 1] = deepcopy(a); return {frames = a.frames}
+    end,
     heal = function(a) local c = a.character or S.active; S.hp[c] = math.min(S.max_hp[c], S.hp[c] + a.amount); return {hp = S.hp[c]} end,
   })
   game.combat = wrap("combat", {
@@ -307,14 +336,17 @@ function F.new(opts)
     damage = function(a)
       for _, m in ipairs(S.monsters) do
         if m.handle == a.entity and m.alive then
+          assert(math.type(a.amount) == "integer" and a.amount >= 1, "combat.damage amount")
+          S.damaged[#S.damaged + 1] = {entity = a.entity, amount = a.amount}
           m.hp = m.hp - a.amount
           if m.hp <= 0 then S.kill(m, true) end
-          return {damage = a.amount}
+          return {damage = a.amount, hp_after = math.max(0, m.hp), death_queued = m.hp <= 0}
         end
       end
       return fail("failed", "stale")
     end,
     register_player_formula = function(a) assert(a.value >= 0 and a.value <= 100); S.player_formulas[a.id] = deepcopy(a); return {id = a.id} end,
+    status_add = function(a) S.statuses[#S.statuses + 1] = deepcopy(a); return {applied = true} end,
   })
   game.entities = wrap("entities", {
     query = function()
@@ -349,6 +381,7 @@ function F.new(opts)
           assert(a.reward_exp == nil or (a.reward_exp >= 0 and a.reward_exp <= 32767), "exp bounds")
           m.max_hp, m.hp = max_hp, a.hp or (a.max_hp and math.max(1, m.hp * a.max_hp // m.max_hp)) or m.hp
           m.defense, m.exp, m.money = a.defense or m.defense, a.reward_exp or m.exp, a.reward_money or m.money
+          if a.drop_item then m.drop = a.drop_item end
           if a.max_hp then m.scaled = (m.scaled or 0) + 1 end
           return {changed = true}
         end
@@ -369,6 +402,10 @@ function F.new(opts)
     spend = function(a) if S.gilda < a.amount then return fail("failed", "insufficient") end; S.gilda = S.gilda - a.amount; return {gilda = S.gilda} end,
   })
   game.items = wrap("items", {
+    remove = function(a)
+      if a.id == "chronicle:item:180" then S.key_held = false; return {removed = 1} end
+      S.items[a.id] = math.max(0, (S.items[a.id] or 0) - (a.count or 1)); return {removed = a.count or 1}
+    end,
     give = function(a)
       assert(a.count >= 1 and a.count <= 999)
       S.items[a.id] = (S.items[a.id] or 0) + a.count
@@ -440,6 +477,11 @@ function F.new(opts)
       local w, c = find_weapon(a); if not w then return nil, c end
       if #w.attach >= 3 then return fail("failed", "all attachment slots on this weapon are full") end
       w.attach[#w.attach + 1] = a.attachment_id; return {inserted = true}
+    end,
+    definition_set = function(a)
+      assert(math.type(a.id) == "integer", "definition_set id")
+      assert(a.hole_num == nil or (a.hole_num >= 0 and a.hole_num <= 6), "hole_num")
+      S.definitions[a.id] = deepcopy(a); return {changed = true}
     end,
     stats_set = function(a)
       local w, c = find_weapon(a); if not w then return nil, c end
@@ -633,7 +675,24 @@ function F.new(opts)
       S.emit("game.tick", {frame = S.frame})
     end
   end
-  function S.exit_gate() S.enter(S.dungeon, S.floor + 1) end
+  function S.exit_gate() S.enter(S.dungeon, S.links[S.dungeon .. ":" .. S.floor] or (S.floor + 1)) end
+  -- A native hit on the active character: a guarded one stays at 1 HP and the engine reports it.
+  function S.hurt(amount)
+    local c = S.active
+    if S.hp[c] - amount <= 0 and S.guards[c] then
+      S.guards[c] = nil
+      S.hp[c] = 1
+      S.pending_events = S.pending_events or {}
+      S.pending_events[#S.pending_events + 1] = {"game.player.guarded", {character = c}}
+      return
+    end
+    S.hp[c] = math.max(0, S.hp[c] - amount)
+  end
+  -- A weapon hit on a monster, as the engine reports it (game.enemy_hit).
+  function S.hit(m, damage, charged)
+    m.hp = m.hp - damage
+    S.emit("game.enemy_hit", {entity = m.handle, damage = damage, charged = charged == true, element = 0})
+  end
   -- A chest hands `character` a weapon: it lands in a free slot and the engine reports the pickup.
   local ORDER = {toan = 0, xiao = 1, goro = 2, ruby = 3, ungaga = 4, osmond = 5}
   function S.pickup_weapon(character, item_no, stats)

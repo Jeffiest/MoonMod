@@ -1,12 +1,15 @@
 # Norune Eternal: the unlock sky (design draft 2, built)
 
 *Built 2026-10-28.* The sky is on the title screen: 126 nodes in 14 constellations (the seven below, the heart and
-the six Signature skies). 75 nodes (104 ranks) work now, for 816 Moon Shards and 45 Genie Sigils; the rest show as
-*Coming soon* until the engine work behind them lands (the Companion, the Signature skies, Moonwalker's dodge roll, Twin
-Wardens, Warden's Court, Endless Maze, Blind Halls, Twin Keys, Barren, Loadouts, Blessed Choice, Chosen of the Moon,
-Second Wind, Hardy, Clear Mind, Charged Fury, Swift Swap). Differences from the draft below: costs and effects follow
+the six Signature skies). All of them work: 125 to buy (155 ranks), for 1,007 Moon Shards, 65 Genie Sigils and 90
+Character Marks. README.md says how the less obvious ones play. Differences from the draft below: costs and effects follow
 `main.lua`; Unbreakable Bond gives an Auto Repair Powder each biome (the game's own one-break save); Genie's Champions
-make each floor's key holder a lesser Warden with twice the HP.
+make each floor's key holder a lesser Warden with twice the HP. The Companion is the mod's own: Chronicle has no AI
+partner, so it has no model and strikes with `combat.damage`. Swift Swap is a one-button switch, Moonwalker's roll a
+speed burst with invincibility (`player.dash`), Twin Wardens and Warden's Court raise floor monsters into Wardens, and
+the Signature moves were fitted to what the engine can reach: Quick Draw speeds Xiao's reload (the gauge), Iron Grip
+and Steady Aim cut knock-back, Pebble Storm, Orb Split and Genie's Daughter land extra hits, Totem Guard answers a hit
+with a moment of guard.
 
 The Gauntlet's permanent progression: a night sky of **seven constellations** around Norune Eternal, each a trunk that
 forks into **build paths**, each path ending in a **Keystone** that defines a build. Plus a small **Signature** sky for each
