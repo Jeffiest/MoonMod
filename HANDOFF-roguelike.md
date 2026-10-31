@@ -11,7 +11,8 @@ drafted allies, and Moon Shards that buy Norune Eternal unlocks. A run belongs t
 | `mods/moonmod.roguelike/` | The Lua mod (`main.lua`), its manifest, and its player guide (`README.md`). The guide also maps the design doc to what was built and lists the API limits. |
 | `ports/chronicle/moonfactory-chronicle.patch` | Refreshed engine patch. It adds **title modes and sandbox sessions** (`title.*`, `session.*`, `game.title.*` and `game.session.*` events) on top of the existing MoonFactory patch. Apply it with `ports/chronicle/apply-moonfactory.ps1` to Chronicle `9418a550` (the master after the game was forked into `port/src/game`; see `ports/chronicle/README.md`). |
 | `docs/API.md` | The section "Chronicle title modes and sandbox sessions" documents the new API. |
-| `tools/tests/roguelike/` | Lua harness: a fake adapter plus 114 checks that play whole runs (`lua tools/tests/roguelike/test_runs.lua`, Lua 5.4+), and 38 checks that RPG, Ascension and Dungeon+ sit runs out (`test_standalone.lua`). |
+| `tools/tests/roguelike/` | Lua harness: a fake adapter plus 160 checks that play whole runs and every Norune Eternal node (`lua tools/tests/roguelike/test_runs.lua`, Lua 5.4+), and 38 checks that RPG, Ascension and Dungeon+ sit runs out (`test_standalone.lua`). |
+| `.github/workflows/engine.yml` | Engine CI: builds the patched Chronicle on Linux and Windows and runs the `MoonMod*` engine tests. This is how engine changes get compiled and tested from a machine that cannot build the port. |
 | `mods/moonmod.hub/` | Two new quick links to the Gauntlet. |
 | `GAUNTLET.md`, `tools/tests/roguelike/gauntlet-log.md` | The stage-gate loop (G0–G7) for verifying the mode in the game, and its log of passes. |
 
@@ -25,6 +26,9 @@ The engine code inside the patch (in a Chronicle checkout):
 | `port/src/app/gameloop.cpp` | `StartSandboxGame` (title result 10), the redirect in `GameFollowMapJump`, the end of a session on a battle-menu load or a developer jump. |
 | `port/src/game/dun/movechara.cpp` | A game over is noted as a defeat. |
 | `port/src/tests/moonmod_title_modes_test.cpp` | Engine tests. |
+| `port/src/tests/moonmod_gauntlet_engine_test.cpp` | Engine tests for the Norune Eternal support: tuning (`ailment_duration`, `map_hidden`, `attack_reach`), `player.guard_set`, `player.dash`, floor links, negative chest bonuses. |
+| `port/include/moonmod/combat_formula.hpp`, `port/src/game/monstorunit.cpp` | The `charged` formula filter and `game.enemy_hit.charged` (from `BtActStatus.charge_level`). |
+| `port/src/game/dngstatusdata.cpp`, `charakey.cpp`, `dun/movechara.cpp`, `dungeonmap.cpp`, `shot_freefuncs.cpp` | The hooks: the fatal-hit guard, melee hit-sphere reach, the dash speed, the hidden map, ailment durations. |
 | `port/src/tests/moonmod_roguelike_package_test.cpp` | Loads this mod through the real Lua runtime (it expects the MoonFactory checkout beside Chronicle, named `MoonFactory`). |
 
 ## Verified (Linux, clang 18, no game data, no GPU)
@@ -45,6 +49,21 @@ The engine code inside the patch (in a Chronicle checkout):
    if it is reached before the Warden dies.
 4. The source floors in `BIOMES` (`main.lua`) hold no scripted events.
 5. Weapon wear per hit, and how far the starting weapon lasts now that a break ends the run.
+
+## The full Norune Eternal sky (2026-10-31)
+
+All 126 nodes work; none is *Coming soon* any more. Where the design asked for something the engine has no hook for,
+the node was fitted to what it can reach (README.md, *Norune Eternal*, and ETERNAL_TREE.md list how): the Companion is
+a scripted ally with no model (`combat.damage`), the dodges are speed bursts (`player.dash`), Quick Draw is a faster
+gauge, Swordsman widens the weapon definition for the run. Charged moves read the swing's charge level, which Toan,
+Goro and Ungaga set; Xiao's, Ruby's and Osmond's shots are not charged swings. Playtest lines for all of it are gate G6b
+in GAUNTLET.md.
+
+Engine CI baseline before this work, on the unchanged patch: Linux in one process failed
+`MoonModGeoramaApi.RegistersStableDataOnlyPieceVariantsInExtendedNativeSlots` (it counts registered variants left by an
+earlier case; it passes in its own process, so the job now runs through ctest), and Windows failed
+`MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload` (the copied fixture DLL could not find its
+runtime DLLs; the job now puts the build folder on PATH).
 
 ## Standalone runs
 
