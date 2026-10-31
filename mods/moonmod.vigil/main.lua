@@ -52,7 +52,7 @@ local function toast(text, frames) try(game.ui.notify, {message = text, duration
 -- the stick at rest, keeping his facing). Melee fighters roll and backstep; Xiao, Ruby and Osmond tumble and hop back
 -- (the hop without its shot: an evade here never attacks).
 local EVADES = {
-  toan   = {dodge = "toan_roll",     back = "toan_backstep"},
+  toan   = {dodge = "toan_dive_roll", back = "toan_backstep"},
   xiao   = {dodge = "xiao_tumble",   back = "xiao_hop_shot"},
   goro   = {dodge = "goro_roll",     back = "goro_backstep"},
   ruby   = {dodge = "ruby_tumble",   back = "ruby_hop_shot"},
@@ -60,12 +60,15 @@ local EVADES = {
   osmond = {dodge = "osmond_tumble", back = "osmond_hop_shot"},
 }
 local ORDER = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
--- How each motion plays (from the Gauntlet's tuned values): the rolls are slow and long, the tumbles quicker.
+-- How each motion plays (from the Gauntlet's tuned values): the rolls are slow and long, the tumbles quicker. Toan's
+-- dive roll (Vigil's own, tools/anim/vigil_moves.py) leaves the floor and takes about a second: about 43 units carried
+-- over its first 27 ticks (the dive and the somersault), against the roll's 29 over 24, then getting up.
 local SHAPE = {
-  roll     = {speed = 0.5, lunge = 2.4, lunge_decay = 0.1},
-  tumble   = {speed = 1.2, lunge = 2.2, lunge_decay = 0.11},
-  backstep = {speed = 1.1, lunge = 2.2, lunge_decay = 0.2, lunge_angle = 180},
-  hop_shot = {speed = 1.1, lunge = 2.0, lunge_decay = 0.2, lunge_angle = 180},
+  dive_roll = {speed = 0.45, lunge = 3.2, lunge_decay = 0.12},
+  roll      = {speed = 0.5, lunge = 2.4, lunge_decay = 0.1},
+  tumble    = {speed = 1.2, lunge = 2.2, lunge_decay = 0.11},
+  backstep  = {speed = 1.1, lunge = 2.2, lunge_decay = 0.2, lunge_angle = 180},
+  hop_shot  = {speed = 1.1, lunge = 2.0, lunge_decay = 0.2, lunge_angle = 180},
 }
 
 local animated -- nil: not tried yet; true: every motion registered; false: fall back to the tuning dodge

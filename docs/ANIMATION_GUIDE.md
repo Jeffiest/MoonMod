@@ -21,6 +21,8 @@ Contents: [What you need](#what-you-need) · [How it works](#how-it-works-in-two
   in your data folder's `dun/mainchara/`: for each character a `.chr` pack, a `.gltf` and a `.game.json`. Setting up
   the data creates them. Below, `<mainchara>` means that folder, for example `E:/DarkCloud/data/dun/mainchara`.
 - **Python 3.11 or newer.** No packages are needed. Blender isn't used (see [Other tools](#animations-from-other-tools)).
+- **Or pose by hand:** the [animation editor](../tools/anim/editor/README.md) opens any character or monster in your
+  browser, on the real model, and saves the same motion files.
 - The scripts in [`tools/anim`](../tools/anim):
 
 | Script | What it's for |
@@ -29,6 +31,7 @@ Contents: [What you need](#what-you-need) · [How it works](#how-it-works-in-two
 | `inspect_rig.py` | Lists a character's native motions and bones, and draws every native motion as a stick figure. Start here. |
 | `verify.py` | Checks your motion files against the game's data before you ship them. |
 | `toan_moves.py` | The Gauntlet's five Toan motions. A full, worked set to copy from. |
+| `editor/` | The animation editor: pose, time and save motions by hand in your browser. |
 
 ## How it works, in two minutes
 
@@ -284,8 +287,9 @@ The tools read all six playable characters:
 
 `moonanim.action_to_document(rig, gltf_path, action, character)` turns an animation stored on the character's own
 converted glTF into a motion file. So any tool that keeps the rig's bones and writes node rotations faithfully can
-feed the pipeline. Blender currently can't: its glTF import pulls these rigs apart, because the animated chain and
-effect bones sit outside the skin.
+feed the pipeline. Blender currently can't: its import pulls the skins apart. The converter writes each joint's
+inverse bind matrix local to its parent rather than for the whole chain; the [animation editor](../tools/anim/editor/README.md)
+rebuilds them as the game skins, and is the way to pose by hand for now.
 
 Motion libraries (Mixamo, CC0 packs) are built on other skeletons. Using one would mean retargeting it onto the
 Dark Cloud rig (mapping bones and converting rest poses), which the tools don't do yet. Check the licence of anything

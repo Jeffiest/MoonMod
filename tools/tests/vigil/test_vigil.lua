@@ -362,7 +362,7 @@ end
 print("7. Motion files")
 do
   local ok, bad = true, nil
-  local names = {"toan_roll", "toan_backstep", "xiao_tumble", "xiao_hop_shot", "goro_roll", "goro_backstep", "ungaga_roll",
+  local names = {"toan_dive_roll", "toan_backstep", "xiao_tumble", "xiao_hop_shot", "goro_roll", "goro_backstep", "ungaga_roll",
                  "ungaga_backstep", "ruby_tumble", "ruby_hop_shot", "osmond_tumble", "osmond_hop_shot"}
   for _, n in ipairs(names) do
     local path = MOD_DIR .. "/resources/anims/" .. n .. ".json"
