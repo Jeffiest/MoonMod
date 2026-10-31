@@ -62,8 +62,10 @@ in GAUNTLET.md.
 Engine CI baseline before this work, on the unchanged patch: Linux in one process failed
 `MoonModGeoramaApi.RegistersStableDataOnlyPieceVariantsInExtendedNativeSlots` (it counts registered variants left by an
 earlier case; it passes in its own process, so the job now runs through ctest), and Windows failed
-`MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload` (the copied fixture DLL could not find its
-runtime DLLs; the job now puts the build folder on PATH).
+`MoonModNativePluginRuntime.RequiresLocalTrustAndCleansServicesAcrossReload` (after the trust confirmation,
+`native_trusted` is still false at moonmod_native_plugin_runtime_test.cpp:154). Putting the build folder on PATH did
+not change it, so the cause is still open; it fails the same with or without the Norune Eternal work. With the work in,
+Linux passes every MoonMod engine case and Windows all but that one (107 of 108).
 
 ## Standalone runs
 
