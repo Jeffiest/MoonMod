@@ -49,8 +49,11 @@ Upstream's native autosave (on each town and dungeon floor) is kept; it writes n
 
 ## Install a release (Windows, PowerShell)
 
-1. Download `MoonMod-<commit>.zip` from the repository's GitHub releases and unzip it.
-2. Get Chronicle at that commit (the full hash is in `MoonMod-README.txt` inside the zip):
+The [release page](https://github.com/Jeffiest/MoonMod/releases/latest) has the full how-to, with updating,
+going back to plain Chronicle and troubleshooting; `MoonMod-README.txt` in the zip holds the same text. In short:
+
+1. Download `MoonMod-<commit>.zip` from the [releases](https://github.com/Jeffiest/MoonMod/releases) and unzip it.
+2. Get Chronicle at that commit (the full hash is on the release page and in `MoonMod-README.txt`):
 
    ```powershell
    git clone --recurse-submodules https://github.com/TheMoonPeople/Chronicle.git
@@ -124,7 +127,8 @@ A release is made for one Chronicle commit, and its version is that commit's fir
    or the script also build them, as a workflow artifact only.
 
 The script applies both patches to a fresh checkout of that commit, copies every file they add or change, and
-adds `mods/` with each bundled mod plus `MoonMod-README.txt` (install steps and the file list). It stops if a patch
+adds `mods/` with each bundled mod plus `MoonMod-README.txt` (the how-to and the file list). The same how-to,
+written by the script, becomes the release page (`dist/MoonMod-<commit>-notes.md`). It stops if a patch
 deletes or renames a file, because a pasted folder cannot do that.
 
 ## Current limits
