@@ -12,13 +12,15 @@ applying this patch to newer upstream source is not verified.
 | File | Purpose |
 | --- | --- |
 | `moonfactory-chronicle-two.patch` | Game adapter, runtime, UI, engine hooks, and tests. |
-| `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule. |
+| `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule, and the camera matching the aerial dungeon map needs (a tick that draws through several cameras keeps each one's interpolation). |
 | `apply-moonfactory.ps1` | Pins source revisions, checks both patches, and applies them. |
 | `verify-headless.ps1` | Builds and runs the Chronicle Two MoonMod native tests; optionally checks executable startup. |
 
 ## How the patch is laid out
 
 MoonFactory's code lives in `port/`: the runtime and adapter in `port/src/moonmod/`, replacement functions as `PORT_OVERRIDE` copies in `port/src/`, and the declarations the port needs in `port/include/stubs/<unit>.hpp` and `port/include/moonmod/`. The patch does not touch `ps2/src` or `ps2/include` at all. The few edits the game's code itself needs (capacity constants such as `AUTOMAP_ROOM_MAX`, the save-data floor range and the item and weapon table sizes, and one-line hooks inside functions too large to copy) live in `port/ps2patch/` as one unified diff per file, which the port's build applies to its build-directory copies of those files, in front of the header fixups and unit copies Chronicle Two already makes (`port/ps2patch/README.md`). The PS2 build compiles the untouched sources.
+
+The patch also carries the aerial dungeon map (`port/src/automap.cpp`, `port/src/aerial_keys.cpp`): the map shows a live render of the floor from above instead of the flat tiles. F1/F2 change the map size, F5/F6 the model size, F7/Shift+F7 the zoom and Shift+F5/F6 the ceiling cut; each is saved to `config.json` (`aerial_map`, `aerial_map_size`, `aerial_map_model_scale`, `aerial_map_zoom`, `aerial_map_ceiling`). Set `aerial_map` to false for the retail map.
 
 ## Install and play on Windows
 

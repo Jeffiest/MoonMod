@@ -38,6 +38,11 @@ Since `d3666bcb` the port compiles its own fork of the game (`port/src/game`, `p
 - `port/src/title/title_menu.*`: a row on the title menu for each mod title mode, between OPTION and EXIT.
 - `port/src/options/`, `port/src/ui/journal_character.*`, `port/src/battlemenu/main_ring.cpp`: the Mod Manager,
   its Options row and ring slot, and the Journal's Character page.
+- `port/src/game/dungeon_aerial.cpp` and `port/include/game/dungeon_{aerial,aerial_cache,grid,visibility}.hpp`: the
+  aerial dungeon map, a live render of the floor from above that `CDungeonMap::DrawMiniMap` draws first
+  (`game.aerial_map`, on by default), with the tile map as its fallback; and the wall-aware cell culling
+  `CDungeonMap::DrawMap` uses. `render/draw3d.cpp` adds its orthographic pass. `docs/port/aerial-map.md` has the
+  settings and keys.
 - `port/src/tests/moonmod_*_test.cpp`: the tests. `darkcloud_tests --gtest_filter='MoonMod*'` runs them.
 
 Upstream's native autosave (on each town and dungeon floor) is kept; it writes nothing during a sandbox session.

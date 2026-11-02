@@ -36,6 +36,61 @@ index 0838874..ce788f0 100644
  // Restores the default bindings and mouse settings.
  void InputResetBindings();
  
+diff --git a/src/cpp/gfx/displaylist.cpp b/src/cpp/gfx/displaylist.cpp
+index 4185e02..d730063 100644
+--- a/src/cpp/gfx/displaylist.cpp
++++ b/src/cpp/gfx/displaylist.cpp
+@@ -545,8 +545,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
+     }
+     cache.cameras.assign(list.cameras.size(), -1);
+     if (!list.camera_cut) {
+-        for (size_t i = 0; i < list.cameras.size() && i < previous.cameras.size(); i++) {
+-            cache.cameras[i] = static_cast<int32_t>(i);
++        // A tick can draw through several cameras (a game's map or mirror views) whose order is not
++        // stable from tick to tick, so each camera is matched with the previous tick's camera nearest
++        // its eye, preferring the same index; one with no camera near it is not interpolated.
++        const auto eye = [](const Mat4 &m) {
++            const Vec3 t = Column(m, 3);
++            const Vec3 r0 = Column(m, 0), r1 = Column(m, 1), r2 = Column(m, 2);
++            return Vec3{-(r0.x * t.x + r0.y * t.y + r0.z * t.z), -(r1.x * t.x + r1.y * t.y + r1.z * t.z),
++                        -(r2.x * t.x + r2.y * t.y + r2.z * t.z)};
++        };
++        const auto distance = [](const Vec3 &a, const Vec3 &b) {
++            const float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
++            return std::sqrt(dx * dx + dy * dy + dz * dz);
++        };
++        constexpr float kCameraMatchDistance = 500.0f;
++        for (size_t i = 0; i < list.cameras.size(); i++) {
++            const Vec3 now = eye(list.cameras[i]);
++            int32_t    best = -1;
++            float      best_distance = kCameraMatchDistance;
++            if (i < previous.cameras.size() && distance(now, eye(previous.cameras[i])) <= kCameraMatchDistance) {
++                best = static_cast<int32_t>(i);
++            } else {
++                for (size_t j = 0; j < previous.cameras.size(); j++) {
++                    const float d = distance(now, eye(previous.cameras[j]));
++                    if (d < best_distance) {
++                        best_distance = d;
++                        best = static_cast<int32_t>(j);
++                    }
++                }
++            }
++            cache.cameras[i] = best;
++        }
++        // A camera only no_interpolation draws use stays where the tick put it, as those draws do.
++        std::vector<bool> smoothed(list.cameras.size(), false);
++        for (const MeshRecord &record : list.records) {
++            if (!record.no_interpolation && record.camera < smoothed.size()) {
++                smoothed[record.camera] = true;
++            }
++        }
++        for (size_t i = 0; i < list.cameras.size(); i++) {
++            if (!smoothed[i]) {
++                cache.cameras[i] = -1;
++            }
+         }
+     }
+ }
 diff --git a/src/cpp/platform/input.cpp b/src/cpp/platform/input.cpp
 index 796e14c..dd7de83 100644
 --- a/src/cpp/platform/input.cpp

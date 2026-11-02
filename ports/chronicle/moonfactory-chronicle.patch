@@ -12,6 +12,36 @@ index c211b224..0252005a 100644
  
  # Reference assembly, split from the disc by splat and never committed: one
  # tree per release, ps2/asm/ntsc and ps2/asm/pal.
+diff --git a/docs/port/aerial-map.md b/docs/port/aerial-map.md
+new file mode 100644
+index 00000000..2147797e
+--- /dev/null
++++ b/docs/port/aerial-map.md
+@@ -0,0 +1,24 @@
++# Aerial dungeon map
++
++The PC dungeon map renders the floor and its models from directly above. Discovery, the map item, the crystal, traps, chests, Atla and monster visibility follow the native minimap rules.
++
++`game.aerial_map` defaults to true. When it is false, or the aerial render targets cannot be created, `CDungeonMap::DrawMiniMap` draws its tile map instead (`game.dungeon_aerial_map` and `game.fit_dungeon_map` still size that one). The native Dungeon Map option chooses large, medium or small, or hides the map. The map stays inside the 640 by 480 logical frame and follows the player when zoomed beyond the floor's visible bounds.
++
++Configuration in `config.json`:
++
++| Key under `game` | Default | Purpose |
++| --- | --- | --- |
++| `aerial_map` | `true` | Enable the aerial view |
++| `aerial_map_ceiling` | `400` | Ceiling cut above the player, in world units |
++| `aerial_map_zoom` | `1` | Magnification |
++| `aerial_map_model_scale` | `8` | Enlarge character, chest and Atla models |
++| `aerial_map_size` | `1.4` | Scale the native map size choices |
++| `aerial_map_markers` | `false` | Add coloured dots for distant objects |
++
++While the aerial map is visible, F1/F2 shrink/grow it; F5/F6 shrink/grow models; F7 increases zoom (Shift+F7 decreases it); Shift+F5/F6 lower/raise the ceiling cut. Tuning is saved immediately.
++
++The still floor, closed chests, Atla and sleeping monsters are cached. Discovery or layout changes, native object state, map identity, configuration and render-target replacement invalidate that image; the player and awake monsters draw every tick. The overhead pass uses an orthographic projection (`MGPortOrthographicScope`) and disables interpolation, restoring the normal projection afterward.
++
++`CDungeonMap::DrawMap` also leaves out cells hidden behind walls from the camera (`dungeon_visibility.hpp`) beyond two cells away. It keeps a one-cell halo, fails open for special or unknown parts, and is bypassed on the Moon Sea and georama 5.
++
++Regression suites: `DungeonAerialCache`, `DungeonAerialProjection`, `DungeonVisibility`, and `PlatformConfig.AerialMap`.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
 index 5a0b2fc1..3e4a63e7 100644
 --- a/port/CMakeLists.txt
@@ -364,6 +394,199 @@ index 91b8bba0..5136f2c0 100644
  extern CHitPointMark   MyHitPointMark[16];
  extern CCharacter      NewChangeFx;
  extern s32             NewChangeFxFlag;
+diff --git a/port/include/game/dungeon_aerial.hpp b/port/include/game/dungeon_aerial.hpp
+new file mode 100644
+index 00000000..59b21a4a
+--- /dev/null
++++ b/port/include/game/dungeon_aerial.hpp
+@@ -0,0 +1,16 @@
++#pragma once
++
++namespace dc::game {
++
++class CDungeonMap;
++
++// Draws the dungeon map as the live floor seen from above (game.aerial_map) in place of the tile
++// map. False when the map is hidden, the option is off or the aerial targets cannot be made: the
++// caller then draws its tile map.
++bool DungeonAerialDrawMiniMap(CDungeonMap *map, float *pos, float angle);
++
++// Whether the last CDungeonMap::DrawMiniMap drew the aerial map, on which the monsters are their
++// models and their retail symbols are left out.
++bool DungeonAerialMapDrawn();
++
++} // namespace dc::game
+diff --git a/port/include/game/dungeon_aerial_cache.hpp b/port/include/game/dungeon_aerial_cache.hpp
+new file mode 100644
+index 00000000..5b7f3f42
+--- /dev/null
++++ b/port/include/game/dungeon_aerial_cache.hpp
+@@ -0,0 +1,36 @@
++#pragma once
++#include <bit>
++#include <cstdint>
++#include "dungeon_grid.hpp"
++
++namespace dc::game {
++
++// Hash actual revealed cells, rather than their count. Unsigned arithmetic is
++// intentional: the old signed multiply hash overflowed on every normal floor.
++inline std::uint64_t DungeonAerialFloorKey(const CDungeonMap &map, int flags, float ceiling,
++                                         float model_scale, float player_y) {
++    std::uint64_t key = 14695981039346656037ull;
++    const auto mix = [&](std::uint64_t value) { key = (key ^ value) * 1099511628211ull; };
++    mix(static_cast<std::uint32_t>(map.map_seed)); mix(flags);
++    mix(std::bit_cast<std::uint32_t>(ceiling));
++    mix(std::bit_cast<std::uint32_t>(model_scale));
++    mix(std::bit_cast<std::uint32_t>(player_y));
++    for (int i = 0; i < dungeon_grid::cells; ++i) {
++        mix(static_cast<std::uint32_t>(map.cells[i].parts_no));
++        mix(map.cells[i].direction); mix(map.mask[i] != 0);
++    }
++    for (int i = 0; i < dungeon_grid::boxes; ++i) {
++        const auto &box = map.boxes[i];
++        mix(box.used); mix(box.closed); mix(box.kind);
++        if (box.used && box.closed) for (int axis = 0; axis < 3; ++axis)
++            mix(std::bit_cast<std::uint32_t>(box.pos[axis]));
++    }
++    for (const auto &atla : map.atra) {
++        mix(atla.used);
++        if (atla.used) for (int axis = 0; axis < 3; ++axis)
++            mix(std::bit_cast<std::uint32_t>(atla.pos[axis]));
++    }
++    return key;
++}
++
++} // namespace dc::game
+diff --git a/port/include/game/dungeon_grid.hpp b/port/include/game/dungeon_grid.hpp
+new file mode 100644
+index 00000000..9c046237
+--- /dev/null
++++ b/port/include/game/dungeon_grid.hpp
+@@ -0,0 +1,10 @@
++#pragma once
++#include <type_traits>
++#include "dungeonmap.hpp"
++
++namespace dc::game::dungeon_grid {
++inline constexpr int cells = std::extent_v<decltype(CDungeonMap::cells)>;
++inline constexpr int boxes = std::extent_v<decltype(CDungeonMap::boxes)>;
++inline constexpr int side = [] { int n = 1; while (n * n < cells) ++n; return n; }();
++static_assert(side * side == cells);
++} // namespace dc::game::dungeon_grid
+diff --git a/port/include/game/dungeon_visibility.hpp b/port/include/game/dungeon_visibility.hpp
+new file mode 100644
+index 00000000..05843c71
+--- /dev/null
++++ b/port/include/game/dungeon_visibility.hpp
+@@ -0,0 +1,107 @@
++#pragma once
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include "dungeonparts.hpp"
++
++namespace dc::game::dungeon_visibility {
++// Only ordinary room/corridor walls are occluders. Doors, dividers, stairs and
++// unfamiliar parts stay open: their geometry/state may allow a view through.
++inline unsigned Walls(int part, int rotation) {
++    constexpr unsigned road[5][4] = {
++        {6, 9, 6, 9}, {5, 3, 10, 12}, {0, 0, 0, 0},
++        {1, 2, 8, 4}, {7, 11, 14, 13}
++    };
++    if (part >= 0 && part <= MAP_PARTS_ROAD_DEAD_END)
++        return road[part][static_cast<unsigned>(rotation) % 4];
++    unsigned mask = 0;
++    if (part >= MAP_PARTS_ROOM_WALL_NORTH && part <= MAP_PARTS_ROOM_WALL_WEST) {
++        constexpr unsigned walls[] = {1, 2, 8, 4};
++        mask = walls[part - MAP_PARTS_ROOM_WALL_NORTH];
++    } else if (part >= MAP_PARTS_ROOM_CORNER_NORTH_WEST && part <= MAP_PARTS_ROOM_CORNER_SOUTH_WEST) {
++        constexpr unsigned corners[] = {5, 3, 10, 12};
++        mask = corners[part - MAP_PARTS_ROOM_CORNER_NORTH_WEST];
++    }
++    for (unsigned r = 0; r < static_cast<unsigned>(rotation) % 4; ++r)
++        mask = ((mask & 1) ? 2 : 0) | ((mask & 2) ? 8 : 0) |
++               ((mask & 8) ? 4 : 0) | ((mask & 4) ? 1 : 0);
++    return mask;
++}
++
++// Conservative 2D portal visibility. Propagate angular windows through whole
++// open cell edges, in increasing Manhattan distance from the camera. Straight
++// sight rays are monotone on both grid axes; walking around a corner cannot
++// propagate visibility. Each quadrant is separate to handle the atan2 seam.
++// A one-cell halo retains walls/trim/models extending across a tile boundary.
++template<int Grid, class Cell>
++std::array<bool, Grid * Grid> Build(const Cell *cells, float x, float z) {
++    std::array<bool, Grid * Grid> visible{};
++    const auto fail_open = [&] { visible.fill(true); return visible; };
++    if (!std::isfinite(x) || !std::isfinite(z)) return fail_open();
++    const float gx = (x + 80.0f) / 160.0f, gz = (z + 80.0f) / 160.0f;
++    if (gx < 0 || gz < 0 || gx >= Grid || gz >= Grid) return fail_open();
++    const int sx = static_cast<int>(gx), sz = static_cast<int>(gz);
++    const int start = sx + sz * Grid;
++    if (cells[start].parts_no == MAP_PARTS_NONE) return fail_open();
++    // At a boundary the camera can straddle either piece. Avoid ambiguous
++    // zero-length portal projections and use the existing renderer there.
++    if (gx - sx < 0.002f || gx - sx > 0.998f ||
++        gz - sz < 0.002f || gz - sz > 0.998f) return fail_open();
++    constexpr float pi = 3.14159265358979323846f;
++    constexpr int dx[] = {0, 1, -1, 0}, dz[] = {-1, 0, 0, 1};
++    constexpr unsigned bit[] = {1, 2, 4, 8}, opposite[] = {8, 4, 2, 1};
++    for (int quadrant = 0; quadrant < 4; ++quadrant) {
++        std::array<float, Grid * Grid> low, high;
++        low.fill(pi + 1); high.fill(-pi - 1);
++        std::array<int, Grid * Grid> queue;
++        int head = 0, tail = 1;
++        queue[0] = start;
++        low[start] = -pi + quadrant * (pi / 2);
++        high[start] = low[start] + pi / 2;
++        visible[start] = true;
++        while (head < tail) {
++            const int here = queue[head++], col = here % Grid, row = here / Grid;
++            const int depth = std::abs(col - sx) + std::abs(row - sz);
++            const unsigned walls = Walls(cells[here].parts_no, cells[here].direction);
++            for (int side = 0; side < 4; ++side) {
++                const int nc = col + dx[side], nr = row + dz[side];
++                if (nc < 0 || nr < 0 || nc >= Grid || nr >= Grid || (walls & bit[side])) continue;
++                if (std::abs(nc - sx) + std::abs(nr - sz) != depth + 1) continue;
++                const int next = nc + nr * Grid;
++                if (cells[next].parts_no == MAP_PARTS_NONE) continue;
++                float ax, az, bx, bz;
++                if (dx[side]) {
++                    ax = bx = col + (dx[side] > 0 ? 1.0f : 0.0f);
++                    az = static_cast<float>(row); bz = row + 1.0f;
++                } else {
++                    az = bz = row + (dz[side] > 0 ? 1.0f : 0.0f);
++                    ax = static_cast<float>(col); bx = col + 1.0f;
++                }
++                float a = std::atan2(az - gz, ax - gx), b = std::atan2(bz - gz, bx - gx);
++                if (a > b) std::swap(a, b);
++                const auto pass = [&](float left, float right) {
++                    left -= 0.00001f; right += 0.00001f;
++                    left = std::max(left, low[here]); right = std::min(right, high[here]);
++                    if (left > right) return;
++                    visible[next] = true; // retain the first wall facing the camera
++                    if (Walls(cells[next].parts_no, cells[next].direction) & opposite[side]) return;
++                    if (low[next] > high[next]) queue[tail++] = next;
++                    low[next] = std::min(low[next], left);
++                    high[next] = std::max(high[next], right);
++                };
++                if (b - a > pi) { pass(-pi, a); pass(b, pi); }
++                else pass(a, b);
++            }
++        }
++    }
++    const auto core = visible;
++    for (int row = 0; row < Grid; ++row) for (int col = 0; col < Grid; ++col) {
++        if (!core[col + row * Grid]) continue;
++        for (int r = std::max(0, row - 1); r <= std::min(Grid - 1, row + 1); ++r)
++            for (int c = std::max(0, col - 1); c <= std::min(Grid - 1, col + 1); ++c)
++                visible[c + r * Grid] = true;
++    }
++    return visible;
++}
++} // namespace dc::game::dungeon_visibility
 diff --git a/port/include/game/dungeonmap.hpp b/port/include/game/dungeonmap.hpp
 index 6ad2f6f9..5f847f5a 100644
 --- a/port/include/game/dungeonmap.hpp
@@ -7522,7 +7745,7 @@ index 00000000..d56b5827
 +
 +} // namespace dc::game
 diff --git a/port/src/game/dun/gameloop.cpp b/port/src/game/dun/gameloop.cpp
-index 0e33bf79..44dd3832 100644
+index 0e33bf79..629c384e 100644
 --- a/port/src/game/dun/gameloop.cpp
 +++ b/port/src/game/dun/gameloop.cpp
 @@ -1,3 +1,5 @@
@@ -7539,7 +7762,15 @@ index 0e33bf79..44dd3832 100644
  
  #include "battlemenu.hpp"
  #include "btactstatus.hpp"
-@@ -74,6 +77,7 @@
+@@ -39,6 +42,7 @@
+ #include "dranmapfield.hpp"
+ #include "dungeonparts.hpp"
+ #include "dungeoneventman.hpp"
++#include "dungeon_aerial.hpp"
+ #include "dungeonmap.hpp"
+ #include "edit.hpp"
+ #include "editloop3.hpp"
+@@ -74,6 +78,7 @@
  #include "objanime.hpp"
  #include "platform/config.hpp"
  #include "platform/input.hpp"
@@ -7547,7 +7778,7 @@ index 0e33bf79..44dd3832 100644
  #include "randomitem.hpp"
  #include "rect.hpp"
  #include "runeffect.hpp"
-@@ -93,6 +97,13 @@
+@@ -93,6 +98,13 @@
  #include "weaponeffect.hpp"
  #include "weaponelement.hpp"
  #include "wind.hpp"
@@ -7561,7 +7792,7 @@ index 0e33bf79..44dd3832 100644
  
  namespace dc::game {
  
-@@ -102,7 +113,7 @@ using namespace dc::platform;
+@@ -102,7 +114,7 @@ using namespace dc::platform;
  namespace {
  
  /* The weapon each character starts with. */
@@ -7570,7 +7801,7 @@ index 0e33bf79..44dd3832 100644
  
  /**
   * How far one character reaches when the game picks what to lock on to.
-@@ -110,7 +121,7 @@ constexpr std::array<s32, 6> defWeapon__6 = {ITEM_WEAPON_DAGGER_BROKEN, ITEM_WEA
+@@ -110,7 +122,7 @@ constexpr std::array<s32, 6> defWeapon__6 = {ITEM_WEAPON_DAGGER_BROKEN, ITEM_WEA
  float CharaRangeRate(CUserStatus *status) {
      constexpr std::array<float, 6> range_rate = {1.2f, 1.4f, 1.1f, 1.5f, 1.0f, 1.8f};
  
@@ -7579,7 +7810,7 @@ index 0e33bf79..44dd3832 100644
  }
  
  /**
-@@ -119,7 +130,7 @@ float CharaRangeRate(CUserStatus *status) {
+@@ -119,7 +131,7 @@ float CharaRangeRate(CUserStatus *status) {
  float CharaHeight(CUserStatus *status) {
      constexpr std::array<float, 6> chara_height = {16.0f, 14.0f, 16.0f, 16.0f, 18.0f, 15.0f};
  
@@ -7588,7 +7819,7 @@ index 0e33bf79..44dd3832 100644
  }
  
  /**
-@@ -394,7 +405,11 @@ CActiveItemPack activeItem;
+@@ -394,7 +406,11 @@ CActiveItemPack activeItem;
  namespace {
  
  /* How square on to the player each monster of the floor stands. */
@@ -7600,7 +7831,7 @@ index 0e33bf79..44dd3832 100644
  
  } // namespace
  
-@@ -480,7 +495,7 @@ CDataAlloc2<1> BtStartLogoBuffer(-1);
+@@ -480,7 +496,7 @@ CDataAlloc2<1> BtStartLogoBuffer(-1);
  CDataAlloc2<1> MonstorModelBuffer(-1);
  
  /* Script working memory, one block per monster on the floor. */
@@ -7609,7 +7840,7 @@ index 0e33bf79..44dd3832 100644
  
  /* The buffers the dungeon's item cache and battle scripts run out of. */
  CDataAlloc2<1> BtItemCashArea[6];
-@@ -1283,6 +1298,153 @@ void MemoryMapDump() {
+@@ -1283,6 +1299,153 @@ void MemoryMapDump() {
      TexManager.print_buff_info();
  }
  
@@ -7763,7 +7994,7 @@ index 0e33bf79..44dd3832 100644
  void GameInit() {
      int         size = 0;
      std::string name;
-@@ -1293,12 +1455,18 @@ void GameInit() {
+@@ -1293,12 +1456,18 @@ void GameInit() {
      BtAllDrawFlag = 0;
      selectMapNo = main_select_menu_no;
      UserStatus = SaveData->GetDngStatus();
@@ -7783,7 +8014,7 @@ index 0e33bf79..44dd3832 100644
              status->hp[i] = status->max_hp[i];
              status->ailments[i] = 0;
              status->ailment_frames[i] = 0;
-@@ -1319,6 +1487,7 @@ void GameInit() {
+@@ -1319,6 +1488,7 @@ void GameInit() {
      sceVu0CopyMatrix(sub_lightcolor, def_lightcolor);
      sceVu0CopyVector(sub_ambientlight, def_ambientlight);
  
@@ -7791,7 +8022,7 @@ index 0e33bf79..44dd3832 100644
      InitializeDataBuffer();
      SetDataBuffer(&MainModelBuffer, 0x9470);
      SetDataBuffer(&MotionData, 10000);
-@@ -1405,7 +1574,7 @@ void GameInit() {
+@@ -1405,7 +1575,7 @@ void GameInit() {
          effect.Initialize();
      }
  
@@ -7800,7 +8031,7 @@ index 0e33bf79..44dd3832 100644
          OzumondShot.damage[i] = 1;
          OzumondShot.age[i] = 0;
      }
-@@ -1439,7 +1608,7 @@ void GameInit() {
+@@ -1439,7 +1609,7 @@ void GameInit() {
      MainMonstorUnit.model_count = 0;
      MainMonstorUnit.current_monster = 0;
  
@@ -7809,7 +8040,7 @@ index 0e33bf79..44dd3832 100644
          MainMonstorUnit.script[i] = &MonstorScriptBuffer[i];
      }
  
-@@ -1523,7 +1692,10 @@ void GameInit() {
+@@ -1523,7 +1693,10 @@ void GameInit() {
      cameraAuto = 0;
      faceEyeCount = 0;
      DispFade__3.FadeInit(128.0f);
@@ -7821,7 +8052,7 @@ index 0e33bf79..44dd3832 100644
  
      switch (LanguageCode) {
          case LANG_JAPANESE:
-@@ -1695,35 +1867,7 @@ void GameInit() {
+@@ -1695,35 +1868,7 @@ void GameInit() {
          element.Initialize();
      }
  
@@ -7858,7 +8089,7 @@ index 0e33bf79..44dd3832 100644
  
      LoadData();
      LoadStartLogo(selectMapNo);
-@@ -1927,7 +2071,7 @@ int GameLoop() {
+@@ -1927,7 +2072,7 @@ int GameLoop() {
          if (BtEventInfo.no_status_recover == 0) {
              CUserStatus *status = UserStatus;
  
@@ -7867,7 +8098,7 @@ index 0e33bf79..44dd3832 100644
                  status->hp[i] = status->max_hp[i];
                  status->ailments[i] = 0;
                  status->ailment_frames[i] = 0;
-@@ -1993,6 +2137,9 @@ void Draw_MainUnitShadow() {
+@@ -1993,6 +2138,9 @@ void Draw_MainUnitShadow() {
          CharaMain.DrawShadow();
      }
  
@@ -7877,7 +8108,7 @@ index 0e33bf79..44dd3832 100644
      if (CMonUnitHyde == 0 && BtEventMode == 0) {
          NowMonstorUnit->DrawShadowMonstor();
      }
-@@ -2112,11 +2259,15 @@ void Draw_MainUnit() {
+@@ -2112,11 +2260,15 @@ void Draw_MainUnit() {
      CharaMain.TextureAnime(0x11);
      CharaMain.Draw();
  
@@ -7894,7 +8125,7 @@ index 0e33bf79..44dd3832 100644
      MGSetAmbient(saved_ambient);
      sceVu0CopyMatrix(light, saved_light);
      sceVu0CopyMatrix(colour, saved_colour);
-@@ -2131,12 +2282,54 @@ namespace {
+@@ -2131,12 +2283,54 @@ namespace {
  // Draws the floor's monsters. CMonstorUnit::DrawMonstor draws the ones taking part; a dormant one
  // within video.detail_distance of the player is passed off as taking part for the length of the
  // call, so that its model draws and animates without the monster waking.
@@ -7951,7 +8182,7 @@ index 0e33bf79..44dd3832 100644
          MONSTOR *monster = &unit->monster[i];
          dormant[i] = monster->state == 1 && monster->revealed != 0 && monster->player_distance < detail;
  
-@@ -2147,7 +2340,7 @@ void DrawMonstorDetail() {
+@@ -2147,7 +2341,7 @@ void DrawMonstorDetail() {
  
      unit->DrawMonstor();
  
@@ -7960,7 +8191,7 @@ index 0e33bf79..44dd3832 100644
          if (dormant[i]) {
              unit->monster[i].state = 1;
          }
-@@ -2168,6 +2361,125 @@ CTexture *NamedTexture(const char *name) {
+@@ -2168,6 +2362,125 @@ CTexture *NamedTexture(const char *name) {
  
  } // namespace
  
@@ -8086,7 +8317,7 @@ index 0e33bf79..44dd3832 100644
  void DunMainDraw() {
      sceVu0FMATRIX camera;
      sceVu0FVECTOR eye;
-@@ -2182,6 +2494,8 @@ void DunMainDraw() {
+@@ -2182,6 +2495,8 @@ void DunMainDraw() {
      sceVu0UnitMatrix(unit);
      sceVu0MulMatrix(view, unit, camera);
      MGSetViewMatrix(view, eye);
@@ -8095,7 +8326,7 @@ index 0e33bf79..44dd3832 100644
      SndSetCamera(NowCamera__3);
  
      if (BtAllDrawFlag == 0) {
-@@ -2228,6 +2542,13 @@ void DunMainDraw() {
+@@ -2228,6 +2543,13 @@ void DunMainDraw() {
  
      // Deliberately non-virtual: the map field's own draw, not an override.
      NowDranMapField->CDranMapField::Draw();
@@ -8109,7 +8340,7 @@ index 0e33bf79..44dd3832 100644
  
      if (itemOpenSmallFlag == 0 && itemOpenBigFlag == 0) {
          sceVu0FVECTOR box_pos;
-@@ -2258,6 +2579,7 @@ void DunMainDraw() {
+@@ -2258,6 +2580,7 @@ void DunMainDraw() {
          NowDngMap->DrawAtraBoll(atra_pos);
      }
  
@@ -8117,7 +8348,7 @@ index 0e33bf79..44dd3832 100644
      Draw_MainUnitShadow();
  
      if (BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0) {
-@@ -2267,15 +2589,16 @@ void DunMainDraw() {
+@@ -2267,15 +2590,16 @@ void DunMainDraw() {
      if (CMonUnitHyde == 0 && BtEventMode == 0) {
          DrawMonstorDetail();
      }
@@ -8136,7 +8367,7 @@ index 0e33bf79..44dd3832 100644
              TexManager.ReloadTexture(Vif1Packet, 0x1D);
              NowWeapon->Draw();
          }
-@@ -2535,6 +2858,7 @@ void DunMainDraw() {
+@@ -2535,6 +2859,7 @@ void DunMainDraw() {
  
              if (CEffectHyde == 0 && BtEventMode == 0) {
                  NowShotData->draw();
@@ -8144,7 +8375,7 @@ index 0e33bf79..44dd3832 100644
                  OzumondShotEffect.Draw();
                  OzumondFire.Draw();
              }
-@@ -2542,14 +2866,26 @@ void DunMainDraw() {
+@@ -2542,14 +2867,26 @@ void DunMainDraw() {
              CWeaponFx.Draw();
              CRunFx__2.Step();
              CRunFx__2.Draw();
@@ -8172,7 +8403,13 @@ index 0e33bf79..44dd3832 100644
          }
  
          TexManager.ReloadTexture(Vif1Packet, 2);
-@@ -2584,12 +2920,15 @@ void DunMainDraw() {
+@@ -2579,17 +2916,23 @@ void DunMainDraw() {
+             sceVu0FVECTOR map_pos;
+             sceVu0FVECTOR map_rot;
+ 
+-            gfx::UiAnchorScope map_anchor(kMiniMapAnchor);
++            gfx::UiAnchorScope map_anchor(ConfigGet().aerial_map ? gfx::UiAnchor{} : kMiniMapAnchor);
+ 
              TexManager.ReloadTexture(Vif1Packet, 0x1F);
              sceVu0CopyVector(map_pos, CharaFrame->position);
              CharaFrame->GetRotation(map_rot);
@@ -8182,7 +8419,10 @@ index 0e33bf79..44dd3832 100644
 +            // Keep the normal map visibility toggle; the map is drawn in the configured layout when it shows.
 +            if (UserStatus->minimap_status != 3) {
 +                NowDngMap->DrawMiniMap(map_pos, map_rot[1]);
-+                NowMonstorUnit->DrawMapSymbol(map_pos);
++                // The aerial map shows the monsters as their models.
++                if (!DungeonAerialMapDrawn()) {
++                    NowMonstorUnit->DrawMapSymbol(map_pos);
++                }
 +                RandomItem->MapSymbolDraw();
 +            }
          }
@@ -8192,7 +8432,7 @@ index 0e33bf79..44dd3832 100644
          BtStatusErrDraw(rogoY3);
          gfx::SetUiAnchor({});
  
-@@ -2601,6 +2940,10 @@ void DunMainDraw() {
+@@ -2601,6 +2944,10 @@ void DunMainDraw() {
              TexManager.ReloadTexture(Vif1Packet, 7);
              set2DSprite(Vif1Packet, NamedTexture("pause"), CRect_i_(0x100, 0xCC, 0x80, 0x28), 0, 0);
          }
@@ -8203,7 +8443,7 @@ index 0e33bf79..44dd3832 100644
  
          setbilinear(1);
      }
-@@ -2686,6 +3029,10 @@ void DunMainDraw() {
+@@ -2686,6 +3033,10 @@ void DunMainDraw() {
          }
      }
  
@@ -8214,7 +8454,7 @@ index 0e33bf79..44dd3832 100644
      if (BtEventMode != 0) {
          if (DebugStatus[4] != 0) {
              TexManager.ReloadTexture(Vif1Packet, 0xC);
-@@ -2714,10 +3061,46 @@ float oldCameraAngle;
+@@ -2714,10 +3065,46 @@ float oldCameraAngle;
  float inputH1;
  
  void motionDrive() {
@@ -8262,7 +8502,7 @@ index 0e33bf79..44dd3832 100644
  
      if (BtAllDrawFlag == 0) {
          return;
-@@ -2750,7 +3133,7 @@ void motionDrive() {
+@@ -2750,7 +3137,7 @@ void motionDrive() {
              if (chara == CHARA_XIAO) {
                  CCharacter *weapon = NowWeapon;
  
@@ -8271,7 +8511,7 @@ index 0e33bf79..44dd3832 100644
                  weapon->motion_flags = 1;
                  weapon->motion_speed = -1.0f;
              }
-@@ -2764,7 +3147,7 @@ void motionDrive() {
+@@ -2764,7 +3151,7 @@ void motionDrive() {
              if (chara == CHARA_XIAO) {
                  CCharacter *weapon = NowWeapon;
  
@@ -8280,7 +8520,7 @@ index 0e33bf79..44dd3832 100644
                  weapon->motion_flags = blend;
                  weapon->motion_speed = -1.0f;
              }
-@@ -2773,7 +3156,7 @@ void motionDrive() {
+@@ -2773,7 +3160,7 @@ void motionDrive() {
          }
  
          // Osmond's tail keeps turning on its own.
@@ -8289,7 +8529,7 @@ index 0e33bf79..44dd3832 100644
              CFrame *tail = CharaMain.frame->SearchFrame("tukene1");
              CFrame *tail_shadow = CharaMain.shadow_frame->SearchFrame("obj46");
  
-@@ -2796,7 +3179,7 @@ void motionDrive() {
+@@ -2796,7 +3183,7 @@ void motionDrive() {
              }
          }
  
@@ -8298,7 +8538,7 @@ index 0e33bf79..44dd3832 100644
              CharaMain.motion_type.state.look_frame = static_cast<CFrameVu1 *>(CharaFrame->SearchFrame("jnt2_1"));
              sceVu0CopyVector(CharaMain.motion_type.state.look_position, BtActStatus.target_position);
              CharaMain.motion_type.state.look_at = true;
-@@ -2805,18 +3188,24 @@ void motionDrive() {
+@@ -2805,18 +3192,24 @@ void motionDrive() {
              CharaMain.motion_type.state.look_at = false;
          }
  
@@ -8324,7 +8564,7 @@ index 0e33bf79..44dd3832 100644
          sceVu0CopyVector(hand, CharaFrame->position);
  
          float height = CharaHeight(UserStatus);
-@@ -2832,28 +3221,28 @@ void motionDrive() {
+@@ -2832,28 +3225,28 @@ void motionDrive() {
          }
  
          if (driveStepHold != 0 || BtActStatus.movement_locked != 0) {
@@ -8357,7 +8597,7 @@ index 0e33bf79..44dd3832 100644
                  weapon->motion_flags = blend;
                  weapon->motion_speed = -1.0f;
              }
-@@ -2891,7 +3280,7 @@ void motionDrive() {
+@@ -2891,7 +3284,7 @@ void motionDrive() {
          s8           owner = status->cur_chara;
          WEAPON_HAVE *weapon = &status->chara_weapons[owner][status->equipped_weapon_slot[owner]];
  
@@ -8366,7 +8606,7 @@ index 0e33bf79..44dd3832 100644
              static int warning_cnt = 0;
              auto       wait = static_cast<int>(weapon->durability_f) * 10;
  
-@@ -3021,7 +3410,7 @@ void motionDrive() {
+@@ -3021,7 +3414,7 @@ void motionDrive() {
  
          gain = std::max(gain, 1.0f);
  
@@ -8375,7 +8615,7 @@ index 0e33bf79..44dd3832 100644
  
          // Toan and Ungaga recharge slowly, and not at all on a frame they swing.
          if (who == CHARA_TOAN || who == CHARA_UNGAGA) {
-@@ -3050,6 +3439,7 @@ void motionDrive() {
+@@ -3050,6 +3443,7 @@ void motionDrive() {
              gain *= 1.5f;
          }
  
@@ -8383,7 +8623,7 @@ index 0e33bf79..44dd3832 100644
          BtActStatus.action_gauge += gain;
  
          if (!(static_cast<int>(BtActStatus.action_gauge) < 100)) {
-@@ -3273,7 +3663,7 @@ void BtLoadMonstor(int ura) {
+@@ -3273,7 +3667,7 @@ void BtLoadMonstor(int ura) {
      unit->model_count = 0;
      unit->current_monster = 0;
  
@@ -8392,7 +8632,7 @@ index 0e33bf79..44dd3832 100644
          unit->script[slot] = &MonstorScriptBuffer[slot];
      }
  
-@@ -3304,6 +3694,12 @@ void BtLoadMonstor(int ura) {
+@@ -3304,6 +3698,12 @@ void BtLoadMonstor(int ura) {
      const BT_ENEMY_FLOOR &layout = floors[UserStatus->cur_floor];
      int                   count = 0;
  
@@ -8405,7 +8645,7 @@ index 0e33bf79..44dd3832 100644
      for (const auto &entry : layout.monster) {
          if (entry.monster_no == -1) {
              break;
-@@ -3326,7 +3722,7 @@ void EquipReAttach(CCharacter *equipment, int held_out) {
+@@ -3326,7 +3726,7 @@ void EquipReAttach(CCharacter *equipment, int held_out) {
  void EquipWeaponFrame(CCharacter *weapon, int chara, int held_out) {
      NowWeapon = weapon;
  
@@ -8414,7 +8654,7 @@ index 0e33bf79..44dd3832 100644
  
      if (hand == nullptr) {
          std::println("no weapon frame !!");
-@@ -3373,15 +3769,16 @@ void LoadWeapon2(unsigned int *crash_data, unsigned int *default_data, unsigned
+@@ -3373,15 +3773,16 @@ void LoadWeapon2(unsigned int *crash_data, unsigned int *default_data, unsigned
      // The weapon's item number, counted from its character's first weapon.
      int model_no = status->chara_weapons[owner][status->equipped_weapon_slot[owner]].item_no;
  
@@ -8435,7 +8675,7 @@ index 0e33bf79..44dd3832 100644
      WEffectModelBuffer.used = 0;
  
      MenuWeaponSpSet(NowWeapon, &status->chara_weapons[owner][status->equipped_weapon_slot[owner]]);
-@@ -3429,7 +3826,7 @@ void SwordDmgCheck1(float amount, int kind) {
+@@ -3429,7 +3830,7 @@ void SwordDmgCheck1(float amount, int kind) {
      // 1 leaves the broken weapon in hand, 2 the character's default one.
      if (broke == 1 || broke == 2) {
          EquipWeaponFrame(broke == 1 ? &CrashWeapon : &DefaultWeapon, UserStatus->cur_chara, CharaMainHandViewFlag);
@@ -8444,7 +8684,7 @@ index 0e33bf79..44dd3832 100644
  
          if (owner == CHARA_OSMOND || owner == CHARA_RUBY) {
              NowMainEffect = &CharaMainEffectCrash;
-@@ -3453,6 +3850,24 @@ u8 wep_rgb[5][3] = {
+@@ -3453,6 +3854,24 @@ u8 wep_rgb[5][3] = {
  void SetWeaponColor() {
      s8 element = NowWeaponHave->best_elem;
  
@@ -8469,7 +8709,7 @@ index 0e33bf79..44dd3832 100644
      if (element == WEAPON_ELEMENT_NONE) {
          SetWeaponTrailDefaultColour();
      } else if (element >= 0 && element < 6) {
-@@ -3470,7 +3885,7 @@ void SetWeaponColor() {
+@@ -3470,7 +3889,7 @@ void SetWeaponColor() {
  }
  
  BT_SHOT_EFFECT *Get_Main_EffectPtr(int chara, int form) {
@@ -8478,7 +8718,7 @@ index 0e33bf79..44dd3832 100644
          case CHARA_TOAN:
              return MyEffectEntry_Tbl[0];
          case CHARA_XIAO:
-@@ -3564,17 +3979,56 @@ void MainChara_Effect(BT_SHOT_EFFECT *effect, unsigned int *data, int reload) {
+@@ -3564,17 +3983,56 @@ void MainChara_Effect(BT_SHOT_EFFECT *effect, unsigned int *data, int reload) {
          std::println("set eff sucsess !");
      }
  
@@ -8537,7 +8777,7 @@ index 0e33bf79..44dd3832 100644
  void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned int *crash_data, unsigned int *default_data, unsigned int *main_data) {
      CFrameAttr    frame_attr;
      sceVu0FVECTOR pos;
-@@ -3605,15 +4059,24 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3605,15 +4063,24 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
  
      CharaMain.InitializeTexAnime(CharaMainTexAnim, 64);
      CharaMain.LoadPackData2(chara_data, "base.cfg", &CharaModelBuffer, 0x11, &CharaModelBuffer, 0);
@@ -8564,7 +8804,7 @@ index 0e33bf79..44dd3832 100644
          CharaHand.frame->SetAttr(hand_attr, 1, 0);
      }
  
-@@ -3628,7 +4091,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3628,7 +4095,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
  
      CharaFrame = static_cast<CFrameVu1 *>(CharaMain.frame);
  
@@ -8573,7 +8813,7 @@ index 0e33bf79..44dd3832 100644
          std::array<LOADTEXTURE_INFO2, 2> info = {
              {
               {.name = nullptr, .block_no = 0x46, .mipmap = 0},
-@@ -3637,7 +4100,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3637,7 +4104,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
          };
          int size = 0;
  
@@ -8582,7 +8822,7 @@ index 0e33bf79..44dd3832 100644
          u_char *at = ArenaFree(CharaModelBuffer);
  
          memcpy(at, hand_texture, size);
-@@ -3646,25 +4109,21 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3646,25 +4113,21 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
          TexManager.DeleteTextureBlock(0x46);
          TexManager.LoadTextureBlockEX(0x46, info.data());
  
@@ -8615,7 +8855,7 @@ index 0e33bf79..44dd3832 100644
      WeaponModelBuffer.used = 0;
      LoadWeapon2(crash_data, default_data, main_data, chara, 0);
      MemoryMapDump();
-@@ -3690,6 +4149,7 @@ void LoadData() {
+@@ -3690,6 +4153,7 @@ void LoadData() {
      frame_attr.program_option = 0;
  
      UserStatus->cur_chara = 0;
@@ -8623,7 +8863,7 @@ index 0e33bf79..44dd3832 100644
      BtGetWeaponNamePath3(weapon_name.data(), weapon_effect_name.data(), UserStatus->chara_weapons[0][UserStatus->equipped_weapon_slot[0]].item_no);
      std::println("[{}] {}", UserStatus->chara_weapons[0][UserStatus->equipped_weapon_slot[0]].item_no, weapon_name.data());
  
-@@ -3858,14 +4318,15 @@ int BtCheckDamageProc() {
+@@ -3858,14 +4322,15 @@ int BtCheckDamageProc() {
              CMonUnitHold = 0;
              CEffectHold = 0;
  
@@ -8642,7 +8882,7 @@ index 0e33bf79..44dd3832 100644
  
              if (StatusErrCheck(AILMENT_STAMINA) != 0) {
                  guard *= 2;
-@@ -4192,7 +4653,7 @@ void BattleActionThlow() {
+@@ -4192,7 +4657,7 @@ void BattleActionThlow() {
      if (BombInfo.throw_step == 1) {
          constexpr std::array<float, 6> throw_frame = {548.0f, 452.0f, 267.0f, 347.0f, 188.0f, 321.0f};
          auto                           end = static_cast<float>(CharaMain.motion_type.motion_info[27].end);
@@ -8651,7 +8891,7 @@ index 0e33bf79..44dd3832 100644
  
          if (CharaMain.motion_type.state.time >= start && CharaMain.motion_type.state.time <= end) {
              SndSePlay(SE_THROW, -1, 0);
-@@ -4280,7 +4741,7 @@ void BattleActionDrink() {
+@@ -4280,7 +4745,7 @@ void BattleActionDrink() {
  
      BtActStatus.motion_no = 0x1C;
  
@@ -8660,7 +8900,7 @@ index 0e33bf79..44dd3832 100644
      float now = CharaMain.motion_type.state.time;
  
      if (now >= frame && now < frame + 0.3f) {
-@@ -4342,7 +4803,22 @@ void EndAction(bool face_target = true) {
+@@ -4342,7 +4807,22 @@ void EndAction(bool face_target = true) {
  /**
   * Puts a shot from the player's character in the first free slot, if there is one.
   */
@@ -8683,7 +8923,7 @@ index 0e33bf79..44dd3832 100644
      CSHOT *shots = NowShotData;
  
      for (int i = 0; i < 12; i++) {
-@@ -4355,6 +4831,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+@@ -4355,6 +4835,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
              shots->halted[i] = 0;
              shots->start_flag[i] = 0;
              shots->used[i] = 1;
@@ -8691,7 +8931,7 @@ index 0e33bf79..44dd3832 100644
              break;
          }
      }
-@@ -4362,6 +4839,77 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+@@ -4362,6 +4843,77 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
  
  } // namespace
  
@@ -8769,7 +9009,7 @@ index 0e33bf79..44dd3832 100644
  void BattleActionOn_Jinn() {
      if (BtActStatus.action_on == 0 && static_cast<s32>(BtActStatus.action_gauge) == 100) {
          BtActStatus.action_step = 0;
-@@ -4508,6 +5056,8 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
+@@ -4508,6 +5060,8 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
          damage *= 2;
      }
  
@@ -8778,7 +9018,7 @@ index 0e33bf79..44dd3832 100644
      // A repeat shot reuses the start and the way the first one took.
      if (repeat != 0) {
          if (NowMainEffect->Set(ruby_effect_pos, ruby_effect_vec, 3, element, 0, nullptr, 1) != -1) {
-@@ -4556,6 +5106,19 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
+@@ -4556,6 +5110,19 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
          NowMainEffect->SetVsMonster(NowWeaponHave->vs_monster);
          NowMainEffect->SetDmg(damage);
      }
@@ -8798,7 +9038,7 @@ index 0e33bf79..44dd3832 100644
  }
  
  void BattleActionPlay_Ruby(CCharacter *chara, int aimed) {
-@@ -4788,6 +5351,7 @@ void BattleActionPlay_Ozumond(int aimed) {
+@@ -4788,6 +5355,7 @@ void BattleActionPlay_Ozumond(int aimed) {
          sceVu0Normalize(shot, shot);
          sceVu0ScaleVectorXYZ(shot, shot, 10.0f);
          OzumondShot.Set(pos, shot, damage, 0);
@@ -8806,7 +9046,7 @@ index 0e33bf79..44dd3832 100644
          BtActStatus.frames_since_attack = 0;
          SwordDmgCheck1(0.5f, 0);
      }
-@@ -4853,6 +5417,7 @@ void BattleActionPlay_Ozumond_H(int aimed) {
+@@ -4853,6 +5421,7 @@ void BattleActionPlay_Ozumond_H(int aimed) {
              NowMainEffect->SetAttribute(GetWeaponElementAttr(NowWeaponHave->best_elem));
              NowMainEffect->SetDmg(damage);
          }
@@ -8814,7 +9054,7 @@ index 0e33bf79..44dd3832 100644
  
          BtActStatus.action_step = 1;
          BtActStatus.frames_since_attack = 0;
-@@ -4900,6 +5465,7 @@ void BattleActionPlay_Ozumond_F(int aimed) {
+@@ -4900,6 +5469,7 @@ void BattleActionPlay_Ozumond_F(int aimed) {
              }
  
              OzumondFire.Init(start, start_dir, 0, 0);
@@ -8822,7 +9062,7 @@ index 0e33bf79..44dd3832 100644
          }
  
          if (GamePad.On(PadInput_OK) == 0) {
-@@ -5080,10 +5646,10 @@ void autoCamTrial() {
+@@ -5080,10 +5650,10 @@ void autoCamTrial() {
              }
          }
      } else {
@@ -8836,7 +9076,7 @@ index 0e33bf79..44dd3832 100644
                  s32          parts_no = cell->parts_no;
                  CFrame      *frame = parts_no == -1 ? nullptr : map->parts[parts_no].camera_collision;
  
-@@ -5331,7 +5897,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
+@@ -5331,7 +5901,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
      s16          item_no = weapon->item_no;
  
      // The first two weapons of each character turn every trap into the stamina trap.
@@ -8845,7 +9085,7 @@ index 0e33bf79..44dd3832 100644
          kind = TRAP_CIRCLE_STAMINA;
      }
  
-@@ -5506,9 +6072,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5506,9 +6076,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      CUserStatus  *status = UserStatus;
      sceVu0FVECTOR at;
      sceVu0FVECTOR towards;
@@ -8858,7 +9098,7 @@ index 0e33bf79..44dd3832 100644
      float         rate = CharaRangeRate(status);
  
      CharaFrame->GetRotation(at);
-@@ -5516,7 +6082,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5516,7 +6086,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      sceVu0FVECTOR forward = {0.0f, 0.0f, 1.0f, 1.0f};
      sceVu0FMATRIX unit;
      sceVu0FMATRIX turn;
@@ -8867,7 +9107,7 @@ index 0e33bf79..44dd3832 100644
      int           screen[4];
  
      sceVu0UnitMatrix(unit);
-@@ -5532,7 +6098,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5532,7 +6102,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
          monster = -1;
      }
  
@@ -9566,6 +9806,672 @@ index f0d0e889..2fd46a90 100644
                  gameTask = GAME_TASK_EXIT_FADE_START;
                  static_cast<CDngStatusData *>(UserStatus)->SetDead();
  #endif
+diff --git a/port/src/game/dungeon_aerial.cpp b/port/src/game/dungeon_aerial.cpp
+new file mode 100644
+index 00000000..99266d3f
+--- /dev/null
++++ b/port/src/game/dungeon_aerial.cpp
+@@ -0,0 +1,660 @@
++#include "dungeon_aerial.hpp"
++
++#include <SDL3/SDL.h>
++#include "dungeon_aerial_cache.hpp"
++#include <libvu0.h>
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <vector>
++
++#include "btactstatus.hpp"
++#include "character.hpp"
++#include "dun/gameloop.hpp"
++#include "dungeonmap.hpp"
++#include "dungeonparts.hpp"
++#include "edit.hpp"
++#include "frame.hpp"
++#include "gfx/gfx.hpp"
++#include "mglib.hpp"
++#include "monstorunit.hpp"
++#include "platform/config.hpp"
++#include "rect.hpp"
++#include "render/draw2d.hpp"
++#include "render/draw3d.hpp"
++#include "renderinfo.hpp"
++#include "snd.hpp"
++#include "text/textwipe.hpp"
++#include "texture.hpp"
++#include "userstatus.hpp"
++
++namespace dc::game {
++
++using namespace dc::platform;
++using namespace dc::render;
++namespace textwipe = dc::text::textwipe;
++
++// ---- Aerial map ------------------------------------------------------------------------------
++//
++// The dungeon map is the live floor seen from straight above. The near clip plane sits
++// aerial_map_ceiling above the player's feet, so ceilings and upper walls are cut away. Only the
++// cells the retail map shows are copied onto it (CDungeonMap::mask, or every cell dimmed while the
++// map item is equipped); monsters, chests and atla balls appear as their own models under the rules
++// retail's symbols follow, and the player as their model.
++
++namespace {
++
++constexpr float kCell = 160.0f;          // world units per grid cell
++constexpr float kRetailScale = 0.1f;     // retail map pixels per world unit (16 per cell)
++// Retail's map uses 16 pixels per grid cell at 380,64; game.aerial_map_size grows it from its
++// top-right corner, moving up as far as the frame allows.
++float kMapLeft = 380.0f;
++float kMapTop = 64.0f;
++float kMapSize = 320.0f;
++
++void PlaceMap(float size) {
++    kMapSize = 320.0f * size;
++    kMapTop = std::max(8.0f, std::min(64.0f, 472.0f - kMapSize));
++    kMapSize = std::min(kMapSize, 472.0f - kMapTop);
++    kMapLeft = 632.0f - kMapSize;
++}
++constexpr float kFloorCentre = 9.5f * kCell;
++constexpr float kAerialHeight = 4000.0f; // camera height above the player's feet
++constexpr float kAerialDepth = 4000.0f;  // how far below the feet the floor is still drawn
++constexpr float kTargetFill = 448.0f;    // target rows the map's span fills at zoom 1
++
++bool g_drawn = false;
++
++struct Aerial {
++    float zoom = 1.0f;
++    float map_x = 0.0f; // map pixel of world x = 0, z = 0
++    float map_y = 0.0f;
++    float u0 = 0.0f; // target texel of world x = 0, z = 0 on the floor
++    float v0 = 0.0f;
++    float du = 0.0f; // target texels per world unit along x, z
++    float dv = 0.0f;
++};
++
++float Det3(const sceVu0FMATRIX m) {
++    return m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2]) +
++           m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
++}
++
++int CellOf(const float *pos) {
++    int col = (int) ((80.0f + pos[0]) / kCell);
++    int row = (int) ((80.0f + pos[2]) / kCell);
++
++    if (col < 0 || row < 0 || col >= dungeon_grid::side || row >= dungeon_grid::side) {
++        return -1;
++    }
++
++    return col + row * dungeon_grid::side;
++}
++
++// The aerial view, scaled by scale about pivot so a model draws larger where it stands without its
++// own matrices changing.
++void SetView(const sceVu0FMATRIX base, const float *eye, const float *pivot, float scale) {
++    sceVu0FMATRIX view;
++    sceVu0CopyMatrix(view, const_cast<float(*)[4]>(base));
++
++    if (pivot != nullptr) {
++        // view * T(pivot) * S(scale) * T(-pivot)
++        for (int row = 0; row < 3; row++) {
++            float moved = base[0][row] * pivot[0] + base[1][row] * pivot[1] + base[2][row] * pivot[2];
++
++            for (int col = 0; col < 3; col++) {
++                view[col][row] = base[col][row] * scale;
++            }
++
++            view[3][row] = base[3][row] + moved * (1.0f - scale);
++        }
++    }
++
++    MGSetViewMatrixQuiet(view, const_cast<float *>(eye));
++}
++
++} // namespace
++
++bool DungeonAerialMapDrawn() {
++    return g_drawn;
++}
++
++namespace {
++
++// What the map drew this frame, ringed in its colour over the aerial image so it reads at map size.
++struct Marker {
++    float  x;
++    float  z;
++    u_char r, g, b;
++    bool   pulse;
++};
++std::vector<Marker> g_markers;
++
++void AddMarker(const float *pos, u_char r, u_char g, u_char b, bool pulse = true) {
++    g_markers.push_back({pos[0], pos[2], r, g, b, pulse});
++}
++
++bool CellShown(CDungeonMap *map, int cell, int show_all) {
++    return cell >= 0 && map->cells[cell].parts_no != MAP_PARTS_NONE && (show_all || map->mask[cell] != 0);
++}
++
++// The overhead camera's height, in 80-unit steps: walking over bumpy ground must not change the
++// cached floor image (its key includes this), or the whole floor is redrawn on most ticks.
++float AerialEyeHeight(float feet) { return 80.0f * std::round(feet / 80.0f); }
++
++void DrawModels(CDungeonMap *map, const sceVu0FMATRIX base, const float *eye, const float *player, float scale, int crystal,
++                int show_all, int pass) {
++    float lid[4];
++
++    // Chests: retail's symbol shows a closed box on a revealed cell, or all of them with the crystal.
++    if (pass == 0 && map->box_lid_model != NULL && map->box_body_model != NULL && map->chest_body_model != NULL &&
++        map->chest_lid_model != NULL) {
++        TexManager.ReloadTexture(Vif1Packet, 3);
++
++        for (int i = 0; i < dungeon_grid::boxes; i++) {
++            TREASURE_BOX *box = &map->boxes[i];
++            int           cell = CellOf(box->pos);
++
++            if (box->used == 0 || box->closed == 0 || cell < 0 || map->cells[cell].parts_no == MAP_PARTS_NONE ||
++                !(crystal || map->mask[cell] != 0)) {
++                continue;
++            }
++
++            if (box->kind != TREASURE_BOX_LARGE && box->kind != TREASURE_BOX_SMALL) {
++                continue;
++            }
++
++            const bool large = box->kind == TREASURE_BOX_LARGE;
++            CFrame    *body = large ? map->box_body_model : map->chest_body_model;
++            CFrame    *top = large ? map->box_lid_model : map->chest_lid_model;
++            SetView(base, eye, box->pos, scale);
++            body->SetPosition(box->pos);
++            sceVu0CopyVector(lid, body->position);
++            lid[1] += large ? 8.0f : 3.0f;
++            lid[2] -= large ? 5.0f : 3.0f;
++            top->SetPosition(lid);
++            top->SetRotation((PI * box->lid_angle) / 180.0f, 0.0f, 0.0f);
++            MGDraw(body);
++            MGDraw(top);
++            AddMarker(box->pos, 0xFF, 0xC0, 0x20);
++        }
++    }
++
++    // Atla balls: as their symbols, on a revealed cell or with the crystal.
++    if (pass == 0 && map->atra_model != NULL && atraGetStatus == 0) {
++        TexManager.ReloadTexture(Vif1Packet, 0x16);
++
++        for (int i = 0; i < 8; i++) {
++            int cell = CellOf(map->atra[i].pos);
++
++            if (map->atra[i].used == 0 || cell < 0 || map->cells[cell].parts_no == MAP_PARTS_NONE ||
++                !(crystal || map->mask[cell] != 0)) {
++                continue;
++            }
++
++            SetView(base, eye, map->atra[i].pos, scale);
++            map->atra_model->SetPosition(map->atra[i].pos);
++            MGDraw(map->atra_model);
++            AddMarker(map->atra[i].pos, 0x40, 0xC0, 0xFF);
++        }
++    }
++
++    // Monsters: CMonstorUnit::DrawMapSymbol's test, an awake monster or every one with the crystal.
++    CMonstorUnit *unit = NowMonstorUnit;
++
++    if (unit != NULL && CMonUnitHyde == 0 && BtEventMode == 0) {
++        float          pos[4];
++        sceVu0FVECTOR  ambient;
++        const int      saved_current = unit->current_monster;
++
++        MGGetAmbient(ambient);
++        TexManager.ReloadTexture(Vif1Packet, 42);
++
++        for (int i = 0; i < std::extent_v<decltype(CMonstorUnit::monster)>; i++) {
++            MONSTOR *monster = &unit->monster[i];
++
++            if (monster->state == -1 || monster->revealed == 0 || !(crystal || monster->state == 2)) {
++                continue;
++            }
++            if ((monster->state == 2) != (pass == 1)) {
++                continue;
++            }
++
++            CCharacter *chara = &unit->chara[i][0];
++            chara->GetPosition(pos);
++
++            if (!CellShown(map, CellOf(pos), show_all || crystal)) {
++                continue;
++            }
++
++            unit->current_monster = i;
++            unit->PalletSet();
++            SetView(base, eye, pos, scale);
++            chara->Draw();
++            MGSetAmbient(ambient);
++            AddMarker(pos, 0xFF, 0x20, 0x20);
++        }
++
++        unit->current_monster = saved_current;
++    }
++
++    // The player.
++    if (pass == 1 && BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0) {
++        // Larger than the rest and fully lit, so the player reads at a glance from straight above.
++        sceVu0FVECTOR saved_ambient;
++        sceVu0FVECTOR bright = {128.0f, 128.0f, 128.0f, 128.0f};
++        MGGetAmbient(saved_ambient);
++        MGSetAmbient(bright);
++        SetView(base, eye, player, scale * 1.8f);
++        Draw_MainUnit();
++        MGSetAmbient(saved_ambient);
++    }
++}
++
++// The things the map marks with a dot, by retail's symbol rules: closed chests and Atla on a
++// revealed cell (every one with the crystal), awake monsters (every one with the crystal).
++void CollectMarkers(CDungeonMap *map, int crystal, int show_all) {
++    g_markers.clear();
++    for (int i = 0; i < dungeon_grid::boxes; i++) {
++        const TREASURE_BOX *box = &map->boxes[i];
++        const int cell = CellOf(box->pos);
++        if (box->used == 0 || box->closed == 0 || cell < 0 || map->cells[cell].parts_no == MAP_PARTS_NONE ||
++            !(crystal || map->mask[cell] != 0) || (box->kind != TREASURE_BOX_LARGE && box->kind != TREASURE_BOX_SMALL)) {
++            continue;
++        }
++        AddMarker(box->pos, 0xFF, 0xC0, 0x20);
++    }
++    if (atraGetStatus == 0) {
++        for (int i = 0; i < 8; i++) {
++            const int cell = CellOf(map->atra[i].pos);
++            if (map->atra[i].used == 0 || cell < 0 || map->cells[cell].parts_no == MAP_PARTS_NONE ||
++                !(crystal || map->mask[cell] != 0)) {
++                continue;
++            }
++            AddMarker(map->atra[i].pos, 0x40, 0xC0, 0xFF);
++        }
++    }
++    CMonstorUnit *unit = NowMonstorUnit;
++    if (unit != NULL && CMonUnitHyde == 0 && BtEventMode == 0) {
++        float pos[4];
++        for (int i = 0; i < std::extent_v<decltype(CMonstorUnit::monster)>; i++) {
++            const MONSTOR *monster = &unit->monster[i];
++            if (monster->state == -1 || monster->hp <= 0 || monster->revealed == 0 || !(crystal || monster->state == 2)) continue;
++            unit->chara[i][0].GetPosition(pos);
++            if (!CellShown(map, CellOf(pos), show_all || crystal)) continue;
++            AddMarker(pos, 0xFF, 0x30, 0x30);
++        }
++    }
++}
++
++// Renders the floor from above into the "aerial_map" target; false when it cannot.
++bool RenderAerial(CDungeonMap *map, const float *player, Aerial &aerial, int show_all, int crystal, bool render) {
++    if (!gfx::InFrame()) {
++        return false;
++    }
++    MGPortOrthographicScope overhead(kAerialHeight);
++
++    // Two images: "aerial_floor" holds the floor and everything that stands still (chests, Atla,
++    // sleeping monsters) and is redrawn only when that changes; "aerial_map" is a copy of it with the
++    // awake monsters and the player drawn on top each frame.
++    gfx::TextureHandle floor_target = gfx::NamedRenderTarget("aerial_floor", 640, 480, true);
++    gfx::TextureHandle target = gfx::NamedRenderTarget("aerial_map", 640, 480, true);
++
++    if (target == gfx::kNullTexture || floor_target == gfx::kNullTexture) {
++        return false;
++    }
++
++    const Config &config = ConfigGet();
++    aerial.zoom = config.aerial_map_zoom * kMapSize / 320.0f;
++
++    // Centre on the floor's built cells. When they do not fit (large generated floors, or zoom
++    // past 1) the map follows the player, clamped so it never scrolls past the floor's edge.
++    const float map_scale = kRetailScale * aerial.zoom;
++    int lo_x = dungeon_grid::side, lo_z = dungeon_grid::side, hi_x = -1, hi_z = -1;
++    for (int cell = 0; cell < dungeon_grid::cells; cell++) {
++        if (map->cells[cell].parts_no == MAP_PARTS_NONE) continue;
++        lo_x = std::min(lo_x, cell % dungeon_grid::side); hi_x = std::max(hi_x, cell % dungeon_grid::side);
++        lo_z = std::min(lo_z, cell / dungeon_grid::side); hi_z = std::max(hi_z, cell / dungeon_grid::side);
++    }
++    float centre[2] = {kFloorCentre, kFloorCentre};
++    float render_centre[2] = {kFloorCentre, kFloorCentre};
++    float render_span = 20.0f * kCell;
++    if (hi_x >= lo_x) {
++        const float visible = kMapSize / map_scale;
++        const float min_x = kCell * lo_x - kCell / 2.0f, max_x = kCell * hi_x + kCell / 2.0f;
++        const float min_z = kCell * lo_z - kCell / 2.0f, max_z = kCell * hi_z + kCell / 2.0f;
++        centre[0] = (min_x + max_x) / 2.0f;
++        centre[1] = (min_z + max_z) / 2.0f;
++        render_centre[0] = centre[0];
++        render_centre[1] = centre[1];
++        render_span = std::max(render_span, std::max(max_x - min_x, max_z - min_z));
++        if (max_x - min_x > visible) centre[0] = std::clamp(player[0], min_x + visible / 2.0f, max_x - visible / 2.0f);
++        if (max_z - min_z > visible) centre[1] = std::clamp(player[2], min_z + visible / 2.0f, max_z - visible / 2.0f);
++    }
++
++    aerial.map_x = kMapLeft + kMapSize / 2.0f - map_scale * centre[0];
++    aerial.map_y = kMapTop + kMapSize / 2.0f - map_scale * centre[1];
++
++    const RenderInfo         saved_info = mgRenderInfo;
++    const gfx::TextureHandle previous = gfx::CurrentRenderTarget();
++
++    // Texels per world unit: the whole floor fills kTargetFill rows, so the image never depends on
++    // where the map is scrolled and can be reused until new cells are revealed.
++    const float target_scale = kTargetFill / render_span;
++    const float near_dist = kAerialHeight - config.aerial_map_ceiling;
++    MGSetRenderInfo(target_scale * kAerialHeight, near_dist > 1.0f ? near_dist : 1.0f, kAerialHeight + kAerialDepth);
++    mgRenderInfo.fog_a = mgRenderInfo.fog_near;
++    mgRenderInfo.fog_b = 0.0f;
++    mgRenderInfo.fog_far = mgRenderInfo.fog_near;
++
++    // Straight down: eye x along world x, eye y (screen down) along world z, depth down the height.
++    // The game's own view sets the handedness, so faces cull as they do in the main view.
++    const float   side = Det3(saved_info.view) < 0.0f ? -1.0f : 1.0f;
++    const float   eye[4] = {render_centre[0], AerialEyeHeight(player[1]) + kAerialHeight, render_centre[1], 1.0f};
++    sceVu0FMATRIX base;
++    std::memset(base, 0, sizeof base);
++    base[0][0] = side;
++    base[3][0] = -side * eye[0];
++    base[2][1] = 1.0f;
++    base[3][1] = -eye[2];
++    base[1][2] = -1.0f;
++    base[3][2] = eye[1];
++    base[3][3] = 1.0f;
++    SetView(base, eye, nullptr, 1.0f);
++
++    // Where the floor at the feet lands in the target: MGRotTransPers2D's logical pixels, centre
++    // (320, 240), target_scale texels per world unit at the camera's height above it.
++    aerial.du = side * target_scale;
++    aerial.dv = target_scale;
++    aerial.u0 = 320.0f - aerial.du * render_centre[0];
++    aerial.v0 = 240.0f - aerial.dv * render_centre[1];
++    const uint8_t black[4] = {0, 0, 0, 0x80};
++    if (render) {
++        gfx::SetRenderTarget(floor_target);
++        gfx::Clear(true, black, true, 0.0f);
++
++        // The cells, as CDungeonMap::DrawMap places them; each part is shared by every cell using it.
++        struct PartPlace {
++            float pos[4];
++            int   direction;
++        };
++        PartPlace saved_parts[72];
++
++        for (int i = 0; i < 72; i++) {
++            sceVu0CopyVector(saved_parts[i].pos, map->parts[i].pos);
++            saved_parts[i].direction = map->parts[i].direction;
++        }
++
++        TexManager.ReloadTexture(Vif1Packet, 3);
++
++        for (int cell = 0; cell < dungeon_grid::cells; cell++) {
++            if (!CellShown(map, cell, show_all)) {
++                continue;
++            }
++
++            CDungeonParts *part = &map->parts[map->cells[cell].parts_no];
++            part->direction = map->cells[cell].direction;
++            part->pos[0] = kCell * (float) (cell % dungeon_grid::side);
++            part->pos[1] = 0.0f;
++            part->pos[2] = kCell * (float) (cell / dungeon_grid::side);
++            part->pos[3] = 1.0f;
++            part->Draw();
++        }
++
++        for (int i = 0; i < 72; i++) {
++            sceVu0CopyVector(map->parts[i].pos, saved_parts[i].pos);
++            map->parts[i].direction = saved_parts[i].direction;
++        }
++
++        DrawModels(map, base, eye, player, config.aerial_map_model_scale, crystal, show_all, 0);
++    }
++
++    // The live layer: the still image, then the few things that move.
++    gfx::CopyTexture(floor_target, {0, 0, 640, 480}, target, 0, 0);
++    gfx::SetRenderTarget(target);
++    gfx::Clear(false, black, true, 0.0f);
++    SetView(base, eye, nullptr, 1.0f);
++    DrawModels(map, base, eye, player, config.aerial_map_model_scale, crystal, show_all, 1);
++
++    gfx::SetRenderTarget(previous);
++    mgRenderInfo = saved_info;
++    TexManager.ReloadTexture(Vif1Packet, 0x1F);
++    return true;
++}
++
++// Copies each shown cell of the aerial image onto the map at retail's place for it.
++void CompositeAerial(CDungeonMap *map, const Aerial &aerial, int show_all, u_char bright, u_char dim, u_char alpha) {
++    gfx::TextureBinding binding;
++    binding.texture = gfx::FindNamedRenderTarget("aerial_map");
++    binding.filter = gfx::Filter::Linear;
++    binding.ignore_alpha = true;
++
++    gfx::DrawState state = draw2d::SpriteState();
++    state.scissor = true;
++    state.scissor_rect = {kMapLeft, kMapTop, kMapSize, kMapSize};
++
++    const float                tile = kCell * kRetailScale * aerial.zoom;
++    std::vector<gfx::Vertex2D> quads;
++
++    for (int cell = 0; cell < dungeon_grid::cells; cell++) {
++        if (!CellShown(map, cell, show_all)) {
++            continue;
++        }
++
++        const float x = kCell * (float) (cell % dungeon_grid::side) - kCell / 2.0f;
++        const float z = kCell * (float) (cell / dungeon_grid::side) - kCell / 2.0f;
++        const float dx = aerial.map_x + kRetailScale * aerial.zoom * x;
++        const float dy = aerial.map_y + kRetailScale * aerial.zoom * z;
++
++        if (dx > kMapLeft + kMapSize || dy > kMapTop + kMapSize || dx + tile < kMapLeft || dy + tile < kMapTop) {
++            continue;
++        }
++
++        const u_char shade = map->mask[cell] != 0 ? bright : dim;
++        const float  u = aerial.u0 + aerial.du * x;
++        const float  v = aerial.v0 + aerial.dv * z;
++        const float  uw = aerial.du * kCell;
++        const float  vh = aerial.dv * kCell;
++
++        const gfx::Vertex2D corners[4] = {
++            draw2d::Vertex(dx, dy, 0.0f, u, v, shade, shade, shade, alpha),
++            draw2d::Vertex(dx + tile, dy, 0.0f, u + uw, v, shade, shade, shade, alpha),
++            draw2d::Vertex(dx + tile, dy + tile, 0.0f, u + uw, v + vh, shade, shade, shade, alpha),
++            draw2d::Vertex(dx, dy + tile, 0.0f, u, v + vh, shade, shade, shade, alpha),
++        };
++        quads.insert(quads.end(), corners, corners + 4);
++    }
++
++    if (!quads.empty()) {
++        textwipe::Draw2D(gfx::Primitive::Quads, quads, binding, state);
++    }
++}
++
++// A small pulsing dot for each marker, with a dark edge so it reads on any floor. Things within two
++// cells of the player are left out: they are in view already. The player shows as their model (DrawModels).
++void DrawMarkers(const Aerial &aerial, const float *player) {
++    gfx::DrawState state = draw2d::SpriteState();
++    state.scissor = true;
++    state.scissor_rect = {kMapLeft, kMapTop, kMapSize, kMapSize};
++
++    const float scale = kRetailScale * aerial.zoom;
++    const float wave = 0.5f + 0.5f * std::sin(static_cast<float>(SDL_GetTicks()) * 0.006f);
++    std::vector<gfx::Vertex2D> quads;
++    auto dot = [&](float cx, float cy, float half, u_char r, u_char g, u_char b, u_char a) {
++        quads.push_back(draw2d::Vertex(cx - half, cy - half, 0.0f, 0, 0, r, g, b, a));
++        quads.push_back(draw2d::Vertex(cx + half, cy - half, 0.0f, 0, 0, r, g, b, a));
++        quads.push_back(draw2d::Vertex(cx + half, cy + half, 0.0f, 0, 0, r, g, b, a));
++        quads.push_back(draw2d::Vertex(cx - half, cy + half, 0.0f, 0, 0, r, g, b, a));
++    };
++    const float near = 2.0f * kCell;
++    for (const Marker &marker : g_markers) {
++        const float dx = marker.x - player[0], dz = marker.z - player[2];
++        if (dx * dx + dz * dz < near * near) continue;
++        const float cx = aerial.map_x + scale * marker.x;
++        const float cy = aerial.map_y + scale * marker.z;
++        const u_char a = static_cast<u_char>(0x50 + 0x30 * wave);
++        dot(cx, cy, 3.0f, 0, 0, 0, a);
++        dot(cx, cy, 2.0f, marker.r, marker.g, marker.b, a);
++    }
++
++    if (!quads.empty()) {
++        textwipe::Draw2D(gfx::Primitive::Quads, quads, {}, state);
++    }
++}
++
++// Retail's trap circle symbols, which stay icons on the aerial map.
++void DrawTrapSymbols(CDungeonMap *map, const Aerial &aerial, u_char alpha) {
++    CTexture *symbol_texture = TexManager.GetTexture(const_cast<char *>("itempack"), -1);
++
++    for (int i = 0; i < 3; i++) {
++        if (map->trap_circle[i].state == 0) {
++            continue;
++        }
++
++        int cell = CellOf(map->trap_circle[i].pos);
++
++        if (cell < 0 || map->cells[cell].parts_no == MAP_PARTS_NONE ||
++            !(BtEquipMasuisyou == 1 || map->mask[cell] != 0)) {
++            continue;
++        }
++
++        const float scale = kRetailScale * aerial.zoom;
++        int         x = (int) (aerial.map_x + scale * map->trap_circle[i].pos[0]) - 4;
++        int         y = (int) (aerial.map_y + scale * map->trap_circle[i].pos[2]) - 4;
++        set2DSprite(Vif1Packet, symbol_texture, CRect_i_(x, y, 8, 8), CRect_i_(88, 112, 8, 8), alpha);
++    }
++}
++
++// Live tuning while the map shows, on function keys the port leaves free: F5/F6 model size
++// (x0.8/x1.25), F1/F2 map size (-/+0.1), F7 zoom +0.25 (Shift+F7 -0.25), Shift+F5/F6 ceiling cut
++// -/+10. Each press is saved to config.json at once.
++void TuneAerial() {
++    struct Key {
++        SDL_Scancode code;
++        bool         shift;
++        int          field;
++        float        step;
++    };
++    static const Key keys[] = {
++        {SDL_SCANCODE_F6, false, 0, 1.25f}, {SDL_SCANCODE_F5, false, 0, 0.8f},
++        {SDL_SCANCODE_F2, false, 1, 0.1f},  {SDL_SCANCODE_F1, false, 1, -0.1f},
++        {SDL_SCANCODE_F7, false, 2, 0.25f}, {SDL_SCANCODE_F7, true, 2, -0.25f},
++        {SDL_SCANCODE_F6, true, 3, 10.0f},  {SDL_SCANCODE_F5, true, 3, -10.0f},
++    };
++    static bool held[sizeof keys / sizeof keys[0]] = {};
++    int         count = 0;
++    const bool *state = SDL_GetKeyboardState(&count);
++
++    if (state == nullptr) {
++        return;
++    }
++
++    const bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
++    Config     config = ConfigGet();
++    bool       changed = false;
++
++    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
++        const bool down = keys[i].shift == shift && keys[i].code < count && state[keys[i].code];
++
++        if (down && !held[i]) {
++            const float step = keys[i].step;
++            switch (keys[i].field) {
++                case 0: config.aerial_map_model_scale = std::clamp(config.aerial_map_model_scale * step, 0.5f, 40.0f); break;
++                case 1: config.aerial_map_size = std::clamp(config.aerial_map_size + step, 0.5f, 1.5f); break;
++                case 2: config.aerial_map_zoom = std::clamp(config.aerial_map_zoom + step, 0.5f, 8.0f); break;
++                default: config.aerial_map_ceiling = std::clamp(config.aerial_map_ceiling + step, 0.0f, 5000.0f); break;
++            }
++            changed = true;
++        }
++
++        held[i] = down;
++    }
++
++    if (changed) {
++        std::fprintf(stderr, "aerial map: model_scale %g size %g zoom %g ceiling %g\n", config.aerial_map_model_scale,
++                     config.aerial_map_size, config.aerial_map_zoom, config.aerial_map_ceiling);
++        ConfigChange(config);
++    }
++}
++
++} // namespace
++
++bool DungeonAerialDrawMiniMap(CDungeonMap *map_self, float *pos, float angle) {
++    (void) angle;
++    int status = UserStatus->minimap_status;
++    g_drawn = false;
++
++    if (status < 0 || status > 2 || !ConfigGet().aerial_map) {
++        return false;
++    }
++
++    // The Dungeon Map option picks the map's size (large, medium, small) at one fixed brightness.
++    static const float sizes[3] = {1.5f, 1.15f, 0.85f};
++    unsigned char red = 0x58;    // unrevealed cells shown by the map item
++    unsigned char green = 0x80;  // revealed cells
++    unsigned char blue = 0x80;   // opaque
++    int           saved_map = BtEquipMap;
++    int           saved_crystal = BtEquipMasuisyou;
++
++    if (DebugStatus[3] != 0) {
++        BtEquipMap = 1;
++        BtEquipMasuisyou = 1;
++    }
++
++    {
++        Aerial aerial;
++        int    show_all = BtEquipMap != 0;
++        int    crystal = BtEquipMasuisyou == 1;
++        float  player[4];
++        sceVu0CopyVector(player, pos);
++
++        TuneAerial();
++        PlaceMap(sizes[status] * ConfigGet().aerial_map_size / 1.4f);
++
++        // The floor image is drawn only when it changes: a new floor, the map item or crystal, or
++        // newly revealed cells. Between those the map reuses it and just moves the view and dots.
++        static std::uint64_t last_key = 0;
++        static bool cached = false;
++        const int  flags = show_all | (crystal << 1);
++        std::uint64_t key = DungeonAerialFloorKey(*map_self, flags, ConfigGet().aerial_map_ceiling,
++                                                 ConfigGet().aerial_map_model_scale, AerialEyeHeight(player[1]));
++        const auto mix = [&](std::uint64_t value) { key = (key ^ value) * 1099511628211ull; };
++        mix(selectMapNo); mix(UserStatus->cur_georama);
++        mix(gfx::FindNamedRenderTarget("aerial_floor"));
++        mix(gfx::FindNamedRenderTarget("aerial_map"));
++        // Sleeping monsters are fixed. Waking/sleeping invalidates the cache;
++        // animation offsets must not make it redraw the floor every tick.
++        if (NowMonstorUnit != nullptr) {
++            for (int i = 0; i < std::extent_v<decltype(CMonstorUnit::monster)>; i++) {
++                const MONSTOR &m = NowMonstorUnit->monster[i];
++                if (m.state != -1 && m.state != 2 && m.hp > 0) {
++                    mix(i + 1); mix(m.revealed);
++                }
++            }
++        }
++        const bool stale = !cached || key != last_key;
++        bool       drawn = RenderAerial(map_self, player, aerial, show_all, crystal, stale);
++        if (drawn && stale) {
++            last_key = key;
++            cached = true;
++        }
++        CollectMarkers(map_self, crystal, show_all);
++
++        if (drawn) {
++            CompositeAerial(map_self, aerial, show_all, green, red, blue);
++            DrawTrapSymbols(map_self, aerial, blue);
++            if (ConfigGet().aerial_map_markers) DrawMarkers(aerial, player);
++            g_drawn = true;
++            BtEquipMap = saved_map;
++            BtEquipMasuisyou = saved_crystal;
++            return true;
++        }
++    }
++    BtEquipMap = saved_map;
++    BtEquipMasuisyou = saved_crystal;
++    return false;
++}
++
++} // namespace dc::game
 diff --git a/port/src/game/dungeoneventman.cpp b/port/src/game/dungeoneventman.cpp
 index 94ac1201..d25f9b5f 100644
 --- a/port/src/game/dungeoneventman.cpp
@@ -9604,12 +10510,15 @@ index 94ac1201..d25f9b5f 100644
                      CDungeonEvent *definition = SearchPartsID(slot_no, parts_id);
  
 diff --git a/port/src/game/dungeonmap.cpp b/port/src/game/dungeonmap.cpp
-index d84b3a67..93a61929 100644
+index d84b3a67..1b7f1e04 100644
 --- a/port/src/game/dungeonmap.cpp
 +++ b/port/src/game/dungeonmap.cpp
-@@ -1,8 +1,12 @@
+@@ -1,8 +1,15 @@
  #include "dungeonmap.hpp"
  
++#include "dungeon_aerial.hpp"
++#include "dungeon_grid.hpp"
++#include "dungeon_visibility.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "platform/config.hpp"
 +
@@ -9620,7 +10529,7 @@ index d84b3a67..93a61929 100644
  #include <array>
  #include <cmath>
  #include <cstddef>
-@@ -60,11 +64,17 @@ enum BuildCellFlag {
+@@ -60,11 +67,17 @@ enum BuildCellFlag {
  struct BUILD_MAP_INFO {
      s32 kind;      /**< MapPartsNo that the cell builds into, or while a corridor is laid, the room it leaves from. */
      s32 direction; /**< Rotation that the cell's map part uses. */
@@ -9639,7 +10548,7 @@ index d84b3a67..93a61929 100644
  
  /**
   * The four cells that touch one cell, as offsets in grid columns and rows.
-@@ -137,7 +147,8 @@ constexpr std::array<std::array<s32, 3>, 2> chainTableDividDoor = {{
+@@ -137,7 +150,8 @@ constexpr std::array<std::array<s32, 3>, 2> chainTableDividDoor = {{
  
  } // namespace
  
@@ -9649,7 +10558,7 @@ index d84b3a67..93a61929 100644
      if (this->npc[npc_no].used != 0) {
          return;
      }
-@@ -155,10 +166,13 @@ void CDungeonMap::SetNPC(int npc_no, unsigned int *pack, int parts_no, sceVu0FVE
+@@ -155,10 +169,13 @@ void CDungeonMap::SetNPC(int npc_no, unsigned int *pack, int parts_no, sceVu0FVE
      }
  
      this->npc[npc_no].chara.InitializeTexAnime(BtNPCTexAnimeData[npc_no], 32);
@@ -9664,7 +10573,7 @@ index d84b3a67..93a61929 100644
      }
  
      this->npc[npc_no].chara.frame->SetAttr(attr, 1, 64);
-@@ -302,10 +316,16 @@ void CDungeonMap::DrawMapCalc(int mode) {
+@@ -302,10 +319,16 @@ void CDungeonMap::DrawMapCalc(int mode) {
      int i;
  
      if (mode == 1) {
@@ -9685,7 +10594,7 @@ index d84b3a67..93a61929 100644
  
                  if (this->cells[cell_no].parts_no != MAP_PARTS_NONE) {
                      CDungeonParts *part;
-@@ -322,6 +342,7 @@ void CDungeonMap::DrawMapCalc(int mode) {
+@@ -322,6 +345,7 @@ void CDungeonMap::DrawMapCalc(int mode) {
                  }
              }
          }
@@ -9693,7 +10602,7 @@ index d84b3a67..93a61929 100644
      } else {
          for (i = 0; this->parts[i].frame[0] != nullptr; i++) {
              this->parts[i].DrawCalc(0, 0, 0, mode);
-@@ -333,7 +354,7 @@ namespace {
+@@ -333,7 +357,7 @@ namespace {
  
  constexpr std::array<int, 7> kItemFreeAreaCounts = {27, 15, 27, 27, 27, 15, 28};
  
@@ -9702,7 +10611,7 @@ index d84b3a67..93a61929 100644
  constexpr int         kMaxPartsCandidates = 0x40;
  constexpr std::size_t kPartsListSize = 2 * static_cast<std::size_t>(kMaxPartsCandidates);
  constexpr float       kCellSize = 160.0f;
-@@ -362,6 +383,14 @@ void CDungeonMap::DrawMap(CCameraFollow *camera, CFrameVu1 * /*player*/) {
+@@ -362,7 +386,19 @@ void CDungeonMap::DrawMap(CCameraFollow *camera, CFrameVu1 * /*player*/) {
      ITEM_FREE_AREA *free_area = ItemFreeAreaAll[selectMapNo];
  
      this->ClearNPC_Cash();
@@ -9715,9 +10624,24 @@ index d84b3a67..93a61929 100644
 +        }
 +    }
      float nearest = 10000.0f;
++    // Cells the camera cannot see past the walls are not drawn beyond two cells away.
++    static_assert(dungeon_grid::side == kMapWidth);
++    const auto visible_cells = dungeon_visibility::Build<dungeon_grid::side>(this->cells, cam_pos[0], cam_pos[2]);
++    const bool walls_hide = selectMapNo != DUNGEON_MOON_SEA && UserStatus->cur_georama != 5;
  
      for (int row = 0; row < kMapWidth; row++) {
-@@ -474,8 +503,59 @@ void CDungeonMap::DrawMap(CCameraFollow *camera, CFrameVu1 * /*player*/) {
+         for (int col = 0; col < kMapWidth; col++) {
+@@ -438,6 +474,9 @@ void CDungeonMap::DrawMap(CCameraFollow *camera, CFrameVu1 * /*player*/) {
+                     }
+                 }
+             }
++            if (walls_hide && !visible_cells[col + row * kMapWidth] && dist >= 2.0f * kCellSize) {
++                draw = false;
++            }
+             cell.visible = draw;
+             if (!draw) {
+                 continue;
+@@ -474,8 +513,59 @@ void CDungeonMap::DrawMap(CCameraFollow *camera, CFrameVu1 * /*player*/) {
                  MGSetAmbient(ambient);
              }
  
@@ -9777,10 +10701,14 @@ index d84b3a67..93a61929 100644
              if (selectMapNo != DUNGEON_MOON_SEA && UserStatus->cur_georama == 4) {
                  MGSetAmbient(old_ambient);
              }
-@@ -589,6 +669,70 @@ void CDungeonMap::DrawDummyModel(CCamera *camera) {
+@@ -589,6 +679,74 @@ void CDungeonMap::DrawDummyModel(CCamera *camera) {
  }
  
  void CDungeonMap::DrawMiniMap(float *pos, float angle) {
++    // game.aerial_map draws the live floor from above; the tile map below is its fallback.
++    if (DungeonAerialDrawMiniMap(this, pos, angle)) {
++        return;
++    }
 +    // The full-screen and aerial map (game.dungeon_aerial_map, game.fit_dungeon_map) fit the grid to the screen,
 +    // and a mod's player tuning can reveal the map and the monsters.
 +    const auto viewport=gfx::VisibleLogicalRect(gfx::kMainTarget);
@@ -9848,7 +10776,7 @@ index d84b3a67..93a61929 100644
      int           status;
      unsigned char red;
      int           saved_map;
-@@ -621,13 +765,25 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -621,13 +779,25 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
      CRect_i_      atra_src;
      status = UserStatus->minimap_status;
  
@@ -9881,7 +10809,7 @@ index d84b3a67..93a61929 100644
  
      red = red_table[status];
      green = green_table[status];
-@@ -640,13 +796,22 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -640,13 +810,22 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
          BtEquipMasuisyou = 1;
      }
  
@@ -9907,7 +10835,7 @@ index d84b3a67..93a61929 100644
              masked = this->mask[cell_no];
              show = masked;
  
-@@ -657,34 +822,55 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -657,34 +836,55 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
                  alpha = green;
              }
  
@@ -9977,7 +10905,7 @@ index d84b3a67..93a61929 100644
      set2DSprite(Vif1Packet, symbol_texture, player_dst, player_src, 7, 7, angle);
  
      for (int i = 0; i < 3; i++) {
-@@ -694,10 +880,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -694,10 +894,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              continue;
          }
  
@@ -9993,7 +10921,7 @@ index d84b3a67..93a61929 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -709,25 +896,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -709,25 +910,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              trap_src.y = 112;
              trap_src.width = 8;
              trap_src.height = 8;
@@ -10030,7 +10958,7 @@ index d84b3a67..93a61929 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -739,25 +928,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -739,25 +942,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              box_src.y = 96;
              box_src.width = 8;
              box_src.height = 8;
@@ -10067,7 +10995,7 @@ index d84b3a67..93a61929 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -769,10 +960,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -769,10 +974,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              atra_src.y = 104;
              atra_src.width = 8;
              atra_src.height = 8;
@@ -10083,7 +11011,7 @@ index d84b3a67..93a61929 100644
              set2DSprite(Vif1Packet, symbol_texture, atra_dst, atra_src, blue);
          }
      }
-@@ -810,31 +1002,31 @@ void CDungeonMap::checkMask(float x, float z) {
+@@ -810,31 +1016,31 @@ void CDungeonMap::checkMask(float x, float z) {
  
                  for (row = this->rooms[room].y; row < this->rooms[room].y + this->rooms[room].height; row++) {
                      for (col = this->rooms[room].x; col < this->rooms[room].x + this->rooms[room].width; col++) {
@@ -10122,7 +11050,7 @@ index d84b3a67..93a61929 100644
              this->mask[i] = 1;
          }
      }
-@@ -963,12 +1155,19 @@ void CDungeonMap::DrawFire(CFrameVu1 *frame, CCameraFollow *camera) {
+@@ -963,12 +1169,19 @@ void CDungeonMap::DrawFire(CFrameVu1 *frame, CCameraFollow *camera) {
      // Only the cells around the camera show their fires.
      for (row = cam_row - 5; row < cam_row + 5; row++) {
          for (col = cam_col - 5; col < cam_col + 5; col++) {
@@ -10144,7 +11072,7 @@ index d84b3a67..93a61929 100644
                      for (j = 0; j < (part = &this->parts[this->cells[cell_no].parts_no])->fire_num; j++) {
                          float turn;
                          float rot_x;
-@@ -1046,8 +1245,8 @@ void CDungeonMap::DrawRaster(CFrameVu1 *frame) {
+@@ -1046,8 +1259,8 @@ void CDungeonMap::DrawRaster(CFrameVu1 *frame) {
      // Only the cells around the player cast a raster.
      for (row = cell_z - 4; row < cell_z + 4; row++) {
          for (col = cell_x - 4; col < cell_x + 4; col++) {
@@ -10155,7 +11083,7 @@ index d84b3a67..93a61929 100644
  
                  if (this->cells[cell_no].parts_no != MAP_PARTS_NONE && this->cells[cell_no].camera_dist <= 240.0f && this->cells[cell_no].visible == 1) {
                      CDungeonParts *part;
-@@ -1130,9 +1329,9 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
+@@ -1130,9 +1343,9 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
      }
  
      // One surface draws for the whole floor: the one nearest to the player.
@@ -10168,7 +11096,7 @@ index d84b3a67..93a61929 100644
              float dist;
  
              if (this->cells[cell_no].parts_no == MAP_PARTS_NONE) {
-@@ -1240,7 +1439,7 @@ void CDungeonMap::DrawItemBox(float *pos) {
+@@ -1240,7 +1453,7 @@ void CDungeonMap::DrawItemBox(float *pos) {
          return;
      }
  
@@ -10177,7 +11105,7 @@ index d84b3a67..93a61929 100644
          if (this->boxes[i].used == 0) {
              continue;
          }
-@@ -1285,7 +1484,7 @@ void CDungeonMap::DrawAtraBoll(float *pos) {
+@@ -1285,7 +1498,7 @@ void CDungeonMap::DrawAtraBoll(float *pos) {
          return;
      }
  
@@ -10186,7 +11114,7 @@ index d84b3a67..93a61929 100644
          return;
      }
  
-@@ -1334,16 +1533,20 @@ int CDungeonMap::CreateCollision(CCPoly *poly, CBoxVu0 box, int num) {
+@@ -1334,16 +1547,20 @@ int CDungeonMap::CreateCollision(CCPoly *poly, CBoxVu0 box, int num) {
  // they stay plain globals with external linkage, defined in this order.
  
  /** Labels each room while a special linked room is selected. */
@@ -10212,7 +11140,7 @@ index d84b3a67..93a61929 100644
  
  /** Gives the number of rooms that the builder placed. */
  s32 roomStackCnt;
-@@ -1359,8 +1562,8 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1359,8 +1576,8 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
      // that two rooms never come out sharing a wall.
      for (j = -1; j < h + 2; j++) {
          for (i = -1; i < w + 2; i++) {
@@ -10223,7 +11151,7 @@ index d84b3a67..93a61929 100644
                      ok = 0;
                  }
              }
-@@ -1373,9 +1576,9 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1373,9 +1590,9 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
  
      for (j = 0; j < h; j++) {
          for (i = 0; i < w; i++) {
@@ -10236,7 +11164,7 @@ index d84b3a67..93a61929 100644
          }
      }
  
-@@ -1384,6 +1587,75 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1384,6 +1601,75 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
  
  } // namespace
  
@@ -10312,7 +11240,7 @@ index d84b3a67..93a61929 100644
  void mapPartsFilter() {
      int col;
      int row;
-@@ -1394,23 +1666,28 @@ void mapPartsFilter() {
+@@ -1394,23 +1680,28 @@ void mapPartsFilter() {
      int east;
      int west;
  
@@ -10349,7 +11277,7 @@ index d84b3a67..93a61929 100644
                      allow_north = 0;
                  }
  
-@@ -1419,8 +1696,13 @@ void mapPartsFilter() {
+@@ -1419,8 +1710,13 @@ void mapPartsFilter() {
                  if ((south & (BUILD_CELL_ROOM | BUILD_CELL_DOOR)) == BUILD_CELL_ROOM) {
                      allow_south = 0;
                  }
@@ -10364,7 +11292,7 @@ index d84b3a67..93a61929 100644
                      allow_south = 0;
                  }
  
-@@ -1429,8 +1711,13 @@ void mapPartsFilter() {
+@@ -1429,8 +1725,13 @@ void mapPartsFilter() {
                  if ((east & (BUILD_CELL_ROOM | BUILD_CELL_DOOR)) == BUILD_CELL_ROOM) {
                      allow_east = 0;
                  }
@@ -10379,7 +11307,7 @@ index d84b3a67..93a61929 100644
                      allow_east = 0;
                  }
  
-@@ -1439,26 +1726,31 @@ void mapPartsFilter() {
+@@ -1439,26 +1740,31 @@ void mapPartsFilter() {
                  if ((west & (BUILD_CELL_ROOM | BUILD_CELL_DOOR)) == BUILD_CELL_ROOM) {
                      allow_west = 0;
                  }
@@ -10418,7 +11346,7 @@ index d84b3a67..93a61929 100644
                              mask &= ~4;
                          }
                      }
-@@ -1466,19 +1758,42 @@ void mapPartsFilter() {
+@@ -1466,19 +1772,42 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 15; table_no++) {
                      if (mask == chainTableRoad[table_no][0]) {
@@ -10468,7 +11396,7 @@ index d84b3a67..93a61929 100644
  
                  if (north == BUILD_CELL_ROOM) {
                      mask &= ~1;
-@@ -1498,74 +1813,74 @@ void mapPartsFilter() {
+@@ -1498,74 +1827,74 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 8; table_no++) {
                      if (mask == chainTableRoom[table_no][0]) {
@@ -10565,7 +11493,7 @@ index d84b3a67..93a61929 100644
                  }
  
                  if ((north & BUILD_CELL_DIVIDING_WALL) == BUILD_CELL_DIVIDING_WALL) {
-@@ -1602,30 +1917,30 @@ void mapPartsFilter() {
+@@ -1602,30 +1931,30 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 6; table_no++) {
                      if (mask == chainTableDivid[table_no][0]) {
@@ -10604,7 +11532,7 @@ index d84b3a67..93a61929 100644
                  }
  
                  if ((north & BUILD_CELL_DIVIDING_WALL) == BUILD_CELL_DIVIDING_WALL) {
-@@ -1646,21 +1961,21 @@ void mapPartsFilter() {
+@@ -1646,21 +1975,21 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 2; table_no++) {
                      if (mask == chainTableDividDoor[table_no][0]) {
@@ -10633,7 +11561,7 @@ index d84b3a67..93a61929 100644
              }
          }
      }
-@@ -1669,20 +1984,248 @@ void mapPartsFilter() {
+@@ -1669,20 +1998,248 @@ void mapPartsFilter() {
  namespace {
  
  void copyMapInfo(BUILD_MAP_INFO *dst, const BUILD_MAP_INFO *src) {
@@ -10641,9 +11569,7 @@ index d84b3a67..93a61929 100644
 -        dst[i].kind = src[i].kind;
 +    std::copy_n(src, DNG_CELLS, dst);
 +}
- 
--        for (int j = 0; j < 16; j++) {
--            dst[i].link[j] = src[i].link[j];
++
 +int joinRoom(int from_room, int to_room);
 +
 +// Shortcut doors (moonmod/dungeonmap_layout.hpp): the rooms the builder joined, and the shortcuts it planned.
@@ -10692,7 +11618,9 @@ index d84b3a67..93a61929 100644
 +    shortcutJoins.push_back({from_room, to_room});
 +    return joinRoom(from_room, to_room);
 +}
-+
+ 
+-        for (int j = 0; j < 16; j++) {
+-            dst[i].link[j] = src[i].link[j];
 +// A room's doorways: the door cells inside it that its own corridors use.
 +std::vector<std::pair<int, int>> RoomDoors(int room) {
 +    std::vector<std::pair<int, int>> doors;
@@ -10704,7 +11632,7 @@ index d84b3a67..93a61929 100644
 +            if ((cell.content & BUILD_CELL_DOOR) != 0 && (cell.content & BUILD_CELL_ROOM) != 0 && cell.link[room] == 1) {
 +                doors.push_back({x, y});
 +            }
-         }
++        }
 +    }
 +    return doors;
 +}
@@ -10717,8 +11645,7 @@ index d84b3a67..93a61929 100644
 +    if (x <= r.x) return 2;
 +    return 3;
 +}
- 
--        dst[i].content = src[i].content;
++
 +// Each dead end (a room with one doorway) joined to a room at least three joins away, leaving by another side.
 +void PlanShortcuts(int wanted) {
 +    shortcutPlans.clear();
@@ -10809,9 +11736,9 @@ index d84b3a67..93a61929 100644
 +            shortcutJoins.push_back({b, a});
 +            zoneGatePlans.push_back(plan);
 +            joined = true;
-+        }
+         }
 +        if (!joined) return false;
-     }
++    }
 +    return true;
 +}
 +
@@ -10824,7 +11751,8 @@ index d84b3a67..93a61929 100644
 +        roomStack[roomStackCnt++] = r;
 +    }
 +}
-+
+ 
+-        dst[i].content = src[i].content;
 +// The rest floor's spring (the hall's top wall) and back floor stairs (the antechamber's), in place of the random
 +// room objects and the random back floor entrance.
 +void SetRestObjects() {
@@ -10878,7 +11806,7 @@ index d84b3a67..93a61929 100644
 +            joinRoomRecorded(room, near);
 +            return room;
 +        }
-+    }
+     }
 +    return -1;
  }
  
@@ -10889,7 +11817,7 @@ index d84b3a67..93a61929 100644
      int target_y;
      int dir;
      int distance;
-@@ -1718,29 +2261,29 @@ int joinRoom(int from_room, int to_room) {
+@@ -1718,29 +2275,29 @@ int joinRoom(int from_room, int to_room) {
          case MAP_DIR_NORTH:
              cx = roomStack[from_room].x + (roomStack[from_room].width >> 1);
              cy = roomStack[from_room].y - 1;
@@ -10927,7 +11855,7 @@ index d84b3a67..93a61929 100644
              steps = roomStack[from_room].x - (roomStack[to_room].x + roomStack[to_room].width);
              break;
      }
-@@ -1770,10 +2313,10 @@ int joinRoom(int from_room, int to_room) {
+@@ -1770,10 +2327,10 @@ int joinRoom(int from_room, int to_room) {
  
      while (done == 0) {
          if (steps != 0) {
@@ -10942,7 +11870,7 @@ index d84b3a67..93a61929 100644
                  steps--;
  
                  if (steps != 0) {
-@@ -1793,11 +2336,11 @@ int joinRoom(int from_room, int to_room) {
+@@ -1793,11 +2350,11 @@ int joinRoom(int from_room, int to_room) {
                      }
                  }
              } else {
@@ -10958,7 +11886,7 @@ index d84b3a67..93a61929 100644
                  }
  
                  done = 1;
-@@ -1820,16 +2363,16 @@ int joinRoom(int from_room, int to_room) {
+@@ -1820,16 +2377,16 @@ int joinRoom(int from_room, int to_room) {
                      for (i = 0; i < distance; i++) {
                          cx += step;
  
@@ -10983,7 +11911,7 @@ index d84b3a67..93a61929 100644
                              }
  
                              done = 1;
-@@ -1851,16 +2394,16 @@ int joinRoom(int from_room, int to_room) {
+@@ -1851,16 +2408,16 @@ int joinRoom(int from_room, int to_room) {
                      for (i = 0; i < distance; i++) {
                          cy += step;
  
@@ -11008,7 +11936,7 @@ index d84b3a67..93a61929 100644
                              }
  
                              done = 1;
-@@ -1904,6 +2447,38 @@ void setRoomObject() {
+@@ -1904,6 +2461,38 @@ void setRoomObject() {
  
      num = 0;
  
@@ -11047,7 +11975,7 @@ index d84b3a67..93a61929 100644
      for (i = 0; i < roomStackCnt; i++) {
  
          // Only two rooms on the floor take an object against their top wall.
-@@ -1911,7 +2486,7 @@ void setRoomObject() {
+@@ -1911,7 +2500,7 @@ void setRoomObject() {
              found = 0;
  
              for (x = 1; x < roomStack[i].width - 1; x++) {
@@ -11056,7 +11984,7 @@ index d84b3a67..93a61929 100644
                      found_x = x + roomStack[i].x;
                      found_y = roomStack[i].y;
                      found = 1;
-@@ -1919,8 +2494,8 @@ void setRoomObject() {
+@@ -1919,8 +2508,8 @@ void setRoomObject() {
              }
  
              if ((100.0f * static_cast<float>(rand())) / 2147483648.0f <= 30.0f) {
@@ -11067,7 +11995,7 @@ index d84b3a67..93a61929 100644
                      num++;
                  }
              }
-@@ -1931,7 +2506,7 @@ void setRoomObject() {
+@@ -1931,7 +2520,7 @@ void setRoomObject() {
  
          for (y = 1; y < roomStack[i].height - 1; y++) {
              for (x = 1; x < roomStack[i].width - 1; x++) {
@@ -11076,7 +12004,7 @@ index d84b3a67..93a61929 100644
                      found_x = x + roomStack[i].x;
                      found_y = y + roomStack[i].y;
                      found = 1;
-@@ -1941,7 +2516,7 @@ void setRoomObject() {
+@@ -1941,7 +2530,7 @@ void setRoomObject() {
  
          if ((100.0f * static_cast<float>(rand())) / 2147483648.0f <= 30.0f) {
              if (found == 1) {
@@ -11085,7 +12013,7 @@ index d84b3a67..93a61929 100644
              }
          }
      }
-@@ -1967,7 +2542,12 @@ void setRoomDivid() {
+@@ -1967,7 +2556,12 @@ void setRoomDivid() {
              ok = 1;
  
              for (x = 0; x < roomStack[i].width; x++) {
@@ -11099,7 +12027,7 @@ index d84b3a67..93a61929 100644
                      ok = 0;
                  }
              }
-@@ -1986,7 +2566,7 @@ void setRoomDivid() {
+@@ -1986,7 +2580,7 @@ void setRoomDivid() {
              ok = 1;
  
              for (y = 0; y < roomStack[i].height; y++) {
@@ -11108,7 +12036,7 @@ index d84b3a67..93a61929 100644
                      ok = 0;
                  }
              }
-@@ -2013,17 +2593,17 @@ void setRoomDivid() {
+@@ -2013,17 +2607,17 @@ void setRoomDivid() {
  
          if (line_dir[line_no] == 0) {
              for (x = line_x[line_no]; x < line_x[line_no] + line_len[line_no]; x++) {
@@ -11130,7 +12058,7 @@ index d84b3a67..93a61929 100644
                  .content |= BUILD_CELL_DIVIDING_DOOR;
          }
      }
-@@ -2046,9 +2626,12 @@ void setUnderDungeonStart() {
+@@ -2046,9 +2640,12 @@ void setUnderDungeonStart() {
      }
  
      // A room cell with no door and no dividing wall can hold the way down.
@@ -11146,7 +12074,7 @@ index d84b3a67..93a61929 100644
                  safe[safe_num * 2] = x;
                  safe[safe_num * 2 + 1] = y;
                  safe_num++;
-@@ -2067,12 +2650,12 @@ void setUnderDungeonStart() {
+@@ -2067,12 +2664,12 @@ void setUnderDungeonStart() {
          x = safe[pick * 2];
          y = safe[pick * 2 + 1];
  
@@ -11165,7 +12093,7 @@ index d84b3a67..93a61929 100644
                      searching = 0;
                  }
              }
-@@ -2091,13 +2674,25 @@ void setUnderDungeonStart() {
+@@ -2091,13 +2688,25 @@ void setUnderDungeonStart() {
  }
  
  void setStair() {
@@ -11191,7 +12119,7 @@ index d84b3a67..93a61929 100644
      // The stair down stands above a corridor that has a free cell over it.
      safe_num = 0;
  
-@@ -2105,10 +2700,10 @@ void setStair() {
+@@ -2105,10 +2714,10 @@ void setStair() {
          safe[i] = -1;
      }
  
@@ -11206,7 +12134,7 @@ index d84b3a67..93a61929 100644
                      safe[safe_num * 2] = x;
                      safe[safe_num * 2 + 1] = y;
                      safe_num++;
-@@ -2128,10 +2723,10 @@ void setStair() {
+@@ -2128,10 +2737,10 @@ void setStair() {
          y = safe[pick * 2 + 1];
      }
  
@@ -11221,7 +12149,7 @@ index d84b3a67..93a61929 100644
  
      // The stair up stands below one that has a free cell under it.
      safe_num = 0;
-@@ -2140,10 +2735,10 @@ void setStair() {
+@@ -2140,10 +2749,10 @@ void setStair() {
          safe[i] = -1;
      }
  
@@ -11236,7 +12164,7 @@ index d84b3a67..93a61929 100644
                      safe[safe_num * 2] = x;
                      safe[safe_num * 2 + 1] = y;
                      safe_num++;
-@@ -2163,10 +2758,10 @@ void setStair() {
+@@ -2163,10 +2772,10 @@ void setStair() {
          y = safe[pick * 2 + 1];
      }
  
@@ -11251,7 +12179,7 @@ index d84b3a67..93a61929 100644
  }
  
  // Returns the first free event slot; running out of slots stops the game.
-@@ -2282,7 +2877,8 @@ void CDungeonMap::StepTrapCircle() {
+@@ -2282,7 +2891,8 @@ void CDungeonMap::StepTrapCircle() {
  }
  
  int CDungeonMap::CheckTreasureBox(float *pos, float dist) {
@@ -11261,7 +12189,7 @@ index d84b3a67..93a61929 100644
          if (this->boxes[i].used != 0 && DistVector(this->boxes[i].pos, pos) < dist) {
              return 0;
          }
-@@ -2311,6 +2907,7 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
+@@ -2311,6 +2921,7 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
      this->atra[this->atra_num].phase = 0.0f;
      this->atra[this->atra_num].atra_no = atra_no;
      this->atra[this->atra_num].used = 1;
@@ -11269,7 +12197,7 @@ index d84b3a67..93a61929 100644
  
      int event_no = FindFreeEvent(this->events);
  
-@@ -2322,10 +2919,52 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
+@@ -2322,10 +2933,52 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
      this->atra_num++;
  }
  
@@ -11323,7 +12251,7 @@ index d84b3a67..93a61929 100644
          if (this->boxes[i].used == 0) {
              box_no = i;
              break;
-@@ -2341,6 +2980,7 @@ int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no)
+@@ -2341,6 +2994,7 @@ int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no)
      this->boxes[box_no].lid_angle = 0;
      this->boxes[box_no].kind = kind;
      this->boxes[box_no].item_no = item_no;
@@ -11331,7 +12259,7 @@ index d84b3a67..93a61929 100644
      this->boxes[box_no].closed = 1;
      this->boxes[box_no].trap_no = trap_no;
  
-@@ -2396,8 +3036,21 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2396,8 +3050,21 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
      object_count = 0;
      target_count = static_cast<int>((4.0f * static_cast<float>(rand())) / 2147483648.0f) + 1;
  
@@ -11355,7 +12283,7 @@ index d84b3a67..93a61929 100644
          valid = 1;
  
          if (this->CheckTreasureBox(box_pos, 20.0f) == 0) {
-@@ -2413,8 +3066,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2413,8 +3080,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
          }
  
          if (valid != 0) {
@@ -11366,7 +12294,7 @@ index d84b3a67..93a61929 100644
  
                  if (item_no != -1) {
                      int trap_no = static_cast<int>((6.0f * static_cast<float>(rand())) / 2147483648.0f);
-@@ -2423,11 +3076,12 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2423,11 +3090,12 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                          trap_no = 1;
                      }
  
@@ -11382,7 +12310,7 @@ index d84b3a67..93a61929 100644
  
                  if (place_atla != 0) {
                      if (object_count == 0) {
-@@ -2440,8 +3094,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2440,8 +3108,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                  }
  
                  if (item_no != -1) {
@@ -11394,7 +12322,7 @@ index d84b3a67..93a61929 100644
                  }
              }
          }
-@@ -2451,7 +3106,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2451,7 +3120,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
  
      for (int i = 0; i < 3; i++) {
          if (static_cast<int>((100.0f * static_cast<float>(rand())) / 2147483648.0f) < 21) {
@@ -11403,7 +12331,7 @@ index d84b3a67..93a61929 100644
              valid = 1;
  
              if (this->CheckTreasureBox(object_pos, 20.0f) == 0) {
-@@ -2472,12 +3127,50 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2472,12 +3141,50 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
          }
      }
  
@@ -11455,7 +12383,7 @@ index d84b3a67..93a61929 100644
              valid = 1;
  
              if (this->CheckTreasureBox(object_pos, 20.0f) == 0) {
-@@ -2497,6 +3190,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2497,6 +3204,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                  this->atra[this->atra_num].phase = 0.0f;
                  this->atra[this->atra_num].atra_no = atra_no[object_count];
                  this->atra[this->atra_num].used = 1;
@@ -11463,7 +12391,7 @@ index d84b3a67..93a61929 100644
  
                  int event_no = FindFreeEvent(this->events);
  
-@@ -2512,6 +3206,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2512,6 +3220,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
              }
          }
      }
@@ -11472,7 +12400,7 @@ index d84b3a67..93a61929 100644
  }
  
  void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind) {
-@@ -2523,7 +3219,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2523,7 +3233,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
  
      int box_no = -1;
  
@@ -11481,7 +12409,7 @@ index d84b3a67..93a61929 100644
          if (this->boxes[i].used == 0) {
              box_no = i;
              break;
-@@ -2546,6 +3242,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2546,6 +3256,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
      this->boxes[box_no].lid_angle = 0;
      this->boxes[box_no].kind = kind;
      this->boxes[box_no].item_no = item_no;
@@ -11489,7 +12417,7 @@ index d84b3a67..93a61929 100644
      this->boxes[box_no].closed = 1;
  
      switch (kind) {
-@@ -2565,7 +3262,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2565,7 +3276,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
  }
  
  void CDungeonMap::RsetMimicEvent() {
@@ -11498,7 +12426,7 @@ index d84b3a67..93a61929 100644
          if (this->events[i].kind != DNG_EVENT_NONE) {
              if (this->events[i].kind == DNG_EVENT_MIMIC) {
                  this->events[i].kind = DNG_EVENT_NONE;
-@@ -2580,7 +3277,7 @@ int CDungeonMap::GetActiveIvent(CFrameVu1 *frame) {
+@@ -2580,7 +3291,7 @@ int CDungeonMap::GetActiveIvent(CFrameVu1 *frame) {
  
      sceVu0CopyVector(pos, frame->position);
  
@@ -11507,7 +12435,7 @@ index d84b3a67..93a61929 100644
          if (this->events[i].kind != DNG_EVENT_NONE && DistVector(this->events[i].pos, pos) <= this->events[i].radius) {
              return i;
          }
-@@ -2619,7 +3316,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2619,7 +3330,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 2; j++) {
                      for (i = 0; i < 2; i++) {
@@ -11516,7 +12444,7 @@ index d84b3a67..93a61929 100644
                              kind = -1;
                          }
                      }
-@@ -2638,7 +3335,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2638,7 +3349,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 2; j++) {
                      for (i = 0; i < 2; i++) {
@@ -11525,7 +12453,7 @@ index d84b3a67..93a61929 100644
                              kind = -1;
                          }
                      }
-@@ -2657,7 +3354,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2657,7 +3368,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 3; j++) {
                      for (i = 0; i < 3; i++) {
@@ -11534,7 +12462,7 @@ index d84b3a67..93a61929 100644
                              kind = -1;
                          }
                      }
-@@ -2683,9 +3380,9 @@ void CDungeonMap::buildDummyModel() {
+@@ -2683,9 +3394,9 @@ void CDungeonMap::buildDummyModel() {
                  }
              }
  
@@ -11547,7 +12475,7 @@ index d84b3a67..93a61929 100644
                          stair_pos[0] = 80.0f + 160.0f * z;
                          stair_pos[1] = 0.0f;
                          stair_pos[2] = 80.0f + 160.0f * x;
-@@ -2721,7 +3418,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2721,7 +3432,7 @@ void CDungeonMap::buildDummyModel() {
  
  void CDungeonMap::GetRoomLinkInfo() {
      int   door_pos[32][2];
@@ -11556,7 +12484,7 @@ index d84b3a67..93a61929 100644
      float pos[4];
      int   door_count;
      int   stair_x;
-@@ -2741,16 +3438,16 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2741,16 +3452,16 @@ void CDungeonMap::GetRoomLinkInfo() {
          this->room_link[i].used = 0;
      }
  
@@ -11577,7 +12505,7 @@ index d84b3a67..93a61929 100644
                  stair_x = x;
                  stair_y = y;
                  break;
-@@ -2758,15 +3455,15 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2758,15 +3469,15 @@ void CDungeonMap::GetRoomLinkInfo() {
          }
      }
  
@@ -11597,7 +12525,7 @@ index d84b3a67..93a61929 100644
                      break;
                  }
              }
-@@ -2776,50 +3473,50 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2776,50 +3487,50 @@ void CDungeonMap::GetRoomLinkInfo() {
      int door_no = static_cast<int>((static_cast<float>(door_count) * static_cast<float>(rand())) / 2147483648.0f);
      x = door_pos[door_no][0];
      y = door_pos[door_no][1];
@@ -11662,7 +12590,7 @@ index d84b3a67..93a61929 100644
              break;
          default:
              std::println("ERROR !!");
-@@ -2832,13 +3529,13 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2832,13 +3543,13 @@ void CDungeonMap::GetRoomLinkInfo() {
      while (active != 0) {
          active = false;
  
@@ -11680,7 +12608,7 @@ index d84b3a67..93a61929 100644
                      case BUILD_CELL_CORRIDOR:
                          propagation_mask = BUILD_CELL_CORRIDOR | BUILD_CELL_DOOR | BUILD_CELL_STAIR_DOWN;
                          break;
-@@ -2853,62 +3550,62 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2853,62 +3564,62 @@ void CDungeonMap::GetRoomLinkInfo() {
                          break;
                  }
  
@@ -11759,7 +12687,7 @@ index d84b3a67..93a61929 100644
                          active = true;
                      }
                  }
-@@ -2917,12 +3614,12 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2917,12 +3628,12 @@ void CDungeonMap::GetRoomLinkInfo() {
      }
  
      // The item goes in a room on the stair's side of the door.
@@ -11774,7 +12702,7 @@ index d84b3a67..93a61929 100644
              room_list[room_count++] = i;
          }
      }
-@@ -2964,8 +3661,8 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2964,8 +3675,8 @@ void CDungeonMap::GetRoomLinkInfo() {
  
              this->room_link[0].item_x = (pos[0] + 80.0f) / 160.0f;
              this->room_link[0].item_y = (pos[2] + 80.0f) / 160.0f;
@@ -11785,7 +12713,7 @@ index d84b3a67..93a61929 100644
              this->room_link[0].used = 1;
              result_no++;
              active = false;
-@@ -2973,10 +3670,113 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2973,10 +3684,113 @@ void CDungeonMap::GetRoomLinkInfo() {
      }
  }
  
@@ -11902,7 +12830,7 @@ index d84b3a67..93a61929 100644
      }
  }
  
-@@ -2990,18 +3790,22 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -2990,18 +3804,22 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
      int free;
      int i;
  
@@ -11929,7 +12857,7 @@ index d84b3a67..93a61929 100644
                          break;
                      }
                  }
-@@ -3012,20 +3816,20 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -3012,20 +3830,20 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
                  for (i = 0; i < 4; i++) {
                      int dx = adjacent.offset[i][0];
                      int dy = adjacent.offset[i][1];
@@ -11953,7 +12881,7 @@ index d84b3a67..93a61929 100644
                          break;
                      }
                  }
-@@ -3038,6 +3842,13 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -3038,6 +3856,13 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
  
  namespace {
  
@@ -11967,7 +12895,7 @@ index d84b3a67..93a61929 100644
  int RollPercent() {
      return static_cast<int>((100.0f * static_cast<float>(rand())) / 2147483648.0f);
  }
-@@ -3056,11 +3867,224 @@ MAP_CELL &PickCell(CDungeonMap &map, std::span<const int> list, int num) {
+@@ -3056,11 +3881,224 @@ MAP_CELL &PickCell(CDungeonMap &map, std::span<const int> list, int num) {
      return map.cells[list[entry] + list[entry + 1] * kMapWidth];
  }
  
@@ -12193,7 +13121,7 @@ index d84b3a67..93a61929 100644
      }
  
      return num;
-@@ -3070,7 +4094,9 @@ int PlaceKeyDoor(CDungeonMap &map, std::span<int> list, int key_door_north) {
+@@ -3070,7 +4108,9 @@ int PlaceKeyDoor(CDungeonMap &map, std::span<int> list, int key_door_north) {
      int num = map.CreatPartsList(list.data(), kMaxPartsCandidates, MAP_PARTS_ROOM_DOOR_NORTH, MAP_PARTS_ROOM_DOOR_WEST);
  
      if (HasCandidates(num)) {
@@ -12204,7 +13132,7 @@ index d84b3a67..93a61929 100644
      }
  
      return num;
-@@ -3107,7 +4133,7 @@ void CDungeonMap::BuildCharaSpecialParts() {
+@@ -3107,7 +4147,7 @@ void CDungeonMap::BuildCharaSpecialParts() {
          roll = 0;
      }
  
@@ -12213,7 +13141,7 @@ index d84b3a67..93a61929 100644
          PlaceKeyPart(*this, list, MAP_PARTS_KEY_XIAO);
      }
  
-@@ -3118,80 +4144,80 @@ void CDungeonMap::BuildCharaSpecialParts() {
+@@ -3118,80 +4158,80 @@ void CDungeonMap::BuildCharaSpecialParts() {
  
      switch (selectMapNo) {
          case DUNGEON_WISE_OWL_FOREST:
@@ -12308,7 +13236,7 @@ index d84b3a67..93a61929 100644
                  PlaceKeyPart(*this, list, MAP_PARTS_KEY_OSMOND);
              }
  
-@@ -3228,7 +4254,16 @@ int CDungeonMap::SetCharaDoor(int chara_no) {
+@@ -3228,7 +4268,16 @@ int CDungeonMap::SetCharaDoor(int chara_no) {
      }
  }
  
@@ -12325,7 +13253,7 @@ index d84b3a67..93a61929 100644
      int w;
      int h;
      int j;
-@@ -3243,18 +4278,44 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3243,18 +4292,44 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      int near_no;
      int near_dist;
  
@@ -12372,7 +13300,7 @@ index d84b3a67..93a61929 100644
          this->boxes[i].used = 0;
          this->boxes[i].lid_angle = 0;
          this->boxes[i].trap_no = 0;
-@@ -3272,39 +4333,41 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3272,39 +4347,41 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          this->room_link[i].used = 0;
      }
  
@@ -12426,7 +13354,7 @@ index d84b3a67..93a61929 100644
                  roomStackCnt++;
                  done = 1;
              } else {
-@@ -3317,29 +4380,39 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3317,29 +4394,39 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          }
      }
  
@@ -12471,7 +13399,7 @@ index d84b3a67..93a61929 100644
                      w = (roomStack[roomStackCnt - 1].x + roomStack[roomStackCnt - 1].width / 2) - (roomStack[j].x + roomStack[j].width / 2);
                      h = (roomStack[roomStackCnt - 1].y + roomStack[roomStackCnt - 1].height / 2) - (roomStack[j].y + roomStack[j].height / 2);
  
-@@ -3351,7 +4424,7 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3351,7 +4438,7 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
                      }
                  }
  
@@ -12480,7 +13408,7 @@ index d84b3a67..93a61929 100644
                  done = 1;
              } else {
                  retry++;
-@@ -3363,27 +4436,52 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3363,27 +4450,52 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          }
      }
  
@@ -12542,7 +13470,7 @@ index d84b3a67..93a61929 100644
          }
      }
  
-@@ -3391,14 +4489,20 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3391,14 +4503,20 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          this->buildDummyModel();
      }
  
@@ -12565,7 +13493,7 @@ index d84b3a67..93a61929 100644
      // Which key opens the floor's gate.
      switch (selectMapNo) {
          case DUNGEON_DIVINE_BEAST_CAVE:
-@@ -3433,7 +4537,22 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3433,7 +4551,22 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      }
  
      this->SetUnderLoad();
@@ -12588,7 +13516,7 @@ index d84b3a67..93a61929 100644
  }
  
  void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
-@@ -3456,7 +4575,7 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3456,7 +4589,7 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
      this->chest_collision_model = nullptr;
      this->fall_model = nullptr;
  
@@ -12597,7 +13525,7 @@ index d84b3a67..93a61929 100644
          this->boxes[i].used = 0;
      }
  
-@@ -3473,14 +4592,14 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3473,14 +4606,14 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
          this->parts[i].initalize();
      }
  
@@ -12614,7 +13542,7 @@ index d84b3a67..93a61929 100644
          this->room_seen[i] = 0;
      }
  
-@@ -3490,12 +4609,12 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3490,12 +4623,12 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
          this->npc[i].draw_num = 0;
      }
  
@@ -12629,7 +13557,7 @@ index d84b3a67..93a61929 100644
          this->boxes[j].used = 0;
          this->boxes[j].lid_angle = 0;
          this->boxes[j].trap_no = 0;
-@@ -3534,7 +4653,7 @@ void CDungeonMap::initalize() {
+@@ -3534,7 +4667,7 @@ void CDungeonMap::initalize() {
      this->chest_collision_model = nullptr;
      this->fall_model = nullptr;
  
@@ -12638,7 +13566,7 @@ index d84b3a67..93a61929 100644
          this->boxes[i].used = 0;
      }
  
-@@ -3550,14 +4669,14 @@ void CDungeonMap::initalize() {
+@@ -3550,14 +4683,14 @@ void CDungeonMap::initalize() {
          this->parts[i].initalize();
      }
  
@@ -12655,7 +13583,7 @@ index d84b3a67..93a61929 100644
          this->room_seen[i] = 0;
      }
  
-@@ -3567,12 +4686,12 @@ void CDungeonMap::initalize() {
+@@ -3567,12 +4700,12 @@ void CDungeonMap::initalize() {
          this->npc[i].draw_num = 0;
      }
  
@@ -12670,7 +13598,7 @@ index d84b3a67..93a61929 100644
          this->boxes[j].used = 0;
          this->boxes[j].lid_angle = 0;
          this->boxes[j].trap_no = 0;
-@@ -3593,4 +4712,79 @@ void CDungeonMap::initalize() {
+@@ -3593,4 +4726,79 @@ void CDungeonMap::initalize() {
      this->draw_dist_scale = 4.0f;
  }
  
@@ -13811,7 +14739,7 @@ index 8d6d8561..3b592043 100644
      for (int plot = 0; plot < 24; plot++) {
          const EDIT_PARTS_ATRA *source = nullptr;
 diff --git a/port/src/game/frame.cpp b/port/src/game/frame.cpp
-index a283b0b6..23c4b90d 100644
+index a283b0b6..9e7a13fc 100644
 --- a/port/src/game/frame.cpp
 +++ b/port/src/game/frame.cpp
 @@ -11,7 +11,10 @@
@@ -13865,6 +14793,15 @@ index a283b0b6..23c4b90d 100644
  
          if (found != nullptr) {
              return found;
+@@ -847,7 +875,7 @@ int CFrameVu1::DrawVu1(unsigned int *packet, RenderInfo *info) {
+         ShadowMatrix(info->shadow, info->light_direction, info->shadow_point, info->shadow_normal);
+     }
+ 
+-    if (visual && attr.draw_on && attr.cull_enable) {
++    if (visual && attr.draw_on && attr.cull_enable && render::MGPortOrthographicDepth() == 0.0f) {
+         MulFrameMatrix(screen_matrix, info->view_scaled, matrix);
+         float inv_scale = 1.0f / info->scale[0];
+ 
 diff --git a/port/src/game/gamepad.cpp b/port/src/game/gamepad.cpp
 index 645cd41a..d971a969 100644
 --- a/port/src/game/gamepad.cpp
@@ -48429,42 +49366,126 @@ index 2f381d6f..51003612 100644
              ShowHelp();
              break;
 diff --git a/port/src/platform/config.cpp b/port/src/platform/config.cpp
-index fbd5a5d2..b0330ac6 100644
+index fbd5a5d2..bea30d90 100644
 --- a/port/src/platform/config.cpp
 +++ b/port/src/platform/config.cpp
-@@ -606,6 +606,8 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
+@@ -606,6 +606,28 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
          config.shadow_distance = distance;
          return true;
      }
 +    if (name == "game.dungeon_aerial_map") return ReadBool(value, config.dungeon_aerial_map);
 +    if (name == "game.fit_dungeon_map") return ReadBool(value, config.fit_dungeon_map);
++    if (name == "game.aerial_map") return ReadBool(value, config.aerial_map);
++    if (name == "game.aerial_map_markers") return ReadBool(value, config.aerial_map_markers);
++    if (name == "game.aerial_map_ceiling" || name == "game.aerial_map_zoom" || name == "game.aerial_map_model_scale" ||
++        name == "game.aerial_map_size") {
++        const bool ceiling = name == "game.aerial_map_ceiling";
++        float      number = 0.0f;
++        if (!ReadNumber(value, number) || !std::isfinite(number)) {
++            return false;
++        }
++        const bool  model = name == "game.aerial_map_model_scale";
++        const float most = ceiling ? 5000.0f : model ? 40.0f : name == "game.aerial_map_size" ? 1.5f : 8.0f;
++        if (number < (ceiling ? 0.0f : 0.5f) || number > most) {
++            return false;
++        }
++        (ceiling ? config.aerial_map_ceiling
++                 : name == "game.aerial_map_zoom" ? config.aerial_map_zoom
++                 : model                         ? config.aerial_map_model_scale
++                                                 : config.aerial_map_size) = number;
++        return true;
++    }
      if (name == "discord.rich_presence") {
          return ReadBool(value, config.discord_rich_presence);
      }
-@@ -798,6 +800,8 @@ std::string ConfigSerialize(const Config &config) {
+@@ -798,6 +820,14 @@ std::string ConfigSerialize(const Config &config) {
      root["input"]["mouse_release"] = config.mouse_release_keys;
      root["input"]["vibration"] = options.vibration;
      root["input"]["bindings"] = std::move(bindings);
 +    root["game"]["dungeon_aerial_map"] = config.dungeon_aerial_map;
 +    root["game"]["fit_dungeon_map"] = config.fit_dungeon_map;
++    root["game"]["aerial_map"] = config.aerial_map;
++    root["game"]["aerial_map_ceiling"] = Shortest(config.aerial_map_ceiling);
++    root["game"]["aerial_map_zoom"] = Shortest(config.aerial_map_zoom);
++    root["game"]["aerial_map_model_scale"] = Shortest(config.aerial_map_model_scale);
++    root["game"]["aerial_map_markers"] = config.aerial_map_markers;
++    root["game"]["aerial_map_size"] = Shortest(config.aerial_map_size);
      root["discord"]["rich_presence"] = config.discord_rich_presence;
      return root.dump(4) + "\n";
  }
 diff --git a/port/src/platform/config.hpp b/port/src/platform/config.hpp
-index b06a678d..8f7b2786 100644
+index b06a678d..2e36d0e0 100644
 --- a/port/src/platform/config.hpp
 +++ b/port/src/platform/config.hpp
-@@ -70,6 +70,8 @@ struct Config : HostSettings {
+@@ -70,6 +70,20 @@ struct Config : HostSettings {
      bool              enhanced_cloth = false;     /**< video.cloth: false runs the PS2's cloth, true also keeps it out of the body. */
      float             mouse_camera_return = 0.2f; /**< Third-person vertical return after mouse input: 0 holds height, 1 is retail's rate. */
      ConfigGameOptions options;
 +    bool              fit_dungeon_map = true;    /**< game.fit_dungeon_map: fit the dungeon map to the screen. */
 +    bool              dungeon_aerial_map = true; /**< game.dungeon_aerial_map: show the aerial dungeon map. */
++    // game.aerial_map: the dungeon map is the live floor seen from above instead of the tiles.
++    bool              aerial_map = true;
++    // World units above the player's feet where the aerial map cuts the ceiling away.
++    float             aerial_map_ceiling = 400.0f;
++    // Aerial map magnification over retail's 16 pixels per cell; 1 shows the whole floor as retail does.
++    float             aerial_map_zoom = 1.0f;
++    // Size of monsters, chests and the player on the aerial map relative to the floor.
++    float             aerial_map_model_scale = 8.0f;
++    // Scale of the native Dungeon Map size choices; 1.4 keeps their standard sizes.
++    float             aerial_map_size = 1.4f;
++    // Coloured dots for distant monsters (red), chests (gold) and atla (blue).
++    bool              aerial_map_markers = false;
      bool              discord_rich_presence = true;
      /**
       * game.language: 0 asks at start-up, as retail does; 2 to 6 is the language to start in
+diff --git a/port/src/render/draw3d.cpp b/port/src/render/draw3d.cpp
+index 392dac1b..ec278a24 100644
+--- a/port/src/render/draw3d.cpp
++++ b/port/src/render/draw3d.cpp
+@@ -129,6 +129,22 @@ void Draw3DMul(float out[4][4], const float a[4][4], const float b[4][4]) {
+ // point MGRotTransPers2D gives, and that lands on the target through its logical mapping (with
+ // the field-height targets taking half the rows). Depth is a + b / z with the GS Z of
+ // MGSetRenderInfo, offset[2] + scale[2] / z, read through MGPortDepth.
++namespace {
++float g_orthographic_depth = 0.0f;
++} // namespace
++
++float MGPortOrthographicDepth() {
++    return g_orthographic_depth;
++}
++
++MGPortOrthographicScope::MGPortOrthographicScope(float depth) : previous_(g_orthographic_depth) {
++    g_orthographic_depth = depth;
++}
++
++MGPortOrthographicScope::~MGPortOrthographicScope() {
++    g_orthographic_depth = previous_;
++}
++
+ void Draw3DEyeToClip(const RenderInfo &info, float clip[4][4]) {
+     gfx::TextureHandle  target = gfx::CurrentRenderTarget();
+     gfx::LogicalMapping mapping = gfx::GetLogicalMapping(target);
+@@ -143,6 +159,18 @@ void Draw3DEyeToClip(const RenderInfo &info, float clip[4][4]) {
+     float               centre_y = info.offset[1] - (kGsCentre - kScreenHeight * 0.5f);
+ 
+     std::memset(clip, 0, sizeof(float) * 16);
++    if (g_orthographic_depth > 0.0f) {
++        clip[0][0] = kx * info.scale[0] / g_orthographic_depth;
++        clip[1][1] = ky * info.scale[1] / g_orthographic_depth;
++        clip[3][0] = kx * centre_x + ox;
++        clip[3][1] = ky * centre_y + oy;
++        const float range = info.far[2] - info.near[2];
++        clip[2][2] = -1.0f / range;
++        clip[3][2] = info.far[2] / range;
++        clip[3][3] = 1.0f;
++        return;
++    }
++
+     clip[0][0] = kx * info.scale[0];
+     clip[2][0] = kx * centre_x + ox;
+     clip[1][1] = ky * info.scale[1];
 diff --git a/port/src/render/draw3d.hpp b/port/src/render/draw3d.hpp
-index 03cc13a7..82a9f083 100644
+index 03cc13a7..5f284c2a 100644
 --- a/port/src/render/draw3d.hpp
 +++ b/port/src/render/draw3d.hpp
 @@ -4,6 +4,7 @@
@@ -48475,7 +49496,28 @@ index 03cc13a7..82a9f083 100644
  #include <vector>
  
  #include "gfx/gfx.hpp"
-@@ -253,6 +254,19 @@ struct Draw3DVisual {
+@@ -155,6 +156,20 @@ Draw3DExtent Draw3DVisibleExtent();
+  */
+ void Draw3DEyeToClip(const game::RenderInfo &info, float clip[4][4]);
+ 
++// An overhead pass (the aerial dungeon map): projects parallel rays at the perspective scale of
++// reference_depth for as long as the scope lives, then restores the perspective projection.
++float MGPortOrthographicDepth();
++class MGPortOrthographicScope {
++public:
++    explicit MGPortOrthographicScope(float reference_depth);
++    ~MGPortOrthographicScope();
++    MGPortOrthographicScope(const MGPortOrthographicScope &) = delete;
++    MGPortOrthographicScope &operator=(const MGPortOrthographicScope &) = delete;
++
++private:
++    float previous_;
++};
++
+ /**
+  * Fills the mvp, normal matrix, lights, ambient and fog of one draw, as the VU1 header carried
+  * them. On shadow passes 1 and 2 the planar projection info.shadow sits between the model and
+@@ -253,6 +268,19 @@ struct Draw3DVisual {
      bool                                immediate = false;                  /**< Whether the geometry is drawn per frame. */
      bool                                cache_strip_runs_on_finish = false; /**< Model builders opt in before finalization. */
      bool                                strip_runs_cached = false;          /**< Whether cached runs match the current strips. */
@@ -48496,7 +49538,7 @@ index 03cc13a7..82a9f083 100644
  
  /**
 diff --git a/port/src/render/draw3d_visual.cpp b/port/src/render/draw3d_visual.cpp
-index bee702b5..798854cf 100644
+index bee702b5..4b82cd8d 100644
 --- a/port/src/render/draw3d_visual.cpp
 +++ b/port/src/render/draw3d_visual.cpp
 @@ -11,6 +11,7 @@
@@ -48515,6 +49557,17 @@ index bee702b5..798854cf 100644
      if (visual.mesh != gfx::kNullMesh) {
          gfx::DestroyMesh(visual.mesh);
          visual.mesh = gfx::kNullMesh;
+@@ -296,7 +298,9 @@ void Draw3DDrawVisual(const Draw3DVisual &visual, const float model[4][4], const
+ 
+ Draw3DIdentityScope::Draw3DIdentityScope(const void *object, float teleport_distance, bool blend_vertices)
+     : key(gfx::CurrentInterpKey()), no_interpolation(gfx::CurrentNoInterpolation()) {
+-    gfx::SetInterpKey(reinterpret_cast<uintptr_t>(object), false, teleport_distance, blend_vertices);
++    // The overhead pass (the aerial dungeon map) is drawn fresh each tick, not interpolated.
++    gfx::SetInterpKey(reinterpret_cast<uintptr_t>(object), MGPortOrthographicDepth() > 0.0f, teleport_distance,
++                      blend_vertices);
+ }
+ 
+ Draw3DIdentityScope::~Draw3DIdentityScope() {
 diff --git a/port/src/render/texture_registry.cpp b/port/src/render/texture_registry.cpp
 index d74856d4..99ab7fdb 100644
 --- a/port/src/render/texture_registry.cpp
@@ -49104,6 +50157,72 @@ index 10407916..b69a7c46 100644
  TEST(DataRead, LanguagesFromTheExtraction) {
      fs::path dir = InstallStandardData("read_languages");
      ASSERT_TRUE((DataLanguages() == std::vector<s32>{2, 3, 4, 5, 6}));
+diff --git a/port/src/tests/dungeon_aerial_test.cpp b/port/src/tests/dungeon_aerial_test.cpp
+new file mode 100644
+index 00000000..06d6b1e0
+--- /dev/null
++++ b/port/src/tests/dungeon_aerial_test.cpp
+@@ -0,0 +1,60 @@
++#include <gtest/gtest.h>
++#include <cstring>
++#include <memory>
++#include "gfx_fixture.hpp"
++#include "dungeon_aerial_cache.hpp"
++#include "render/draw3d.hpp"
++#include "mglib.hpp"
++#include "renderinfo.hpp"
++
++using namespace dc::game;
++using namespace dc::render;
++
++TEST(DungeonAerialCache, DiscoveryIdentityAndChestsInvalidateFloor) {
++    auto floor = std::make_unique<CDungeonMap>();
++    const auto key = [&] { return DungeonAerialFloorKey(*floor, 0, 400, 8, 0); };
++    floor->mask[5] = 1;
++    auto first = key();
++    floor->mask[5] = 0; floor->mask[6] = 1;
++    EXPECT_NE(first, key()); // same revealed count, different cells
++    first = key();
++    floor->boxes[dungeon_grid::boxes - 1].used = 1;
++    floor->boxes[dungeon_grid::boxes - 1].closed = 1;
++    EXPECT_NE(first, key());
++    first = key();
++    floor->boxes[dungeon_grid::boxes - 1].closed = 0;
++    EXPECT_NE(first, key());
++    first = key();
++    EXPECT_EQ(first, key());
++    EXPECT_NE(first, DungeonAerialFloorKey(*floor, 0, 40, 8, 0));
++    EXPECT_NE(first, DungeonAerialFloorKey(*floor, 0, 400, 12, 0));
++}
++
++TEST(DungeonAerialProjection, WallTopsStayOnTheirFloorTileAndPerspectiveIsRestored) {
++    dc::test::GfxFixture gfx(640, 480, 1, dc::test::GfxOptions{.offscreen = true});
++    const RenderInfo saved = mgRenderInfo;
++    MGSetRenderInfo(1000, 3600, 8000);
++    float perspective[4][4], overhead[4][4], restored[4][4];
++    Draw3DEyeToClip(mgRenderInfo, perspective);
++    {
++        MGPortOrthographicScope scope(4000);
++        Draw3DEyeToClip(mgRenderInfo, overhead);
++        const auto project = [&](float x, float z, int axis) {
++            return (overhead[0][axis] * x + overhead[2][axis] * z + overhead[3][axis]) /
++                   (overhead[0][3] * x + overhead[2][3] * z + overhead[3][3]);
++        };
++        EXPECT_FLOAT_EQ(project(3000, 4000, 0), project(3000, 3600, 0));
++        EXPECT_FLOAT_EQ(project(-3000, 4000, 0), project(-3000, 3600, 0));
++        EXPECT_NEAR(project(0, 3600, 2), 1.0f, 0.00001f);
++        EXPECT_NEAR(project(0, 8000, 2), 0.0f, 0.00001f);
++        {
++            MGPortOrthographicScope nested(2000);
++            EXPECT_EQ(MGPortOrthographicDepth(), 2000);
++        }
++        EXPECT_EQ(MGPortOrthographicDepth(), 4000);
++    }
++    EXPECT_EQ(MGPortOrthographicDepth(), 0);
++    Draw3DEyeToClip(mgRenderInfo, restored);
++    EXPECT_EQ(std::memcmp(perspective, restored, sizeof restored), 0);
++    mgRenderInfo = saved;
++}
 diff --git a/port/src/tests/dungeon_reach_test.cpp b/port/src/tests/dungeon_reach_test.cpp
 new file mode 100644
 index 00000000..7f796a69
@@ -49722,6 +50841,84 @@ index 00000000..7f796a69
 +    selectMapNo = previous_select;
 +    UserStatus = previous_user;
 +    SaveData = previous_save;
++}
+diff --git a/port/src/tests/dungeon_visibility_test.cpp b/port/src/tests/dungeon_visibility_test.cpp
+new file mode 100644
+index 00000000..c378d23b
+--- /dev/null
++++ b/port/src/tests/dungeon_visibility_test.cpp
+@@ -0,0 +1,72 @@
++#include <gtest/gtest.h>
++#include "dungeon_visibility.hpp"
++#include "dungeonmap.hpp"
++
++using namespace dc::game;
++
++namespace {
++constexpr int grid = 16;
++struct Floor {
++    std::array<MAP_CELL, grid * grid> cells{};
++    Floor() { for (auto &cell : cells) cell.parts_no = MAP_PARTS_NONE; }
++    void put(int x, int z, int part = MAP_PARTS_ROOM_FLOOR, int direction = 0) {
++        cells[x + z * grid].parts_no = part;
++        cells[x + z * grid].direction = direction;
++    }
++    auto view(float x, float z) { return dungeon_visibility::Build<grid>(cells.data(), x * 160, z * 160); }
++};
++}
++
++TEST(DungeonVisibility, StraightCorridorStaysVisibleInAllDirections) {
++    Floor f;
++    for (int x = 1; x < 15; ++x) f.put(x, 8, MAP_PARTS_ROAD_STRAIGHT, 1);
++    EXPECT_TRUE(f.view(2, 8)[14 + 8 * grid]);
++    EXPECT_TRUE(f.view(14, 8)[1 + 8 * grid]); // atan2 seam
++    Floor vertical;
++    for (int z = 1; z < 15; ++z) vertical.put(8, z, MAP_PARTS_ROAD_STRAIGHT);
++    EXPECT_TRUE(vertical.view(8, 2)[8 + 14 * grid]);
++    EXPECT_TRUE(vertical.view(8, 14)[8 + 1 * grid]);
++}
++
++TEST(DungeonVisibility, DoesNotSeeAroundCorridorBend) {
++    Floor f;
++    for (int x = 2; x < 11; ++x) f.put(x, 3, MAP_PARTS_ROAD_STRAIGHT, 1);
++    f.put(10, 3, MAP_PARTS_ROAD_CORNER, 1); // west/south open
++    for (int z = 4; z < 14; ++z) f.put(10, z, MAP_PARTS_ROAD_STRAIGHT);
++    auto visible = f.view(3, 3);
++    EXPECT_TRUE(visible[10 + 3 * grid]);
++    EXPECT_FALSE(visible[10 + 12 * grid]);
++}
++
++TEST(DungeonVisibility, AdjacentOccupiedCellsDoNotTransmitThroughWalls) {
++    Floor f;
++    for (int z = 2; z < 14; ++z) for (int x = 2; x < 14; ++x)
++        f.put(x, z, x == 5 ? MAP_PARTS_ROOM_WALL_EAST : MAP_PARTS_ROOM_FLOOR);
++    auto visible = f.view(3, 7);
++    EXPECT_TRUE(visible[5 + 7 * grid]);
++    EXPECT_FALSE(visible[10 + 7 * grid]);
++}
++
++TEST(DungeonVisibility, OpenRoomAndDoorRemainVisible) {
++    Floor f;
++    for (int z = 1; z < 15; ++z) for (int x = 1; x < 15; ++x) f.put(x, z);
++    f.put(5, 7, MAP_PARTS_ROOM_DOOR_EAST);
++    auto visible = f.view(3, 7);
++    for (int z = 1; z < 15; ++z) for (int x = 1; x < 15; ++x)
++        EXPECT_TRUE(visible[x + z * grid]) << x << "," << z;
++}
++
++TEST(DungeonVisibility, InvalidAndEmptyCameraOriginsFailOpen) {
++    Floor f;
++    for (auto v : {f.view(-0.6f, 0), f.view(16, 0), f.view(4, 4), f.view(NAN, 0)})
++        for (bool cell : v) EXPECT_TRUE(cell);
++}
++
++TEST(DungeonVisibility, WallMasksMatchBuilderTables) {
++    EXPECT_EQ(dungeon_visibility::Walls(MAP_PARTS_ROAD_STRAIGHT, 1), 9u);
++    EXPECT_EQ(dungeon_visibility::Walls(MAP_PARTS_ROAD_CORNER, 3), 12u);
++    EXPECT_EQ(dungeon_visibility::Walls(MAP_PARTS_ROOM_WALL_NORTH, 1), 2u);
++    EXPECT_EQ(dungeon_visibility::Walls(MAP_PARTS_ROOM_CORNER_NORTH_WEST, 2), 10u);
++    EXPECT_EQ(dungeon_visibility::Walls(MAP_PARTS_ROOM_DOOR_NORTH, 0), 0u);
++    EXPECT_EQ(dungeon_visibility::Walls(75, 0), 0u);
 +}
 diff --git a/port/src/tests/integration_gameloop_test.cpp b/port/src/tests/integration_gameloop_test.cpp
 index deee6294..6e63dfe0 100644
@@ -60723,6 +61920,44 @@ index 57eeb084..45db5d4a 100644
  TEST(PlatformArena, ReusesAndZeroes) {
      InitializeDataBuffer();
      SetDataBuffer(&TextureData, 2000);
+diff --git a/port/src/tests/platform_config_test.cpp b/port/src/tests/platform_config_test.cpp
+index 78f40d5f..73a9f68b 100644
+--- a/port/src/tests/platform_config_test.cpp
++++ b/port/src/tests/platform_config_test.cpp
+@@ -61,6 +61,33 @@ TEST(PlatformConfig, ShadowDistance) {
+     ASSERT_TRUE(ConfigParse(ConfigSerialize(config)).shadow_distance == 320.0f);
+ }
+ 
++TEST(PlatformConfig, AerialMap) {
++    Config defaults = ConfigParse("");
++    ASSERT_TRUE(defaults.aerial_map);
++    ASSERT_FLOAT_EQ(defaults.aerial_map_ceiling, 400.0f);
++    ASSERT_FLOAT_EQ(defaults.aerial_map_zoom, 1.0f);
++    ASSERT_FLOAT_EQ(defaults.aerial_map_model_scale, 8.0f);
++    ASSERT_FALSE(defaults.aerial_map_markers);
++    ASSERT_TRUE(ConfigParse(R"({"game": {"aerial_map_markers": true}})").aerial_map_markers);
++    ASSERT_FLOAT_EQ(defaults.aerial_map_size, 1.4f);
++    ASSERT_FLOAT_EQ(ConfigParse(R"({"game": {"aerial_map_size": 1}})").aerial_map_size, 1.0f);
++    ASSERT_FLOAT_EQ(ConfigParse(R"({"game": {"aerial_map_size": 3}})").aerial_map_size, 1.4f);
++    Config config = ConfigParse(
++        R"({"game": {"aerial_map": false, "aerial_map_ceiling": 90, "aerial_map_zoom": 2, "aerial_map_model_scale": 3}})");
++    ASSERT_FALSE(config.aerial_map);
++    ASSERT_FLOAT_EQ(config.aerial_map_ceiling, 90.0f);
++    ASSERT_FLOAT_EQ(config.aerial_map_zoom, 2.0f);
++    ASSERT_FLOAT_EQ(config.aerial_map_model_scale, 3.0f);
++    ASSERT_EQ(ConfigParse(ConfigSerialize(config)), config);
++    // Out of range or the wrong type keeps the default.
++    Config bad = ConfigParse(
++        R"({"game": {"aerial_map": "on", "aerial_map_ceiling": -1, "aerial_map_zoom": 0.1, "aerial_map_model_scale": "big"}})");
++    ASSERT_TRUE(bad.aerial_map);
++    ASSERT_FLOAT_EQ(bad.aerial_map_ceiling, 400.0f);
++    ASSERT_FLOAT_EQ(bad.aerial_map_zoom, 1.0f);
++    ASSERT_FLOAT_EQ(bad.aerial_map_model_scale, 8.0f);
++}
++
+ TEST(PlatformConfig, OptionalMouseZoomRoundTripsAndKeepsResetBindings) {
+     ASSERT_FALSE(ConfigParse("").mouse_zoom);
+     ASSERT_FALSE(ConfigParse(R"({"input":{"mouse_zoom":"on"}})").mouse_zoom);
 diff --git a/port/src/tests/platform_mouse_look_test.cpp b/port/src/tests/platform_mouse_look_test.cpp
 index a989b2ef..87936bb2 100644
 --- a/port/src/tests/platform_mouse_look_test.cpp
