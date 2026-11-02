@@ -90,10 +90,18 @@ items remain unsupported. Test with an isolated save before using an existing pl
 ## Verification on November 2, 2026
 
 The patches were rebuilt for ChronicleTwo `7a7d7f29` and Kazarov `fd72338a` and apply cleanly to a fresh recursive
-checkout of both (`git apply --check`, as the `patches` workflow does). Every changed or added C++ unit of the port,
-the MoonMod runtime and adapter, and all MoonMod and changed upstream test sources compile with clang 20 (libc++,
-C++26) against the upstream headers; Lua 5.5.1, the native plugin fixtures and the patched Kazarov input unit compile
-as well, and every symbol the MoonMod and changed units reference is defined by the port's objects or its libraries.
+checkout of both (`git apply --check`, as the `patches` workflow does). A Linux Debug build (clang 20 with libc++,
+Rust 1.99, SDL 3.4, Ubuntu's FFmpeg 6.1 instead of Kazarov's pinned 9.0) built `darkchronicle` and
+`darkchronicle_tests`. With software Vulkan (llvmpipe):
+
+- 78 of the 80 `MoonMod*` native cases pass. First Steps skips when the example package is not beside the
+  checkout, and `MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload` fails: its skill-tree mouse expectation fails against the manager code the previous patch already shipped (neither the
+  test nor `manager_ui.cpp` changed in this port);
+- the changed upstream suites (`DataRead`, `SaveSlotTest`, `EventRuntimeMemory`, `TestHooks`, `NativeDungeon`,
+  monster and Luau runtime cases) and upstream's `NativeArchitecture.Check` pass;
+- `Smoke.HeadlessFramesScreenshot` and the two-launch `MoonMod.HeadlessProbe` pass;
+- of the full CPU suite (2419 cases, 68 of them skipping without retail data), 13 fail. The other failures are upstream's log-file, crash-handler and
+  Vulkan-validation-layer cases, which this patch does not touch and which fail in that container.
 
 What changed upstream, and how the port follows it:
 
@@ -108,10 +116,14 @@ What changed upstream, and how the port follows it:
   no longer replace `.stb` scripts; model (`.chr`) and map overrides still load through the data reader.
 - **File loading** goes through Kazarov's virtual file system; overrides are read as host files with the same size
   limits as before.
-- **Saves** are written by `SaveSlotWriteAutosave` too; the mod floor sidecar is written for autosaves as well as
-  manual saves.
+- **Saves** are JSON documents, and `SaveSlotWriteAutosave` writes them too. The mod floor sidecar is written for
+  autosaves as well as manual saves, and is keyed by the save counter and the save's `CSaveDataDungeon`, which round
+  trips exactly (the whole `CSaveData` no longer does).
+- **Georama layouts** (placed pieces, houses, river grids) are kept in a `TownLayout` beside each town's save record
+  (`port/src/save_json.hpp`), not in `CEditData`'s arrays; `georama.get`, `georama.place` and `georama.remove` read it.
+- **Map names load earlier.** The catalog is read before the first scene event, as the previous patch arranged, so
+  mods can list and register locations from it on the title screen.
 
-A full game build and test run were not possible in the environment that produced this update (it lacks the
-Kazarov container's GPU and media dependencies), so the native test cases and the two-launch `MoonMod.HeadlessProbe`
-test have not been run against this revision. Run `verify-headless.ps1` (above) after building to check them. These
-checks do not establish a full playthrough, existing-save compatibility, or support for newer upstream commits.
+No retail data was used: these checks do not establish a full playthrough, existing-save compatibility, a Windows
+build, or support for newer upstream commits. Run `verify-headless.ps1 -StartupSmoke` on a Windows build to check it
+there.

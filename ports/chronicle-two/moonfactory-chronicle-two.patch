@@ -1,5 +1,5 @@
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index a33893e0..1b0db011 100644
+index a33893e0..9d87e668 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -12,6 +12,19 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -22,7 +22,7 @@ index a33893e0..1b0db011 100644
  include(${CMAKE_SOURCE_DIR}/tools/cmake/sanitizers.cmake)
  
  set(CMAKE_CXX_STANDARD 26)
-@@ -93,6 +106,19 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+@@ -93,6 +106,21 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
      set(CT_WARNINGS -Wall -Wextra)
  endif()
  find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -35,6 +35,8 @@ index a33893e0..1b0db011 100644
 +add_library(moonmod_lua STATIC ${MOONMOD_LUA_SOURCES})
 +set_target_properties(moonmod_lua PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
 +target_compile_options(moonmod_lua PRIVATE -w)
++# Luau also defines the C-linked data symbol lua_ident; Lua 5.5's copy is renamed so both link into the game.
++target_compile_definitions(moonmod_lua PRIVATE lua_ident=moonmod_lua_ident)
 +if(UNIX AND NOT APPLE)
 +    target_link_libraries(moonmod_lua PUBLIC m)
 +endif()
@@ -42,7 +44,7 @@ index a33893e0..1b0db011 100644
  kz_port_host_library(ct_host)
  if(NINTENDO_SWITCH)
      kz_switch_host(ct_host)
-@@ -394,7 +420,8 @@ endif()
+@@ -394,7 +422,8 @@ endif()
  
  function(ct_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:ct_port> $<TARGET_OBJECTS:ct_port_bridge> $<TARGET_OBJECTS:ct_host> $<TARGET_OBJECTS:ct_native>)
@@ -53,17 +55,16 @@ index a33893e0..1b0db011 100644
          target_link_libraries(${target} PRIVATE kazarov_bridge kazarov_core)
      else()
 diff --git a/port/include/automap.hpp b/port/include/automap.hpp
-index bffc7929..4e7a9422 100644
+index bffc7929..ba416316 100644
 --- a/port/include/automap.hpp
 +++ b/port/include/automap.hpp
-@@ -36,8 +36,26 @@ struct RoomStorage;
+@@ -36,8 +36,17 @@ struct RoomStorage;
  #define MINIMAP_INFO_NUM 18
  /** Number of preset room layouts that a room script can hold. */
  #define AUTOMAP_ROOM_INFO_MAX 64
 -/** Number of rooms that a generated floor can hold. */
 -#define AUTOMAP_ROOM_MAX 8
 +/** Floor grid side and room limit: retail 30 x 30 and 8 rooms; the PC port enlarges the room limit for mods. */
-+#ifdef PORT
 +#define DNG_GRID         30
 +#define AUTOMAP_ROOM_MAX 64
 +#define DNG_ROOM_MAX     AUTOMAP_ROOM_MAX
@@ -74,110 +75,88 @@ index bffc7929..4e7a9422 100644
 +#define DNG_BUILD_AREA      (DngLayoutArea > 0 ? DngLayoutArea : 14)
 +#define DNG_BUILD_ROOM_MIN  (DngLayoutRoomMax > 0 ? DngLayoutRoomMin : 3)
 +#define DNG_BUILD_ROOM_SPAN (DngLayoutRoomMax > 0 ? DngLayoutRoomMax - DngLayoutRoomMin + 1 : 2)
-+#else
-+#define DNG_GRID            30
-+#define AUTOMAP_ROOM_MAX    8
-+#define DNG_ROOM_MAX        AUTOMAP_ROOM_MAX
-+#define DNG_BUILD_AREA      14
-+#define DNG_BUILD_ROOM_MIN  3
-+#define DNG_BUILD_ROOM_SPAN 2
-+#endif
  /** Number of random stones that a floor places. */
  #define AUTOMAP_RANDOM_STONE_MAX 12
  /** Frames that the healing point waits after healing before it can heal again. */
-@@ -776,7 +794,11 @@ public:
+@@ -776,7 +785,7 @@ public:
      void UpdateNaviMap(float *pos, int depth);
  };
  
-+#ifdef PORT
+-STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0);
 +STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0 + (AUTOMAP_ROOM_MAX - 8) * sizeof(AUTOMAP_ROOM));
-+#else
- STATIC_ASSERT(sizeof(CAutoMapGen) == 0x2A0);
-+#endif
  
  /**
   *
 diff --git a/port/include/dng_event.hpp b/port/include/dng_event.hpp
-index 8d19805f..ed3a5228 100644
+index 8d19805f..8888532d 100644
 --- a/port/include/dng_event.hpp
 +++ b/port/include/dng_event.hpp
-@@ -1027,3 +1027,7 @@ int CheckObjectPutArea(float *pos);
+@@ -1027,3 +1027,5 @@ int CheckObjectPutArea(float *pos);
   * @size 0x64
   */
  void CreatMonsterFloorInfo(char *script, int length);
 +
-+#ifdef PORT
 +#include "moonmod/dng_event_moonmod.hpp"
-+#endif
 diff --git a/port/include/dngfloor.hpp b/port/include/dngfloor.hpp
-index fb0204c9..6e2d6dc1 100644
+index fb0204c9..9aaee1b4 100644
 --- a/port/include/dngfloor.hpp
 +++ b/port/include/dngfloor.hpp
-@@ -268,6 +268,12 @@ public:
+@@ -268,6 +268,10 @@ public:
       */
      void LoadDataTable(int dungeon, mgCMemory *memory);
  
-+#ifdef PORT
 +    bool RegisterMoonModFloor(int source_floor, const char *title, const char *stable_id, int *out_floor_id, char *error,
 +                              size_t error_size);
 +    bool IsMoonModFloor(int floor_id, const char *title) const;
-+#endif
 +
      /**
       *
       * Gives the room cell standing for a floor, or NULL.
 diff --git a/port/include/gamedata.hpp b/port/include/gamedata.hpp
-index 8ccd6b69..c914c23f 100644
+index 8ccd6b69..ad763693 100644
 --- a/port/include/gamedata.hpp
 +++ b/port/include/gamedata.hpp
-@@ -1441,6 +1441,15 @@ public:
+@@ -1441,6 +1441,13 @@ public:
       */
      int LoadData();
  
-+#ifdef PORT
 +    bool RegisterMoonModItem(int template_item_no, const char *display_name, int max_num, int stack_num,
 +                             int effect_flags, int effect_amount, int *out_item_no, char *error, size_t error_size);
 +    bool RegisterMoonModWeapon(int template_item_no, const char *display_name, int max_num, int stack_num,
 +                               int attack, int durability_stat, int attack_cap, int durability_cap,
 +                               int durability_capacity, int levelup_exp, const int *attributes,
 +                               const int *attribute_caps, int *out_item_no, char *error, size_t error_size);
-+#endif
 +
      /**
       *
       * Reads the item name script of one language.
 diff --git a/port/include/mapselect.hpp b/port/include/mapselect.hpp
-index 941ec119..8f2b0148 100644
+index 941ec119..849eb6a5 100644
 --- a/port/include/mapselect.hpp
 +++ b/port/include/mapselect.hpp
-@@ -366,3 +366,7 @@ namespace dc2::debug {
+@@ -366,3 +366,5 @@ namespace dc2::debug {
   */
  std::span<const EVENT_VIEW_INFO> EventViewEntries();
  } // namespace dc2::debug
 +
-+#ifdef PORT
 +#include "moonmod/mapselect_moonmod.hpp"
-+#endif
 diff --git a/port/include/monster.hpp b/port/include/monster.hpp
-index d017d6f4..7dde183a 100644
+index d017d6f4..7d398df8 100644
 --- a/port/include/monster.hpp
 +++ b/port/include/monster.hpp
-@@ -40,6 +40,10 @@ enum MONSTER_MAN_SIZE {
+@@ -40,6 +40,8 @@ enum MONSTER_MAN_SIZE {
      MONSTER_SHARE_MAX = 128  /**< Variables that every monster's script shares. */
  };
  
-+#ifdef PORT
 +extern int MonsterActiveLimit; /**< Maximum nearest monsters allowed in sight at once (1..MONSTER_ACTIVE_MAX). */
-+#endif
 +
  /**
   *
   * Kinds of monster that the code singles out by number.
-@@ -579,6 +583,17 @@ public:
+@@ -579,6 +581,15 @@ public:
       */
      CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
  
-+#ifdef PORT
 +    /**
 +     * Removes a live mod-spawned monster without running the native kill, reward, or gate-drop path.
 +     *
@@ -186,16 +165,14 @@ index d017d6f4..7dde183a 100644
 +     * @return true when the matching live monster was safely removed.
 +     */
 +    bool DespawnMoonModMonster(int slot, unsigned int generation);
-+#endif
 +
      /**
       *
       * Draws the monsters on the mini-map.
-@@ -749,6 +764,23 @@ extern BASE_MONSTER_TBL base_monster_define[344];
+@@ -749,6 +760,21 @@ extern BASE_MONSTER_TBL base_monster_define[344];
   */
  BASE_MONSTER_TBL *GetMonsterTable(int id);
  
-+#ifdef PORT
 +/**
 + * Registers a port-owned enemy definition by copying a native template and overriding safe
 + * numeric fields. The variant reuses the template's model, script, drops, and other behavior.
@@ -210,7 +187,6 @@ index d017d6f4..7dde183a 100644
 +void BumpMoonModMonsterSlotGeneration(int slot);
 +/** Gives a registered mod variant's definition, or null. */
 +BASE_MONSTER_TBL *FindMoonModMonsterVariant(int monster_id);
-+#endif
 +
  /**
   *
@@ -1401,17 +1377,15 @@ index 00000000..c8834713
 +STATIC_ASSERT(sizeof(MOONMOD_DUNGEON_SAVE_RECORD) == 0x114);
 +STATIC_ASSERT(sizeof(MOONMOD_DUNGEON_SAVE_EXTENSION) == 0x8B0);
 diff --git a/port/include/savedatadungeon.hpp b/port/include/savedatadungeon.hpp
-index bc3b6851..be2c1f1a 100644
+index bc3b6851..9d58f60b 100644
 --- a/port/include/savedatadungeon.hpp
 +++ b/port/include/savedatadungeon.hpp
-@@ -103,3 +103,7 @@ public:
+@@ -103,3 +103,5 @@ public:
  
  STATIC_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
  PORT_RECORD_ASSERT(sizeof(CSaveDataDungeon) == 0xCE4);
 +
-+#ifdef PORT
 +#include "moonmod/savedatadungeon_moonmod.hpp"
-+#endif
 diff --git a/port/include/stubs/dng_object.hpp b/port/include/stubs/dng_object.hpp
 new file mode 100644
 index 00000000..f32a6175
@@ -2500,10 +2474,10 @@ index 00000000..f11b202d
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_two_adapter.cpp b/port/src/moonmod/chronicle_two_adapter.cpp
 new file mode 100644
-index 00000000..5aa5549a
+index 00000000..98662664
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_two_adapter.cpp
-@@ -0,0 +1,7188 @@
+@@ -0,0 +1,7191 @@
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
@@ -2529,6 +2503,7 @@ index 00000000..5aa5549a
 +#include "dngfloor.hpp"
 +#include "dng_event.hpp"
 +#include "dng_main.hpp"
++#include "save_json.hpp"
 +#include "cameracontrol.hpp"
 +#include "editanalyze.hpp"
 +#include "editmap.hpp"
@@ -2549,6 +2524,18 @@ index 00000000..5aa5549a
 +
 +class CInventDataManage;
 +CInventDataManage *MoonModGetNativeInventDataManage();
++
++namespace {
++/** Placed parts of one definition in a town's saved layout, as CEditData::GetPartsNumID counted the record's arrays. */
++int SavedTownPartCount(const CEditData &town, int parts_id) {
++    const TownLayout *layout = PortFindTownLayout(town);
++    if (layout == nullptr) {
++        return 0;
++    }
++    return static_cast<int>(std::ranges::count_if(
++        layout->parts, [parts_id](const TownPart &part) { return part.id != 0 && part.id == parts_id && part.state != 0; }));
++}
++} // namespace
 +
 +namespace moonmod {
 +namespace {
@@ -5235,54 +5222,43 @@ index 00000000..5aa5549a
 +    }
 +
 +    CEditData *town = save->GetEditData(town_id);
-+    if (town == nullptr || town->parts_max < 0 || town->parts_max > EDIT_DATA_PARTS_MAX ||
-+        town->house_max < 0 || town->house_max > EDIT_DATA_HOUSE_MAX) {
++    if (town == nullptr) {
 +        return Failed("the saved Georama town data is outside the supported range");
 +    }
++    // The town's layout is kept beside its save record, not in the record's arrays (save_json.hpp).
++    static const TownLayout empty_layout;
++    const TownLayout *layout_found = PortFindTownLayout(*town);
++    const TownLayout &layout = layout_found != nullptr ? *layout_found : empty_layout;
++    const int house_count = static_cast<int>(layout.houses.size());
 +
 +    Json river_grids = Json::array();
-+    std::size_t grid_offset = 0;
-+    for (int grid_index = 0; grid_index < EDIT_MAP_GRID_MAX; ++grid_index) {
-+        if (grid_offset > sizeof(town->grid) - sizeof(EditDataGrid)) {
-+            return Failed("the saved Georama river-grid header is truncated");
-+        }
-+        EditDataGrid header{};
-+        std::memcpy(&header, town->grid + grid_offset, sizeof(header));
-+        if (header.num_x == 0 && header.num_z == 0) break;
-+        if (header.num_x == 0 || header.num_z == 0) {
++    for (std::size_t grid_index = 0; grid_index < layout.grids.size(); ++grid_index) {
++        const TownGrid &grid = layout.grids[grid_index];
++        if (grid.num_x <= 0 || grid.num_z <= 0 ||
++            grid.cells.size() != static_cast<std::size_t>(grid.num_x) * static_cast<std::size_t>(grid.num_z)) {
 +            return Failed("the saved Georama river-grid dimensions are invalid");
 +        }
-+        const std::size_t cell_count = static_cast<std::size_t>(header.num_x) * header.num_z;
-+        const std::size_t cells_offset = grid_offset + sizeof(EditDataGrid);
-+        if (cell_count > sizeof(town->grid) - cells_offset) {
-+            return Failed("the saved Georama river-grid cells exceed the save-data boundary");
-+        }
-+
 +        Json cells = Json::array();
-+        for (std::size_t x = 0; x < header.num_x; ++x) {
++        for (int x = 0; x < grid.num_x; ++x) {
 +            Json row = Json::array();
-+            for (std::size_t z = 0; z < header.num_z; ++z) {
-+                const std::size_t cell_offset = cells_offset + x * header.num_z + z;
-+                row.push_back((town->grid[cell_offset] & 1) != 0);
++            for (int z = 0; z < grid.num_z; ++z) {
++                row.push_back((grid.cells[static_cast<std::size_t>(x) * static_cast<std::size_t>(grid.num_z) +
++                                          static_cast<std::size_t>(z)] & 1) != 0);
 +            }
 +            cells.push_back(std::move(row));
 +        }
 +        river_grids.push_back({{"index", grid_index},
-+                               {"size", {{"x", header.num_x}, {"z", header.num_z}}},
-+                               {"position", {{"x", header.pos[0]}, {"y", header.pos[1]}, {"z", header.pos[2]}}},
++                               {"size", {{"x", grid.num_x}, {"z", grid.num_z}}},
++                               {"position", {{"x", grid.pos[0]}, {"y", grid.pos[1]}, {"z", grid.pos[2]}}},
 +                               {"cells", std::move(cells)}});
-+
-+        grid_offset = cells_offset + cell_count;
-+        if ((grid_offset & 1u) != 0) ++grid_offset;
-+        if (grid_offset == sizeof(town->grid)) break;
 +    }
 +
 +    Json placed_parts = Json::array();
-+    for (int index = 0; index < town->parts_max; ++index) {
-+        const EditDataParts &part = town->parts[index];
++    for (std::size_t index = 0; index < layout.parts.size(); ++index) {
++        const TownPart &part = layout.parts[index];
 +        if (part.id == 0 || part.state == 0) continue;
 +        if (part.id < 0 || part.state < 0 || part.state > 2 || part.angle < 0 ||
-+            part.angle >= kGeoramaAngleSteps || (part.house_no < 0 || part.house_no > town->house_max)) {
++            part.angle >= kGeoramaAngleSteps || (part.house_no < 0 || part.house_no > house_count)) {
 +            return Failed("the saved Georama placement list contains an invalid record");
 +        }
 +        Json colors = Json::array();
@@ -5301,8 +5277,8 @@ index 00000000..5aa5549a
 +    }
 +
 +    Json houses = Json::array();
-+    for (int index = 0; index < town->house_max; ++index) {
-+        const int npc_id = town->house[index].npc_no;
++    for (int index = 0; index < house_count; ++index) {
++        const int npc_id = layout.houses[static_cast<std::size_t>(index)].npc_no;
 +        if (npc_id <= 0) continue;
 +        houses.push_back({{"house_id", index}, {"npc_id", npc_id}});
 +    }
@@ -5702,7 +5678,7 @@ index 00000000..5aa5549a
 +    }
 +
 +    // The current town may have unsaved editor changes. Count its live parts and use saved counts for the other towns.
-+    const int saved_town_count = town->GetPartsNumID(native_id);
++    const int saved_town_count = SavedTownPartCount(*town, native_id);
 +    const int live_town_count = map->GetePlacePartsAtInfoID(native_id, nullptr, 0);
 +    const int placed_count = std::max(0, save->GetPlaceEditPartsNum(native_id) - saved_town_count + live_town_count);
 +    const int built_count = save->GetBuildPartsNum(native_id);
@@ -5745,11 +5721,13 @@ index 00000000..5aa5549a
 +        }
 +        ++saved_count;
 +    }
-+    if (saved_index < 0 || saved_index >= town->parts_max || town->parts[saved_index].id != native_id) {
++    const TownLayout *saved_layout = PortFindTownLayout(*town);
++    if (saved_layout == nullptr || saved_index < 0 || std::cmp_greater_equal(saved_index, saved_layout->parts.size()) ||
++        saved_layout->parts[static_cast<std::size_t>(saved_index)].id != native_id) {
 +        return Failed("the native save did not retain the new Georama placement");
 +    }
 +
-+    const EditDataParts &saved_part = town->parts[saved_index];
++    const TownPart &saved_part = saved_layout->parts[static_cast<std::size_t>(saved_index)];
 +    return {ApiCallStatus::Ok,
 +            {{"id", id},
 +             {"town_id", town_id},
@@ -5784,8 +5762,7 @@ index 00000000..5aa5549a
 +    const auto index_parse = std::from_chars(suffix.data() + separator + 1, suffix.data() + suffix.size(), placement_index);
 +    if (town_parse.ec != std::errc{} || town_parse.ptr != suffix.data() + separator || town_id < 0 ||
 +        town_id >= SAVE_EDIT_DATA_MAX || index_parse.ec != std::errc{} ||
-+        index_parse.ptr != suffix.data() + suffix.size() || placement_index < 0 ||
-+        placement_index >= EDIT_DATA_PARTS_MAX) {
++        index_parse.ptr != suffix.data() + suffix.size() || placement_index < 0) {
 +        return Invalid("placement_id contains an invalid town or placement index");
 +    }
 +
@@ -5802,11 +5779,11 @@ index 00000000..5aa5549a
 +    CSaveData *save = GetSaveData();
 +    if (save == nullptr) return Failed("the game has no active save data");
 +    CEditData *town = save->GetEditData(town_id);
-+    if (town == nullptr || town->parts_max < 0 || town->parts_max > EDIT_DATA_PARTS_MAX ||
-+        placement_index >= town->parts_max) {
++    const TownLayout *saved_layout = town != nullptr ? PortFindTownLayout(*town) : nullptr;
++    if (saved_layout == nullptr || placement_index < 0 || std::cmp_greater_equal(placement_index, saved_layout->parts.size())) {
 +        return Failed("placement_id is stale or the saved Georama layout is unavailable");
 +    }
-+    const EditDataParts &saved_part = town->parts[placement_index];
++    const TownPart &saved_part = saved_layout->parts[static_cast<std::size_t>(placement_index)];
 +    if (saved_part.id <= 0 || saved_part.id >= EDIT_REMOVE_INFO_ID_MAX || saved_part.state == 0) {
 +        return Failed("placement_id does not identify a placed Georama piece");
 +    }
@@ -15000,10 +14977,10 @@ index 00000000..0d0d56e4
 +} // namespace moonmod
 diff --git a/port/src/moonmod/mapselect_moonmod.cpp b/port/src/moonmod/mapselect_moonmod.cpp
 new file mode 100644
-index 00000000..1b006218
+index 00000000..2ba8291e
 --- /dev/null
 +++ b/port/src/moonmod/mapselect_moonmod.cpp
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,80 @@
 +// Mod map identities appended after the native map catalog (moved out of ps2/src/mapselect.cpp).
 +
 +#include "common.h"
@@ -15011,6 +14988,7 @@ index 00000000..1b006218
 +#include <cstring>
 +
 +#include "mapselect.hpp"
++#include "text/bounded.hpp"
 +
 +extern int            PortMapNameNum asm("MapSelect_MapNameNum");
 +extern MAP_NAME_INFO *PortMapName asm("MapSelect_MapName");
@@ -15063,8 +15041,8 @@ index 00000000..1b006218
 +
 +    MoonModMapNameInfo &entry = MoonModMapNames[MoonModMapNameNum];
 +    memset(&entry, 0, sizeof(entry));
-+    strcpy(entry.name, name);
-+    strcpy(entry.title, title);
++    dc2::text::Copy(entry.name, dc2::text::View(name));
++    dc2::text::Copy(entry.title, dc2::text::View(title));
 +    entry.info.name = entry.name;
 +    entry.info.title = entry.title;
 +    entry.info.add_path = NULL;
@@ -15085,7 +15063,7 @@ index 00000000..1b006218
 +}
 diff --git a/port/src/moonmod/monster_moonmod.cpp b/port/src/moonmod/monster_moonmod.cpp
 new file mode 100644
-index 00000000..c65f185b
+index 00000000..8b21935f
 --- /dev/null
 +++ b/port/src/moonmod/monster_moonmod.cpp
 @@ -0,0 +1,198 @@
@@ -15136,6 +15114,7 @@ index 00000000..c65f185b
 +#include "snd_mngr.hpp"
 +#include "sound.hpp"
 +#include "swordeffect.hpp"
++#include "text/bounded.hpp"
 +#include "userdata.hpp"
 +
 +// MoonMod's monster additions for the ChronicleTwo port: data-only monster variants, per-slot generations that
@@ -15218,8 +15197,7 @@ index 00000000..c65f185b
 +    memcpy(&moonmod_variants[slot].definition, template_definition, sizeof(BASE_MONSTER_TBL));
 +    moonmod_variants[slot].definition.id = native_id;
 +    memset(moonmod_variants[slot].definition.name, 0, sizeof(moonmod_variants[slot].definition.name));
-+    strncpy(moonmod_variants[slot].definition.name, display_name,
-+            sizeof(moonmod_variants[slot].definition.name) - 1);
++    dc2::text::Copy(moonmod_variants[slot].definition.name, dc2::text::View(display_name));
 +    memset(moonmod_variants[slot].definition.model, 0, sizeof(moonmod_variants[slot].definition.model));
 +    memcpy(moonmod_variants[slot].definition.model, model, strlen(model));
 +    memset(moonmod_variants[slot].definition.script, 0, sizeof(moonmod_variants[slot].definition.script));
@@ -17898,7 +17876,7 @@ index 10ac7b34..3d4eed00 100644
  
  void DrawTakePhotoSystem(int texture, CInventUserData *user_data) {
 diff --git a/port/src/object/dun/automap.cpp b/port/src/object/dun/automap.cpp
-index fdee1a6e..a2992953 100644
+index fdee1a6e..ec5eceab 100644
 --- a/port/src/object/dun/automap.cpp
 +++ b/port/src/object/dun/automap.cpp
 @@ -555,6 +555,7 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
@@ -17935,44 +17913,36 @@ index fdee1a6e..a2992953 100644
          candidates[i] = -1;
      }
  
-@@ -1974,6 +1980,11 @@ void CAutoMapGen::RandomMapMainProc() {
+@@ -1974,6 +1980,9 @@ void CAutoMapGen::RandomMapMainProc() {
  
      rooms = 2;
      goal = iRand(3) + 4;
-+#ifdef PORT
 +    if (DngLayoutRooms > 0) {
 +        goal = DngLayoutRooms;
 +    }
-+#endif
      round = 0;
  
      while (rooms < goal) {
-@@ -2132,14 +2143,24 @@ void CAutoMapGen::Build() {
+@@ -2132,14 +2141,14 @@ void CAutoMapGen::Build() {
      }
  
      if (mode & AUTOMAP_GEN_FIXED_START) {
-+#ifdef PORT
+-        grid_w = 20;
+-        grid_h = 16;
 +        grid_w = DngLayoutArea > 20 ? DngLayoutArea : 20;
 +        grid_h = DngLayoutArea > 16 ? DngLayoutArea : 16;
-+#else
-         grid_w = 20;
-         grid_h = 16;
-+#endif
          RandomMapMainProc();
          return;
      }
  
-+#ifdef PORT
+-    grid_w = 14;
+-    grid_h = 14;
 +    grid_w = DNG_BUILD_AREA;
 +    grid_h = DNG_BUILD_AREA;
-+#else
-     grid_w = 14;
-     grid_h = 14;
-+#endif
      RandomMapMainProc();
      map = DngMainScene->GetMap(0);
  
-@@ -2903,3 +2924,9 @@ bool CAutoMapGen::SetupRoomInfo(std::string_view path) {
+@@ -2903,3 +2912,9 @@ bool CAutoMapGen::SetupRoomInfo(std::string_view path) {
      room_info_num = static_cast<int>(count);
      return true;
  }
@@ -18050,42 +18020,33 @@ index 8ac0b9ed..8170b801 100644
      return true;
  }
 diff --git a/port/src/object/dun/dng_object.cpp b/port/src/object/dun/dng_object.cpp
-index d90eaaad..91d81e88 100644
+index d90eaaad..b5f56fd2 100644
 --- a/port/src/object/dun/dng_object.cpp
 +++ b/port/src/object/dun/dng_object.cpp
-@@ -1462,7 +1462,11 @@ void CPullItem::Step() {
+@@ -1462,7 +1462,7 @@ void CPullItem::Step() {
                      }
  
                      MsgTaskMan.Print(item_message, 45, 8, 0);
-+#ifdef PORT
+-                    DngUserData->GetItem(item_no, 1);
 +                    moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
-+#else
-                     DngUserData->GetItem(item_no, 1);
-+#endif
                      state = PULL_ITEM_STATE_FREE;
                  }
              }
-@@ -1480,7 +1484,11 @@ void CPullItem::Step() {
+@@ -1480,7 +1480,7 @@ void CPullItem::Step() {
              } else {
                  std::snprintf(key_message, sizeof(key_message), dung_progtxt_gkey_get[LanguageCode], GetItemMessage(item_no));
                  MsgTaskMan.Print(key_message, 90, 8, 0);
-+#ifdef PORT
+-                DngUserData->GetItem(item_no, 1);
 +                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
-+#else
-                 DngUserData->GetItem(item_no, 1);
-+#endif
                  state = PULL_ITEM_STATE_GOT;
                  get_delay = 60;
                  bob_height = 30.0f;
-@@ -1499,7 +1507,11 @@ void CPullItem::Step() {
+@@ -1499,7 +1499,7 @@ void CPullItem::Step() {
              } else {
                  std::snprintf(stolen_message, sizeof(stolen_message), dung_progtxt_steal[LanguageCode], GetItemMessage(item_no));
                  MsgTaskMan.Print(stolen_message, 90, 8, 0);
-+#ifdef PORT
+-                DngUserData->GetItem(item_no, 1);
 +                moonmod::ChronicleTwoNativeItemPickedUp(item_no, DngUserData->GetItem(item_no, 1));
-+#else
-                 DngUserData->GetItem(item_no, 1);
-+#endif
                  state = PULL_ITEM_STATE_GOT;
                  get_delay = 60;
                  bob_height = 30.0f;
@@ -18155,7 +18116,7 @@ index 3a177a37..86f75cea 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 58420ea4..5ac6a959 100644
+index 58420ea4..0b3bd1fe 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
 @@ -721,6 +721,11 @@ void CActiveMonster::Initialize() {
@@ -18170,19 +18131,38 @@ index 58420ea4..5ac6a959 100644
      BASE_MONSTER_TBL *entry = base_monster_define;
  
      while (entry->name[0] != 0) {
-@@ -735,6 +740,11 @@ BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
+@@ -735,13 +740,26 @@ BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
  }
  
  void CMonsterLocateInfo::SetPutFlag(int slot, int put) {
 +    // CMonsterMan::SetActiveMonster calls this once per spawn, right after claiming the slot: a new generation
 +    // invalidates every handle mods hold for the slot's previous monster.
++    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
++        return;
++    }
 +    if (put != 0) {
 +        BumpMoonModMonsterSlotGeneration(slot);
 +    }
++    // put_flag has a bit for the first 32 slots only. There each slot is counted once, so a mod despawn and the
++    // native death of the same monster cannot both release it; the slots past it count as retail counted them.
++    const bool tracked = slot < 32;
++    const u32  mask = tracked ? 1u << slot : 0u;
++    const bool was_put = tracked && (put_flag & mask) != 0;
      if (put != 0) {
-         if (put_num < num) {
-             put_flag |= 1 << slot;
-@@ -775,6 +785,10 @@ void CMonsterMan::Initialize(CScene *scene) {
+-        if (put_num < num) {
+-            put_flag |= 1 << slot;
++        if ((!tracked || !was_put) && put_num < num) {
++            put_flag |= mask;
+             put_num += 1;
+         }
+-    } else if (put_num > 0) {
+-        put_flag &= ~(1 << slot);
++    } else if ((!tracked || was_put) && put_num > 0) {
++        put_flag &= ~mask;
+         put_num -= 1;
+     }
+ }
+@@ -775,6 +793,10 @@ void CMonsterMan::Initialize(CScene *scene) {
      textures = &mgTexManager;
      effect_man = FxScriptMan;
      priority_limit = PortMonsterLatchLimits();
@@ -18193,7 +18173,7 @@ index 58420ea4..5ac6a959 100644
  
      for (i = 0; i < MONSTER_ACTIVE_MAX; i++) {
          active_views[i] = scene->GetCharacterView(DNG_CHARA_SLOT_MONSTER + i);
-@@ -994,6 +1008,11 @@ int CMonsterMan::GetMonsterNum(float limit) {
+@@ -994,6 +1016,11 @@ int CMonsterMan::GetMonsterNum(float limit) {
  }
  
  BASE_MONSTER_TBL *CMonsterMan::GetReferPtr2(int monster_id) {
@@ -18205,13 +18185,11 @@ index 58420ea4..5ac6a959 100644
      BASE_MONSTER_TBL *entry = base_monster_define;
  
      while (entry->name[0] != 0) {
-@@ -2216,6 +2235,10 @@ void CMonsterMan::CheckDamage() {
+@@ -2216,6 +2243,8 @@ void CMonsterMan::CheckDamage() {
                  damage *= 0.01f * static_cast<float>(prim->param->critical_rate);
              }
  
-+#ifdef PORT
 +            damage = moonmod::ApplyChronicleTwoCombatDamageFormula(damage);
-+#endif
 +
              calcWeaponParamWhp(monster, prim);
  
@@ -18275,20 +18253,18 @@ index 216dd7da..3e9c3c27 100644
  
  int EventDoorLoop(int frame, int use_scene_se) {
 diff --git a/port/src/object/event/event_func.cpp b/port/src/object/event/event_func.cpp
-index 4fda5f79..2b0326e0 100644
+index 4fda5f79..7027e5ef 100644
 --- a/port/src/object/event/event_func.cpp
 +++ b/port/src/object/event/event_func.cpp
-@@ -5190,6 +5190,9 @@ static int _DNG_SET_FLOOR_ID(dc2::script::RunArguments stack) {
+@@ -5190,6 +5190,7 @@ static int _DNG_SET_FLOOR_ID(dc2::script::RunArguments stack) {
          return false;
      }
  
-+#ifdef PORT
 +    floor_id = moonmod::ChronicleTwoRequestedDungeonEntryFloor(floor_id);
-+#endif
      dungeon->SetFloorID(floor_id);
      return true;
  }
-@@ -17167,12 +17170,22 @@ static int _SET_FLOOR_INFO(dc2::script::RunArguments stack) {
+@@ -17167,12 +17168,22 @@ static int _SET_FLOOR_INFO(dc2::script::RunArguments stack) {
          case 3:
              info->unk_a = dc2::script::RunInteger(stack);
              break;
@@ -18315,51 +18291,45 @@ index 4fda5f79..2b0326e0 100644
              info->kill_count = dc2::script::RunInteger(stack);
              break;
 diff --git a/port/src/object/menu/inventmn.cpp b/port/src/object/menu/inventmn.cpp
-index 6a0985cd..d7dae9de 100644
+index 6a0985cd..40edb06d 100644
 --- a/port/src/object/menu/inventmn.cpp
 +++ b/port/src/object/menu/inventmn.cpp
-@@ -2839,6 +2839,9 @@ int CMenuInvent::IsCreateObject(int mode, int keys) {
+@@ -2839,6 +2839,7 @@ int CMenuInvent::IsCreateObject(int mode, int keys) {
                          if (0 < this->create_item_id) {
                              this->create_success = true;
                              InventUserDataPtr->SetCreateItemFlag(this->card_cursor, this->create_item_id);
-+#ifdef PORT
 +                            MoonModNotifyInventionCreated(this->create_item_id);
-+#endif
                          } else {
                              s32 recipe_index = {};
                              this->create_partial_match = false;
 diff --git a/port/src/object/world/editloop.cpp b/port/src/object/world/editloop.cpp
-index 207645fd..d6f85e37 100644
+index 207645fd..02fccab1 100644
 --- a/port/src/object/world/editloop.cpp
 +++ b/port/src/object/world/editloop.cpp
-@@ -2335,6 +2335,10 @@ int EditMapJump(int map_no) {
+@@ -2335,6 +2335,8 @@ int EditMapJump(int map_no) {
          }
  
          map->area_no = MainScene->now_map_no;
-+#ifdef PORT
 +        moonmod::ApplyChronicleTwoGeorama(map, main_data);
 +        GameGrantGeoramaStockForTest(map);
-+#endif
          map->ClearAllParts();
          used_quads = main_data->stack_used - used_before;
          used_kb = (used_quads * 0x10) / 0x400;
 diff --git a/port/src/object/world/mapselect.cpp b/port/src/object/world/mapselect.cpp
-index b53f4089..5abbb35a 100644
+index b53f4089..878a6a24 100644
 --- a/port/src/object/world/mapselect.cpp
 +++ b/port/src/object/world/mapselect.cpp
-@@ -228,6 +228,11 @@ void LoadMapName(int language, u_long128 *buffer);
+@@ -228,6 +228,9 @@ void LoadMapName(int language, u_long128 *buffer);
   */
  static MAP_NAME_INFO *GetMapNameInfo(int map_no) {
  
-+#ifdef PORT
 +    if (map_no >= MapNameNum) {
 +        return GetMoonModMapNameInfo(map_no - MapNameNum);
 +    }
-+#endif
      if (map_no < 0 || map_no >= MapNameNum) {
          return nullptr;
      }
-@@ -331,6 +336,15 @@ int SearchMapNo(char *name) {
+@@ -331,6 +334,15 @@ int SearchMapNo(char *name) {
          }
      }
  
@@ -18908,7 +18878,7 @@ index 61dcb08c..2470dec4 100644
              } else {
                  Change(1);
 diff --git a/port/src/platform/dataread.cpp b/port/src/platform/dataread.cpp
-index df6148ae..21ccfb59 100644
+index df6148ae..82f11eb5 100644
 --- a/port/src/platform/dataread.cpp
 +++ b/port/src/platform/dataread.cpp
 @@ -153,6 +153,7 @@ DataReadPathNameExt DivPathNameExt(std::string_view path) {
@@ -19031,7 +19001,7 @@ index df6148ae..21ccfb59 100644
      return IsHostName(name) ? "host:" + key : key;
  }
  
-@@ -579,6 +675,67 @@ int ResolveFile(const char *name, const std::string &key, void *buffer, bool siz
+@@ -579,6 +675,64 @@ int ResolveFile(const char *name, const std::string &key, void *buffer, bool siz
          }
      }
  
@@ -19042,10 +19012,12 @@ index df6148ae..21ccfb59 100644
 +    const std::string  direct_key = host_name ? key : DirectGamePathKey(name);
 +    const std::string  source_key = host_name ? key : TextureSourceResolveAlias(direct_key);
 +    const bool         used_asset_alias = source_key != direct_key;
-+    const auto read_override = [&](const fs::path &path, const std::string &source, std::size_t limit) -> int {
++    // limit bounds the padded size of a new file; max_size the exact size of one standing in for a native file.
++    const auto read_override = [&](const fs::path &path, const std::string &source, std::size_t limit,
++                                   std::optional<int> max_size = std::nullopt) -> int {
 +        const IndexedFile override_file{.file = vfs::HostFile(path), .replaced = true, .relative = source};
 +        const std::optional<int> size = FileSize(override_file);
-+        if (!size || PaddedSize(static_cast<std::size_t>(*size)) > limit) {
++        if (!size || *size == 0 || PaddedSize(static_cast<std::size_t>(*size)) > limit || (max_size && *size > *max_size)) {
 +            return -1;
 +        }
 +        if (size_only) {
@@ -19057,13 +19029,8 @@ index df6148ae..21ccfb59 100644
 +        }
 +        return read;
 +    };
-+    const auto replacement_limit = [](const IndexedFile &original) -> std::optional<std::size_t> {
-+        const std::optional<int> size = FileSize(original);
-+        if (!size) {
-+            return std::nullopt;
-+        }
-+        return PaddedSize(static_cast<std::size_t>(*size));
-+    };
++    // A replacement is read only when it is no larger than the native file it stands in for.
++    const auto replacement_limit = [](const IndexedFile &original) { return FileSize(original); };
 +    if (!host_name && !key.ends_with(".stb")) {
 +        if (indexed_file == nullptr && (IsVirtualMonsterAssetPath(direct_key) || IsVirtualMapAssetPath(direct_key))) {
 +            if (const std::optional<fs::path> override = moonmod::FindNativeResourceOverride(direct_key)) {
@@ -19074,7 +19041,7 @@ index df6148ae..21ccfb59 100644
 +        if (indexed_file != nullptr) {
 +            if (const std::optional<fs::path> override = moonmod::FindNativeResourceOverride(key)) {
 +                if (const auto limit = replacement_limit(*indexed_file)) {
-+                    const int size = read_override(*override, key, *limit);
++                    const int size = read_override(*override, key, PaddedSize(static_cast<std::size_t>(*limit)), *limit);
 +                    if (size >= 0) {
 +                        return size;
 +                    }
@@ -19085,7 +19052,7 @@ index df6148ae..21ccfb59 100644
 +            if (const IndexedFile *aliased = Lookup(source_key)) {
 +                if (const std::optional<fs::path> override = moonmod::FindNativeResourceOverride(source_key)) {
 +                    if (const auto limit = replacement_limit(*aliased)) {
-+                        const int size = read_override(*override, direct_key, *limit);
++                        const int size = read_override(*override, direct_key, PaddedSize(static_cast<std::size_t>(*limit)), *limit);
 +                        if (size >= 0) {
 +                            return size;
 +                        }
@@ -19099,7 +19066,7 @@ index df6148ae..21ccfb59 100644
      // A script loads as a handle naming its Luau module, which CRunScript::load runs; one without a module is missing.
      if (key.ends_with(".stb")) {
          const auto module = luau_runtime::ModuleForScript(key);
-@@ -596,7 +753,11 @@ int ResolveFile(const char *name, const std::string &key, void *buffer, bool siz
+@@ -596,7 +750,11 @@ int ResolveFile(const char *name, const std::string &key, void *buffer, bool siz
          return static_cast<int>(handle.size());
      }
  
@@ -19113,7 +19080,7 @@ index df6148ae..21ccfb59 100644
          return -1;
      }
 diff --git a/port/src/platform/gamedata.cpp b/port/src/platform/gamedata.cpp
-index 03f2eaaf..71b39739 100644
+index 03f2eaaf..86a78b66 100644
 --- a/port/src/platform/gamedata.cpp
 +++ b/port/src/platform/gamedata.cpp
 @@ -480,21 +480,21 @@ CGameData GameItemDataManage;
@@ -19141,18 +19108,16 @@ index 03f2eaaf..71b39739 100644
  
  /**
   *
-@@ -616,6 +616,9 @@ void CGameData::Initialize() {
+@@ -616,6 +616,7 @@ void CGameData::Initialize() {
      robo_num = 0;
      fish_data = local_fishdata;
      fish_num = 0;
-+#ifdef PORT
 +    ResetMoonModGameData();
-+#endif
      InitItemMes(1, 1);
  }
  
 diff --git a/port/src/platform/mainloop.cpp b/port/src/platform/mainloop.cpp
-index 3ed66069..67ba0840 100644
+index 3ed66069..803bbb64 100644
 --- a/port/src/platform/mainloop.cpp
 +++ b/port/src/platform/mainloop.cpp
 @@ -1344,6 +1344,7 @@ ClsMes PauseMes;
@@ -19191,11 +19156,13 @@ index 3ed66069..67ba0840 100644
  
      memory = GetMainStack();
      memory->stSetBuffer(main_arena, 0x1A0000 * kArenaHeadroom);
-@@ -1595,10 +1610,12 @@ void MainLoop() {
+@@ -1595,10 +1610,14 @@ void MainLoop() {
      mgInitVSyncCallBack(PortPlayTimeVSyncCallback);
      LanguageCode = GameHasJump() ? LANG_ENGLISH : LANG_FRENCH;
      CrashContextSet(CrashKey::Loop, "boot");
 +    PortLoopNo = LOOP_TITLE;
++    // The map catalog is read before the first scene event, so mods that list or register locations see it.
++    LoadMapName(LanguageCode, nullptr);
      if (!GameHasJump()) {
 +        publish_scene_event("game.scene.will_enter", PortLoopNo);
 +        announced_scene_mode = PortLoopNo;
@@ -19205,16 +19172,24 @@ index 3ed66069..67ba0840 100644
      DebugFlag = false;
      DebugInfo.chara_move = 0;
  
-@@ -1686,6 +1703,8 @@ void MainLoop() {
+@@ -1628,6 +1647,8 @@ void MainLoop() {
+     PortInitPadTable(LanguageCode);
+     GameItemDataManage.LoadData();
+     GameItemDataManage.LoadItemSystemMes(LanguageCode);
++    // The mods' locations extend the map catalog read above; their items and weapons extend the item tables.
++    moonmod::ApplyChronicleTwoContent();
+     LoadSystemMes();
+     CreateSystemMes();
+     LoadFontTexture();
+@@ -1685,7 +1706,6 @@ void MainLoop() {
+     }
  
      LoadHelpMes();
-     LoadMapName(LanguageCode, file_buffer);
-+    // The mods' locations extend the map catalog just read; their items and weapons extend the item tables.
-+    moonmod::ApplyChronicleTwoContent();
+-    LoadMapName(LanguageCode, file_buffer);
      LoadEditAnalyzeData(LanguageCode, file_buffer);
      LoadFilePictureName();
      Font.Init();
-@@ -1699,6 +1718,10 @@ void MainLoop() {
+@@ -1699,6 +1719,10 @@ void MainLoop() {
          SCElogoFade(1, memory);
      }
      GamePrepareJump(PortLoopNo, InitArg);
@@ -19225,7 +19200,7 @@ index 3ed66069..67ba0840 100644
  
      while (true) {
          if (PortLoopNo == LOOP_TITLE || OmakeFlag != 0) {
-@@ -1721,6 +1744,11 @@ void MainLoop() {
+@@ -1721,6 +1745,11 @@ void MainLoop() {
              PortLoopNo = LOOP_TITLE;
          }
  
@@ -19237,7 +19212,7 @@ index 3ed66069..67ba0840 100644
          if (PortCaptureMode == CAPTURE_RECORD) {
              GamePad__2.CaptureStart();
              srand(9999);
-@@ -1762,6 +1790,8 @@ void MainLoop() {
+@@ -1762,6 +1791,8 @@ void MainLoop() {
          PortQuickLoadoutReset();
          ItemIcons3DReset();
          RecordCrashContext(PortLoopNo, InitArg);
@@ -19246,7 +19221,7 @@ index 3ed66069..67ba0840 100644
          LoopInit[PortLoopNo](InitArg);
          GameGiveOnArrival(PortLoopNo);
          PortAutosaveResetArrival();
-@@ -1769,7 +1799,14 @@ void MainLoop() {
+@@ -1769,7 +1800,14 @@ void MainLoop() {
          DebugModeDiscardMenuKey();
          INIT_LOOP_ARG next_arg;
  
@@ -19263,7 +19238,7 @@ index 3ed66069..67ba0840 100644
          bool developer_menu_requested = false;
          auto request_developer_menu = [&] {
 diff --git a/port/src/platform/memcard.cpp b/port/src/platform/memcard.cpp
-index f29d256c..68c15a44 100644
+index f29d256c..e6612f3c 100644
 --- a/port/src/platform/memcard.cpp
 +++ b/port/src/platform/memcard.cpp
 @@ -2140,17 +2140,25 @@ s16 NowProgramLoopNo = -1;
@@ -19292,16 +19267,17 @@ index f29d256c..68c15a44 100644
  #include "title.hpp"
  #include "userdata.hpp"
  
-@@ -2167,6 +2175,62 @@ int Digit(const CSaveData &save, std::size_t size) {
+@@ -2167,6 +2175,63 @@ int Digit(const CSaveData &save, std::size_t size) {
      return digit;
  }
  
-+// MoonMod floor progress lives in a sidecar beside the save, keyed by the exact retail save payload and its
-+// counter, so the retail save format stays unchanged and an older save never pairs with newer mod progress.
++// MoonMod floor progress lives in a sidecar beside the save, keyed by the save's dungeon progress and its counter,
++// so the retail save format stays unchanged and an older save never pairs with newer mod progress. Saves are JSON
++// documents whose round trip does not keep every byte of CSaveData, so the key covers only CSaveDataDungeon.
 +std::uint64_t SaveFingerprint(const CSaveData &save) {
-+    const auto   *bytes = reinterpret_cast<const unsigned char *>(&save);
++    const auto   *bytes = reinterpret_cast<const unsigned char *>(&save.save_dungeon);
 +    std::uint64_t hash = 14695981039346656037ull;
-+    for (std::size_t index = 0; index < sizeof(save); ++index) {
++    for (std::size_t index = 0; index < sizeof(save.save_dungeon); ++index) {
 +        hash ^= bytes[index];
 +        hash *= 1099511628211ull;
 +    }
@@ -19355,7 +19331,7 @@ index f29d256c..68c15a44 100644
  u64 MaxUniqueCounter(const SaveSlotList &list) {
      u64 newest = 0;
      for (const auto &slot : list.saves) {
-@@ -2258,6 +2322,9 @@ bool SaveSlotWriteAutosave(int program_loop_no, const AutosaveSpawn *spawn) {
+@@ -2258,6 +2323,9 @@ bool SaveSlotWriteAutosave(int program_loop_no, const AutosaveSpawn *spawn) {
      if (program_loop_no == LOOP_DUNGEON) {
          // Only the counter belongs to the write; the save data, the towns' layouts and the header are the entry's.
          floor_entry->image.unique_counter = newest + 1;
@@ -19365,7 +19341,7 @@ index f29d256c..68c15a44 100644
          return SaveSlotWrite(SaveSlotAutosavePath(), *floor_entry, true) == FilesResult::kWritten;
      }
      auto document = BuildDocument(program_loop_no, newest);
-@@ -2268,6 +2335,9 @@ bool SaveSlotWriteAutosave(int program_loop_no, const AutosaveSpawn *spawn) {
+@@ -2268,6 +2336,9 @@ bool SaveSlotWriteAutosave(int program_loop_no, const AutosaveSpawn *spawn) {
          document->spawn = *spawn;
          document->spawn->counter = document->image.unique_counter;
      }
@@ -19375,7 +19351,7 @@ index f29d256c..68c15a44 100644
      return SaveSlotWrite(SaveSlotAutosavePath(), *document, true) == FilesResult::kWritten;
  }
  
-@@ -2401,6 +2471,12 @@ int CMemoryCardManager::SaveToMc(int row) {
+@@ -2401,6 +2472,12 @@ int CMemoryCardManager::SaveToMc(int row) {
      const auto document = BuildDocument(NowProgramLoopNo, newest);
      std::memcpy(static_cast<void *>(save_buffer), &document->image, sizeof(*save_buffer));
  
@@ -19388,7 +19364,7 @@ index f29d256c..68c15a44 100644
      std::filesystem::path path;
      FilesResult           result = FilesResult::kFailed;
      if (SaveSlotNew) {
-@@ -2470,6 +2546,9 @@ int CMemoryCardManager::LoadFromMc(int row) {
+@@ -2470,6 +2547,9 @@ int CMemoryCardManager::LoadFromMc(int row) {
          document->spawn->map_no == image.map_no) {
          SaveSlotSetPendingSpawn(document->spawn);
      }
@@ -19474,20 +19450,16 @@ index d93b2523..dd7fd840 100644
      }
  
 diff --git a/port/src/script/runscript_opcodes.cpp b/port/src/script/runscript_opcodes.cpp
-index 7a89bbb5..9442dc5a 100644
+index 7a89bbb5..3bf53abf 100644
 --- a/port/src/script/runscript_opcodes.cpp
 +++ b/port/src/script/runscript_opcodes.cpp
-@@ -3037,7 +3037,13 @@ int _SET_DEAD_START(dc2::script::RunArguments args, int argc) {
+@@ -3037,7 +3037,9 @@ int _SET_DEAD_START(dc2::script::RunArguments args, int argc) {
          return 0;
      }
  
-+#ifdef PORT
 +    const bool first_death_transition = nowMonster->state != ACTIVE_MONSTER_DEAD;
-+#endif
      nowMonster->state = ACTIVE_MONSTER_DEAD;
-+#ifdef PORT
 +    if (first_death_transition) moonmod::ChronicleTwoEnemyDefeated(nowMonster, nullptr);
-+#endif
      pallet = &nowMonster->script_pallet;
      pallet->duration = 0;
      pallet->elapsed = 0;
@@ -19687,10 +19659,10 @@ index 0e925f69..9677998f 100644
  bool GameDebugEnabled();
  void GameSetFastLoad(bool fast);
 diff --git a/port/src/tests/CMakeLists.txt b/port/src/tests/CMakeLists.txt
-index a7ea168f..d12be47d 100644
+index a7ea168f..e07a8510 100644
 --- a/port/src/tests/CMakeLists.txt
 +++ b/port/src/tests/CMakeLists.txt
-@@ -28,6 +28,36 @@ add_test(NAME NativeArchitecture.Check
+@@ -28,6 +28,39 @@ add_test(NAME NativeArchitecture.Check
  
  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp)
  add_executable(darkchronicle_tests ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${TEST_SOURCES})
@@ -19705,6 +19677,9 @@ index a7ea168f..d12be47d 100644
 +    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 +    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 +target_include_directories(moonmod_native_plugin_shared_fixture PRIVATE ${CMAKE_SOURCE_DIR}/port/include)
++foreach(fixture IN ITEMS moonmod_native_plugin_fixture moonmod_native_plugin_shared_fixture)
++    target_compile_options(${fixture} PRIVATE ${CT_WARNINGS})
++endforeach()
 +target_compile_definitions(darkchronicle_tests PRIVATE
 +    MOONMOD_TEST_NATIVE_PLUGIN_PATH="$<TARGET_FILE:moonmod_native_plugin_shared_fixture>"
 +    MOONMOD_TEST_GAME_ID="chronicle-two"
@@ -19727,7 +19702,7 @@ index a7ea168f..d12be47d 100644
  if(WIN32)
      include(${KZ_ROOT}/cmake/KazarovWindowsRuntime.cmake)
      kz_windows_runtime_post_build(darkchronicle_tests)
-@@ -49,7 +79,7 @@ target_sources(darkchronicle_tests PRIVATE ${LOCAL_LAYOUT_PROBES})
+@@ -49,7 +82,7 @@ target_sources(darkchronicle_tests PRIVATE ${LOCAL_LAYOUT_PROBES})
  target_include_directories(darkchronicle_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
  ct_link_game(darkchronicle_tests)
  kz_port_tests(darkchronicle_tests)
@@ -19736,7 +19711,7 @@ index a7ea168f..d12be47d 100644
  # The painters' geometry is checked against the numbers the fonts were fitted with.
  target_compile_definitions(darkchronicle_tests PRIVATE
      CT_MESSAGE_FONT_PARAMETERS="${CMAKE_SOURCE_DIR}/scripts/font/message_font.json"
-@@ -230,6 +260,1097 @@ set_tests_properties(Smoke.HeadlessFramesScreenshot PROPERTIES
+@@ -230,6 +263,1097 @@ set_tests_properties(Smoke.HeadlessFramesScreenshot PROPERTIES
      ENVIRONMENT "DC2_SAVE=${CMAKE_BINARY_DIR}/smoke-fixture/save;DC2_DATA=${CMAKE_BINARY_DIR}/smoke-fixture/data"
      TIMEOUT 120 RUN_SERIAL TRUE LABELS gpu)
  
@@ -20835,7 +20810,7 @@ index a7ea168f..d12be47d 100644
  foreach(f IN LISTS ct_stream_cmake)
      include(${f})
 diff --git a/port/src/tests/dataread_test.cpp b/port/src/tests/dataread_test.cpp
-index 5428f26d..046f7403 100644
+index 5428f26d..c26add51 100644
 --- a/port/src/tests/dataread_test.cpp
 +++ b/port/src/tests/dataread_test.cpp
 @@ -27,6 +27,7 @@
@@ -20846,7 +20821,7 @@ index 5428f26d..046f7403 100644
  #include "character_motion.hpp"
  #include "dataread.hpp"
  #include "gamedata.hpp"
-@@ -312,6 +313,246 @@ TEST_F(DataRead, PaddedLoadForgetsMotionSetBeyondTheReservation) {
+@@ -312,6 +313,247 @@ TEST_F(DataRead, PaddedLoadForgetsMotionSetBeyondTheReservation) {
      character_motion::Clear();
  }
  
@@ -20991,7 +20966,8 @@ index 5428f26d..046f7403 100644
 +    EXPECT_TRUE(std::all_of(loaded + map.size(), loaded + sector_padded,
 +                            [](unsigned char byte) { return byte == 0; }));
 +
-+    for (const char *extension : {".cfg", ".efp", ".ipk", ".mpk", ".sky", ".stb"}) {
++    // Scripts are Luau modules, which the data reader resolves without reading .stb files.
++    for (const char *extension : {".cfg", ".efp", ".ipk", ".mpk", ".sky", ".cfg.json"}) {
 +        std::string game_path = std::string("map/m/m00/probe") + extension;
 +        ASSERT_EQ(moonmod::RegisterNativeResourceOverride(
 +                      "test.virtual-map", package,
@@ -23555,7 +23531,7 @@ index 00000000..9e0fa22f
 +}
 diff --git a/port/src/tests/moonmod_combat_api_test.cpp b/port/src/tests/moonmod_combat_api_test.cpp
 new file mode 100644
-index 00000000..d595cc02
+index 00000000..fe64341e
 --- /dev/null
 +++ b/port/src/tests/moonmod_combat_api_test.cpp
 @@ -0,0 +1,272 @@
@@ -23760,7 +23736,7 @@ index 00000000..d595cc02
 +                                 moonmod::Json::array({{{"entity", "chronicle-two:monster:7:1"}, {"amount", 12}}})).status,
 +              moonmod::ApiCallStatus::Failed);
 +    EXPECT_EQ(config.api_handler("test.moonmod.combat-probe", *heal_operation,
-+                                 moonmod::Json::array({{{"entity", "chronicle-two:monster:24:1"}, {"amount", 12}}})).status,
++                                 moonmod::Json::array({{{"entity", "chronicle-two:monster:" + std::to_string(MONSTER_ACTIVE_MAX) + ":1"}, {"amount", 12}}})).status,
 +              moonmod::ApiCallStatus::InvalidArgument);
 +    EXPECT_EQ(config.api_handler("test.moonmod.combat-probe", *heal_operation,
 +                                 moonmod::Json::array({{{"entity", entity_handle}, {"amount", 0}}})).status,
@@ -23985,10 +23961,10 @@ index 00000000..8fa38f3b
 +}
 diff --git a/port/src/tests/moonmod_content_e2e_test.cpp b/port/src/tests/moonmod_content_e2e_test.cpp
 new file mode 100644
-index 00000000..91e88f89
+index 00000000..6a8b594e
 --- /dev/null
 +++ b/port/src/tests/moonmod_content_e2e_test.cpp
-@@ -0,0 +1,417 @@
+@@ -0,0 +1,416 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -24003,6 +23979,7 @@ index 00000000..91e88f89
 +#include <utility>
 +#include <vector>
 +
++#include "moonmod_item_table_fixture.hpp"
 +#include "dngfloor.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
@@ -24017,8 +23994,6 @@ index 00000000..91e88f89
 +#include "userdata.hpp"
 +
 +extern CSaveData *PortActiveSaveData asm("MainLoop_ActiveSaveData");
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +
 +namespace {
 +
@@ -24056,7 +24031,7 @@ index 00000000..91e88f89
 +    SPI_STACK count{};
 +    count.type = SPI_STACK_TYPE_INT;
 +    count.value.integer = 1;
-+    ASSERT_EQ(_DATACOMINIT(&count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&count, 1), 1);
 +
 +    SPI_STACK fields[11]{};
 +    const int values[] = {0x112, ITEM_DATA_RECOVERY, 0, 1, 10, 30, 3, 17, 100};
@@ -24068,7 +24043,7 @@ index 00000000..91e88f89
 +    fields[9].value.string = const_cast<char *>("VANILLA_TONIC");
 +    fields[10].type = SPI_STACK_TYPE_INT;
 +    fields[10].value.integer = ITEM_ATTRIBUTE_USABLE;
-+    ASSERT_EQ(_DATACOM(fields, 11), 1);
++    ASSERT_EQ(moonmod_test::ItemTableAdd(fields, 11), 1);
 +
 +    CDataCommon &common = GameItemDataManage.common_data[0];
 +    common.item_no = 0x112;
@@ -25426,10 +25401,10 @@ index 00000000..1f1c60c2
 +}
 diff --git a/port/src/tests/moonmod_example_package_test.cpp b/port/src/tests/moonmod_example_package_test.cpp
 new file mode 100644
-index 00000000..9380dc1d
+index 00000000..2d3ebff1
 --- /dev/null
 +++ b/port/src/tests/moonmod_example_package_test.cpp
-@@ -0,0 +1,228 @@
+@@ -0,0 +1,227 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -25442,6 +25417,7 @@ index 00000000..9380dc1d
 +#include <string_view>
 +#include <vector>
 +
++#include "moonmod_item_table_fixture.hpp"
 +#include "savedata.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/runtime.hpp"
@@ -25451,8 +25427,6 @@ index 00000000..9380dc1d
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "scriptinterpreter.hpp"
 +extern CSaveData *PortActiveSaveData asm("MainLoop_ActiveSaveData");
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +#elif defined(MOONMOD_TEST_CHRONICLE)
 +#include "moonmod/chronicle_adapter.hpp"
 +extern CSaveData *SaveData;
@@ -25491,7 +25465,7 @@ index 00000000..9380dc1d
 +    SPI_STACK count{};
 +    count.type = SPI_STACK_TYPE_INT;
 +    count.value.integer = 1;
-+    ASSERT_EQ(_DATACOMINIT(&count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&count, 1), 1);
 +
 +    SPI_STACK fields[11]{};
 +    const int values[] = {274, ITEM_DATA_RECOVERY, 0, 1, 10, 30, 3, 17, 100};
@@ -25503,7 +25477,7 @@ index 00000000..9380dc1d
 +    fields[9].value.string = const_cast<char *>("VANILLA_TONIC");
 +    fields[10].type = SPI_STACK_TYPE_INT;
 +    fields[10].value.integer = ITEM_ATTRIBUTE_USABLE;
-+    ASSERT_EQ(_DATACOM(fields, 11), 1);
++    ASSERT_EQ(moonmod_test::ItemTableAdd(fields, 11), 1);
 +
 +    CDataCommon &common = GameItemDataManage.common_data[0];
 +    std::memset(&common, 0, sizeof(common));
@@ -25660,10 +25634,10 @@ index 00000000..9380dc1d
 +}
 diff --git a/port/src/tests/moonmod_georama_api_test.cpp b/port/src/tests/moonmod_georama_api_test.cpp
 new file mode 100644
-index 00000000..d21b02f3
+index 00000000..7b89fa0a
 --- /dev/null
 +++ b/port/src/tests/moonmod_georama_api_test.cpp
-@@ -0,0 +1,1133 @@
+@@ -0,0 +1,1123 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -25677,6 +25651,8 @@ index 00000000..d21b02f3
 +#include <string_view>
 +#include <vector>
 +
++#include "save_json.hpp"
++#include "moonmod_item_table_fixture.hpp"
 +#include "editdata.hpp"
 +#include "editmap.hpp"
 +#include "gamedata.hpp"
@@ -25689,8 +25665,6 @@ index 00000000..d21b02f3
 +#include "savedata.hpp"
 +#include "userdata.hpp"
 +
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +
 +namespace {
 +
@@ -25771,17 +25745,17 @@ index 00000000..d21b02f3
 +    ASSERT_NE(town, nullptr);
 +    town->save_count = 7;
 +    town->culture_point = 125;
-+    town->parts[2].id = 0x42;
-+    town->parts[2].state = 1;
-+    town->parts[2].angle = 6;
-+    town->parts[2].pos[0] = 120;
-+    town->parts[2].pos[1] = -24;
-+    town->parts[2].pos[2] = 360;
-+    town->parts[2].color[0][0] = 10;
-+    town->parts[2].color[0][1] = 20;
-+    town->parts[2].color[0][2] = 30;
-+    town->parts[2].house_no = 1;
-+    town->house[0].npc_no = 8;
++    // The town's layout is kept beside its save record (save_json.hpp).
++    TownLayout &layout = PortTownLayout(*town);
++    layout.parts.resize(3);
++    layout.houses.resize(1);
++    layout.parts[2].id = 0x42;
++    layout.parts[2].state = 1;
++    layout.parts[2].angle = 6;
++    layout.parts[2].pos = {120, -24, 360};
++    layout.parts[2].color[0] = {10, 20, 30};
++    layout.parts[2].house_no = 1;
++    layout.houses[0].npc_no = 8;
 +    town->analyze.data_open[2] = 1;
 +    town->analyze.condition[5] = 1;
 +    town->analyze.condition_open[7] = 1;
@@ -25905,10 +25879,11 @@ index 00000000..d21b02f3
 +                  moonmod::ApiCallStatus::InvalidArgument);
 +    }
 +
-+    town->parts[2].angle = 24;
++    layout.parts[2].angle = 24;
 +    const moonmod::ApiCallResult malformed_native = config.api_handler(
 +        "test.moonmod.georama", *get, moonmod::Json::array({moonmod::Json{{"town_id", 3}}}));
 +    EXPECT_EQ(malformed_native.status, moonmod::ApiCallStatus::Failed);
++    PortClearTownLayout(*town);
 +}
 +
 +TEST(MoonModGeoramaApi, SetsCompletionThroughNativeRequestConditions) {
@@ -26017,26 +25992,12 @@ index 00000000..d21b02f3
 +    CEditData *town = save->GetEditData(2);
 +    ASSERT_NE(town, nullptr);
 +
-+    EditDataGrid first{};
-+    first.num_x = 2;
-+    first.num_z = 2;
-+    first.pos[0] = 100;
-+    first.pos[1] = -5;
-+    first.pos[2] = 200;
-+    const std::uint8_t first_cells[] = {1, 0, 0x81, 0};
-+    std::memcpy(town->grid, &first, sizeof(first));
-+    std::memcpy(town->grid + sizeof(first), first_cells, sizeof(first_cells));
-+
-+    constexpr std::size_t second_offset = sizeof(EditDataGrid) + sizeof(first_cells);
-+    EditDataGrid second{};
-+    second.num_x = 1;
-+    second.num_z = 2;
-+    second.pos[0] = -30;
-+    second.pos[1] = 0;
-+    second.pos[2] = 40;
-+    const std::uint8_t second_cells[] = {0, 1};
-+    std::memcpy(town->grid + second_offset, &second, sizeof(second));
-+    std::memcpy(town->grid + second_offset + sizeof(second), second_cells, sizeof(second_cells));
++    // The town's river grids are kept in its layout beside the save record (save_json.hpp).
++    TownLayout &layout = PortTownLayout(*town);
++    layout.grids = {
++        TownGrid{.num_x = 2, .num_z = 2, .pos = {100, -5, 200}, .cells = {1, 0, 0x81, 0}},
++        TownGrid{.num_x = 1, .num_z = 2, .pos = {-30, 0, 40}, .cells = {0, 1}},
++    };
 +
 +    moonmod::RuntimeConfig config;
 +    moonmod::ConfigureChronicleTwoApi(config);
@@ -26055,14 +26016,13 @@ index 00000000..d21b02f3
 +    EXPECT_EQ(result.value.at("river_grids").at(1).at("cells"),
 +              moonmod::Json::array({moonmod::Json::array({false, true})}));
 +
-+    EditDataGrid malformed{};
-+    malformed.num_x = 255;
-+    malformed.num_z = 255;
-+    std::memcpy(town->grid, &malformed, sizeof(malformed));
++    layout.grids[0].num_x = 255;
++    layout.grids[0].num_z = 255;
 +    const moonmod::ApiCallResult invalid = config.api_handler(
 +        "test.moonmod.georama-river", *get, moonmod::Json::array({moonmod::Json{{"town_id", 2}}}));
 +    EXPECT_EQ(invalid.status, moonmod::ApiCallStatus::Failed);
-+    EXPECT_NE(invalid.message.find("save-data boundary"), std::string::npos);
++    EXPECT_NE(invalid.message.find("dimensions are invalid"), std::string::npos);
++    PortClearTownLayout(*town);
 +}
 +
 +TEST(MoonModGeoramaApi, SetsNativeRiverGridCellsPersistsReadbackAndIsIdempotent) {
@@ -26403,7 +26363,11 @@ index 00000000..d21b02f3
 +    EXPECT_EQ(placed.value.at("remaining_built"), 0);
 +    EXPECT_TRUE(placed.value.at("changed"));
 +    EXPECT_EQ(save->GetBuildPartsNum(native_id), 0);
-+    ASSERT_EQ(save->GetEditData(3)->GetPartsNumID(native_id), 1);
++    const TownLayout *placed_layout = PortFindTownLayout(*save->GetEditData(3));
++    ASSERT_NE(placed_layout, nullptr);
++    ASSERT_EQ(std::ranges::count_if(placed_layout->parts,
++                                    [native_id](const TownPart &part) { return part.id == native_id && part.state != 0; }),
++              1);
 +    ASSERT_EQ(map.GetePlacePartsAtInfoID(native_id, nullptr, 0), 1);
 +
 +    const moonmod::ApiCallResult town = config.api_handler(
@@ -26530,7 +26494,7 @@ index 00000000..d21b02f3
 +    SPI_STACK common_count{};
 +    common_count.type = SPI_STACK_TYPE_INT;
 +    common_count.value.integer = 1;
-+    ASSERT_EQ(_DATACOMINIT(&common_count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&common_count, 1), 1);
 +    SPI_STACK common_fields[11]{};
 +    const int common_values[] = {weapon_item_no, ITEM_DATA_MAX_MELEE, 0, 1, 1, 144, 4, 23, 300};
 +    for (std::size_t index = 0; index < std::size(common_values) / sizeof(common_values[0]); ++index) {
@@ -26541,7 +26505,7 @@ index 00000000..d21b02f3
 +    common_fields[9].value.string = const_cast<char *>("EVENT_PROBE_BLADE");
 +    common_fields[10].type = SPI_STACK_TYPE_INT;
 +    common_fields[10].value.integer = ITEM_ATTRIBUTE_UNIQUE;
-+    ASSERT_EQ(_DATACOM(common_fields, 11), 1);
++    ASSERT_EQ(moonmod_test::ItemTableAdd(common_fields, 11), 1);
 +    CDataCommon &weapon_common = GameItemDataManage.common_data[0];
 +    std::memset(&weapon_common, 0, sizeof(weapon_common));
 +    weapon_common.type = ITEM_DATA_MAX_MELEE;
@@ -27010,15 +26974,16 @@ index 00000000..27078dbb
 +}
 diff --git a/port/src/tests/moonmod_item_registration_test.cpp b/port/src/tests/moonmod_item_registration_test.cpp
 new file mode 100644
-index 00000000..59fc251a
+index 00000000..557eb143
 --- /dev/null
 +++ b/port/src/tests/moonmod_item_registration_test.cpp
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,214 @@
 +#include <gtest/gtest.h>
 +
 +#include <cstring>
 +#include <memory>
 +
++#include "moonmod_item_table_fixture.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
 +#include "moonmod/chronicle_two_adapter.hpp"
@@ -27029,8 +26994,6 @@ index 00000000..59fc251a
 +#include "userdata.hpp"
 +
 +extern CSaveData *PortActiveSaveData asm("MainLoop_ActiveSaveData");
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +
 +TEST(MoonModItemRegistration, DataOnlyConsumableEntersNativeTablesAndInventory) {
 +    moonmod::ResetChronicleTwoContentForTests();
@@ -27039,7 +27002,7 @@ index 00000000..59fc251a
 +    SPI_STACK common_count{};
 +    common_count.type = SPI_STACK_TYPE_INT;
 +    common_count.value.integer = 1;
-+    ASSERT_EQ(_DATACOMINIT(&common_count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&common_count, 1), 1);
 +    SPI_STACK common_fields[11]{};
 +    const int common_values[] = {0x112, ITEM_DATA_RECOVERY, 0, 1, 10, 30, 3, 17, 100};
 +    for (std::size_t index = 0; index < sizeof(common_values) / sizeof(common_values[0]); ++index) {
@@ -27050,7 +27013,7 @@ index 00000000..59fc251a
 +    common_fields[9].value.string = const_cast<char *>("VANILLA_TONIC");
 +    common_fields[10].type = SPI_STACK_TYPE_INT;
 +    common_fields[10].value.integer = ITEM_ATTRIBUTE_USABLE;
-+    ASSERT_EQ(_DATACOM(common_fields, 11), 1);
++    ASSERT_EQ(moonmod_test::ItemTableAdd(common_fields, 11), 1);
 +
 +    CDataCommon &vanilla_common = GameItemDataManage.common_data[0];
 +    std::memset(&vanilla_common, 0, sizeof(vanilla_common));
@@ -27229,6 +27192,60 @@ index 00000000..59fc251a
 +    PortActiveSaveData = previous_save;
 +    moonmod::ResetChronicleTwoContentForTests();
 +}
+diff --git a/port/src/tests/moonmod_item_table_fixture.hpp b/port/src/tests/moonmod_item_table_fixture.hpp
+new file mode 100644
+index 00000000..9ec8405e
+--- /dev/null
++++ b/port/src/tests/moonmod_item_table_fixture.hpp
+@@ -0,0 +1,48 @@
++#pragma once
++
++#include <cstring>
++
++#include "gamedata.hpp"
++#include "scriptinterpreter.hpp"
++#include "stubs/gamedata.hpp"
++
++// The item table is a JSON document now, without the DATACOMINIT/DATACOM script tags the MoonMod tests seeded it
++// with; these do what those tags did, on the same game state.
++namespace moonmod_test {
++
++/** Starts a common item table of stack->value.integer records, as DATACOMINIT did. */
++inline int ItemTableInit(SPI_STACK *stack, int) {
++    GameItemDataManage.common_num = stack->value.integer;
++    comdatapt_num = 0;
++    comdatapt = GameItemDataManage.common_data;
++    std::memset(local_itemdatano_converttable, -1, sizeof(local_itemdatano_converttable));
++    return 1;
++}
++
++/**
++ * Adds one common item record, as DATACOM did: item number, type, list number, active set, stack, maximum,
++ * icon texture, icon, message, file name and attribute.
++ */
++inline int ItemTableAdd(SPI_STACK *stack, int) {
++    CDataCommon *record = comdatapt;
++    record->item_no = static_cast<short>((stack++)->value.integer);
++    record->type = static_cast<short>((stack++)->value.integer);
++    record->list_no = static_cast<short>((stack++)->value.integer);
++    record->active_set = static_cast<short>((stack++)->value.integer);
++    record->stack_num = static_cast<short>((stack++)->value.integer);
++    record->max_num = static_cast<short>((stack++)->value.integer);
++    record->icon_texture_no = static_cast<short>((stack++)->value.integer);
++    record->icon_no = static_cast<short>((stack++)->value.integer);
++    record->message_no = static_cast<short>((stack++)->value.integer);
++    if (const char *name = (stack++)->value.string; name != nullptr) {
++        std::strncpy(record->file_name, name, sizeof(record->file_name) - 1);
++    }
++    record->attribute = static_cast<decltype(record->attribute)>(stack->value.integer);
++    record->name = nullptr;
++    local_itemdatano_converttable[record->item_no] = static_cast<short>(comdatapt_num);
++    comdatapt_num += 1;
++    comdatapt++;
++    return 1;
++}
++
++} // namespace moonmod_test
 diff --git a/port/src/tests/moonmod_location_registration_test.cpp b/port/src/tests/moonmod_location_registration_test.cpp
 new file mode 100644
 index 00000000..fd2af82c
@@ -28413,10 +28430,10 @@ index 00000000..84f0ed06
 +}
 diff --git a/port/src/tests/moonmod_party_events_test.cpp b/port/src/tests/moonmod_party_events_test.cpp
 new file mode 100644
-index 00000000..79dd7cfd
+index 00000000..49128f67
 --- /dev/null
 +++ b/port/src/tests/moonmod_party_events_test.cpp
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,318 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -28429,6 +28446,7 @@ index 00000000..79dd7cfd
 +#include <string_view>
 +#include <vector>
 +
++#include "moonmod_item_table_fixture.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
 +#include "platform/game_loop_state.hpp"
@@ -28440,8 +28458,6 @@ index 00000000..79dd7cfd
 +
 +extern CSaveData *PortActiveSaveData asm("MainLoop_ActiveSaveData");
 +extern int PortLoopNo;
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +
 +namespace {
 +
@@ -28610,7 +28626,7 @@ index 00000000..79dd7cfd
 +    SPI_STACK common_count{};
 +    common_count.type = SPI_STACK_TYPE_INT;
 +    common_count.value.integer = 2;
-+    ASSERT_EQ(_DATACOMINIT(&common_count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&common_count, 1), 1);
 +    for (int index = 0; index < 2; ++index) {
 +        SPI_STACK common_fields[11]{};
 +        const int item_no = index == 0 ? target_weapon_no : current_weapon_no;
@@ -28623,7 +28639,7 @@ index 00000000..79dd7cfd
 +        common_fields[9].value.string = const_cast<char *>(index == 0 ? "TARGET_SWORD" : "CURRENT_SWORD");
 +        common_fields[10].type = SPI_STACK_TYPE_INT;
 +        common_fields[10].value.integer = ITEM_ATTRIBUTE_UNIQUE;
-+        ASSERT_EQ(_DATACOM(common_fields, 11), 1);
++        ASSERT_EQ(moonmod_test::ItemTableAdd(common_fields, 11), 1);
 +
 +        CDataCommon &common = GameItemDataManage.common_data[index];
 +        std::memset(&common, 0, sizeof(common));
@@ -29174,10 +29190,10 @@ index 00000000..f247c151
 +}
 diff --git a/port/src/tests/moonmod_signature_api_test.cpp b/port/src/tests/moonmod_signature_api_test.cpp
 new file mode 100644
-index 00000000..c28c2ac4
+index 00000000..a5b2f63d
 --- /dev/null
 +++ b/port/src/tests/moonmod_signature_api_test.cpp
-@@ -0,0 +1,422 @@
+@@ -0,0 +1,421 @@
 +﻿#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -29193,6 +29209,7 @@ index 00000000..c28c2ac4
 +
 +#include "dng_main.hpp"
 +#include "gamedata.hpp"
++#include "moonmod_item_table_fixture.hpp"
 +#include "inventmn.hpp"
 +#include "mainloop.hpp"
 +#include "mg_memory.hpp"
@@ -29206,8 +29223,6 @@ index 00000000..c28c2ac4
 +
 +extern CSaveData *PortActiveSaveData asm("MainLoop_ActiveSaveData");
 +extern int PortLoopNo;
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +
 +namespace {
 +
@@ -29252,7 +29267,7 @@ index 00000000..c28c2ac4
 +    SPI_STACK count{};
 +    count.type = SPI_STACK_TYPE_INT;
 +    count.value.integer = 2;
-+    ASSERT_EQ(_DATACOMINIT(&count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&count, 1), 1);
 +
 +    const int item_numbers[] = {ITEM_ID_PHOTO_ALBUM, ITEM_ID_CAMERA};
 +    for (std::size_t index = 0; index < std::size(item_numbers); ++index) {
@@ -29266,7 +29281,7 @@ index 00000000..c28c2ac4
 +        fields[9].value.string = const_cast<char *>("SIGNATURE_ITEM");
 +        fields[10].type = SPI_STACK_TYPE_INT;
 +        fields[10].value.integer = ITEM_ATTRIBUTE_USABLE;
-+        ASSERT_EQ(_DATACOM(fields, 11), 1);
++        ASSERT_EQ(moonmod_test::ItemTableAdd(fields, 11), 1);
 +
 +        CDataCommon &common = GameItemDataManage.common_data[index];
 +        common.item_no = item_numbers[index];
@@ -29793,10 +29808,10 @@ index 00000000..7f4fa00e
 +}
 diff --git a/port/src/tests/moonmod_weapons_api_test.cpp b/port/src/tests/moonmod_weapons_api_test.cpp
 new file mode 100644
-index 00000000..b2ee55bf
+index 00000000..4db8e906
 --- /dev/null
 +++ b/port/src/tests/moonmod_weapons_api_test.cpp
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,229 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -29805,14 +29820,13 @@ index 00000000..b2ee55bf
 +#include <string>
 +
 +#include "gamedata.hpp"
++#include "moonmod_item_table_fixture.hpp"
 +#include "scriptinterpreter.hpp"
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "savedata.hpp"
 +#include "userdata.hpp"
 +
 +extern CSaveData *PortActiveSaveData asm("MainLoop_ActiveSaveData");
-+int _DATACOMINIT(SPI_STACK *stack, int arg_count);
-+int _DATACOM(SPI_STACK *stack, int arg_count);
 +
 +TEST(MoonModWeaponsApi, ListsNativeDefinitionsAndReadsOwnedWeaponState) {
 +    GameItemDataManage.Initialize();
@@ -29821,7 +29835,7 @@ index 00000000..b2ee55bf
 +    SPI_STACK common_count{};
 +    common_count.type = SPI_STACK_TYPE_INT;
 +    common_count.value.integer = 1;
-+    ASSERT_EQ(_DATACOMINIT(&common_count, 1), 1);
++    ASSERT_EQ(moonmod_test::ItemTableInit(&common_count, 1), 1);
 +    SPI_STACK common_fields[11]{};
 +    const int common_values[] = {item_no, ITEM_DATA_MAX_MELEE, 0, 1, 1, 144, 4, 23, 300};
 +    for (std::size_t index = 0; index < sizeof(common_values) / sizeof(common_values[0]); ++index) {
@@ -29832,7 +29846,7 @@ index 00000000..b2ee55bf
 +    common_fields[9].value.string = const_cast<char *>("PROBE_SWORD");
 +    common_fields[10].type = SPI_STACK_TYPE_INT;
 +    common_fields[10].value.integer = ITEM_ATTRIBUTE_UNIQUE;
-+    ASSERT_EQ(_DATACOM(common_fields, 11), 1);
++    ASSERT_EQ(moonmod_test::ItemTableAdd(common_fields, 11), 1);
 +
 +    CDataCommon &common = GameItemDataManage.common_data[0];
 +    std::memset(&common, 0, sizeof(common));
