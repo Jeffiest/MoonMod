@@ -160,6 +160,13 @@ This checks that the tools still read the game's data correctly, and that each o
 keyed, frames in order, rotations clean. It also checks that the first pose is a real native pose, so the motion
 won't snap when it starts. Fix anything marked `FAIL` before shipping.
 
+Its last section, "how they move", runs `tools/anim/motion_checks.py` over Toan's files: a limb turning faster against
+his body than his own motions ever turn one fails, and a file named for an evade (roll, dodge, tumble, step) is also
+checked for a whipping blade, a slow push-off and its lead foot. Those are warnings and notes, not failures. The
+reference importer runs the same checks on every motion it writes, which is where they matter most: a retarget brings
+in another game's timing and another skeleton's turns. `tools/anim/hold_bone.py` eases a snapping bone across a span
+of frames.
+
 ### 6. Ship it in a mod
 
 The mod's layout (all of it is in [`examples/new-move`](../examples/new-move)):
@@ -231,6 +238,22 @@ These come from building Toan's set. Each one was a real problem first.
   (the roll's recovery has one with the blade lifted over his shoulder).
 - **Anticipation and settle.** A small wind-up before the action and a beat held after it make it read: the chop's
   raise and its held frame. Ease into a strike with `"in"` and out of it with `"out"`.
+- **Ease the start; don't snap a limb in one frame.** Toan's dive roll first flipped both arms from behind him to
+  ahead of him between two frames, and dropped into its crouch at a flat rate. Easing the crouch out of the run and
+  giving the arm swing two frames made it read as a push-off. Later, cutting the crouch to three frames squeezed the
+  same swing back into one frame (174 degrees), and his left hand flipped flat for the plant in another (180).
+  `motion_checks.py` finds these: no native motion of his turns a limb faster than about 57 degrees a tick against
+  his body.
+- **An evade should feel instant.** The push-off within 0.1 to 0.15 s of the press; longer reads as input lag that
+  isn't there. Vigil's roll pushes off at 0.11 s. Its first frames would still be smeared by the engine's fade from
+  the run (10 ticks for the player), so the move sets `blend_in` (3 frames for an evade, 4 for an attack).
+- **Hold the weapon still in the hand.** A hand reworked key by key can leave the wrist turning a long way between
+  frames, so the blade whips around. Measure the wrist's turn against the chest from frame to frame; if it isn't the
+  body's own motion, set the wrist from a held grip (Vigil's roll keeps it against his chest).
+- **Push off the lead foot.** A move out of a run can come in two versions, one pushing off each foot, and
+  `player.moves_set`'s `variants` picks the one for the point of the stride he's at (Toan's run, native motion 1, has
+  the right foot ahead for its first 30% and last 20%). Vigil builds the right-foot roll by mirroring the legs of the
+  left-foot one across his hips until he leaves the floor, then blending back.
 - **Mind the off hand.** It's easy to pose the weapon hand and forget the other. Place both hands in every keypose.
 - **Check in game, not just on the sheet.** The stick figure doesn't show the mesh, the cloth or the camera. The
   backstep's float was visible only in game.
@@ -336,6 +359,11 @@ you'd ship.
 
 - `game.animations.player_register({id, file})`, `player_unregister({id})`, `player_list()`: up to 64 motions a mod.
   See [API: playable-character motions](API.md#chronicle-playable-character-motions-animationsplayer_register).
+- `game.animations.monster_register({id, file, model, hits})`, `monster_unregister({id})`, `monster_list()`: the same
+  files for a native monster model (`character` is its file name, `e03a`), with optional hit spheres; the motion number
+  and first frame come from `monster_list` once a floor has loaded the model. Open `Rig(chr, gltf,
+  cfg_name="info.cfg")` on the monster's `dun/monstor` files; `tools/anim/vigil_monster_moves.py` builds a roll and an
+  attack for two monsters. See [API: monster motions](API.md#chronicle-monster-motions-animationsmonster_register).
 - `game.player.moves_set({moves = {...}})`, `moves_clear()`: up to 64 moves a mod. The event `game.player.move` fires
   as one starts. See [API: mod moves](API.md#chronicle-mod-moves-playermoves_set).
 - Triggers: `run_attack`, `guard_attack`, `dodge` (L2 with the stick pushed), `dodge_back` (L2 at rest),

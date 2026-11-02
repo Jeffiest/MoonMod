@@ -1,0 +1,14 @@
+{
+  "mod": "moonmod.vigil",
+  "about": "Elden Ring's straight sword (a023), one-handed, on Toan's Vigil attack slots. Paths are inside the reference cache; nothing of the game is in this file.",
+  "motions": {
+    "toan_heavy":         {"anim": "game/a023/a023_030200.hkx"},
+    "toan_finisher_2":    {"anim": "game/a023/a023_030210.hkx"},
+    "toan_finisher_3":    {"anim": "game/a023/a023_030040.hkx"},
+    "toan_run_attack":    {"anim": "game/a023/a023_030400.hkx"},
+    "toan_roll_attack":   {"anim": "game/a023/a023_030300.hkx"},
+    "toan_guard_counter": {"anim": "game/a023/a023_030700.hkx"},
+    "toan_lunge":         {"anim": "game/a023/a023_030505.hkx"},
+    "toan_back_attack":   {"anim": "game/a023/a023_030500.hkx"}
+  }
+}

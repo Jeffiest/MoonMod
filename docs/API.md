@@ -595,7 +595,8 @@ plates and lettering, driven by the pad or the mouse, and spread across a wide w
   `good`, `bad`, `dim` or `gold`. Left/right (or L1/R1) move, Cross takes, Circle backs out when `cancel` is set; the
   mouse picks the card under it. The owner gets `ui.choice_made` `{id, index}` (index from 1) or `{id, cancelled =
   true}`. One panel at a time; it waits for play to be free (not mid-chest) before it shows. Notices hold back while it
-  is up. `ui.choice_close()` takes it away.
+  is up. `ui.choice_close()` takes it away. With `town = true` it opens in a town too while the party walks free: there
+  the town goes on around it and only the party's controls wait. Without it a panel opens only in dungeon play.
 - `ui.run_menu_set({title, tabs = {{id, title, lines?, rows?}, ...}})` gives the mod a run menu: while it has one,
   Start in a dungeon opens it in place of the bare pause. Up to 6 tabs (L1/R1) of up to 64 rows (`{id, label, value?,
   detail?, tone?, enabled?}`); a side pane shows the tab's lines and the chosen row's detail. Cross on an enabled row
@@ -617,6 +618,19 @@ plates and lettering, driven by the pad or the mouse, and spread across a wide w
   weapon the party already holds (or one already in a chest on the floor) and gets another of the same character's;
   `rare` is the percent chance a chest weapon steps up to a stronger one for the same character (up to about half
   again its attack); `large_chests` is the share of large chests, where weapons are (retail 12). `{}` restores retail.
+- `world.set_roads({enabled})`: `{enabled = true}` makes walking out of a town's gate (the ground that opened the world
+  map) send `game.town.road` `{town_id, location_id}` instead, once each time the party walks onto it; the world map
+  no longer opens there. Where the gate's ground isn't beside the spot the world map sets the party down (Norune,
+  Queens) or the town has none (Yellow Drops), standing on that spot facing out of the town sends it. The mod takes
+  the road itself, with `world.transition` to another town or `dungeons.enter_floor({dungeon_id, floor_id = 0})`; with
+  quick passage on, a jump between two towns holds the picture as one between a town and a dungeon does. One mod at a
+  time; unloading the mod gives the world map back. Returns `{enabled}`. Vigil turns it on for a Vigil World save.
+- `dungeons.set_quick_passage({enabled})`: `{enabled = true}` goes between a town and a dungeon (either way) with no loading card, no title the game holds for several seconds and no fade: the last picture stays on screen while the other side builds (at most ten seconds) and the first picture of the other side replaces it. The town and the dungeon both stay loaded (each keeps its own memory and textures), and each is drawn live through the other's way through, from where the camera stands: the cave seen through the town's door, the town seen through a doorway in the cave wall behind where the party arrived. Walking into that doorway, facing it, goes back to the town, which is gone back to as it was left (its villagers where they stood, its clock running on), not loaded again; it stands the party just outside the town's door, facing out, the camera behind them. A place shows through only once both sides have been visited. Going from one floor of a dungeon to another of the same dungeon (`dungeons.enter_floor`, such as a story floor through its smoke) shows no card either: the floor fades out as ever, the black holds while the next floor builds, and the next floor is there once the party can play on it. `{enabled = false}` gives the card back. One mod at a time; unloading the mod gives it back. Returns `{enabled}`. Vigil turns it on for a Vigil World save.
+- `dungeons.set_npc_models({models = {{dungeon_id, npc, pack, cfg, motion}, ...}})`: loads up to three character packs into a dungeon's free NPC slots (`npc` 1-3; slot 0 is the one its floors' parts use) whenever that dungeon's map loads, for `set_npc_marks` to stand. `pack` is a game path `dun/.../<stem>.chr` or `gedit/.../<stem>.chr` (a scene's pack draws its people textured: Divine Beast Cave's Fairy King is `dun/d01/event/e28c03c.chr`); `cfg` is the pack's config, `<stem>.cfg` by default (`base.cfg` for `dun/mainchara`); `motion` the loop it plays (0). It takes effect from the dungeon's next map load, so ask before entering. `{}` stops; one mod at a time; unloading the mod stops it. Returns `{models}`.
+- `dungeons.set_npc_marks({marks = {{npc, x, y, facing}, ...}})`: stands the map's NPCs (a floor's own, or ones `set_npc_models` loaded) at cells of the floor the player is on, up to 16, each facing 0-3. They are drawn while that floor (its map seed) stays; a floor built again needs them asked again. Fails when the player isn't on a dungeon floor or the slot holds no character. `{}` takes them away; one mod at a time. Returns `{marks}`.
+- `dungeons.play_event({program})`: plays program `program` of the dungeon's event script (its scenes, `dun/script/dNN/event.stb`, which a mod can replace with `resources.override`) on the floor the player is on, the way a monster's script asks for one. Fails when there is no such program, a scene is already starting, or the player is not free on a floor. When it is over, `game.dungeon.event_ended` `{program, dungeon_id, floor_id, frame}` goes to that mod only; the floor's monsters are gone after a scene, so build the floor again (`enter_floor`). Returns `{program}`.
+- `dungeons.set_floor_select({enabled})`: `{enabled = false}` turns the dungeon entrance's floor menu off, so the entrance takes the player straight to the dungeon's first floor (a resumed floor still wins; a mod then starts the player where it likes, such as `dungeons.set_arrival`). `{enabled = true}` gives the menu back. One mod at a time; unloading the mod gives it back. Returns `{enabled}`. Vigil turns it off for a Vigil World save, whose dungeons are one map each.
+- `dungeons.set_story_exits({title?, text?})`: on a floor of the game's own design (a fixed map, not generated), pressing at the gate that wants the floor's key (its `gatekey` marker) opens a panel (the title, default "LEAVE THIS FLOOR?", and the text) with *Leave* and *Stay*, Stay first, in place of the lock. Either way the gate stays shut: the mod hears `game.dungeon.story_exit` `{left, dungeon_id, floor_id}` and takes the player on itself (Vigil enters the next floor with `dungeons.enter_floor`). One mod at a time; `{}` takes it back, as does unloading the mod.
 - `dungeons.set_backrooms({free, title?, text?, stay?, lines?})`: the back floor's stairs no longer ask for the gate key; walking onto
   them puts up a choice panel (`title`, `text`, Enter / Not now) instead of the key window, and Enter goes down at
   once. The key the stairs take is given back below. Acting at the back floor's entrance itself (the tram, the
@@ -688,19 +702,40 @@ play them by name (`player.moves_set`, `animation`). A mod registers up to 64. T
 these files from a character's own rig; see the [animation guide](ANIMATION_GUIDE.md) and
 [Gauntlet animations](GAUNTLET_ANIMATIONS.md).
 
+### Chronicle monster motions (`animations.monster_register`)
+
+`animations.monster_register({id, file, model, hits?})` adds a mod's own motion to a native monster model (`model`,
+the native model id, as `entities.query`'s `native_model_id`: 1 the Skeleton Soldier, 3 the Dasher). The file is the
+same `moonmod-motion` v1 format, its `character` the model's file name (`e03a`, `e06a`); bone names may keep a frame's
+attribute (`knife__m`). Whenever a floor loads the model, its registered motions are appended after its last native
+frame, on the model, its shadow and each part it carries, in the order they were registered, and its first motion
+set grows by one motion number for each. A registration counts from the next load of the model (the next floor), so
+register at load. `hits` (up to 4: `{bone, radius (default 2, up to 40), from, to, damage (default 1, up to 10)}`)
+become damage spheres on the named frame of every monster of the model as it spawns, live while the motion's frame
+lies between `from` and `to` (the motion's own frames): each deals the kind of hit of the monster's first native blow,
+and that blow's damage times `damage`. `animations.monster_unregister({id})` takes one back from the next load
+(unloading takes all); `animations.monster_list()` lists the mod's monster motions with `motion` (the number to give
+`SET_MOTION`) and `start` (its first frame, what `CHK_MOTION_FRM` reads while it plays) once a loaded floor model
+carries them, nil before. A mod registers up to 64. Vigil's rolls and attacks are an example
+(`tools/anim/vigil_monster_moves.py`, `MONSTER_MOVES` in `mods/moonmod.vigil/main.lua`).
+
 ### Chronicle mod moves (`player.moves_set`)
 
 `player.moves_set({moves = {...}})` gives characters this mod's own attacks, up to 160, replacing the mod's earlier set;
 `player.moves_clear()` takes them back (and unloading does). A move replays a stretch of one of the character's own
 native motions at its own speed and brings its own lunge, spin, hits, bursts, sounds and trail, in place of the native
-action. Mods hear `game.player.move` ({id, owner, character, cancel}) as one starts.
+action. Mods hear `game.player.move` ({id, owner, character, cancel, variant}) as one starts (`variant` is the number of
+the variant that played, or nil).
 
 - `id` (1-40 bytes), `character` (one of the six), `trigger`:
   - `run_attack`: the attack button after running for `run_frames` (1-300 game steps, two drawn frames each),
     still running as attack is pressed (stick pushed hard, nothing locked on; locking on doesn't count as running).
   - `guard_attack`: the attack button while guarding (locked on, R1 held).
   - `dodge` / `dodge_back`: L2 with the stick pushed (the move turns the way it points) / at rest (he keeps his
-    facing). An evade takes L2 ahead of the tuning dodge (`dodge_power`). It also cuts an attack short: a swing of
+    facing). A `dodge` can take a `direction`: `any` (the default), or, while locked on, `toward` or `away` (the stick
+    within 45 degrees of the way to the target, or of the way from it) or `left` or `right` (the stick between them).
+    A `left` or `right` dodge keeps him facing the target and carries him the way the stick points: a side roll.
+    The dodge for the stick's way wins, and an `any` dodge takes the rest. An evade takes L2 ahead of the tuning dodge (`dodge_power`). It also cuts an attack short: a swing of
     the character's own combo, or one of the mod's attack moves, once its last blow is `cancel_after` steps past
     (0-60, default 2). `cancel = false` turns that off. Specials (the jump slash, the wave), a charge being held and
     another evade can't be cut. Evades keep their own cooldown, apart from the attack moves'. `game.player.move`
@@ -726,9 +761,24 @@ action. Mods hear `game.player.move` ({id, owner, character, cancel}) as one sta
     as it reaches `min_charge`.
 - `motion` (native motion number 0-63) or `animation` (a motion registered with `animations.player_register`: the
   mod's own id, or `"mod:id"`), `from`/`to` (the stretch, fractions 0-1), `speed` (0.2-4, motion units a step).
+- `variants` (up to 4, for a move with an `animation`): `{animation, motion, from?, to?}`, another registered motion
+  that plays instead when the move starts while the character is in native motion `motion` (0-63), between the
+  fractions `from` and `to` of it (default 0 and 1). The first that matches wins. Vigil's roll pushes off whichever
+  foot leads: Toan's run is his native motion 1, his right foot ahead for its first 30% and its last 20%:
+
+  ```lua
+  {id = "roll", character = "toan", trigger = "dodge", animation = "toan_dive_roll", -- off his left foot
+   variants = {{animation = "toan_dive_roll_right", motion = 1, from = 0, to = 0.3},
+               {animation = "toan_dive_roll_right", motion = 1, from = 0.8, to = 1}}}
+  ```
 - `lunge` (0-6) and `lunge_decay` (0.01-2): a push the way the stick points (else the way the character faces). Every
   move but `run_attack` and the evades faces the lock target if there is one (and pushes that way).
   `lunge_angle` (-180 to 180): the push's angle from the way he faces (180 pushes him backward).
+  `blend_in` (1-30 frames): how quickly the move takes over from the pose he is in. The engine fades from it over 10
+  ticks otherwise, which smears the first frames of a quick move; Vigil fades its evades in over 3 and its attacks
+  over 4.
+  `camera` (1-14 steps): how quickly the follow camera closes on the character while the move plays. The game's own
+  is 8 (14 locked on), which leaves the camera trailing a roll by 20 units; Vigil gives Toan's evades 3.
   `spin` (-4 to 4): whole turns, made between `spin_from` and `spin_to` (fractions of the move, default the whole). `invincible`: no hits land during it. `gauge` (0-100): action gauge
   spent, and the move needs that much. `wear` (0-5): weapon wear, as a swing's. `cooldown` (0-600 steps).
 - `hits` (up to 12): `{at (0-1 through the move), radius (1-40), reach (-20 to 40, ahead of the character), height,
@@ -1165,6 +1215,15 @@ and 120 (killed). Calling `game.scripts.call({id = "native.monster.run"})` runs 
 does not call it takes the monster over for that program. The program then counts as finished, so the hook runs again
 on the next frame, and a mod can drive the monster each frame with `monsters.call`.
 
+`ctx.model` is the floor's model slot (0-2, the order the floor loads its monsters in), not the monster's kind: find
+the kind from `entities.query`'s `native_model_id` for `ctx.entity`. The hook runs when a program starts. A monster's
+retail idle loop (100) never ends on its own, so when a mod installs or removes a `native.monster.run` override, every
+monster then in its retail idle loop starts it again once: the new override takes it over on the next frame. A
+monster's spawn script may set up things its other programs rely on: a Skeleton Soldier's opens a guard window over
+its guard motions (`SET_GUARD_FRAME` 100-120), so a brain that plays those motions blocks. Vigil's enemy brain is a
+full example: Dashers and Skeleton Soldiers that circle, feint, block, punish a whiff and wait their turn
+(`mods/moonmod.vigil/main.lua`, *Enemies that fight like it*).
+
 ```lua
 game.scripts.override({id = "native.monster.run"}, function(ctx)
   if ctx.program_no == 100 and ctx.model == 3 then
@@ -1228,7 +1287,7 @@ the game restarted.
 
 ### Procedural floor layout (`dungeons.set_layout`)
 
-Retail Chronicle builds every floor on a 20 x 20 grid and places at most 6 rooms (3-4 cells wide) in its top-left 16 x 16 corner. The Chronicle PC port enlarges the grid to 48 x 48 (`DNG_GRID`) and the room table to 64 (`DNG_ROOM_MAX`). Chronicle Two builds procedural floors on a 30 x 30 grid (`DNG_GRID = 30`) and enlarges its room table from 8 to 64 (`DNG_ROOM_MAX = 64`). Without a mod setting, floors still use the retail room count, area, and sizes.
+Retail Chronicle builds every floor on a 20 x 20 grid and places at most 6 rooms (3-4 cells wide) in its top-left 16 x 16 corner. The Chronicle PC port enlarges the grid to 96 x 96 (`DNG_GRID`) and the room table to 160 (`DNG_ROOM_MAX`). Chronicle Two builds procedural floors on a 30 x 30 grid (`DNG_GRID = 30`) and enlarges its room table from 8 to 64 (`DNG_ROOM_MAX = 64`). Without a mod setting, floors still use the retail room count, area, and sizes.
 
 ```lua
 local layout = assert(game.dungeons.set_layout({rooms = 24, area = 26, room_min = 3, room_max = 5}))
@@ -1237,6 +1296,152 @@ assert(game.dungeons.set_layout({})) -- back to the native layout
 ```
 
 `rooms` (2-64) is required unless resetting with `{}`; `area` (8-46 in Chronicle, default 46; 8-30 in Chronicle Two, default 30) is the side of the corner rooms are placed in; `room_min`/`room_max` (Chronicle 3-6, Chronicle Two 2-6; default 3-4) bound each room's side; Chronicle needs 3 because it puts a room's door on the middle cell of a wall and a 2-cell wall would put it on a corner, which has no door piece, and `area` must exceed `room_max`. In Chronicle Two, `room_min`/`room_max` also filter the floor builder's preset room table (`CreateRandomRoom`). The layout is global, stays until changed (unloading the mod does not reset it) and is not saved; a floor already built keeps its layout.
+
+### The same floor again (`dungeons.set_seed`, Chronicle)
+
+Every Chronicle floor is built from a seed, and a floor built from the same seed (with the same layout requests) comes out the same, cell for cell, with the same chests and monsters. `game.dungeon.generated` reports the seed a floor was built from, and `dungeons.set_seed` builds the next new floor from a seed you kept:
+
+```lua
+moonmod.on("game.dungeon.generating", function(e)
+  local kept = game.save.get("floors") or {}
+  local seed = not e.back_floor and kept[e.dungeon_id .. ":" .. e.floor_id]
+  if seed then game.dungeons.set_seed({seed = seed}) end
+end)
+moonmod.on("game.dungeon.generated", function(e)
+  if e.back_floor then return end
+  local kept = game.save.get("floors") or {}
+  kept[e.dungeon_id .. ":" .. e.floor_id] = e.floor_seed
+  game.save.set("floors", kept)
+end)
+```
+
+`seed` is an integer from 0 to 2147483647 (the floors the game picks itself use 0-21474); `{}` drops a seed not used yet. The seed is used **once**, by the next floor built for the first time, and then cleared. A back floor follows its floor, not the seed. A floor that can't be crossed is still built again from another seed, so keep the `floor_seed` that `game.dungeon.generated` reports rather than the one you asked for. The result is `{seed, previous}`, each a number or `"random"`. `world.get().floor_seed` reads the current floor's seed. `game.save` is per mod, not per save slot: key the floors by `game.save.slot_id()` as Vigil does.
+
+`game.dungeon.generated` fires once a floor is built, after any rebuilds, with `dungeon_id`, `floor_id`, `back_floor`, `floor_seed` and `room_count`.
+
+`game.dungeon.resumed` fires instead of `generating`/`generated` when the floor is not built at all: with connected worlds (quick passage), walking back into a dungeon through its town's door onto the floor the party left there goes back to that floor as it was, its monsters, chests and event flags with it. It carries `dungeon_id` and `floor_id`. Treat it as "the party is on this floor again", not as a new floor.
+
+With connected worlds, a town whose door into its dungeon is known (Norune's cave door; Matataki's forest path is known too, but Wise Owl Forest's walk-in can't be run unseen yet, so it is built on the first visit) also builds that dungeon's first floor unseen as the town loads, so the cave shows through the door before the first visit. That build sends `game.dungeon.generating` and `game.dungeon.generated` with `prebuild = true` while the party is still in town (no save is written for it); walking in then sends `game.dungeon.resumed`. A mod that reacts to a floor being entered should wait for the party to be there (`game.world.location_changed` with `context = "dungeon"`, or `game.dungeon.resumed`). Rules that decide how the build goes (`dungeons.set_quick_passage`, `dungeons.set_floor_select`) must be set by `game.scene.will_enter`, which comes before the town is made. If the floor's opening script would start another scene, the floor is not prebuilt.
+
+### Chests that stay opened (`dungeons.set_opened_chests`, `dungeons.chests_get`, Chronicle)
+
+A floor built again from its seed puts its chests down in the same order, so a chest's **number** names it from visit to visit. `game.chest.opened` reports the number when the player opens one, and `dungeons.set_opened_chests` opens those chests (lid up, empty, gone from the mini map, no Gilda) as the floor is built again:
+
+```lua
+moonmod.on("game.chest.opened", function(e)
+  if not e.chest then return end -- a mod changed a loot table
+  local kept = game.save.get("chests") or {}
+  local k = e.dungeon_id .. ":" .. e.floor_id .. (e.back_floor and ":back" or "")
+  kept[k] = kept[k] or {}
+  table.insert(kept[k], e.chest)
+  game.save.set("chests", kept)
+end)
+moonmod.on("game.dungeon.generating", function(e)
+  if e.back_floor then return end
+  local kept, k = game.save.get("chests") or {}, e.dungeon_id .. ":" .. e.floor_id
+  -- ... game.dungeons.set_seed({seed = ...}) as above, then:
+  game.dungeons.set_opened_chests({chests = kept[k], back_chests = kept[k .. ":back"]})
+end)
+```
+
+`chests` is for the floor and `back_chests` for its back floor, which is built straight after it; each is a list of chest numbers 0-63, and each is used **once**, by the next build of that floor. `{}` drops lists not used yet. It only makes sense with `set_seed`: on a floor from another seed the numbers are other chests. The result is `{chests, back_chests}`, the counts held. Mimics are never opened this way.
+
+`game.chest.opened` fires once per chest the player opens, with `dungeon_id`, `floor_id`, `back_floor`, `chest`, `item_id` and `large`. It also fires with the `dungeons.loot_override` result when a mod changes a loot table; that payload has no `chest`.
+
+`dungeons.chests_get()` lists the chests on the player's floor: `{back_floor, chests = {{chest, large, opened, item_id, x, z}, ...}}`, mimics left out. It fails outside a dungeon floor.
+
+The floor's map (item 233) and magic crystal (234) only work on the visit they're found on; Vigil leaves their chests to fill again.
+
+### Zones joined by locked gates (`dungeons.set_zones`, `dungeons.zones_get`, Chronicle)
+
+A floor built while zones are on is a chain of 2-4 **zones** on one map, joined by **zone gates**: you walk from one zone into the next with no load. Each zone is built in its own square of the grid (a snake: east, south, then west), its rooms joined only to each other; one corridor joins it to the zone before, and that corridor's doorway into the zone is a locked gate. The stair down stands in the first zone and the stair up in the last. A monster standing in the zone before a gate carries its key (a small chest there holds it when no monster does), and the gate opens when the player reaches it holding the key, which is used up.
+
+```lua
+-- floors built from now on: two zones of five rooms; the gate into zone 1 (the second) already opened
+game.dungeons.set_zones({zones = {{rooms = 5}, {rooms = 5}}, open = {1}})
+game.dungeons.set_zones({}) -- floors as the game builds them
+```
+
+- `zones`: 2-24 zones of 2-12 rooms each (the first needs 2), 159 rooms in all. Zones are numbered from 0; gate `n` leads into zone `n`. The zones' squares (each the build area, 16 cells by default) snake two wide down the grid, so eight zones of a 16-cell area take 32 x 64 cells; a request of more than eight snakes five wide (24 zones take 80 x 80). Zones whose squares would not fit (a large `set_layout` area) are left off.
+- `open`: gates to build open (a list of 1 to zones - 1), for a floor built again from its seed whose gates the player already opened. Keep them the way Vigil does: `game.dungeon.zone_gate_opened` reports each.
+- `source_floor` (per zone, 0-99): the zone takes that floor's monsters, atla and chest items, so one map can hold several of the game's floors (a **region**; Vigil makes all of Divine Beast Cave one map this way). The monster models of all the zones' floors are loaded together (up to 48 kinds, in the whole model arena) and each stands only in its own floor's zone; each zone lays its floor's atla, and picking one up credits its own floor. The HUD's floor number follows the zone the player stands in. Without it a zone takes the floor being built.
+- `exit_floor` (0-99): where the floor's exit gate leads instead of the next floor (past a region's last floor). It also ends the floor the way the game's own `_SET_FLOOR_LEVEL` would.
+- `shrines = true`: each zone has a **shrine**, a healing spring against the top wall of its shrine room (the first zone's first room, a later zone's gate room), and no room gets a random spring. No monster starts within two and a half cells of the spot in front of a shrine, so a party that rests or arrives there isn't set upon at once (monsters can still walk in).
+- `shrine_heal = false`: those springs refill the water gauge but leave HP alone (a mod whose rest heals, for a price), and Cross pressed in one no longer shows the game's "Recover health and thirst here". The default heals as the game's springs do.
+- `sanctuary = true` (with `shrines`): no monster steps within 400 units (two and a half cells) of the spot in front of any shrine's spring, the circle no monster starts in. One that steps in, chasing or knocked back, is put at the circle's edge. Off by default.
+- `smoke` (a list of 1 to zones - 1): those gates are **smoke gates**: a wall no key opens, drawn as a curtain of pale smoke rising in front of its door, and no monster carries a key for it. Walking up to one is `game.dungeon.smoke_touched`; what lies beyond is the mod's to offer (Vigil puts a story floor of the game's own there and enters it with `dungeons.enter_floor`). A smoke gate listed in `open` is built open, like any other; don't list one in both.
+- The request stays until changed or `{}`; one mod at a time owns it, and unloading that mod clears it. It applies to the main floor only, never the back floor, and never to a rest floor.
+- A layout that can't be split cleanly (a room that lands outside its zone, a corridor that gets round a gate) is built again from another seed, as an uncrossable floor is; a floor that still won't split after the rebuilds is left whole.
+- The keys are the shortcut keys from the Silver Key down (passing over the one the shortcut doors skip), so a floor with zones has fewer shortcut doors. A locked zone gate shows its key's colour. A map of more than eight zones runs out of keys: from the eighth gate on, the six come round again (a key opens the nearest gate it fits, which is the one before the next that takes it).
+
+`dungeons.zones_get()` returns `{zones, rooms, open, smoke, shrines, shrine_heal, source_floors, exit_floor, floor_zones, current, zone_floors, gates = {{zone, x, y, key, key_item, locked, smoke, carrier}, ...}, shrines = {{zone, x, y}, ...}}` (a smoke gate has no `key`): the request, the zones of the floor the player is on (0 on a floor without zones), the zone the player stands in, each gate with the entity id of the monster carrying its key (while it lives and the gate is locked), and each zone's shrine spring (on the floor the player is on; the request's `shrines` is true or false), and `zone_floors`, the floor each zone of that floor stands for (its `source_floor`, or the floor itself). The cell to stand on in front of a spring is `y + 1`.
+
+A zone's key is never handed out twice: a floor built again while the player still holds the key (or it lies on the floor) gives no monster or chest another.
+
+Events:
+
+- `game.dungeon.zone_entered`: `zone`, `previous` (-1 when the player arrives on the floor, including where `enter_floor` or `set_arrival` puts them: the zone the floor first stood them in isn't reported), `zones`, `floor_id` (the floor the zone stands for; walking into it counts as reaching that floor, for the entrance's floor list).
+- `game.dungeon.zone_gate_opened`: `zone` (the zone behind it), `key`, `x`, `y`.
+- `game.dungeon.zone_gate_locked`: the player reached a locked gate without its key; once while they stay there.
+
+- `game.dungeon.shrine_reached`: `zone`, `x`, `y` (the spring's cell): the player stands in front of a shrine; once until they walk away (and not when a warp puts them there).
+- `game.dungeon.smoke_touched`: `zone`, `x`, `y`: the player walked up to a smoke gate (within about 130 units of its cell); once until they walk away.
+- `game.dungeon.event_ended` (to the `dungeons.play_event` caller only): `program`, `dungeon_id`, `floor_id`, `frame`: the scene it started is over; the floor has no monsters until it is built again.
+- `game.dungeon.story_exit` (to the `dungeons.set_story_exits` owner only): `left` (Leave was chosen), `dungeon_id`, `floor_id`: the player answered a fixed floor's gate.
+
+`DC_ZONE_VISIT=frames` (a test hook) puts the player just outside the first gate that many frames into a zoned floor.
+
+### Shrines, warps and the way out (`dungeons.set_exits`, `dungeons.warp`, `dungeons.enter_floor`, Chronicle)
+
+```lua
+game.dungeons.set_exits({town = "shrines"})                 -- town only by your own way (a shrine's panel)
+game.dungeons.warp({x = 12, y = 6})                          -- this floor's cell 12, 6, at once
+game.dungeons.enter_floor({floor_id = 2, x = 19, y = 8})     -- floor 3 built again from the start; arrive at 19, 8
+game.world.transition({id = "chronicle:location:norune-village"}) -- and leave for town (already there)
+```
+
+- `dungeons.set_exits({town = "shrines" | "any"})`: with `"shrines"` the Escape menu's way out is refused (with the menu's own refusal sound) and the exit gate's continue/leave window doesn't open: the gate leads on to the next floor. Mods hear `game.dungeon.town_refused` `{via = "menu" | "gate"}`. One mod at a time; `"any"`, `{}` or unloading the mod gives the native exits back. A knockout still sends the party to town.
+- `game.dungeon.defeated`: `dungeon_id`, `floor_id`, `gilda` (the wallet before the knockout: the game then halves it, so the event reaches mods after the halving). The whole party was knocked out in a dungeon and the game is about to fade to town (with the game's debug mode on, which `--jump` turns on, the party gets up again instead and nothing is sent). A mod that wants the party somewhere else can call `dungeons.enter_floor` with `dungeon_id` once the town is up. The party stands where it fell until the fade ends, so `player.get().position` still reads that spot.
+- `dungeons.warp({x, y, teleport?})` moves the player to a cell of the floor they are on (one with something to stand on), facing north (toward a room's top wall, where a spring stands), with the camera behind. With `teleport = true` the screen comes up from black as the escape item's light plays around the player, who (with the monsters) waits about a second.
+- `dungeons.drop_gilda({x, y, z, amount})` puts a pile of gold (1 to 9,999,999 Gilda) on the floor the player is on, at a world position (160 units to a cell; `y` from `player.get().position`), the way a monster that stole Gilda drops it. It shows on the corner map, and the player takes it by walking within about half a cell of it (the game's own drops must be walked onto). The pile is gone when the floor is built again, so drop it again then; a floor holds 32 dropped things at once.
+- `dungeons.set_arrival({zone})` or `({x, y})` (either with `teleport = true`), from `game.dungeon.generating`: the next main floor built starts the player in front of that zone's shrine (inside its gate on a floor without shrines), or on that cell. A region entered by one of its later floors (from the entrance's floor list) uses it to start at that floor's zone. `{}` takes it back.
+- `dungeons.enter_floor({floor_id, x?, y?, dungeon_id?})` builds floor `floor_id` of the dungeon the player is in (or, from a town, of `dungeon_id`, its native number) again from the start and enters it, with no menu; the floor the player is on is allowed, which is how a rest brings the monsters back. With `x, y` the player arrives on that cell once play starts on the floor. With `teleport = true` as well (and on `set_arrival`), the floor's opening script still runs and builds the floor, but its stairs walk-in plays out unseen in a single frame; the player is put on the cell behind a black screen, and the screen comes up as the escape item's light plays around them. A story scene the floor opens with still plays. The floor is built as any other: keep it with `dungeons.set_seed`, `set_opened_chests` and `set_zones({open})` from `game.dungeon.generating`, as Vigil does, and it comes back as it was left.
+
+### The map screen, kept maps and waypoints (`ui.map_open`, `dungeons.map_snapshot`, Chronicle)
+
+```lua
+local snap = game.dungeons.map_snapshot()            -- {seed, width = 96, cells, seen}: what the player has seen
+game.dungeons.set_seen({seed = snap.seed, cells = snap.cells})   -- next visit (same seed): seen again
+game.dungeons.set_waypoint({x = 30, y = 21})         -- the red flag on the mini map; {} takes it away
+game.ui.map_open({id = "map", title = "Divine Beast Cave", subtitle = "Floors 1-7",
+  marks = {{x = 30, y = 20, kind = "shrine_lit", label = "Floor 3", pick = true}},
+  waypoints = true})                                 -- the floor the player is on
+game.ui.map_open({id = "map", title = "Divine Beast Cave", cells = snap.cells, hint = "Travel",
+  marks = marks, pages = true})                      -- a kept map, in a town too
+```
+
+- `ui.map_open({id, title, subtitle?, cells?, marks?, cursor?, waypoints?, hint?, pages?})` opens the map screen. In a
+  dungeon it pauses play as the choice panel does; in a town (while walking) it holds the town's controls. Without
+  `cells` it is the floor the player is on (dungeon only), showing the cells they have seen (all of them with the
+  floor's map item), the player, and the marks; with `cells` from `dungeons.map_snapshot` it is that kept map,
+  anywhere. Rooms are blocks, roads lines between the cells they join. A mark is `{x, y, kind?, label?, pick?}` with
+  kind `shrine` (not lit), `shrine_lit`, `waypoint`, `gate`, `stair` or `mark`; up to 64. A `shrine` or `gate` mark
+  stays hidden until its cell has been seen. The cursor starts at `cursor`, else on the player, else the middle of the
+  map; the pad or left stick moves it, L1/R1 step between `pick` marks, Cross on one sends `ui.map_choice` `{id, x, y,
+  mark}` (mark numbered from 1, as listed) and closes, Triangle (with `waypoints`) puts or takes away the one waypoint
+  under the cursor (`ui.map_waypoint` `{id, x, y, set}`; on the live map the mini map's flag moves at once), L2/R2
+  (with `pages`) send `ui.map_page` `{id, way = -1 | 1}`, and Circle, Select or Start close it (`ui.map_closed`).
+  Opening again while the mod's own map is up replaces it in place, which is how a page turns. One mod's map at a
+  time; `ui.map_close()` takes it away, and unloading the mod does too.
+- `dungeons.map_snapshot()` returns the floor the player is on as far as they have seen it: `{seed, width, cells,
+  seen}`, `cells` a short text (each cell a letter, runs counted) to keep in a mod's save. Unseen cells are left out.
+- `dungeons.set_seen({seed, cells})` counts a kept map's cells as seen again on the floor the player is on, when that
+  floor was built from `seed` (`{applied = false}` otherwise). Call it from `game.dungeon.generated`.
+- `dungeons.set_waypoint({x, y})` puts the waypoint flag on the mini map for the floor the player is on (held at the
+  mini map's edge while it lies outside the part shown); `{}` takes it away. A floor built from another seed doesn't
+  show it.
+- On a map too big for the corner (a region of several floors) the mini map shows the part around the player, at a
+  readable size, scrolling as they walk, in a framed box.
 
 ### Room-scaled encounter and chest population (`dungeons.set_population`)
 
@@ -1248,7 +1453,9 @@ local population = assert(game.dungeons.set_population({
 assert(game.dungeons.set_population({})) -- restore native population targets
 ```
 
-Chronicle rolls a target ratio for each generated floor, multiplies it by the realized room count, applies the active additive monster/chest bonus once, rounds up, and takes the larger of that result and the correspondingly modified native target. The native monster targets remain 15 for regular floors and 8 for back floors; the native chest target remains a random 4–7 before existing modifiers. Monster placement is capped by its native slot array. The PC port now provides 64 physical box slots, with 16 reserved for mimics/special boxes and regular chest targets capped at 48; the shared event table has 384 slots. Retail array sizes remain unchanged. Dense maps may still reach these audited capacities before the configured upper ratio. Requests are owned by the calling mod and are removed when it unloads.
+Chronicle rolls a target ratio for each generated floor, multiplies it by the realized room count, applies the active additive monster/chest bonus once, rounds up, and takes the larger of that result and the correspondingly modified native target. The native monster targets remain 15 for regular floors and 8 for back floors; the native chest target remains a random 4–7 before existing modifiers; a region (`dungeons.set_zones` with `source_floor`) gets that target once per zone, as each zone is a floor. Monster placement is capped by its native slot array. The PC port now provides 160 physical box slots, with 16 reserved for mimics/special boxes and regular chest targets capped at 144; the shared event table has 768 slots (a whole dungeon on one map holds every floor's chests). Retail array sizes remain unchanged. Dense maps may still reach these audited capacities before the configured upper ratio. Requests are owned by the calling mod and are removed when it unloads.
+
+A floor built in zones (`dungeons.set_zones`) belongs to the mod that zoned it: the room density does not apply to it (its own zones set its rooms, and a region map would otherwise fill every monster slot). Its zones' rooms and each source floor's own monsters and chests stand as the zoning mod asked. A mod can tell such a floor by `dungeons.zones_get().floor_zones` above 0.
 
 ### Enemy Variety survival chance (Chronicle)
 
@@ -1296,7 +1503,7 @@ local status = assert(game.player.status_add({status = "power", character = "max
 assert(game.player.status_remove({status = "power", character = "max"}))
 ```
 
-`player.get()` returns the active character id plus current and maximum HP and water. Chronicle also returns `character_id` (the native party slot) and the equipped `weapon` object when present (`id`, `item_no`, `slot`, `attack`, `endurance`, `speed`, `durability` and `durability_max`; a hit wears `(1.5 - endurance / 100)` times the swing's weight, up to 3 for a charged attack). During an active dungeon it also returns the active player's native world `position` (`x`, `y`, `z`) in both games. `player.set({hp = integer, character = optional_id})` sets current HP exactly through the native HP update path; `player.set({max_hp = integer, character = optional_id}) changes Chronicle's maximum HP from 1 through 999 and clamps current and pending HP down if needed; player.set({water = integer, character = optional_id}) sets Chronicle's current water gauge within its native range and clears any pending gauge interpolation. Each call sets exactly one field. Attempts to set max_water, multiple fields together, or unknown fields are rejected. Chronicle Two does not support max_hp or water. This call can target a benched character without switching the active character. `player.heal` and `player.damage` accept integer amounts from 1 through 32767 and use the game's native health state, which clamps at maximum and zero HP. The optional `character` accepts `"active"` or a playable character id: Chronicle supports Toan, Xiao, Goro, Ruby, Ungaga, Osmond and the registered playable characters in the party (`characters.register_playable`); ChronicleTwo supports Max, Monica, and the ridepod. These calls can update a benched character without switching the active character. Omitting `character` targets the active character, including ChronicleTwo's transformed monster when its live gauge is available. `player.damage` changes HP only; it does not synthesize damage formulas or knockback. `player.status_add/remove` use native ailment/status rules: Chronicle accepts `freeze`, `stamina`, `poison`, `curse`, and `goo` for the active character; ChronicleTwo accepts `poison`, `slow`, `curse`, `stop`, `power`, `stone`, and `dry` for Max or Monica. ChronicleTwo requires `duration_frames` from 1 through 32767 when adding a timed status (`slow`, `stop`, `power`, or `stone`) and rejects a duration for untimed statuses. Native interactions can reject a status (for example, ChronicleTwo power wards off poison and slow). Unsupported player mutations remain unsupported.
+`player.get()` returns the active character id plus current and maximum HP and water. Chronicle also returns `character_id` (the native party slot) and the equipped `weapon` object when present (`id`, `item_no`, `slot`, `attack`, `endurance`, `speed`, `durability` and `durability_max`; a hit wears `(1.5 - endurance / 100)` times the swing's weight, up to 3 for a charged attack). During an active dungeon it also returns the active player's native world `position` (`x`, `y`, `z`) in both games. In a Chronicle dungeon it also returns `heading`, the way the player faces in radians (0 looks along +z, as `sin(heading)`, `cos(heading)` on x and z). `player.set({hp = integer, character = optional_id})` sets current HP exactly through the native HP update path; `player.set({max_hp = integer, character = optional_id}) changes Chronicle's maximum HP from 1 through 999 and clamps current and pending HP down if needed; player.set({water = integer, character = optional_id}) sets Chronicle's current water gauge within its native range and clears any pending gauge interpolation. Each call sets exactly one field. Attempts to set max_water, multiple fields together, or unknown fields are rejected. Chronicle Two does not support max_hp or water. This call can target a benched character without switching the active character. `player.heal` and `player.damage` accept integer amounts from 1 through 32767 and use the game's native health state, which clamps at maximum and zero HP. The optional `character` accepts `"active"` or a playable character id: Chronicle supports Toan, Xiao, Goro, Ruby, Ungaga, Osmond and the registered playable characters in the party (`characters.register_playable`); ChronicleTwo supports Max, Monica, and the ridepod. These calls can update a benched character without switching the active character. Omitting `character` targets the active character, including ChronicleTwo's transformed monster when its live gauge is available. `player.damage` changes HP only; it does not synthesize damage formulas or knockback. `player.status_add/remove` use native ailment/status rules: Chronicle accepts `freeze`, `stamina`, `poison`, `curse`, and `goo` for the active character; ChronicleTwo accepts `poison`, `slow`, `curse`, `stop`, `power`, `stone`, and `dry` for Max or Monica. ChronicleTwo requires `duration_frames` from 1 through 32767 when adding a timed status (`slow`, `stop`, `power`, or `stone`) and rejects a duration for untimed statuses. Native interactions can reject a status (for example, ChronicleTwo power wards off poison and slow). Unsupported player mutations remain unsupported.
 
 ### Player tuning (Chronicle)
 
@@ -1464,7 +1671,7 @@ print(resolved.native_monster_id, resolved.model, resolved.script)
 
 Chronicle registers up to 128 enemy variants through its native monster-model resolver. A variant can inherit the selected template's model, AI script, effects, family, and drop rules while overriding `hp`, `defense`, `reward_exp`, and `reward_money`, or it can select a package-owned model binding through `models.register`. Chronicle's monster table has no per-definition display string, so `name` is returned by the API while the in-game lock-on label still uses the template's localized name.
 
-`characters.spawn({character = id, position = {x, y, z}, rotation = optional {x, y, z}})` and its `entities.spawn` alias use the native actor initializer and inherited AI. Data-only variants require their exact template to be loaded on the current floor. A character using a registered custom model can load that model into a free slot of the floor's model table (24 models; the native game had 9); spawning fails with a reason when the floor loader is not ready or all slots are occupied. The registering mod owns the definition and is the only mod allowed to spawn it. Nearby mod-owned enemies enter Chronicle's active native state immediately, and the view budget (4 awake enemies by default) prioritizes mod-owned enemies before filling remaining slots with vanilla actors. The response includes a generation-checked `entity_handle`, slot, position, and supported stats. Resolve it with `entities.get`; it reports `dead` after death and `expired` after native slot reuse or dungeon cleanup. `entities.despawn({id = entity_handle})` removes a live owned non-mimic enemy without kill credit or drops.
+`characters.spawn({character = id, position = {x, y, z}, rotation = optional {x, y, z}})` and its `entities.spawn` alias use the native actor initializer and inherited AI. Data-only variants require their exact template to be loaded on the current floor. A character using a registered custom model can load that model into a free slot of the floor's model table (48 models; the native game had 9); spawning fails with a reason when the floor loader is not ready or all slots are occupied. The registering mod owns the definition and is the only mod allowed to spawn it. Nearby mod-owned enemies enter Chronicle's active native state immediately, and the view budget (4 awake enemies by default) prioritizes mod-owned enemies before filling remaining slots with vanilla actors. The response includes a generation-checked `entity_handle`, slot, position, and supported stats. Resolve it with `entities.get`; it reports `dead` after death and `expired` after native slot reuse or dungeon cleanup. `entities.despawn({id = entity_handle})` removes a live owned non-mimic enemy without kill credit or drops.
 
 A data-only variant whose template the floor didn't load (a boss on an ordinary floor) has the template loaded into a
 free slot of the floor's model table when it spawns. The retail bosses (Dran 78, Master Utan 79, Ice Queen 80, King's
@@ -1804,7 +2011,7 @@ The Tier 2 expansion introduces high-utility gameplay hooks across both games:
 
 - **Weapon Mastery & Progression (`game.weapons.*`)**:
   - `game.weapons.abs_get({id = weapon_id, character = optional, slot = optional})`: Reads current ABS (experience points), current level, and ABS required for next level.
-  - `game.weapons.abs_add({id = weapon_id, amount = 50, character = optional, slot = optional})`: Adds ABS to a weapon, auto-leveling when reaching the requirement and emitting `game.weapon.abs_gained`.
+  - `game.weapons.abs_add({id = weapon_id, amount = 50, character = optional, slot = optional})`: Adds ABS to a weapon, auto-leveling when reaching the requirement and emitting `game.weapon.abs_gained`. A negative `amount` (down to -32767) takes unspent ABS away, never below 0 and never a level; the result's `added` is then negative and no `abs_gained` is sent. `slot` needs `character`.
   - `game.weapons.attachments_get({id = weapon_id})`: Inspects attachment sockets, filled slots, and stat contributions (attack, endurance, speed, magic, elemental, vs-monster).
   - `game.weapons.attachment_insert({id = weapon_id, attachment_id = item_id, attachment_slot = optional})`: Inserts an attachment into an open socket.
   - `game.weapons.attachment_remove({id = weapon_id, attachment_slot = slot_idx})`: (*Chronicle only*) Safely removes an attachment from a weapon and returns it to the consumable bag.
@@ -1862,7 +2069,7 @@ Chronicle's `register_item` claims no shop: the goods it adds are kept apart and
   - `game.weapon.built_up`: Emitted when a weapon undergoes build-up or synthesis/spectrumization.
   - `game.weapon.broken`: Emitted when weapon durability reaches 0 or when status-broken.
   - `game.shop.purchased`: Emitted upon shop transaction or inventory change.
-  - `game.chest.opened`: Emitted when a dungeon chest is opened or loot is retrieved.
+  - `game.chest.opened`: Emitted when the player opens a dungeon chest (`dungeon_id`, `floor_id`, `back_floor`, `chest`, `item_id`, `large`), or a mod changes a loot table (no `chest`).
   - `game.floor.cleared`: Emitted when a dungeon floor's exit is unlocked or rules change.
 
 ### Tier 3 APIs: Signature Game Systems
@@ -1875,7 +2082,7 @@ These operations bind each game's signature systems to native save or live engin
   - `game.player.thirst_changed` carries `character`, `character_id`, `previous_water`, `water`, `max_water`, `drain_per_frame`, `drained_out`, `dried_out`, `source` (`api` or `native`), `reason`, and `frame`. The adapter polls the native gauge once per runtime pump, so native drain, drinking, and drying out are observed even when no API call made the change. Native observations are emitted on whole-unit gauge boundaries and on dry-out rather than for every fractional frame, and a transition that starts and ends between two pumps is not reported.
 - **Chronicle Atla and town reconstruction (`game.georama.*`)**:
   - `game.georama.atla_list()` requires an active dungeon floor and returns the open Atla spheres with their live slot, native Atla registry index and id, registry floor/refcount, world position, and whether the contents are a Georama part or chip plus its saved obtained/placed/stock state.
-  - `game.georama.atla_spawn({id, name, position?})` (`game.write`) puts a mod's own Atla sphere on the active dungeon floor: at `position` (`{x, y?, z}`), or a free spot as the floor's own spheres are put. Toan opens it as he does theirs, and the pickup says `"<name>" acquired`. It holds nothing of the game's (no Georama part or chip, no save record); `game.georama.atla_collected` tells the mods `{id, owner, name}`, and the mod keeps what it means (a story flag, say). It lasts for that floor; put it again on a later visit while the mod still wants it found. A floor holds 16 spheres (the game puts 8 at most), and one picked up leaves its place free; up to 16 mod spheres can be registered. `atla_list` shows them with `contents = {kind = "mod", id, owner, name}`.
+  - `game.georama.atla_spawn({id, name, position?})` (`game.write`) puts a mod's own Atla sphere on the active dungeon floor: at `position` (`{x, y?, z}`), or a free spot as the floor's own spheres are put. Toan opens it as he does theirs, and the pickup says `"<name>" acquired`. It holds nothing of the game's (no Georama part or chip, no save record); `game.georama.atla_collected` tells the mods `{id, owner, name}`, and the mod keeps what it means (a story flag, say). It lasts for that floor; put it again on a later visit while the mod still wants it found. A floor holds 80 spheres (the game puts 8 at most; a map of eight floors' zones, 64), and one picked up leaves its place free; up to 16 mod spheres can be registered. Each `atla_list` entry has `floor_id`, the floor the sphere belongs to (a region's zone's floor). `atla_list` shows mod spheres with `contents = {kind = "mod", id, owner, name}`.
   - `game.georama.atla_collect({slot = 0..15})` requires an active dungeon floor and Toan as the controlled character. It uses the game's native Atla save routine (`getAtraToSaveData`), marks the live ball and matching dungeon event closed, and releases the part or chip into the same saved state as a native pickup. It does not transfer ownership of a mod-authored asset.
   - `game.georama.satisfaction_get({town_id = optional 0..4})` returns each requested Chronicle town with saved request completion, a rounded `satisfaction_percent` derived from completed native requests, and per-plot `obtained`, `placed_count`, `stock`, and element flags. The percentage is a framework view over native request state; retail has no separate satisfaction statistic.
 - **Chronicle back floors (`game.dungeons.back_floor_*`)**:

@@ -182,11 +182,15 @@ local function enter_floor(world)
     apply_generation(default_tier())
     return
   end
-  floor = {token = token, dungeon = world.dungeon_id, number = world.floor_id, tier = tier_of(world.dungeon_id, world.floor_id),
-           entered = frame, seen = 0, cleared = false, scaled = {}, speeds = {}, champions = {}}
+  -- A floor built in zones (dungeons.set_zones: a Vigil World map) belongs to the mod that zoned it: no tier and no
+  -- mutator here (the engine already leaves our room density off it).
+  local zones = try(game.dungeons.zones_get)
+  local zoned = type(zones) == "table" and type(zones.floor_zones) == "number" and zones.floor_zones > 0
+  floor = {token = token, dungeon = world.dungeon_id, number = world.floor_id, tier = zoned and 0 or tier_of(world.dungeon_id, world.floor_id),
+           entered = frame, seen = 0, cleared = false, scaled = {}, speeds = {}, champions = {}, zoned = zoned}
   streak = 0
   local chance = clamp((setting("mutator_chance", 35) + 3 * world.dungeon_id) * preset().mutator, 0, 100)
-  if world.floor_id > 0 and math.random(100) <= chance then floor.mutator = MUTATOR_IDS[math.random(#MUTATOR_IDS)] end
+  if not zoned and world.floor_id > 0 and math.random(100) <= chance then floor.mutator = MUTATOR_IDS[math.random(#MUTATOR_IDS)] end
   apply_mutator_formulas(floor.mutator)
   local intro = floor.tier > 0 and ("TIER " .. floor.tier .. " FLOOR") or nil
   if floor.mutator then

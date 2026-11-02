@@ -17,3 +17,7 @@ Thumbs.db
 
 # Blender auto-backups
 *.blend1
+
+# Elden Ring reference exporter build output (tools/anim/reference)
+tools/anim/reference/bin/
+tools/anim/reference/obj/

@@ -12,6 +12,8 @@ character: toan (default), xiao, goro, ruby, ungaga or osmond.
    keys every rotation and translation channel of the character's motion file, its frames rise from 0 to its length, its rotations are unit quaternions,
    and its first pose is within reach of a native pose (no snap when it starts), or of a pose of another of the
    character's authored animations (a follow-up, such as a slash out of a roll).
+4. How they move (motion_checks.py): a limb snapping round against the body fails; in an evade, a blade whipping round,
+   an anticipation over 0.15 s or the push-off foot are reported as warnings and notes, which don't fail.
 Exits non-zero on a failure.
 """
 
@@ -22,6 +24,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import moonanim as ma  # noqa: E402
+import motion_checks  # noqa: E402
 
 failures = []
 
@@ -154,6 +157,21 @@ def main():
                     best, source = g, "%s frame %d" % (other, f)
         check(best < 1.0, name + ": starts on a native pose or another animation's (within %.2f degrees%s)" %
               (best, ", " + source if source else ""))
+    print("4. how they move")
+    for name in sorted(os.listdir(anims)):
+        if not name.endswith(".json"):
+            continue
+        doc = json.load(open(os.path.join(anims, name), encoding="utf-8"))
+        if doc.get("character") != character:
+            continue
+        found = motion_checks.check(rig, doc, motion_checks.is_evade(name))
+        for level, text in found:
+            if level == "fail":
+                check(False, name + ": " + text)
+            else:
+                print("  %-5s %s: %s" % (level, name, text))
+        if not any(level == "fail" or text.startswith("unchecked") for level, text in found):
+            check(True, name + ": no limb snaps round")
     print("%d failed" % len(failures))
     sys.exit(1 if failures else 0)
 

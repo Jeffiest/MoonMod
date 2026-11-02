@@ -16,12 +16,20 @@ raise it in the engine instead of shrinking the design. Already raised:
 | Limit | Retail | Now |
 | --- | --- | --- |
 | Monster slots (`MONSTOR_SLOT_MAX`) | 16 | 256 |
-| Floor grid (`DNG_GRID`) | 20 x 20 | 48 x 48 |
-| Rooms per floor (`DNG_ROOM_MAX`) | 16 | 64 |
+| Floor grid (`DNG_GRID`) | 20 x 20 | 96 x 96 |
+| Rooms per floor (`DNG_ROOM_MAX`) | 16 | 160 |
+| Zones on one map (`DNG_ZONE_MAX`, `dungeons.set_zones`) | - | 8 |
+| Monster kinds a floor loads (`MONSTOR_MODEL_MAX`) | 9 | 48 |
+| Monster model memory (`MonstorModelBuffer`) | what the map leaves of 0xA7F80 quadwords | what it leaves of the whole arena (about 2.5M) |
+| Atla on a floor (`CDungeonMap::atra`) | 8 | 80 |
 | Chests (`DNG_BOX_MAX`) / event records (`DNG_EVENT_MAX`) | 24 / 48 | 64 / 384 |
 | Georama plots | retail's | 56 |
 | Weapon slots | retail's | 32 more after retail's (items 377-408) |
 | Playable characters (`CHARA_MAX`) | 6 | 16 (6 saved + up to 10 registered) |
+
+A floor the game builds itself (no mod asking for zones) still comes out exactly as before a raise: its rooms keep to
+the build area (16 x 16), and searches over the whole grid see the same spots in the same order. Keep that true when
+you raise one: the Gauntlet and saved seeds rely on it.
 
 The raised values sit under `#ifdef PORT` with the retail values kept in the `#else` branch, so it is plain which is
 which (`port/include/game/dungeonmap.hpp` is an example).
@@ -204,6 +212,9 @@ submodule, has its own patch):
 ```bash
 git -C Chronicle diff 9418a550 -- . ':(exclude)tools/kazarov' > MoonFactory/ports/chronicle/moonfactory-chronicle.patch
 ```
+
+`git diff` leaves out files git doesn't track yet. Mark each new file you added with `git add -N <file>` (intent to
+add) before regenerating, or the patch will lack it.
 
 Then check it applies to a clean checkout of the base commit:
 

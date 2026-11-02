@@ -10,6 +10,7 @@ Recipes are Chronicle unless they say otherwise. The snippets use the `try` and 
 - [A game mode on the title menu](#a-game-mode-on-the-title-menu)
 - [Add dungeon floors](#add-dungeon-floors)
 - [Shape a floor as it is built](#shape-a-floor-as-it-is-built)
+- [An open world: towns, roads and one-map dungeons](#an-open-world-towns-roads-and-one-map-dungeons)
 - [A special room: the Rest floor](#a-special-room-the-rest-floor)
 - [A boss in a sealed room](#a-boss-in-a-sealed-room)
 - [Put a character on a floor](#put-a-character-on-a-floor)
@@ -132,12 +133,31 @@ end)
 | --- | --- |
 | `dungeons.set_modifiers({rooms, monsters, chests, chest_value})` | Percent changes; `chests = -100` is none |
 | `dungeons.set_layout` / `set_population` | Floor size and monster/chest density per room |
+| `dungeons.set_seed({seed})` | Build the floor from a seed you kept (`game.dungeon.generated` reports each floor's `floor_seed`): the same floor every visit |
+| `dungeons.set_zones({zones = {{rooms = 5}, {rooms = 5}}, open})` | One map in 2-24 zones joined by locked gates; a monster in each zone carries the next gate's key; `dungeons.zones_get()` reports gates, carriers and the player's zone |
+| `dungeons.set_zones({..., smoke = {3}})` + `game.dungeon.smoke_touched` | A smoke gate no key opens; walking up to it is your cue to offer what lies beyond (Vigil: a story floor of the game's own, by `dungeons.enter_floor`) |
+| `dungeons.drop_gilda({x, y, z, amount})` | A pile of Gilda on the floor (a death drop, a reward), shown on the corner map, taken by walking up to it |
+| `dungeons.set_zones({..., shrines = true})` + `game.dungeon.shrine_reached` | A healing-spring shrine in each zone, and an event when the player walks up to one (open a `ui.choice_open` panel there); `shrine_heal = false` keeps its water from healing HP |
+| `dungeons.set_exits({town = "shrines"})` | No town from the Escape menu or the exit gate (the gate leads on); your mod's own way out is the only one |
+| `game.dungeon.defeated` then `dungeons.enter_floor({dungeon_id, floor_id, x, y})` from town | Wake the party somewhere after a knockout (Vigil: at the last shrine) |
+| `weapons.abs_add({id, character, slot, amount = -n})` | Take a weapon's unspent ABS (a death drop, a toll); it never goes below 0 |
+| `dungeons.set_zones({zones = {{rooms = 5, source_floor = 0}, {rooms = 5, source_floor = 1}}, exit_floor = 2})` | A **region**: two of the game's floors on one map, each zone with its own floor's monsters, atla and chest items, the exit gate leading past both; `dungeons.set_arrival({zone = 1})` starts the player at the second floor's shrine |
+| `dungeons.warp({x, y})` / `dungeons.enter_floor({floor_id, x, y})` | Move the player on this floor at once / build a floor again from the start (monsters back) and arrive at a cell; from a town add `dungeon_id` (fast travel) |
+| `dungeons.map_snapshot()` / `dungeons.set_seen({seed, cells})` / `dungeons.set_waypoint({x, y})` | Keep what the player has seen of a floor, give it back on the next visit, and flag a cell on the mini map |
+| `dungeons.set_opened_chests({chests, back_chests})` | With `set_seed`, open the chests the player already opened (numbers from `game.chest.opened`) as the floor is built again; `dungeons.chests_get()` lists a floor's chests |
 | `dungeons.set_shortcuts({count})` | Dead-end rooms loop back through locked doors with coloured keys |
 | `dungeons.set_weapon_drops({unique, rare, large_chests})` | What weapons chests hold |
 | `dungeons.set_warden_room({enabled, lock_in})` | A sealed boss room behind the exit |
 | `dungeons.set_rest_room({enabled})` | A two-room rest layout (spring, exit, stairs) |
 | `dungeons.set_character_blocks({characters})` | Character-only doors and jumps appear only for these |
 | `dungeons.set_backrooms({free, title, text, stay, lines})` | Back-floor stairs ask with a panel instead of taking the key |
+| `dungeons.set_quick_passage({enabled = true})` | Town to dungeon and back with only a fade, no loading card |
+| `world.set_roads({enabled = true})` + `game.town.road` | A town's gate asks the mod instead of opening the world map: answer with a `ui.choice_open({..., town = true})` panel of places, then `world.transition` or `dungeons.enter_floor` |
+| `dungeons.set_floor_select({enabled = false})` | The dungeon entrance skips its floor menu and goes straight to floor 1 |
+| `dungeons.set_npc_models` + `dungeons.set_npc_marks` | Stand a character (a scene's pack) at cells of a dungeon floor |
+| `dungeons.play_event({program = n})` + `game.dungeon.event_ended` | Play one of the dungeon's scenes when the player asks (talk to someone) |
+| `dungeons.set_story_exits({title, text})` + `game.dungeon.story_exit` | A fixed (story) floor's key gate asks "leave?" instead; you move the player on |
+| `dungeons.enter_floor({floor_id, x, y, teleport = true})` | Arrive on a cell in the escape item's light, no stairs walk-in (also `set_arrival`, `warp`) |
 
 **Things to know**
 
@@ -147,6 +167,151 @@ end)
   "another mod already ...". Turn yours off (`{enabled = false}`) when your mode ends so others can use it.
 
 **In the Gauntlet:** the `game.dungeon.generating` handler under *Floors*.
+
+---
+
+## An open world: towns, roads and one-map dungeons
+
+**What:** walk from village to village and into every dungeon with no loading card and no world map, each dungeon
+one continuous map, the story floors behind smoke you walk through. This is Vigil World (`mods/moonmod.vigil`,
+setting *Vigil World preview*); `VIGIL_PLAN.md` sections 9 and 10 have the full history. The pieces stack, and each
+works on its own, so take the ones you need.
+
+### 1. Turn the rules on before the place is made
+
+Rules that change how a town or floor is *built* must stand before the build starts. A town builds its dungeon's
+first floor unseen as it loads, so `game.world.location_changed` is too late. Set them on `game.scene.will_enter`
+(and again on `location_changed`, which is cheap):
+
+```lua
+local function passage_rules()
+  local on = my_world_is_on()                                  -- yours: a setting, or a flag kept with the save
+  try(game.dungeons.set_floor_select, {enabled = not on})       -- the entrance skips its floor menu
+  try(game.dungeons.set_quick_passage, {enabled = on})          -- no loading card; town and dungeon stay loaded
+  try(game.world.set_roads, {enabled = on})                     -- a town's gate asks you, not the world map
+end
+moonmod.on("game.scene.will_enter", passage_rules)
+moonmod.on("game.world.location_changed", passage_rules)
+```
+
+All three are **one mod at a time** and given back when the mod unloads.
+
+### 2. Town and dungeon, both live (quick passage)
+
+With `dungeons.set_quick_passage({enabled = true})` the engine does the rest:
+
+- **No loading card.** A jump between a town and a dungeon, between two towns, or between two floors of one dungeon
+  holds the last picture on screen until the other side is ready (at most ten seconds), then cuts.
+- **Connected worlds.** Each place keeps its own memory (town `100 + map`, dungeon its map), so walking back out of
+  the dungeon resumes the town as it was left, villagers where they stood, and walking back in resumes floor 1.
+- **The door is a window.** Norune's cave door, once opened, stays open, and the cave is drawn live through it; inside,
+  the village is drawn live through the doorway behind the arrival. Walk into either facing it and you go through:
+  no button, no fade. The first time, the town builds floor 1 unseen as it loads so the cave is already there
+  (`prebuild = true` on `generating`/`generated`). Matataki's forest path works the same once you have been in.
+- **What you see as a mod:** `game.dungeon.resumed` instead of `generating`/`generated` when a floor is gone back to,
+  not built. Treat it as "the party is on this floor again".
+
+### 3. One map per dungeon (regions)
+
+Each dungeon is built as one map with a zone per floor, joined by locked gates whose keys a monster in each zone
+carries (*Shape a floor as it is built*: `set_zones` with `source_floor` per zone and `exit_floor`). Keep each
+floor's seed (`set_seed`), opened chests (`set_opened_chests`), seen cells (`set_seen`) and opened gates with the save
+and give them back each build, and the map is the same every visit. Shrines (`shrines = true`) are the rest points
+and the fast travel; `sanctuary = true` keeps monsters out of their circle.
+
+### 4. Story floors: smoke you walk through
+
+The boss and scene floors are fixed maps with their own scripts, so they can't be zones of a region. Put a smoke
+gate in front of them instead (`set_zones({..., smoke = {zone}})`). Walking up to it fires
+`game.dungeon.smoke_touched`; offer a panel, and on *Go through* call `dungeons.enter_floor({floor_id = f})`. With
+quick passage on, that floor-to-floor jump is a cut too. On the story floor, `dungeons.set_story_exits` turns its key
+gate into a *Leave* panel; on `game.dungeon.story_exit` enter the next floor's zone of the region.
+
+### 5. Roads between the towns
+
+The game has no outdoor map joining two towns (its fields join towns to dungeons), so the town's **gate is the road**.
+With `world.set_roads` on, walking out of the gate sends `game.town.road` `{town_id, location_id}` once each time the
+party walks onto it, and the world map never opens. Answer with a panel, which needs `town = true` to open outside a
+dungeon:
+
+```lua
+local ROAD = {[0] = {{town = 1}}, [1] = {{town = 0}, {town = 2}}, [2] = {{town = 1}, {town = 3}, {dungeon = 2}},
+              [3] = {{town = 2}, {town = 4}, {dungeon = 3}}, [4] = {{town = 3}, {dungeon = 4}, {dungeon = 5}}}
+local from
+moonmod.on("game.town.road", function(e)
+  if not ROAD[e.town_id] then return end
+  from = e.town_id
+  local options = {}
+  for _, way in ipairs(ROAD[e.town_id]) do options[#options + 1] = {title = way.town and TOWN[way.town] or DUNGEON[way.dungeon]} end
+  options[#options + 1] = {title = "Stay"}
+  try(game.ui.choice_open, {id = "road", title = "The road", cancel = true, town = true, options = options})
+end)
+moonmod.on("ui.choice_made", function(e)
+  if e.id ~= "road" or e.cancelled or not from then return end
+  local way = ROAD[from][e.index]
+  from = nil
+  if way and way.town then
+    call(game.world.transition, {id = "chronicle:location:" .. TOWN_IDS[way.town]})
+  elseif way then
+    call(game.dungeons.enter_floor, {dungeon_id = way.dungeon, floor_id = 0})  -- the dungeons only the map reached
+  end
+end)
+```
+
+Put the dungeons that only the world map reached (Shipwreck, Sun and Moon Temple, Moon Sea, Gallery of Time) on the
+road too, or replacing the world map cuts them off.
+
+**Things to know**
+
+- **Where the gates are.** Matataki's and Muska Lacka's gates are the game's own: ground of kind 1 that ran program 1
+  (the world map). Norune's, Queens' and Yellow Drops' are the spot the world map sets the party down, taken facing
+  out of town (Norune's spot faces a fence; Queens' kind-1 ground is elsewhere; Yellow Drops has no program 1).
+- **Towns reached by road load fresh**, as the world map always loaded them. A town's live objects (party, villagers,
+  ground) are shared statics the next town overwrites, so only the dungeon's way out, back to the town whose objects
+  are still live, resumes one.
+- **Ahead of the story.** A town reached early plays its arrival scene (Matataki's, unless story flag 9 is set); it
+  plays through and hands the walk back. Sun and Moon Temple's story floors 4 and 7 leave for the desert field (s32)
+  for their scene and come back by themselves, so a mod sees the dungeon left and entered again.
+- **Wise Owl Forest can't be built unseen** (its walk-in waits on an action sequence only real frames move): the
+  prebuild gives up after 120 frames, and the forest is built on the first walk in, connected after.
+- **Panels in towns are opt-in** (`town = true`). A mod that retries its panel every tick until one opens (the
+  Gauntlet's blessing and weapon picks) keeps waiting for the dungeon, as it always did.
+- **Floors built without zones stay byte-identical**: none of this changes a floor a mod didn't ask to change.
+
+### Testing it without playing
+
+Everything above was checked headless on a copy of a real save, with a throwaway probe mod. The pattern:
+
+1. Copy the save folder to a scratch folder and copy the current mod into its `mods/` (a stale copy misleads), plus a
+   probe mod with `game.read`/`game.write` enabled in its `moonmod/profile.json`.
+2. Run the game headless with a scripted pad:
+   `darkcloud.exe --data <data> --save <scratch> --headless --jump title --fast-load --frames N --input pad.txt --screenshot shot.png --screenshot-at 1500,2200`.
+   The input file holds lines `<frame> [buttons] [lx ly rx ry]`, held until the next line: `500 start`, `560 cross`
+   and two more crosses load slot 1 from the title; `1500 128 0 128 128` holds the stick up (sticks 0-255, 128
+   centre); `1504` lets go. Pad words don't reach a mod's own key bindings; `key:E` lines do.
+3. In the probe, act on `game.tick` counts and log what happens (`moonmod.log` goes to stderr):
+
+```lua
+local ticks = 0
+moonmod.on("game.tick", function()
+  ticks = ticks + 1
+  if ticks == 1100 then game.world.transition({id = "chronicle:location:matataki-village"}) end
+end)
+for _, ev in ipairs({"game.town.road", "game.world.location_changed", "game.dungeon.generated", "game.dungeon.resumed"}) do
+  moonmod.on(ev, function(e) moonmod.log("info", "PROBE " .. ev .. " " .. tostring(e.town_id or e.floor_id or e.context) .. " at " .. ticks) end)
+end
+```
+
+- **Every floor of a dungeon:** step `dungeons.enter_floor({floor_id = f})` through each in turn, counting a floor
+  once `location_changed` arrives and play has run on it for a few seconds; retry when the call is refused (a story
+  floor's scene may have taken the party out). This is how all six dungeons were checked, story floors included.
+- **Screenshots** catch what logs can't: a loading card, a black hold, a scene that never hands the walk back.
+- The held picture keeps the *old* place on screen while the new one loads, so a screenshot taken too early shows
+  where you were; wait for `location_changed` before timing pad input in the new place.
+
+**In Vigil:** `passage_rules`, *Roads*, *Smoke* and *Shrines* in `mods/moonmod.vigil/main.lua`; the engine side is
+`port/src/game/doorway_view.cpp`, `editloop.cpp` and `chronicle_adapter.cpp` (`ChronicleMapJumped`,
+`StepHeldPicture`, `SetRoads`) in `ports/chronicle/moonfactory-chronicle.patch`.
 
 ---
 
@@ -233,6 +398,7 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | A small icon by the floor plate | `render.hud_icon_set({id, icon or image, blink?})` | Up to six |
 | The floor plate's text ("2-3") | `render.floor_label_set` | `render.floor_label_clear` restores it |
 | A pick of 1-4 cards | `ui.choice_open({id, title, options})` | Pauses play; answer in `ui.choice_made` |
+| A map with marks | `ui.map_open({id, title, marks, cells?})` | The floor or a kept map (`dungeons.map_snapshot`), in a dungeon or a town; answer in `ui.map_choice` / `ui.map_waypoint` |
 | A menu in place of the pause | `ui.run_menu_set({title, tabs})` | Rows send `ui.run_menu_action` |
 | A boss entrance | `ui.boss_card({name, kicker, epithet, frames})` | |
 | A page in the Journal | `ui.sheet_set` / `ui.sheet_open` | Journal > Character, with a skill tree |
@@ -261,10 +427,19 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | Colour, size, a shove | `entities.tint`, `entities.scale_set`, `entities.knockback` |
 | A flash or burst | `effects.burst({kind, position, scale})` |
 | Player speed, i-frames, thirst, wear | `player.tuning_set` |
+| A monster that fights differently | hook `native.monster.run` (`scripts.override`), drive it with `monsters.call` |
 
 Formulas are owned and stack by priority. Register them once, and update them by re-registering the same id with a
 new value instead of adding more. A mode that changes the rules (the Gauntlet's curses and blessings) recomputes its
 formulas in one place (`apply_effects`) whenever the run changes.
+
+A monster's own AI can be replaced program by program: override `native.monster.run`, take program 100 (its idle
+loop) for the kinds you have a brain for, and hand everything else to `game.scripts.call`. Each frame the brain reads
+where the player is (`GET_POSITION`), whether the player just swung (`GUARD_SEARCH`) and its own motion frame
+(`CHK_MOTION_FRM`), then walks, steps, guards or attacks with `SET_MOVE` and `SET_MOTION`. Vigil's Dashers and
+Skeleton Soldiers take turns with one attack token. `ctx.model` is the floor's slot, not the monster's kind: key brains
+by `entities.query`'s `native_model_id` ([API](../API.md)). To find a monster's motions and where its blows land, play
+each motion number on it and read `CHK_MOTION_FRM`, and watch the player's HP while it swings.
 
 ---
 
@@ -339,6 +514,24 @@ Mods can ship authored motions and bind them to the attack buttons (`animations.
 `player.moves_set`). The motions are written with `tools/anim`, not Blender. Start with the
 [Animation guide](../ANIMATION_GUIDE.md) and the [`examples/new-move`](../../examples/new-move/) mod. The Gauntlet's
 full sets for all six characters are documented in [GAUNTLET_ANIMATIONS.md](../GAUNTLET_ANIMATIONS.md).
+
+A move out of a run can push off whichever foot is leading: give it `variants`, each another motion and the stretch of
+a native motion (his run) it is for. Vigil's dive roll does this ([API](../API.md), *Chronicle mod moves*).
+
+Locked on, a `dodge` with `direction = "left"` or `"right"` keeps him facing the target while the stick carries him
+sideways: Vigil's side rolls are its dive roll with his body turned a quarter into the way he goes
+(`tools/anim/vigil_side_rolls.py`). Give quick moves `blend_in` (3 or 4 frames) so the engine's fade doesn't eat the
+start and `camera` (about 3) so the camera keeps up with a roll, and run `tools/anim/verify.py` or `motion_checks.py` on anything imported from another game: they flag limbs
+snapping round, a whipping blade and a push-off later than 0.15 s.
+
+**Give a monster new motions.** `animations.monster_register({id, file, model, hits})` appends a motion file to a
+native monster model the next time a floor loads it; `monster_list()` then gives its motion number and first frame,
+and a `native.monster.run` override plays it with `SET_MOTION`. Build the file from the monster's own poses with
+`tools/anim` (`Rig(..., cfg_name="info.cfg")`). A flat rig such as the Skeleton's (every piece hung off the root)
+turns as a whole by turning each piece about one point; keep every node above the floor, its weapon too. Put an
+attack's `hits` where the blow lands when the monster stands at arm's length (the hand, not only the weapon's tip), and
+make its damage a factor of the monster's native blow. Vigil gives the Skeleton and the Dasher a roll each way and a new
+attack (`tools/anim/vigil_monster_moves.py`, `MONSTER_MOVES` in its `main.lua`).
 
 ---
 

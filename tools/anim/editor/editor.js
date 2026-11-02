@@ -162,6 +162,7 @@ async function openRig(id) {
   state.selected = -1;
   if (info.motions.length) await openNative(0);
   else setMotion({ frames: [{ frame: 0, values: currentValues() }], length: 30, speed: 0.5 }, "new_move", null);
+  state.rigHeight = posedBox(new THREE.Box3(), true).getSize(new THREE.Vector3()).y;
   frameCamera();
   status(`${info.name}: ${info.channels.length} animated channels, ${info.motions.length} native motions`, "good");
 }
@@ -391,12 +392,14 @@ function showFrame() {
   const v = valuesAt(state.frame);
   if (v) applyValues(v);
   placeTravel();
+  placeReference();
   updateSkeleton();
   if (state.mode === "ik" && state.selected >= 0 && !gizmo.dragging) placeIkTarget();
   refreshBonePanel();
   $("frame").value = Math.round(state.frame * 100) / 100;
   const ticks = state.frame / state.speed;
   $("timeNote").textContent = `tick ${ticks.toFixed(0)} of ${(state.length / state.speed).toFixed(0)}  ·  ${(state.length / state.speed / TICKS).toFixed(2)} s at speed ${state.speed}`;
+  if (ref.figure.visible) $("timeNote").textContent += `  ·  reference frame ${ref.frame.toFixed(1)}`;
   drawTimeline();
 }
 
@@ -767,6 +770,135 @@ function updateTravelNote() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Reference: an Elden Ring animation (tools/anim/reference) drawn as a stick figure beside the character, to watch
+// how a similar action moves while posing this one. It is scaled to the character's height, turned to face +Z and
+// either fitted over this motion's length or played in real time. It is only ever looked at; nothing of it is saved.
+
+const REF_BODY = /^(Pelvis|Spine|Spine1|Spine2|Neck|Head|[LR]_(Clavicle|UpperArm|Forearm|Hand|Finger22|Thigh|Calf|Foot|Toe0))$/;
+const ref = { available: false, groups: [], group: "", path: "", anim: null, links: [], head: -1, tall: 1, scale: 1, flipZ: 1,
+  figure: new THREE.Group(), frame: 0 };
+scene.add(ref.figure);
+const refMats = { L: new THREE.MeshBasicMaterial({ color: 0x7fcf8a }), R: new THREE.MeshBasicMaterial({ color: 0xf07a6a }),
+  C: new THREE.MeshBasicMaterial({ color: 0xd8d8d8 }) };
+const refCyl = new THREE.CylinderGeometry(1, 1, 1, 8).translate(0, 0.5, 0);
+
+async function loadReferenceGroups() {
+  const r = await api("/api/ref/groups");
+  ref.available = r.available;
+  $("refPanel").style.display = r.available ? "" : "none";
+  if (!r.available) return;
+  ref.groups = r.groups;
+  fillSelect($("refGroup"), r.groups.map((g) => [g.id, `${g.name}  (${g.source})`]));
+  let want = "";
+  try { want = localStorage.getItem("moonanim.refGroup") || ""; } catch (e) { /* private window */ }
+  if (r.groups.some((g) => g.id === want)) $("refGroup").value = want;
+  await loadReferenceItems($("refGroup").value);
+}
+
+async function loadReferenceItems(group) {
+  const items = await api("/api/ref/items?group=" + encodeURIComponent(group));
+  fillSelect($("refAnim"), items.map((p) => [p, p]));
+  try {
+    localStorage.setItem("moonanim.refGroup", group);
+    const want = localStorage.getItem("moonanim.refAnim");
+    if (items.includes(want)) $("refAnim").value = want;
+  } catch (e) { /* private window */ }
+  return items;
+}
+
+async function openReference(group, path) {
+  status("Decoding " + path + "…");
+  const anim = await api(`/api/ref/anim?group=${encodeURIComponent(group)}&path=${encodeURIComponent(path)}`);
+  try { localStorage.setItem("moonanim.refAnim", path); } catch (e) { /* private window */ }
+  ref.group = group;
+  ref.path = path;
+  ref.anim = anim;
+  const at = (pose, i) => [pose.p[i * 3], pose.p[i * 3 + 1], pose.p[i * 3 + 2]];
+  const index = (name) => anim.bones.indexOf(name);
+  // The body's bones, each joined to the nearest body bone above it.
+  const body = anim.bones.map((n) => REF_BODY.test(n));
+  ref.links = [];
+  anim.bones.forEach((n, i) => {
+    if (!body[i]) return;
+    let p = anim.parents[i];
+    while (p >= 0 && !body[p]) p = anim.parents[p];
+    if (p >= 0) ref.links.push({ from: p, to: i, side: n[0] === "L" && n[1] === "_" ? "L" : n[0] === "R" && n[1] === "_" ? "R" : "C" });
+  });
+  ref.head = index("Head");
+  // Its toes point the way it faces; the editor's characters face +Z.
+  const foot = at(anim.rest, index("L_Foot")), toe = at(anim.rest, index("L_Toe0"));
+  ref.flipZ = toe[2] < foot[2] ? -1 : 1;
+  // Its height standing (the head bone sits about a head's height below the top) against the character's.
+  ref.tall = at(anim.rest, ref.head)[1] * 1.08;
+  ref.figure.clear();
+  ref.sticks = ref.links.map((l) => { const m = new THREE.Mesh(refCyl, refMats[l.side]); ref.figure.add(m); return m; });
+  ref.skull = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), refMats.C);
+  ref.figure.add(ref.skull);
+  if (!$("refBeside").value) $("refBeside").value = Math.round((state.rigHeight || 16) * 0.7);
+  $("refFrom").value = 0;
+  $("refTo").value = anim.frames - 1;
+  $("refShow").checked = true;
+  placeReference();
+  status(`Reference: ${path}, ${anim.frames} frames (${anim.duration.toFixed(2)} s)`, "good");
+  return referenceSummary();
+}
+
+// The reference's frame for a frame of this motion.
+function referenceFrameAt(frame) {
+  const a = ref.anim;
+  const from = Math.max(0, Math.min(a.frames - 1, Number($("refFrom").value) || 0));
+  const to = Math.max(from, Math.min(a.frames - 1, Number($("refTo").value) || a.frames - 1));
+  if ($("refTiming").value === "real") return Math.min(to, from + (frame / state.speed / TICKS) / a.frame_time);
+  return from + (to - from) * Math.max(0, Math.min(1, frame / Math.max(1, state.length)));
+}
+
+const refA = new THREE.Vector3(), refB = new THREE.Vector3(), refUp = new THREE.Vector3(0, 1, 0);
+function placeReference() {
+  ref.figure.visible = !!ref.anim && $("refShow").checked;
+  if (!ref.figure.visible) return;
+  const a = ref.anim;
+  ref.frame = referenceFrameAt(state.frame);
+  const f0 = Math.floor(ref.frame), f1 = Math.min(a.frames - 1, f0 + 1), t = ref.frame - f0;
+  const s = ref.scale = (state.rigHeight || 16) / ref.tall;
+  const p0 = a.poses[f0].p, p1 = a.poses[f1].p;
+  const point = (i, out) => out.set(
+    (p0[i * 3] + (p1[i * 3] - p0[i * 3]) * t) * s,
+    (p0[i * 3 + 1] + (p1[i * 3 + 1] - p0[i * 3 + 1]) * t) * s,
+    (p0[i * 3 + 2] + (p1[i * 3 + 2] - p0[i * 3 + 2]) * t) * s * ref.flipZ);
+  const thick = (state.rigHeight || 16) / 110;
+  ref.links.forEach((l, n) => {
+    point(l.from, refA); point(l.to, refB);
+    const stick = ref.sticks[n], d = refB.clone().sub(refA), len = d.length();
+    stick.position.copy(refA);
+    stick.quaternion.setFromUnitVectors(refUp, len > 1e-6 ? d.divideScalar(len) : refUp);
+    stick.scale.set(thick, len, thick);
+  });
+  point(ref.head, refA);
+  ref.skull.position.copy(refA).addScaledVector(refUp, thick * 4);
+  ref.skull.scale.setScalar(thick * 4.5);
+  // Beside the character as the camera sees him (to the right on screen), travelling with him or along its own root
+  // motion.
+  const look = camera.getWorldDirection(refA);
+  const side = new THREE.Vector3(-look.z, 0, look.x);
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.normalize().multiplyScalar(Number($("refBeside").value || 0));
+  let x = side.x, z = side.z + stage.position.z;
+  if ($("refRoot").checked && a.root.length) {
+    const r = a.root[Math.min(a.root.length - 1, Math.round(ref.frame))];
+    x += r[0] * s;
+    z += r[2] * s * ref.flipZ - stage.position.z;
+  }
+  ref.figure.position.set(x, 0, z);
+}
+
+function referenceSummary() {
+  return { available: ref.available, group: ref.group, path: ref.path, shown: ref.figure.visible,
+    frames: ref.anim ? ref.anim.frames : 0, seconds: ref.anim ? r3(ref.anim.duration) : 0,
+    from: Number($("refFrom").value), to: Number($("refTo").value), timing: $("refTiming").value,
+    beside: Number($("refBeside").value), own_travel: $("refRoot").checked, frame: r3(ref.frame) };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Timeline
 
 const tl = $("timeline");
@@ -864,6 +996,7 @@ function tick(now) {
     showFrame();
   }
   last = now;
+  if (!state.playing && ref.anim) placeReference();
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -911,6 +1044,9 @@ $("length").onchange = () => {
 };
 $("speed").onchange = () => { state.speed = Math.max(0.05, Math.min(4, Number($("speed").value) || 0.5)); updateTravelNote(); showFrame(); };
 for (const id of ["lunge", "decay", "travel", "backward"]) $(id).onchange = () => { updateTravelNote(); showFrame(); };
+$("refGroup").onchange = () => loadReferenceItems($("refGroup").value).catch((e) => status(e.message, "bad"));
+$("refOpen").onclick = () => $("refAnim").value && openReference($("refGroup").value, $("refAnim").value).catch((e) => status(e.message, "bad"));
+for (const id of ["refShow", "refRoot", "refBeside", "refTiming", "refFrom", "refTo"]) $(id).onchange = showFrame;
 $("keyBtn").onclick = keyPose;
 $("delKey").onclick = deleteKey;
 $("ease").onchange = () => {
@@ -1024,6 +1160,7 @@ function needRig() { if (!state.rig || !state.keys.length) throw new Error("the 
 
 function summary() {
   return {
+    page: PAGE, // a new id each time the page loads: a change means everything unsaved was lost
     rig: state.rig && { id: state.rig.id, name: state.rig.name, character: state.rig.character, playable: state.rig.playable },
     motion: state.sourceName, path: $("path").value, length: state.length, speed: state.speed,
     ticks: Math.round(state.length / state.speed), seconds: r3(state.length / state.speed / TICKS), frame: state.frame,
@@ -1193,6 +1330,36 @@ const BRIDGE = {
     return await save();
   },
 
+  // The Elden Ring reference beside the character: list its sources and animations, show one, and set how it's placed
+  // and timed. `from`/`to` pick the part of it that plays over this motion.
+  reference: async ({ groups, group, list, open, show, own_travel, beside, timing, from, to }) => {
+    needRig();
+    if (!ref.available) throw new Error("no reference cache: run tools/anim/reference (see its README)");
+    const out = {};
+    if (groups) out.groups = ref.groups;
+    if (group !== undefined && group !== $("refGroup").value) {
+      if (!ref.groups.some((g) => g.id === group)) throw new Error("no reference group " + group);
+      $("refGroup").value = group;
+      out.items = await loadReferenceItems(group);
+    }
+    if (list) out.items = out.items || await api("/api/ref/items?group=" + encodeURIComponent($("refGroup").value));
+    if (open) {
+      $("refAnim").value = open;
+      await openReference($("refGroup").value, open);
+    }
+    if (show !== undefined) $("refShow").checked = !!show;
+    if (own_travel !== undefined) $("refRoot").checked = !!own_travel;
+    if (beside !== undefined) $("refBeside").value = Number(beside);
+    if (timing !== undefined) {
+      if (!["stretch", "real"].includes(timing)) throw new Error("timing is stretch or real");
+      $("refTiming").value = timing;
+    }
+    if (from !== undefined) $("refFrom").value = Math.round(from);
+    if (to !== undefined) $("refTo").value = Math.round(to);
+    showFrame();
+    return { ...out, ...referenceSummary() };
+  },
+
   // Renders frames from a camera of its own (or yours, view "current") and gives them back as one PNG, tiled.
   screenshot: async ({ frame, frames, view = "three-quarter", width, height, bones = false, columns }) => {
     needRig();
@@ -1217,8 +1384,15 @@ const BRIDGE = {
       $("showSkel").checked = !!bones;
       gizmo.visible = false;
       if (view !== "current") {
+        camera.position.copy(orbit.target).add(new THREE.Vector3(...dirs[view]));
+        camera.lookAt(orbit.target);
         const box = new THREE.Box3();
-        for (const f of list) { state.frame = f; showFrame(); posedBox(box, true); }
+        for (const f of list) {
+          state.frame = f;
+          showFrame();
+          posedBox(box, true);
+          if (ref.figure.visible) box.expandByObject(ref.figure);
+        }
         const center = box.getCenter(new THREE.Vector3());
         const radius = Math.max(2, box.getSize(new THREE.Vector3()).length() / 2);
         const half = THREE.MathUtils.degToRad(camera.fov / 2);
@@ -1257,7 +1431,7 @@ const BRIDGE = {
   },
 };
 
-// This load of the page: a reload or a closed tab says goodbye, so the server hands what it held to the next page.
+// This load of the page. A reload or a closed tab says goodbye, and the server fails whatever it was doing.
 const PAGE = Math.random().toString(36).slice(2);
 window.addEventListener("pagehide", () => navigator.sendBeacon("/api/bridge/bye?page=" + PAGE));
 
@@ -1288,6 +1462,8 @@ async function bridgeLoop() {
 setMode("rotate");
 resize();
 requestAnimationFrame(tick);
-loadRigList().catch((e) => status("Couldn't load: " + e.message, "bad")).finally(bridgeLoop);
+loadRigList().catch((e) => status("Couldn't load: " + e.message, "bad"))
+  .then(() => loadReferenceGroups().catch((e) => status("Reference: " + e.message, "bad")))
+  .finally(bridgeLoop);
 // for inspecting from the console
 window.moonanimEditor = { state, valuesAt, applyValues, select, setMode, ikTarget, onGizmoChange, showFrame, openRig, openNative, BRIDGE };

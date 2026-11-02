@@ -5,6 +5,14 @@ python tools/anim/vigil_moves.py <dun/mainchara folder> <out folder> [sheet fold
 The Gauntlet's roll is a somersault from a stoop. Vigil's dive roll leaves the floor first: a crouch with the arms
 swung back, a push off into a flat dive with the arms reaching ahead and the legs trailing, the hands down, the same
 tucked somersault, and up through the roll's planted stance. The Gauntlet's own files are left as they are.
+
+toan_dive_roll.json has since been reworked by hand in the animation editor (tools/anim/editor): a deeper crouch, the
+hands planting flat ahead of the head at frame 9, a roll over the right shoulder with the head tucked aside, and a
+tight ball across the back; then its opening was eased (the crouch eases out of the run, and the arms swing
+down through his hips before the push-off instead of flipping in one; the crouch and push-off were then cut to three
+frames, about 0.1 s, so the anticipation stays quick), and the right wrist was set to hold the sword still against his chest (it had
+whipped the blade round between frames). toan_dive_roll_right.json, the same roll pushing off his right foot, mirrors
+its legs across his hips until he leaves the floor (Vigil plays it when his right foot leads). Running this script writes its first version over it; open that file in the editor instead.
 """
 
 import os

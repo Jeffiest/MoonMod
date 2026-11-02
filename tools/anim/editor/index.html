@@ -84,6 +84,20 @@
       <label>Decay</label><input type="number" id="decay" value="0.12" step="0.01" min="0.01" max="2"></div>
     <div class="row"><label><input type="checkbox" id="backward"> backwards (lunge_angle 180)</label></div>
     <div id="travelNote" class="note"></div>
+    <div id="refPanel" style="display:none">
+      <h3>Reference</h3>
+      <div class="note">An Elden Ring animation beside the character, to watch how a similar action moves. Green is its
+        left side, red its right. It is only shown, never saved.</div>
+      <label>Source</label>
+      <select id="refGroup"></select>
+      <label>Animation</label>
+      <div class="row"><select id="refAnim" style="flex:1"></select><button id="refOpen">Show</button></div>
+      <div class="row"><label><input type="checkbox" id="refShow"> show</label>
+        <label><input type="checkbox" id="refRoot"> its own travel</label></div>
+      <div class="row"><label>Beside</label><input type="number" id="refBeside" step="1" title="How far to the right of the character on screen; 0 lays it over him">
+        <select id="refTiming" style="flex:1"><option value="stretch">fit to this motion</option><option value="real">real time</option></select></div>
+      <div class="row"><label>Its frames</label><input type="number" id="refFrom" min="0" step="1"> to <input type="number" id="refTo" min="0" step="1"></div>
+    </div>
   </aside>
 
   <div id="view"><div id="hud"></div><div id="status"></div></div>

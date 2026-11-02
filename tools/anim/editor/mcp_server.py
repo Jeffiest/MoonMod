@@ -101,7 +101,7 @@ TOOLS = [
     {"name": "save_motion",
      "description": "Saves the page's motion as a moonmod-motion file (what animations.player_register reads), under "
                     "mods/ or examples/. If the play save has that mod, it is copied there too (sync, default on). "
-                    "Monster motions save, but the engine can't play a mod motion on a monster yet.",
+                    "A monster's motion is played through animations.monster_register.",
      "inputSchema": {"type": "object", "properties": {
          "path": {"type": "string", "description": "Repository path; default: the page's path field"},
          "sync": {"type": "boolean"}}}},
@@ -117,10 +117,27 @@ TOOLS = [
          "height": {"type": "integer", "description": "Of one picture (640, or 360 when tiled)"},
          "columns": {"type": "integer", "description": "Tiles a row (up to 6)"},
          "bones": {"type": "boolean", "description": "Draw the bone dots and lines too"}}}},
+    {"name": "reference",
+     "description": "The Reference panel: an Elden Ring animation (decoded by tools/anim/reference from the user's "
+                    "own install and downloaded repositories) drawn as a stick figure beside the character, green its "
+                    "left side and red its right, to look at how a similar action moves. Screenshots show it. It is "
+                    "only looked at: never copy its keys into a motion. Groups are the game's own animation table and "
+                    "each repository folder; animations are .hkx paths inside a group.",
+     "inputSchema": {"type": "object", "properties": {
+         "groups": {"type": "boolean", "description": "List the groups"},
+         "group": {"type": "string", "description": "Switch to a group (its id from groups); lists its animations"},
+         "list": {"type": "boolean", "description": "List the current group's animations"},
+         "open": {"type": "string", "description": "Show this animation of the current group"},
+         "show": {"type": "boolean"},
+         "own_travel": {"type": "boolean", "description": "Move it along its own root motion"},
+         "beside": {"type": "number", "description": "How far right of the character on screen; 0 lays it over him"},
+         "timing": {"type": "string", "enum": ["stretch", "real"],
+                    "description": "stretch: its frames from..to fill this motion; real: played at its own speed"},
+         "from": {"type": "integer"}, "to": {"type": "integer"}}}},
 ]
 
 PAGE_COMMANDS = {"editor_status": "status", "open_motion": "open", "get_pose": "get_pose", "set_pose": "set_pose",
-                 "edit_motion": "edit", "save_motion": "save", "screenshot": "screenshot"}
+                 "edit_motion": "edit", "save_motion": "save", "screenshot": "screenshot", "reference": "reference"}
 
 
 class EditorError(Exception):

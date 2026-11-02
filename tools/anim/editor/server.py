@@ -1,24 +1,32 @@
 """MoonMod animation editor: a local web page to pose and time Dark Cloud motions by hand.
 
-python tools/anim/editor/server.py [--data <extracted game data>] [--play <play save>] [--port 8765]
+python tools/anim/editor/server.py [--data <extracted game data>] [--play <play save>] [--port 8765] [--lan]
 
 Serves the editor (index.html, editor.js) and, from the converted game data, every playable character's and
 monster's model and native motions. Saving writes a moonmod-motion v1 file (what animations.player_register reads)
 through moonanim's own bake and motion_document, so a file from the editor is the same kind of file as one from the
-authoring scripts. Only 127.0.0.1 is served, and files are written only under the repository's mods/ and examples/.
+authoring scripts. Only 127.0.0.1 is served unless --lan opens it to your local network (a phone, a tablet, another
+PC; anyone on that network can then open and save motions), and files are written only under the repository's mods/
+and examples/.
 
 Poses travel as glTF values in the rig's channel order: rotations (x, y, z, w), translations and scales (x, y, z).
 
 The bridge (/api/bridge/...) carries commands from mcp_server.py to the open page and its answers back, so an
 assistant poses and looks at the same page you are watching.
+
+The reference endpoints (/api/ref/...) serve Elden Ring animations to watch beside the character, decoded by
+tools/anim/reference from the player's own install and downloaded repositories into a cache outside the repository
+(--reference, default %LOCALAPPDATA%/Moonmod/reference). They are only ever looked at; nothing of them is saved.
 """
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -75,6 +83,76 @@ class Catalog:
             rig.motion_names = motion_names(members.get(cfg, b""), e.get("names") or e["gltf"][:-5] + ".game.json")
             self.rigs[rid] = rig
         return self.rigs[rid]
+
+
+class Reference:
+    """Elden Ring reference animations: the game's own (extracted into the cache) and every downloaded repository named
+    in the cache's reference.json ({"exporter": ErReference.exe, "repositories": [folders]}). A group is the game's
+    animation table or one repository folder; an animation is decoded the first time it is asked for and kept."""
+
+    def __init__(self, cache):
+        self.cache = cache
+        self.roots = {}
+        self.exporter = None
+        config = os.path.join(cache or "", "reference.json")
+        if not cache or not os.path.exists(config):
+            return
+        cfg = json.load(open(config, encoding="utf-8"))
+        self.exporter = cfg.get("exporter")
+        game = os.path.join(cache, "game")
+        if os.path.isdir(game):
+            self.roots["game"] = ("Elden Ring", game)
+        for n, repo in enumerate(cfg.get("repositories", [])):
+            if os.path.isdir(repo):
+                self.roots["repo%d" % n] = (os.path.basename(os.path.normpath(repo)), repo)
+        self.lock = threading.Lock()
+
+    def available(self):
+        return bool(self.exporter and os.path.exists(self.exporter) and self.roots)
+
+    def groups(self):
+        out = []
+        for rid, (label, root) in self.roots.items():
+            for name in sorted(os.listdir(root), key=str.lower):
+                if os.path.isdir(os.path.join(root, name)):
+                    out.append({"id": rid + "/" + name, "name": name, "source": label})
+        return out
+
+    def _dir(self, group):
+        rid, _, name = group.partition("/")
+        root = self.roots[rid][1]
+        full = os.path.abspath(os.path.join(root, name))
+        if os.path.dirname(full) != os.path.abspath(root) or not os.path.isdir(full):
+            raise KeyError(group)
+        return full
+
+    def items(self, group):
+        full = self._dir(group)
+        found = []
+        for here, _, files in os.walk(full):
+            for f in files:
+                if f.lower().endswith(".hkx"):
+                    found.append(os.path.relpath(os.path.join(here, f), full).replace("\\", "/"))
+        return sorted(found, key=lambda r: (os.path.basename(r).lower(), r.lower()))
+
+    def decoded(self, group, rel):
+        """The decoded animation's JSON (bytes), decoding it first if the cache doesn't have it yet."""
+        base = self._dir(group)
+        full = os.path.abspath(os.path.join(base, rel))
+        if not full.startswith(base + os.sep) or not full.lower().endswith(".hkx") or not os.path.isfile(full):
+            raise KeyError(rel)
+        stamp = "%s|%d|%d" % (full.lower(), os.path.getsize(full), int(os.path.getmtime(full)))
+        out = os.path.join(self.cache, "decoded", hashlib.sha1(stamp.encode("utf-8")).hexdigest() + ".json")
+        with self.lock:
+            if not os.path.exists(out):
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                run = subprocess.run([self.exporter, "decode", self.cache, full, out + ".part"], capture_output=True,
+                                     text=True, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if run.returncode != 0:
+                    raise RuntimeError("couldn't decode %s: %s" % (rel, (run.stderr or run.stdout).strip()[-400:]))
+                os.replace(out + ".part", out)
+        with open(out, "rb") as f:
+            return f.read()
 
 
 def _plain(comment):
@@ -170,8 +248,9 @@ def writable(rel):
 
 class Bridge:
     """Commands for the open page. Each page (an id per load) long-polls next() and posts each answer to answer();
-    call() queues a command and waits for its answer. A page that goes away says bye(), and what it took and hadn't
-    answered goes back on the queue for the next page."""
+    call() queues a command and waits for its answer. A command can't outlive the page that took it: what a page was
+    working on when it went away (bye()) or never received (lost()) fails, since a reloaded page holds none of its
+    state and would apply the command to whatever motion it opened instead."""
 
     def __init__(self):
         self.cond = threading.Condition()
@@ -206,10 +285,19 @@ class Bridge:
         with self.cond:
             self.gone.add(page)
             self.pages.pop(page, None)
-            back = [cmd for cid, (p, cmd) in self.taken.items() if p == page and cid not in self.answers]
-            for cmd in back:
-                del self.taken[cmd["id"]]
-            self.queue[:0] = back
+            for cid, (p, _) in list(self.taken.items()):
+                if p == page:
+                    self._fail(cid, "the page reloaded or closed during this command, and nothing it held is left; "
+                                    "open the motion again (unsaved changes are gone)")
+
+    def lost(self, cmd):
+        """A command the page's long-poll was gone before it could receive."""
+        with self.cond:
+            self._fail(cmd["id"], "the page went away before it received this command; nothing was changed")
+
+    def _fail(self, cid, message):
+        if self.taken.pop(cid, None):
+            self.answers[cid] = {"id": cid, "ok": False, "error": message}
             self.cond.notify_all()
 
     def answer(self, reply):
@@ -235,6 +323,7 @@ class Bridge:
 
 class Handler(BaseHTTPRequestHandler):
     catalog = None
+    reference = Reference(None)
     play = None
     bridge = Bridge()
 
@@ -275,9 +364,22 @@ class Handler(BaseHTTPRequestHandler):
                 if not full or not os.path.exists(full):
                     return self.fail(404, "no such motion file")
                 return self.send(200, document_frames(self.catalog.rig(q["id"]), json.load(open(full, encoding="utf-8"))))
+            if url.path == "/api/ref/groups":
+                if not self.reference.available():
+                    return self.send(200, {"available": False, "cache": self.reference.cache})
+                return self.send(200, {"available": True, "groups": self.reference.groups()})
+            if url.path == "/api/ref/items":
+                return self.send(200, self.reference.items(q["group"]))
+            if url.path == "/api/ref/anim":
+                return self.send(200, self.reference.decoded(q["group"], q["path"]), "application/json")
             if url.path == "/api/bridge/next":
                 cmd = self.bridge.next(q.get("page", ""))
-                return self.send(200, cmd) if cmd else self.send(204, b"")
+                try:
+                    return self.send(200, cmd) if cmd else self.send(204, b"")
+                except OSError:  # the page left while it waited (a reload, a closed tab)
+                    if cmd:
+                        self.bridge.lost(cmd)
+                    return None
             if url.path == "/api/bridge/state":
                 return self.send(200, {"connected": self.bridge.connected()})
             if url.path.startswith("/model/"):
@@ -291,8 +393,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(500, "%s: %s" % (type(e).__name__, e))
 
     def do_POST(self):
-        if self.headers.get("Origin") not in (None, "http://127.0.0.1:%d" % self.server.server_port,
-                                              "http://localhost:%d" % self.server.server_port):
+        if self.headers.get("Origin") not in (None, *self.server.origins):
             return self.fail(403, "cross-origin request")
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -393,16 +494,43 @@ class Handler(BaseHTTPRequestHandler):
                         "bytes": os.path.getsize(full)})
 
 
+def lan_addresses():
+    """This PC's IPv4 addresses on its local networks (the private ranges)."""
+    import ipaddress
+    import socket
+    found = set()
+    try:
+        found.update(info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET))
+    except OSError:
+        pass
+    try:  # the address the default route leaves from (nothing is sent)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("10.255.255.255", 1))
+            found.add(probe.getsockname()[0])
+    except OSError:
+        pass
+    return sorted(a for a in found if ipaddress.ip_address(a).is_private and not ipaddress.ip_address(a).is_loopback)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--data", default=os.environ.get("DC_DATA", "E:/Gauntlet-build/run/data"))
     p.add_argument("--play", default="E:/Gauntlet-build/play/save", help="a save folder whose mods get a copy of each save")
     p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--reference", default=os.environ.get("MOONANIM_REFERENCE") or
+                   os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Moonmod", "reference"),
+                   help="the Elden Ring reference cache (tools/anim/reference)")
+    p.add_argument("--lan", action="store_true", help="serve your local network too, not only this PC")
     args = p.parse_args()
     Handler.catalog = Catalog(args.data)
+    Handler.reference = Reference(args.reference)
     Handler.play = args.play if os.path.isdir(args.play or "") else None
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server = ThreadingHTTPServer(("0.0.0.0" if args.lan else "127.0.0.1", args.port), Handler)
+    hosts = ["127.0.0.1", "localhost"] + (lan_addresses() if args.lan else [])
+    server.origins = ["http://%s:%d" % (h, args.port) for h in hosts]
     print("MoonMod animation editor: http://127.0.0.1:%d  (%d rigs)" % (args.port, len(Handler.catalog.entries)))
+    for h in hosts[2:]:
+        print("  on your network: http://%s:%d" % (h, args.port))
     server.serve_forever()
 
 

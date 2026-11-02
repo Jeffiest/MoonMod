@@ -1,8 +1,21 @@
 diff --git a/include/platform/arena.hpp b/include/platform/arena.hpp
-index a78be3f..15ba765 100644
+index a78be3f..52e8ae7 100644
 --- a/include/platform/arena.hpp
 +++ b/include/platform/arena.hpp
-@@ -23,6 +23,10 @@ void ArenaClearAll();
+@@ -17,12 +17,22 @@ constexpr int kArenaHeadroom = 4;
+ // a pointer the game truncates.
+ unsigned char *ArenaBlock(const void *owner, std::size_t bytes, std::size_t lead = 0);
+ 
+-// Zeroes every block, as retail's clear of the whole GlobalDataBuffer does.
++// Zeroes every block of the current world, as retail's clear of the whole GlobalDataBuffer does.
+ void ArenaClearAll();
+ 
++// Worlds keep apart the blocks of places loaded at once (a town and a dungeon side by side): ArenaBlock hands an
++// owner the block of the current world, and ArenaClearAll zeroes only that world's. World 0 is the default, the one
++// everything uses unless a caller sets another.
++void ArenaSetWorld(int world);
++int  ArenaWorld();
++
  // Retired blocks count: the game can still hold a pointer into one.
  bool ArenaContains(const void *pointer);
  
@@ -75,10 +88,59 @@ index 0dc8a9c..e51ee5e 100644
  SDL_Window *WindowHandle();
  // The window's size in the units mouse motion is measured in; false with no window.
 diff --git a/src/cpp/platform/arena.cpp b/src/cpp/platform/arena.cpp
-index 2990abc..6accebc 100644
+index 2990abc..2815d2d 100644
 --- a/src/cpp/platform/arena.cpp
 +++ b/src/cpp/platform/arena.cpp
-@@ -78,6 +78,19 @@ bool ArenaContains(const void *pointer) {
+@@ -12,15 +12,18 @@ namespace {
+ struct Block {
+     const void *owner;
+     ArenaMemory memory;
++    int         world = 0;
+ };
+ 
++int g_world = 0;
++
+ std::vector<Block> g_blocks;
+ // Blocks an owner outgrew stay mapped: retail's memory never went away, and a
+ // pointer the game kept into an old arena reads zeroes rather than faulting.
+ std::vector<Block> g_retired;
+ 
+ Block MapBlock(const void *owner, std::size_t bytes, std::size_t lead) {
+-    return {owner, ArenaMemoryMap(bytes, lead)};
++    return {owner, ArenaMemoryMap(bytes, lead), g_world};
+ }
+ 
+ bool MapHolds(const std::vector<Block> &blocks, std::uintptr_t address) {
+@@ -50,7 +53,7 @@ void CheckSomeBlockHigh() {
+ 
+ unsigned char *ArenaBlock(const void *owner, std::size_t bytes, std::size_t lead) {
+     for (Block &block : g_blocks) {
+-        if (block.owner != owner) {
++        if (block.owner != owner || block.world != g_world) {
+             continue;
+         }
+         if (block.memory.capacity >= bytes && block.memory.lead >= lead) {
+@@ -69,15 +72,38 @@ unsigned char *ArenaBlock(const void *owner, std::size_t bytes, std::size_t lead
+ 
+ void ArenaClearAll() {
+     for (const Block &block : g_blocks) {
+-        ArenaMemoryZero(block.memory);
++        if (block.world == g_world) {
++            ArenaMemoryZero(block.memory);
++        }
+     }
+ }
+ 
++void ArenaSetWorld(int world) {
++    g_world = world;
++}
++
++int ArenaWorld() {
++    return g_world;
++}
++
+ bool ArenaContains(const void *pointer) {
+     const auto address = reinterpret_cast<std::uintptr_t>(pointer);
      return MapHolds(g_blocks, address) || MapHolds(g_retired, address);
  }
  

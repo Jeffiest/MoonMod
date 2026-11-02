@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Reads Elden Ring animations from the player's own install and the animation repositories they download, for the
+       animation editor's Reference panel. It builds against DSAnimStudio's libraries where they are unpacked (pass
+       -p:DsasDir=... or set DSAS_DIR); nothing of theirs or the game's is copied into this folder. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>CA1416</NoWarn>
+    <DsasDir Condition="'$(DsasDir)' == ''">$(DSAS_DIR)</DsasDir>
+  </PropertyGroup>
+  <Target Name="NeedDsas" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(DsasDir)/SoulsAssetPipeline.dll')">
+    <Error Text="Point DsasDir (or the DSAS_DIR environment variable) at an unpacked DSAnimStudio folder (the one with SoulsAssetPipeline.dll)." />
+  </Target>
+  <ItemGroup>
+    <Reference Include="SoulsFormats"><HintPath>$(DsasDir)/SoulsFormats.dll</HintPath></Reference>
+    <Reference Include="SoulsAssetPipeline"><HintPath>$(DsasDir)/SoulsAssetPipeline.dll</HintPath></Reference>
+    <Reference Include="Havoc"><HintPath>$(DsasDir)/Havoc.dll</HintPath></Reference>
+    <Reference Include="BouncyCastle.Cryptography"><HintPath>$(DsasDir)/BouncyCastle.Cryptography.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>
