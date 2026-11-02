@@ -3660,6 +3660,46 @@ index 00000000..261fc66f
 +void          BumpMonsterScriptOverrideGeneration();
 +
 +} // namespace moonmod
+diff --git a/port/include/moonmod/symlinks.hpp b/port/include/moonmod/symlinks.hpp
+new file mode 100644
+index 00000000..c19dff2c
+--- /dev/null
++++ b/port/include/moonmod/symlinks.hpp
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include <filesystem>
++#include <system_error>
++
++namespace moonmod {
++
++// Whether a component of path below base is a symbolic link, or can't be inspected: such a link, planted in the
++// save folder or a mod's package, could send a read or write somewhere else. base and the folders above it are the
++// player's or the system's own and aren't checked: macOS's /var is a link to /private/var, and a home or save folder
++// can sit behind a link or junction. A path that leaves base is checked from where it leaves.
++inline bool ContainsSymlinkBelow(const std::filesystem::path &path, const std::filesystem::path &base) {
++    std::filesystem::path trusted = base.lexically_normal();
++    if (!trusted.has_filename()) trusted = trusted.parent_path();
++    auto                  next_trusted = trusted.begin();
++    bool                  within = !trusted.empty();
++    std::filesystem::path current;
++    for (const auto &part : path.lexically_normal()) {
++        current /= part;
++        if (within && next_trusted != trusted.end() && *next_trusted == part) {
++            ++next_trusted;
++            continue;
++        }
++        within = false;
++        if (part.empty() || part == "." || !current.has_relative_path()) continue;
++        std::error_code ec;
++        const auto      status = std::filesystem::symlink_status(current, ec);
++        if (ec && ec != std::errc::no_such_file_or_directory) return true;
++        if (!ec && std::filesystem::is_symlink(status)) return true;
++    }
++    return false;
++}
++
++} // namespace moonmod
 diff --git a/port/include/moonmod/title_modes.hpp b/port/include/moonmod/title_modes.hpp
 new file mode 100644
 index 00000000..fffa0637
@@ -20564,11 +20604,12 @@ index 00000000..c0079088
 +} // namespace moonmod
 diff --git a/port/src/moonmod/audio_api.cpp b/port/src/moonmod/audio_api.cpp
 new file mode 100644
-index 00000000..30832f24
+index 00000000..ad254269
 --- /dev/null
 +++ b/port/src/moonmod/audio_api.cpp
-@@ -0,0 +1,531 @@
+@@ -0,0 +1,519 @@
 +#include "moonmod/audio_api.hpp"
++#include "moonmod/symlinks.hpp"
 +
 +#include <algorithm>
 +#include <cctype>
@@ -20655,19 +20696,6 @@ index 00000000..30832f24
 +    return std::string(owner) + ":" + std::string(local_id);
 +}
 +
-+bool ContainsSymlink(const std::filesystem::path &path) {
-+    std::filesystem::path current = path.root_path();
-+    for (const auto &part : path.relative_path()) {
-+        if (part.empty() || part == ".") continue;
-+        current /= part;
-+        std::error_code error;
-+        const auto status = std::filesystem::symlink_status(current, error);
-+        if (error && error != std::errc::no_such_file_or_directory) return true;
-+        if (!error && std::filesystem::is_symlink(status)) return true;
-+    }
-+    return false;
-+}
-+
 +bool ResolveAudioPath(const std::filesystem::path &package_root, std::string_view relative,
 +                      std::filesystem::path &resolved, std::size_t &file_size, std::string &error) {
 +    if (relative.empty() || relative.size() > 240 || relative.find('\\') != std::string_view::npos ||
@@ -20701,7 +20729,7 @@ index 00000000..30832f24
 +        error = "audio path must use a .wav, .flac, or .ogg file";
 +        return false;
 +    }
-+    if (ContainsSymlink(package_root)) {
++    if (moonmod::ContainsSymlinkBelow(package_root, package_root.parent_path())) {
 +        error = "mod package path contains a symbolic link";
 +        return false;
 +    }
@@ -20712,7 +20740,7 @@ index 00000000..30832f24
 +        return false;
 +    }
 +    const std::filesystem::path candidate = package_root / relative_path;
-+    if (ContainsSymlink(candidate)) {
++    if (moonmod::ContainsSymlinkBelow(candidate, package_root)) {
 +        error = "audio path contains a symbolic link";
 +        return false;
 +    }
@@ -21436,12 +21464,13 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..1c7b79f0
+index 00000000..90b9385d
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,14927 @@
+@@ -0,0 +1,14917 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/symlinks.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/choice_panel.hpp"
 +#include "moonmod/map_screen.hpp"
@@ -26911,19 +26940,6 @@ index 00000000..1c7b79f0
 +    return true;
 +}
 +
-+bool ContainsSymlink(const std::filesystem::path &path) {
-+    std::filesystem::path current = path.root_path();
-+    for (const auto &part : path.relative_path()) {
-+        if (part.empty() || part == ".") continue;
-+        current /= part;
-+        std::error_code ec;
-+        const auto status = std::filesystem::symlink_status(current, ec);
-+        if (ec && ec != std::errc::no_such_file_or_directory) return true;
-+        if (!ec && std::filesystem::is_symlink(status)) return true;
-+    }
-+    return false;
-+}
-+
 +std::filesystem::path ItemSlotRegistryPath(const std::filesystem::path &save_root) {
 +    return save_root / "moonmod" / "game-content" / "chronicle-item-slots.json";
 +}
@@ -26936,7 +26952,7 @@ index 00000000..1c7b79f0
 +        return false;
 +    }
 +    std::filesystem::path path = ItemSlotRegistryPath(save_root);
-+    if (ContainsSymlink(path)) {
++    if (moonmod::ContainsSymlinkBelow(path, save_root)) {
 +        error = "Chronicle item slot registry path contains a symbolic link";
 +        return false;
 +    }
@@ -26945,7 +26961,7 @@ index 00000000..1c7b79f0
 +        if (ec) error = "Chronicle item slot registry could not be inspected: " + ec.message();
 +        if (ec) return false;
 +        path += ".bak";
-+        if (ContainsSymlink(path)) {
++        if (moonmod::ContainsSymlinkBelow(path, save_root)) {
 +            error = "Chronicle item slot registry backup path contains a symbolic link";
 +            return false;
 +        }
@@ -26993,11 +27009,11 @@ index 00000000..1c7b79f0
 +bool SaveItemSlotRegistry(const std::filesystem::path &save_root, const Json &assignments, std::string &error) {
 +    const std::filesystem::path path = ItemSlotRegistryPath(save_root);
 +    const std::filesystem::path backup = path.string() + ".bak";
-+    if (ContainsSymlink(path)) {
++    if (moonmod::ContainsSymlinkBelow(path, save_root)) {
 +        error = "Chronicle item slot registry path contains a symbolic link";
 +        return false;
 +    }
-+    if (ContainsSymlink(backup)) {
++    if (moonmod::ContainsSymlinkBelow(backup, save_root)) {
 +        error = "Chronicle item slot registry backup path contains a symbolic link";
 +        return false;
 +    }
@@ -27008,7 +27024,7 @@ index 00000000..1c7b79f0
 +        return false;
 +    }
 +    const std::filesystem::path temporary = path.string() + ".tmp";
-+    if (ContainsSymlink(temporary)) {
++    if (moonmod::ContainsSymlinkBelow(temporary, save_root)) {
 +        error = "Chronicle item slot registry temporary path contains a symbolic link";
 +        return false;
 +    }
@@ -27105,7 +27121,7 @@ index 00000000..1c7b79f0
 +        return false;
 +    }
 +    std::filesystem::path path = WeaponSlotRegistryPath(save_root);
-+    if (ContainsSymlink(path)) {
++    if (moonmod::ContainsSymlinkBelow(path, save_root)) {
 +        error = "Chronicle weapon slot registry path contains a symbolic link";
 +        return false;
 +    }
@@ -27116,7 +27132,7 @@ index 00000000..1c7b79f0
 +            return false;
 +        }
 +        path += ".bak";
-+        if (ContainsSymlink(path)) {
++        if (moonmod::ContainsSymlinkBelow(path, save_root)) {
 +            error = "Chronicle weapon slot registry backup path contains a symbolic link";
 +            return false;
 +        }
@@ -27165,7 +27181,8 @@ index 00000000..1c7b79f0
 +    const std::filesystem::path path = WeaponSlotRegistryPath(save_root);
 +    const std::filesystem::path backup = path.string() + ".bak";
 +    const std::filesystem::path temporary = path.string() + ".tmp";
-+    if (ContainsSymlink(path) || ContainsSymlink(backup) || ContainsSymlink(temporary)) {
++    if (moonmod::ContainsSymlinkBelow(path, save_root) || moonmod::ContainsSymlinkBelow(backup, save_root) ||
++        moonmod::ContainsSymlinkBelow(temporary, save_root)) {
 +        error = "Chronicle weapon slot registry path contains a symbolic link";
 +        return false;
 +    }
@@ -27243,7 +27260,7 @@ index 00000000..1c7b79f0
 +        return false;
 +    }
 +    const std::filesystem::path path = GeoramaPieceSlotRegistryPath(save_root);
-+    if (ContainsSymlink(path)) {
++    if (moonmod::ContainsSymlinkBelow(path, save_root)) {
 +        error = "Chronicle Georama slot registry path contains a symbolic link";
 +        return false;
 +    }
@@ -27300,7 +27317,8 @@ index 00000000..1c7b79f0
 +    const std::filesystem::path path = GeoramaPieceSlotRegistryPath(save_root);
 +    const std::filesystem::path backup = path.string() + ".bak";
 +    const std::filesystem::path temporary = path.string() + ".tmp";
-+    if (ContainsSymlink(path) || ContainsSymlink(backup) || ContainsSymlink(temporary)) {
++    if (moonmod::ContainsSymlinkBelow(path, save_root) || moonmod::ContainsSymlinkBelow(backup, save_root) ||
++        moonmod::ContainsSymlinkBelow(temporary, save_root)) {
 +        error = "Chronicle Georama slot registry path contains a symbolic link";
 +        return false;
 +    }
@@ -38189,11 +38207,12 @@ index 00000000..a267d5ec
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..309ebc1c
+index 00000000..f0dc025f
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3606 @@
+@@ -0,0 +1,3595 @@
 +#include "lua_runtime.hpp"
++#include "moonmod/symlinks.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/runtime.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
@@ -38305,19 +38324,6 @@ index 00000000..309ebc1c
 +           std::ranges::all_of(key, [](char value) {
 +               return AsciiAlnum(value) || value == '.' || value == '_' || value == '-';
 +           });
-+}
-+
-+bool ContainsSymlink(const std::filesystem::path &path) {
-+    std::filesystem::path current = path.root_path();
-+    for (const auto &part : path.relative_path()) {
-+        if (part.empty() || part == ".") continue;
-+        current /= part;
-+        std::error_code ec;
-+        const auto status = std::filesystem::symlink_status(current, ec);
-+        if (ec && ec != std::errc::no_such_file_or_directory) return true;
-+        if (!ec && std::filesystem::is_symlink(status)) return true;
-+    }
-+    return false;
 +}
 +
 +// Storage tables: a 1..n sequence is saved as a JSON array; any other table as an
@@ -39217,11 +39223,11 @@ index 00000000..309ebc1c
 +
 +        std::error_code error;
 +        const std::filesystem::path package_root = std::filesystem::canonical(manifest.package_root, error);
-+        if (error || ContainsSymlink(manifest.package_root)) {
++        if (error || moonmod::ContainsSymlinkBelow(manifest.package_root, manifest.package_root.parent_path())) {
 +            return {ApiCallStatus::Failed, nullptr, "mod package path is missing or contains a symbolic link"};
 +        }
 +        const std::filesystem::path candidate = manifest.package_root / relative_path;
-+        if (ContainsSymlink(candidate)) {
++        if (moonmod::ContainsSymlinkBelow(candidate, manifest.package_root)) {
 +            return {ApiCallStatus::Failed, nullptr, "resource path contains a symbolic link"};
 +        }
 +        const std::filesystem::path resolved = std::filesystem::canonical(candidate, error);
@@ -41366,7 +41372,7 @@ index 00000000..309ebc1c
 +    bool FlushStorage(std::string &error) {
 +        if (!storage_dirty) return true;
 +        std::error_code ec;
-+        if (ContainsSymlink(storage_file)) {
++        if (moonmod::ContainsSymlinkBelow(storage_file, config.save_root)) {
 +            error = "mod storage path contains a symbolic link";
 +            return false;
 +        }
@@ -41377,7 +41383,8 @@ index 00000000..309ebc1c
 +        }
 +        auto temp = storage_file;
 +        temp += ".tmp";
-+        if (ContainsSymlink(storage_file) || ContainsSymlink(temp)) {
++        if (moonmod::ContainsSymlinkBelow(storage_file, config.save_root) ||
++            moonmod::ContainsSymlinkBelow(temp, config.save_root)) {
 +            error = "mod storage path contains a symbolic link";
 +            return false;
 +        }
@@ -41551,7 +41558,7 @@ index 00000000..309ebc1c
 +
 +    bool LoadStorage(std::string &error) {
 +        std::error_code ec;
-+        if (ContainsSymlink(storage_file)) {
++        if (moonmod::ContainsSymlinkBelow(storage_file, config.save_root)) {
 +            error = "mod storage path contains a symbolic link";
 +            return false;
 +        }
@@ -45090,10 +45097,10 @@ index 00000000..c4c4411e
 +bool ModsTextureOverride(const char *name, PortDecodedTexture &texture);
 diff --git a/port/src/moonmod/monstorunit_moonmod.cpp b/port/src/moonmod/monstorunit_moonmod.cpp
 new file mode 100644
-index 00000000..7947d802
+index 00000000..891a8eac
 --- /dev/null
 +++ b/port/src/moonmod/monstorunit_moonmod.cpp
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,213 @@
 +// MoonMod code that used to live in ps2/src/monstorunit.cpp: the registered monster variants, the
 +// awake-monster limit, the floor population a mod asks for, and retail's DrawMapSymbol with the
 +// enlarged map grid and the mod reveal.
@@ -45102,6 +45109,7 @@ index 00000000..7947d802
 +
 +#include <algorithm>
 +#include <cmath>
++#include <cstdlib>
 +#include <cstring>
 +
 +#include "dun/gameloop.hpp"
@@ -45924,11 +45932,12 @@ index 00000000..04313ffe
 +} // namespace moonmod
 diff --git a/port/src/moonmod/native_resource_overrides.cpp b/port/src/moonmod/native_resource_overrides.cpp
 new file mode 100644
-index 00000000..5d9b0d0f
+index 00000000..e29c7329
 --- /dev/null
 +++ b/port/src/moonmod/native_resource_overrides.cpp
-@@ -0,0 +1,360 @@
+@@ -0,0 +1,348 @@
 +#include "moonmod/native_resource_overrides.hpp"
++#include "moonmod/symlinks.hpp"
 +
 +#include <algorithm>
 +#include <cstdint>
@@ -46032,19 +46041,6 @@ index 00000000..5d9b0d0f
 +           });
 +}
 +
-+bool ContainsSymlink(const std::filesystem::path &path) {
-+    std::filesystem::path current = path.root_path();
-+    for (const auto &part : path.relative_path()) {
-+        if (part.empty() || part == ".") continue;
-+        current /= part;
-+        std::error_code error;
-+        const auto status = std::filesystem::symlink_status(current, error);
-+        if (error && error != std::errc::no_such_file_or_directory) return true;
-+        if (!error && std::filesystem::is_symlink(status)) return true;
-+    }
-+    return false;
-+}
-+
 +} // namespace
 +
 +ApiCallResult RegisterNativeResourceOverride(std::string_view owner, const std::filesystem::path &package_root,
@@ -46077,11 +46073,11 @@ index 00000000..5d9b0d0f
 +
 +    std::error_code error;
 +    const std::filesystem::path canonical_root = std::filesystem::canonical(package_root, error);
-+    if (error || ContainsSymlink(package_root)) {
++    if (error || moonmod::ContainsSymlinkBelow(package_root, package_root.parent_path())) {
 +        return {ApiCallStatus::Failed, nullptr, "mod package path is missing or contains a symbolic link"};
 +    }
 +    const std::filesystem::path candidate = package_root / relative_path;
-+    if (ContainsSymlink(candidate)) {
++    if (moonmod::ContainsSymlinkBelow(candidate, package_root)) {
 +        return {ApiCallStatus::Failed, nullptr, "resource path contains a symbolic link"};
 +    }
 +    const std::filesystem::path resolved = std::filesystem::canonical(candidate, error);
@@ -46637,12 +46633,13 @@ index 00000000..a32cd35f
 +} // namespace dc::game
 diff --git a/port/src/moonmod/runtime.cpp b/port/src/moonmod/runtime.cpp
 new file mode 100644
-index 00000000..4dfee607
+index 00000000..b9dac855
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
-@@ -0,0 +1,1415 @@
+@@ -0,0 +1,1407 @@
 +#include <chrono>
 +#include "moonmod/runtime.hpp"
++#include "moonmod/symlinks.hpp"
 +
 +#include <algorithm>
 +#include <cmath>
@@ -46698,19 +46695,6 @@ index 00000000..4dfee607
 +Json DefaultProfile() {
 +    return {{"format_version", 1}, {"enabled", Json::object()}, {"settings", Json::object()},
 +            {"native_trusted", Json::object()}};
-+}
-+
-+bool ContainsSymlink(const std::filesystem::path &path) {
-+    std::filesystem::path current = path.root_path();
-+    for (const auto &part : path.relative_path()) {
-+        if (part.empty() || part == ".") continue;
-+        current /= part;
-+        std::error_code ec;
-+        const auto status = std::filesystem::symlink_status(current, ec);
-+        if (ec && ec != std::errc::no_such_file_or_directory) return true;
-+        if (!ec && std::filesystem::is_symlink(status)) return true;
-+    }
-+    return false;
 +}
 +
 +
@@ -46882,7 +46866,7 @@ index 00000000..4dfee607
 +        error.clear();
 +        profile_file = config.save_root / "moonmod" / "profile.json";
 +        profile = DefaultProfile();
-+        if (ContainsSymlink(profile_file)) {
++        if (moonmod::ContainsSymlinkBelow(profile_file, config.save_root)) {
 +            error = "MoonFactory profile path contains a symbolic link; defaults are active";
 +            return false;
 +        }
@@ -46917,7 +46901,7 @@ index 00000000..4dfee607
 +
 +    bool SaveProfile(std::string &error) const {
 +        error.clear();
-+        if (ContainsSymlink(profile_file)) {
++        if (moonmod::ContainsSymlinkBelow(profile_file, config.save_root)) {
 +            error = "MoonFactory profile path contains a symbolic link";
 +            return false;
 +        }
@@ -46929,7 +46913,8 @@ index 00000000..4dfee607
 +        }
 +        auto temp = profile_file;
 +        temp += ".tmp";
-+        if (ContainsSymlink(profile_file) || ContainsSymlink(temp)) {
++        if (moonmod::ContainsSymlinkBelow(profile_file, config.save_root) ||
++            moonmod::ContainsSymlinkBelow(temp, config.save_root)) {
 +            error = "MoonFactory profile path contains a symbolic link";
 +            return false;
 +        }
@@ -46975,7 +46960,10 @@ index 00000000..4dfee607
 +        if (ec) return {};
 +        const std::string content_hash = NativePluginFileSha256(record.manifest.native_library);
 +        if (content_hash.empty()) return {};
-+        const auto relative = record.manifest.native_library.lexically_relative(record.package_root).generic_string();
++        // Against the manifest's canonical root, as the library's path is: the folder's own path can be another
++        // spelling of it (a link, or Windows' short names such as RUNNER~1), which would put the library outside.
++        const auto relative =
++            record.manifest.native_library.lexically_relative(record.manifest.package_root).generic_string();
 +        if (relative.empty() || relative.starts_with("..")) return {};
 +        return record.manifest.version + "|" + relative + "|" + std::to_string(size) + "|" +
 +               std::to_string(static_cast<long long>(modified.time_since_epoch().count())) + "|" + content_hash;
@@ -47769,7 +47757,7 @@ index 00000000..4dfee607
 +    if (module != impl_->modules.end()) return module->second->GetQuests();
 +
 +    const std::filesystem::path storage_file = impl_->config.save_root / "moonmod" / "data" / record->id / "storage.json";
-+    if (ContainsSymlink(storage_file)) {
++    if (moonmod::ContainsSymlinkBelow(storage_file, impl_->config.save_root)) {
 +        return {ApiCallStatus::Failed, nullptr, "saved quest data path contains a symbolic link"};
 +    }
 +    std::error_code ec;
@@ -47859,7 +47847,7 @@ index 00000000..4dfee607
 +    if (module != impl_->modules.end()) return module->second->GetSkills();
 +
 +    const std::filesystem::path storage_file = impl_->config.save_root / "moonmod" / "data" / record->id / "storage.json";
-+    if (ContainsSymlink(storage_file)) {
++    if (moonmod::ContainsSymlinkBelow(storage_file, impl_->config.save_root)) {
 +        return {ApiCallStatus::Failed, nullptr, "saved skill data path contains a symbolic link"};
 +    }
 +    std::error_code ec;
