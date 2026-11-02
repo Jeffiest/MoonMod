@@ -96,10 +96,11 @@ on idle lets the game take him back.
 python tools/anim/toan_moves.py E:/Gauntlet-build/run/data/dun/mainchara mods/moonmod.roguelike/resources/anims <sheets>
 ```
 
-**Blender.** Blender 5.2 imports the converted glTF, but it doesn't animate this kind of rig correctly. The
-converter's own actions come out with the limbs pulled apart, because Toan's animated chain and effect bones (`chn*`,
-`eff*`, the hand chains) sit outside the skin's joint list. Until that import is fixed, Blender can't be used to
-pose these characters. `moonanim.action_to_document` turns any glTF action on the rig into a motion file, and is
+**Blender.** Blender 5.2 imports the converted glTF, but it doesn't animate this kind of rig correctly: the
+converter's own actions come out with the limbs pulled apart. The cause is the skin: each joint's inverse bind matrix
+is the inverse of its own bind-pose (`.bbp`) matrix, local to its parent, where glTF wants the whole chain's. Until
+the converter writes them whole, Blender can't be used to pose these characters; the animation editor
+(`tools/anim/editor`) rebuilds them the way the game skins (`MotionProc2`) and poses any character or monster by hand. `moonanim.action_to_document` turns any glTF action on the rig into a motion file, and is
 checked against the converter's actions, so a tool that exports node rotations faithfully can feed it.
 
 **Free animations online.** Libraries such as Mixamo or Quaternius's CC0 packs are built on humanoid skeletons with
