@@ -17,9 +17,14 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Chronicle Two build failed.' }
 }
 
-# ctest runs each case in its own process, isolating native game globals.
+# ctest runs each case in its own process, isolating native game globals. The two executable launches
+# (MoonMod.HeadlessProbe and the upstream smoke test) need Vulkan, so they run only with -StartupSmoke.
 $filter = '^MoonMod'
-if ($StartupSmoke) { $filter += '|^Smoke.HeadlessFramesScreenshot$' }
+$exclude = @('-E', '^MoonMod\.HeadlessProbe$')
+if ($StartupSmoke) {
+    $filter += '|^Smoke.HeadlessFramesScreenshot$'
+    $exclude = @()
+}
 $report = Join-Path $build 'moonfactory-tests.xml'
 $previousData = $env:DC2_DATA
 $previousSave = $env:DC2_SAVE
@@ -30,7 +35,7 @@ try {
     # Native fixtures seed their own state; never discover the player's extraction or save.
     $env:DC2_DATA = $testData
     $env:DC2_SAVE = $testSave
-    & ctest --test-dir $build -R $filter --no-tests=error --output-on-failure --output-junit $report --parallel $Jobs
+    & ctest --test-dir $build -R $filter @exclude --no-tests=error --output-on-failure --output-junit $report --parallel $Jobs
     if ($LASTEXITCODE -ne 0) { throw "MoonFactory verification failed; inspect $report." }
 } finally {
     $env:DC2_DATA = $previousData
