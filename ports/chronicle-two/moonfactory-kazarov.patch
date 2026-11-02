@@ -1,8 +1,8 @@
 diff --git a/include/platform/input.hpp b/include/platform/input.hpp
-index 0838874..ce788f0 100644
+index 3a686a9..536349d 100644
 --- a/include/platform/input.hpp
 +++ b/include/platform/input.hpp
-@@ -44,6 +44,8 @@ struct InputPadState {
+@@ -53,6 +53,8 @@ struct InputPadState {
      std::uint8_t  left_y = kInputAxisCentre;
      std::uint8_t  right_x = kInputAxisCentre;
      std::uint8_t  right_y = kInputAxisCentre;
@@ -11,7 +11,7 @@ index 0838874..ce788f0 100644
      // D-pad bits the left-stick keys add only while the game is not reading the left stick: the
      // screens that read the d-pad alone (the developer menu, the dungeon loader).
      std::uint16_t stick_dpad = 0;
-@@ -157,6 +159,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
+@@ -166,6 +168,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
  // The stick byte the game's AxisCalibration reads as deflection * 128, deflection in [-1, 1]: the
  // dead zone is stepped over, so any motion moves the game.
  std::uint8_t InputStickByte(float deflection);
@@ -20,7 +20,7 @@ index 0838874..ce788f0 100644
  
  // Rebinds one action ("cross", "up", "lx-", "rx", ...) to the names given: SDL key names, Mouse1 to
  // Mouse5 (left, right, middle, X1, X2), and for the whole-axis actions lx ly rx ry MouseX or MouseY
-@@ -164,6 +168,15 @@ std::uint8_t InputStickByte(float deflection);
+@@ -173,6 +177,15 @@ std::uint8_t InputStickByte(float deflection);
  // the camera's own. Returns false if the action or a name is unknown or does not fit the action.
  bool InputBindKeys(std::string_view action, std::span<const std::string_view> keys);
  
@@ -37,10 +37,10 @@ index 0838874..ce788f0 100644
  void InputResetBindings();
  
 diff --git a/src/cpp/gfx/displaylist.cpp b/src/cpp/gfx/displaylist.cpp
-index 4185e02..d730063 100644
+index a1a0667..a7f469b 100644
 --- a/src/cpp/gfx/displaylist.cpp
 +++ b/src/cpp/gfx/displaylist.cpp
-@@ -545,8 +545,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
+@@ -855,8 +855,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
      }
      cache.cameras.assign(list.cameras.size(), -1);
      if (!list.camera_cut) {
@@ -92,18 +92,18 @@ index 4185e02..d730063 100644
      }
  }
 diff --git a/src/cpp/platform/input.cpp b/src/cpp/platform/input.cpp
-index 796e14c..dd7de83 100644
+index c5a4797..e129c5a 100644
 --- a/src/cpp/platform/input.cpp
 +++ b/src/cpp/platform/input.cpp
 @@ -8,6 +8,7 @@
  #include <charconv>
  #include <cmath>
- #include <cstdio>
+ #include <cstdlib>
 +#include <map>
+ #include <memory>
  #include <numbers>
  #include <optional>
- #include <string>
-@@ -21,6 +22,11 @@
+@@ -24,6 +25,11 @@
  #include "platform/touchpad.hpp"
  #include "platform/window.hpp"
  
@@ -115,7 +115,7 @@ index 796e14c..dd7de83 100644
  namespace {
  
  enum class ActionKind {
-@@ -211,6 +217,9 @@ bool             g_touch_tap_shown = false;
+@@ -249,6 +255,9 @@ bool             g_touch_tap_shown = false;
  // buttons, the script's keys) were held at the last poll, for their press edges.
  std::array<int, kHostActionCount>  g_host_presses{};
  std::array<bool, kHostActionCount> g_host_polled{};
@@ -125,25 +125,17 @@ index 796e14c..dd7de83 100644
  
  std::string Lower(std::string_view text) {
      std::string lower(text);
-@@ -390,10 +399,14 @@ void ReadGamepad(SDL_Gamepad *gamepad, InputPadState &state) {
-             state.buttons |= GamepadButtonPad(type, button);
+@@ -535,6 +544,8 @@ void ReadGamepad(SDL_Gamepad *gamepad, InputPadState &state) {
+             state.buttons |= pressed;
          }
      }
--    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kTriggerThreshold) {
-+    const Sint16 left_trigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
-+    const Sint16 right_trigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
-+    state.left_trigger = InputTriggerByte(left_trigger);
-+    state.right_trigger = InputTriggerByte(right_trigger);
-+    if (left_trigger > kTriggerThreshold) {
++    state.left_trigger = InputTriggerByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
++    state.right_trigger = InputTriggerByte(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
+     if (PadDefault(kInputL2) && TriggerHeld(gamepad, 0)) {
          state.buttons |= kInputL2;
      }
--    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kTriggerThreshold) {
-+    if (right_trigger > kTriggerThreshold) {
-         state.buttons |= kInputR2;
-     }
-     Sint16 axes[4] = {SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX),
-@@ -587,6 +600,41 @@ bool HostPolledHeld(std::size_t host) {
-     return false;
+@@ -761,6 +772,42 @@ bool HostPolledHeld(std::size_t host) {
+     return std::ranges::any_of(PadSources(kFirstHostAction + host, g_pad_type), GamepadSourceHeld);
  }
  
 +bool ModActionHeldInternal(std::string_view action) {
@@ -159,7 +151,8 @@ index 796e14c..dd7de83 100644
 +                if (((MouseButtons() | g_scripted.mouse_buttons) & (1u << (source.code - 1))) != 0) return true;
 +                break;
 +            case Source::GamepadButton:
-+                if (GamepadButtonHeld(source.code)) return true;
++            case Source::GamepadTrigger:
++                if (GamepadSourceHeld(source)) return true;
 +                break;
 +            case Source::MouseAxis:
 +                break;
@@ -184,7 +177,7 @@ index 796e14c..dd7de83 100644
  bool MouseAxisBound(int code) {
      return std::ranges::any_of(g_bindings, [&](const std::vector<Source> &sources) {
          return std::ranges::any_of(sources, [&](const Source &source) {
-@@ -818,6 +866,7 @@ void InputPoll() {
+@@ -1091,6 +1138,7 @@ void InputPoll() {
      }
      ReadTouchpad(g_slots[0].gamepad);
      PollHostActions();
@@ -192,7 +185,7 @@ index 796e14c..dd7de83 100644
  }
  
  void InputHandleEvent(const SDL_Event &event) {
-@@ -882,6 +931,7 @@ void InputHandleEvent(const SDL_Event &event) {
+@@ -1161,6 +1209,7 @@ void InputHandleEvent(const SDL_Event &event) {
          default:
              break;
      }
@@ -200,7 +193,7 @@ index 796e14c..dd7de83 100644
  }
  
  void InputLatchPad(int pad) {
-@@ -1225,6 +1275,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
+@@ -1556,6 +1605,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
      return false;
  }
  
@@ -257,7 +250,7 @@ index 796e14c..dd7de83 100644
  std::span<const InputActionInfo> InputActions() {
      static const std::vector<InputActionInfo> actions = [] {
          std::vector<InputActionInfo> list;
-@@ -1440,6 +1540,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
+@@ -1850,6 +1949,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
      g_scripted = held;
      g_scripted_wheel = held.mouse_wheel;
      PollHostActions();
