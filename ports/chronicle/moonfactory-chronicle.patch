@@ -1747,10 +1747,10 @@ index 00000000..55226749
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..56758118
+index 00000000..bbde351b
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,197 @@
 +#pragma once
 +
 +#include <string>
@@ -1862,6 +1862,7 @@ index 00000000..56758118
 +bool ChroniclePlayerMapReveal();
 +bool ChroniclePlayerMonsterReveal();
 +bool ChroniclePlayerMapHidden();
++bool ChroniclePlayerMapWindow();
 +// Charged hits: the dungeon loop reports each frame; a hit within a second of a charged move counts.
 +void ChronicleChargedActionTick();
 +// Shortcut doors: each frame, a locked door the player stands at opens with its key (dungeons.set_shortcuts).
