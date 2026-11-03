@@ -42,6 +42,48 @@ index 00000000..2147797e
 +`CDungeonMap::DrawMap` also leaves out cells hidden behind walls from the camera (`dungeon_visibility.hpp`) beyond two cells away. It keeps a one-cell halo, fails open for special or unknown parts, and is bypassed on the Moon Sea and georama 5.
 +
 +Regression suites: `DungeonAerialCache`, `DungeonAerialProjection`, `DungeonVisibility`, and `PlatformConfig.AerialMap`.
+diff --git a/docs/port/item-icons-3d.md b/docs/port/item-icons-3d.md
+new file mode 100644
+index 00000000..356f19da
+--- /dev/null
++++ b/docs/port/item-icons-3d.md
+@@ -0,0 +1,36 @@
++# Item icons from the 3D models
++
++The menus draw an item from a 32x32 cell of the `itemicon` / `wepicon` sheets, all through `RetCTex`. The treasure
++chest draws the item's model, which is known from the same item number (`ITEM_NAME_TBL_NEW` for items and
++attachments, the `dun/item/main_wep/` files for weapons). With 3D icons on, `RetCTex` hands out a small texture the
++item's model was drawn into the first time a menu asked for it, so the inventory, the weapon and attachment lists, the
++shops and the status pages all show the models.
++
++`RetCTex` looks in this order: a mod's own icon (`item_icon_override.hpp`), the model icon (`item_icon3d.hpp`), the
++sheet's cell. An item with no model of its own keeps the sheet's picture. A weapon a mod registers (items 377-408)
++shows the built-in weapon it was made from, as its sheet icon does, unless the mod gave it an icon.
++
++Configuration: `video.item_icons` in `config.json`, `"3d"` (the default) or `"original"`, also on the Options
++screen's Display page as Item Icons. It takes effect at once. `DC_ITEM_ICONS_3D=0` or `1` overrides both.
++
++How an icon is drawn (`Render` in `port/src/game/item_icon3d.cpp`):
++
++* The model is read into its own buffers and texture block 0x47 (held only while it is drawn), built with smoothed
++  normals (`normal_smoothing.hpp`, 60 degree crease), and posed as the chest presents it, by whose weapon it is.
++* It is stood up, turned to show its widest face, tipped to be seen from a little above, and a long thin one is laid
++  on the diagonal as the retail icons draw them. A flat plate is turned face on.
++* It is drawn with the menu camera into a 640x480 scratch target, with a key light from the upper left and a weak
++  fill, over a black outline and drop shadow made from the unlit model; the 128x128 around it is halved twice into the
++  32x32 icon.
++* At most three icons are drawn for the first time in a frame, so opening a full page never stalls; the rest show
++  the sheet's picture for a frame or two.
++
++Tuning (environment, read when an icon is drawn): `DC_ITEM_ICONS_3D_KEY` (120), `DC_ITEM_ICONS_3D_FILL_LIGHT` (36),
++`DC_ITEM_ICONS_3D_AMBIENT` (70), `DC_ITEM_ICONS_3D_SMOOTH` (60, 0 for flat shading), `DC_ITEM_ICONS_3D_TIP`,
++`DC_ITEM_ICONS_3D_ITEM_TURN` (-0.26), `DC_ITEM_ICONS_3D_NO_OUTLINE=1`, `DC_ITEM_ICONS_3D_NO_TURN_SEARCH=1`,
++`DC_ITEM_ICONS_3D_POSE_SHAPE=1`. `DC_ITEM_ICONS_3D_DEBUG=1` prints each item drawn and where it landed.
++
++The dungeon HUD's quick item and weapon slots copy their pictures from the sheets into `itempack` when the floor
++loads (`DngActiveItemTextureCopy`), outside any menu, and keep the sheet's pictures.
++
++Regression suite: `PlatformConfig.ItemIcons`.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
 index 5a0b2fc1..3e4a63e7 100644
 --- a/port/CMakeLists.txt
@@ -849,6 +891,38 @@ index e2f6eb1b..bd381616 100644
 +extern int defWeapon__2[SAVE_CHARA_COUNT];
  
  } // namespace dc::game
+diff --git a/port/include/game/item_icon3d.hpp b/port/include/game/item_icon3d.hpp
+new file mode 100644
+index 00000000..f646dfb5
+--- /dev/null
++++ b/port/include/game/item_icon3d.hpp
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include "common.h"
++
++namespace dc::game {
++
++class CTexture;
++
++// Item icons drawn from the item's 3D model instead of the picture on the icon sheets.
++//
++// The menus draw an item from a 32x32 cell of the `itemicon` / `wepicon` sheets, all through RetCTex. With this on,
++// RetCTex hands out, for an item that has a model (the one the treasure chest shows), a small texture the model was
++// drawn into the first time it was asked for, and the cell is its whole 32x32. Items without a model keep the
++// sheet's picture, and a mod's own icon (item_icon_override.hpp) still comes first.
++//
++// video.item_icons in config.json ("3d", the default, or "original"), the Options screen's Display page, or
++// DC_ITEM_ICONS_3D=<0|1> over both. See docs/port/item-icons-3d.md.
++
++/// Whether item icons are drawn from models.
++bool ItemIcons3DEnabled();
++
++/// The icon texture for an item, drawing it on first use; null where the item has no model, this is off, or the
++/// icon is not drawn yet (outside a frame, or more icons were asked for in this frame than are drawn in one).
++CTexture *ItemIcon3DTexture(int item_no);
++
++} // namespace dc::game
 diff --git a/port/include/game/itembombeffect.hpp b/port/include/game/itembombeffect.hpp
 index 7d8f9401..d1f71ac0 100644
 --- a/port/include/game/itembombeffect.hpp
@@ -1202,6 +1276,28 @@ index 2af9ea35..ca769563 100644
  /** Projectile effects the monsters fire, indexed by MONSTOR_MODEL::shot_effect. */
  extern "C" BT_SHOT_EFFECT *BtEntryEffectTbl[35];
  
+diff --git a/port/include/game/normal_smoothing.hpp b/port/include/game/normal_smoothing.hpp
+new file mode 100644
+index 00000000..68460b46
+--- /dev/null
++++ b/port/include/game/normal_smoothing.hpp
+@@ -0,0 +1,16 @@
++#pragma once
++
++namespace dc::game {
++
++// Smoothing of the vertex normals of the models the port builds: retail's models are flat shaded, every face
++// carrying its own normal, so a rounded thing is lit as a cut gem. With smoothing on, the normals of the vertices
++// that sit at one point are averaged across the faces that meet there, except across an edge sharper than the
++// crease angle, so a bottle's body is lit as a curve while its rim stays crisp.
++//
++// Off (0) unless DC_SMOOTH_NORMALS=<crease angle in degrees> is set, or a caller turns it on for the models it
++// builds (the 3D item icons: item_icon3d.hpp).
++
++/// Sets the crease angle in degrees for models built from now on; 0 turns smoothing off. Returns the previous angle.
++float PortSetNormalSmoothing(float crease_degrees);
++
++} // namespace dc::game
 diff --git a/port/include/game/playable_chara.hpp b/port/include/game/playable_chara.hpp
 new file mode 100644
 index 00000000..2d0c25e9
@@ -3870,7 +3966,7 @@ index 00000000..fffa0637
 +
 +} // namespace moonmod
 diff --git a/port/lang/de_de.json b/port/lang/de_de.json
-index 693c0b45..c7b3a2c8 100644
+index 693c0b45..483230b7 100644
 --- a/port/lang/de_de.json
 +++ b/port/lang/de_de.json
 @@ -7,6 +7,8 @@
@@ -3897,7 +3993,18 @@ index 693c0b45..c7b3a2c8 100644
      "options.game.time_speed.label": "Zeitgeschwindigkeit",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Schnell",
-@@ -383,5 +393,12 @@
+@@ -95,6 +105,10 @@
+     "options.video.cloth.help": "\"Stoff\"\nOriginal: wie auf der PS2.\nVerbessert: der Körper\ngeht nicht mehr hindurch.",
+     "options.video.cloth.choice.0": "Original",
+     "options.video.cloth.choice.1": "Verbessert",
++    "options.video.item_icons.label": "Item-Symbole",
++    "options.video.item_icons.help": "\"Item-Symbole\"\nOriginal: wie auf der PS2.\n3D: aus dem Modell\ndes Gegenstands.",
++    "options.video.item_icons.choice.0": "Original",
++    "options.video.item_icons.choice.1": "3D",
+     "options.page.audio": "Audio",
+     "options.audio.master_volume.label": "Lautstärke",
+     "options.audio.master_volume.help": "\"Lautstärke\"\nWie laut das Spiel ist.",
+@@ -383,5 +397,12 @@
      "quest.carls_slingshot.gina.excuse": "Carls Schleuder?{page}Ähm... ein, ein großer Vogel hat sie geklaut! Er war *SO* groß!{page}Er hat wusch gemacht und ist damit weggeflogen!",
      "quest.carls_slingshot.gina.bird": "Der Vogel hat sie geklaut! Ehrlich!",
      "quest.carls_slingshot.gina.confess": "...Carl glaubt das mit dem Vogel nicht?{page}...Na gut. Ich hab auf Flaschen geschossen, und dann hat es KNACKS gemacht.{page}Das wollte ich nicht! Darum hab ich ihm eine neue gebastelt!{page}Kannst du sie ihm geben? Ich hab Angst, dass er sauer ist..",
@@ -3913,7 +4020,7 @@ index 693c0b45..c7b3a2c8 100644
  }
 \ No newline at end of file
 diff --git a/port/lang/es_es.json b/port/lang/es_es.json
-index ec974d09..b1343dae 100644
+index ec974d09..2e383def 100644
 --- a/port/lang/es_es.json
 +++ b/port/lang/es_es.json
 @@ -7,6 +7,8 @@
@@ -3940,7 +4047,18 @@ index ec974d09..b1343dae 100644
      "options.game.time_speed.label": "Velocidad del tiempo",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rápido",
-@@ -383,5 +393,12 @@
+@@ -95,6 +105,10 @@
+     "options.video.cloth.help": "\"Tela\"\nOriginal: la de PS2.\nMejorada: el cuerpo\nya no la atraviesa.",
+     "options.video.cloth.choice.0": "Original",
+     "options.video.cloth.choice.1": "Mejorada",
++    "options.video.item_icons.label": "Iconos de objetos",
++    "options.video.item_icons.help": "\"Iconos de objetos\"\nOriginal: los de PS2.\n3D: dibujados con el\nmodelo del objeto.",
++    "options.video.item_icons.choice.0": "Original",
++    "options.video.item_icons.choice.1": "3D",
+     "options.page.audio": "Audio",
+     "options.audio.master_volume.label": "Volumen",
+     "options.audio.master_volume.help": "\"Volumen\"\nQué tan alto suena.",
+@@ -383,5 +397,12 @@
      "quest.carls_slingshot.gina.excuse": "¿La honda de Carlos?{page}Esto... ¡un, un pájaro enorme se la llevó! ¡Era *ASÍ* de grande!{page}¡Hizo fiuuu y se fue volando con ella!",
      "quest.carls_slingshot.gina.bird": "¡Se la llevó el pájaro! ¡De verdad!",
      "quest.carls_slingshot.gina.confess": "...¿Carlos no se cree lo del pájaro?{page}...Vale. Estaba disparando a botellas, y hizo CRAC.{page}¡No fue a propósito! ¡Así que le hice una nueva!{page}¿Se la puedes dar? Me da miedo que se enfade..",
@@ -3956,7 +4074,7 @@ index ec974d09..b1343dae 100644
  }
 \ No newline at end of file
 diff --git a/port/lang/fr_fr.json b/port/lang/fr_fr.json
-index 3596beb8..2978543d 100644
+index 3596beb8..c396068e 100644
 --- a/port/lang/fr_fr.json
 +++ b/port/lang/fr_fr.json
 @@ -7,6 +7,8 @@
@@ -3983,7 +4101,18 @@ index 3596beb8..2978543d 100644
      "options.game.time_speed.label": "Vitesse du temps",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rapide",
-@@ -383,5 +393,12 @@
+@@ -95,6 +105,10 @@
+     "options.video.cloth.help": "\"Tissus\"\nOriginal: celui de la PS2.\nAmélioré: le corps\nne le traverse plus.",
+     "options.video.cloth.choice.0": "Original",
+     "options.video.cloth.choice.1": "Amélioré",
++    "options.video.item_icons.label": "Icônes d'objets",
++    "options.video.item_icons.help": "\"Icônes d'objets\"\nOriginal: celles de la PS2.\n3D: dessinées d'après\nle modèle de l'objet.",
++    "options.video.item_icons.choice.0": "Original",
++    "options.video.item_icons.choice.1": "3D",
+     "options.page.audio": "Audio",
+     "options.audio.master_volume.label": "Volume",
+     "options.audio.master_volume.help": "\"Volume\"\nLe volume du jeu.",
+@@ -383,5 +397,12 @@
      "quest.carls_slingshot.gina.excuse": "Le lance-pierre de Carl ?{page}Euh... un, un gros oiseau l'a pris ! Il était *GRAND COMME ÇA* !{page}Il a fait whoosh, et il s'est envolé avec !",
      "quest.carls_slingshot.gina.bird": "C'est l'oiseau qui l'a pris ! Promis !",
      "quest.carls_slingshot.gina.confess": "...Carl ne croit pas à l'oiseau ?{page}...Bon. Je tirais sur des bouteilles, et ça a fait CRAC.{page}J'ai pas fait exprès ! Alors je lui en ai fabriqué un nouveau !{page}Tu peux le lui donner ? J'ai peur qu'il soit fâché..",
@@ -3999,7 +4128,7 @@ index 3596beb8..2978543d 100644
  }
 \ No newline at end of file
 diff --git a/port/lang/it_it.json b/port/lang/it_it.json
-index a914df22..8435418d 100644
+index a914df22..50348db0 100644
 --- a/port/lang/it_it.json
 +++ b/port/lang/it_it.json
 @@ -7,6 +7,8 @@
@@ -4026,7 +4155,18 @@ index a914df22..8435418d 100644
      "options.game.time_speed.label": "Velocità del tempo",
      "options.game.time_speed.choice.0": "Normale",
      "options.game.time_speed.choice.1": "Veloce",
-@@ -383,5 +393,12 @@
+@@ -95,6 +105,10 @@
+     "options.video.cloth.help": "\"Tessuti\"\nOriginale: come su PS2.\nMigliorato: il corpo\nnon li attraversa più.",
+     "options.video.cloth.choice.0": "Originale",
+     "options.video.cloth.choice.1": "Migliorato",
++    "options.video.item_icons.label": "Icone oggetti",
++    "options.video.item_icons.help": "\"Icone oggetti\"\nOriginale: come su PS2.\n3D: disegnate dal\nmodello dell'oggetto.",
++    "options.video.item_icons.choice.0": "Originale",
++    "options.video.item_icons.choice.1": "3D",
+     "options.page.audio": "Audio",
+     "options.audio.master_volume.label": "Volume",
+     "options.audio.master_volume.help": "\"Volume\"\nQuanto forte è il\ngioco.",
+@@ -383,5 +397,12 @@
      "quest.carls_slingshot.gina.excuse": "La fionda di Carl?{page}Ehm... un, un grosso uccello l'ha presa! Era grande *COSÌ*!{page}Ha fatto fiuuu, ed è volato via con lei!",
      "quest.carls_slingshot.gina.bird": "L'ha presa l'uccello! Davvero!",
      "quest.carls_slingshot.gina.confess": "...Carl non crede all'uccello?{page}...Va bene. Tiravo alle bottiglie, e ha fatto CRAC.{page}Non l'ho fatto apposta! Così gliene ho fatta una nuova!{page}Puoi dargliela tu? Ho paura che si arrabbi..",
@@ -14937,6 +15077,598 @@ index 51e0338d..78d5b76f 100644
      wear += 0.1f * kind;
      weapon->durability_f = old_durability - wear;
  
+diff --git a/port/src/game/item_icon3d.cpp b/port/src/game/item_icon3d.cpp
+new file mode 100644
+index 00000000..7be93e42
+--- /dev/null
++++ b/port/src/game/item_icon3d.cpp
+@@ -0,0 +1,586 @@
++#include "item_icon3d.hpp"
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "btitem.hpp"
++#include "collision.hpp"
++#include "dataalloc.hpp"
++#include "dataread.hpp"
++#include "dun/gameloop.hpp"
++#include "frame.hpp"
++#include "framevu1.hpp"
++#include "gfx/gfx.hpp"
++#include "itemdata.hpp"
++#include "mds.hpp"
++#include "menu_draw.hpp"
++#include "menu_save.hpp"
++#include "menuetc.hpp"
++#include "mglib.hpp"
++#include "normal_smoothing.hpp"
++#include "platform/config.hpp"
++#include "render/texture_registry.hpp"
++#include "renderinfo.hpp"
++#include "texture.hpp"
++
++namespace dc::game {
++
++using namespace dc::render;
++
++namespace {
++
++constexpr int         kIconSize = 32;
++constexpr int         kCrop = 128;    // scratch pixels turned into one icon (4x4 each)
++constexpr float       kFill = 120.0f; // pixels across the model inside the crop
++constexpr int         kBlock = 0x47;  // a texture block nothing else loads into
++constexpr std::size_t kModelBytes = 8u << 20;
++constexpr std::size_t kImageBytes = 4u << 20;
++constexpr std::size_t kArenaBytes = 8u << 20;
++constexpr const char *kScratch = "item icon 3d scratch";
++// Icons drawn for the first time in one frame. A page of the inventory opening asks for all of its icons at once;
++// the rest show the sheet's picture for a frame or two and are drawn over the next frames, so the menu never stalls.
++constexpr int kNewIconsPerFrame = 3;
++
++bool EnvOn(const char *name) {
++    const char *value = std::getenv(name);
++    return value != nullptr && value[0] != 0 && value[0] != '0';
++}
++
++float EnvFloat(const char *name, float fallback) {
++    const char *text = std::getenv(name);
++    return text != nullptr ? static_cast<float>(std::atof(text)) : fallback;
++}
++
++bool Debug() {
++    static const bool on = EnvOn("DC_ITEM_ICONS_3D_DEBUG");
++    return on;
++}
++
++struct Icon {
++    std::unique_ptr<CTexture> texture;
++    unsigned                  key = 0;
++    bool                      failed = false;
++};
++
++std::map<int, Icon> g_icons;
++
++u_long Tex0(unsigned tbp, int tbw, int psm, int tw, int th) {
++    return static_cast<u_long>(tbp) | (static_cast<u_long>(tbw) << 14) | (static_cast<u_long>(psm) << 20) |
++           (static_cast<u_long>(tw) << 26) | (static_cast<u_long>(th) << 30) | (static_cast<u_long>(1) << 34);
++}
++
++// Buffers the files are read into and the model is built in; kept for every icon, since only one is drawn at a time.
++struct Work {
++    std::unique_ptr<uint8_t[]> storage;
++    uint8_t                   *model = nullptr;
++    uint8_t                   *image = nullptr;
++    uint8_t                   *arena_base = nullptr;
++
++    Work() {
++        storage = std::make_unique<uint8_t[]>(kModelBytes + kImageBytes + kArenaBytes + 192);
++        auto align = [](uint8_t *p) {
++            return reinterpret_cast<uint8_t *>((reinterpret_cast<uintptr_t>(p) + 63) & ~uintptr_t{63});
++        };
++        model = align(storage.get());
++        image = align(model + kModelBytes);
++        arena_base = align(image + kImageBytes);
++    }
++};
++
++Work &GetWork() {
++    static Work work;
++    return work;
++}
++
++CFrame *g_frame = nullptr; // the model
++CFrame *g_root = nullptr;  // the frame the picture is turned, scaled and placed by, with the model its child
++
++// The icon's frame is drawn into a target of its own, so the screen-bound test (made against the visible extent) is
++// switched off for every frame of it.
++void NoCull(CFrame *frame, int &count) {
++    for (; frame != nullptr; frame = frame->brother) {
++        frame->attr.cull_enable = 0;
++        count++;
++        NoCull(frame->child, count);
++    }
++}
++
++// 0: the lit model; 1: the same model unlit, which is black and makes the outline and shadow.
++int g_pass = 0;
++
++// Drawn by MenuPolygonDraw, which has set the menu camera's position and the lights (and puts them back after).
++void DrawModel() {
++    MenuWorldTrans(&MenuCamera);
++    if (g_pass == 1) {
++        float none_dir[4][4] = {};
++        float none_colour[4][4] = {};
++        float dark[4] = {0.0f, 0.0f, 0.0f, 128.0f};
++        MGSetPLight(none_dir, none_colour);
++        MGSetAmbient(dark);
++    } else {
++        // A key light from the upper left, a weak fill from the other side, and enough ambient that the shade side
++        // stays a colour: the retail icons are painted with a highlight on the top left and shade bottom right.
++        float key[3] = {-0.45f, 0.75f, 0.5f};
++        float fill[3] = {0.6f, -0.2f, 0.4f};
++        float key_length = std::sqrt(key[0] * key[0] + key[1] * key[1] + key[2] * key[2]);
++        float fill_length = std::sqrt(fill[0] * fill[0] + fill[1] * fill[1] + fill[2] * fill[2]);
++        float dir[4][4] = {};
++        float colour[4][4] = {};
++        for (int i = 0; i < 3; i++) {
++            dir[i][0] = key[i] / key_length;
++            dir[i][1] = fill[i] / fill_length;
++        }
++        const float key_strength = EnvFloat("DC_ITEM_ICONS_3D_KEY", 120.0f);
++        const float fill_strength = EnvFloat("DC_ITEM_ICONS_3D_FILL_LIGHT", 36.0f);
++        colour[0][0] = colour[0][1] = colour[0][2] = key_strength;
++        colour[1][0] = colour[1][1] = colour[1][2] = fill_strength;
++        float ambient[4] = {EnvFloat("DC_ITEM_ICONS_3D_AMBIENT", 70.0f), 0.0f, 0.0f, 128.0f};
++        ambient[1] = ambient[2] = ambient[0];
++        MGSetPLight(dir, colour);
++        MGSetAmbient(ambient);
++    }
++    MGDraw(g_root);
++}
++
++constexpr int kFirstWeapons[6] = {ITEM_WEAPON_DAGGER_BROKEN,        ITEM_WEAPON_WOODENSLINGSHOT_BROKEN,
++                                  ITEM_WEAPON_MALLET_BROKEN,        ITEM_WEAPON_GOLD_RING_BROKEN,
++                                  ITEM_WEAPON_FIGHTING_STICK_BROKEN, ITEM_WEAPON_MACHINE_GUN_BROKEN};
++
++// Whose a built-in weapon is (CHARA_TOAN to CHARA_OSMOND), from its item number as CheckWeaponUser judges it.
++int WeaponOwner(int item_no) {
++    int chara = 0;
++    while (chara < 5 && item_no >= kFirstWeapons[chara + 1]) {
++        ++chara;
++    }
++    return chara;
++}
++
++// The item whose model is this item's picture: itself, or for a weapon a mod registered (377-408) the built-in
++// weapon it was made from, whose icon the sheets already show for it. -1 where there is none.
++int ModelItem(int item_no) {
++    if (item_no < ITEM_ATTACH_START) {
++        item_no = TransWepNo(item_no);
++    }
++    if (item_no >= ITEM_WEAPON_END) {
++        item_no = MoonModWeaponTemplate(item_no);
++    }
++    if (item_no < ITEM_ATTACH_START || item_no >= ITEM_WEAPON_END) {
++        return -1;
++    }
++    return item_no;
++}
++
++// The model's file names, as the treasure chest reads them (BtGetItemNamePath), or none where the item has no model
++// of its own: an empty slot of the item table falls back to the water bottle there, which is not this item's picture.
++std::optional<std::pair<std::string, std::string>> ModelPaths(int item_no) {
++    std::string base;
++    if (item_no < ITEM_WEAPON_START) {
++        const char *name = ITEM_NAME_TBL_NEW[item_no - ITEM_ATTACH_START];
++        if (name == nullptr || name[0] == 0) {
++            return std::nullopt;
++        }
++        base = "dun/item/main_data/";
++        base += name;
++    } else {
++        constexpr const char *prefixes[] = {"c01w", "c04w", "c06w", "c05w", "c10w", "c18w"};
++        const int             chara = WeaponOwner(item_no);
++        const int             offset = item_no - kFirstWeapons[chara];
++        std::string           number = std::to_string(offset);
++        if (offset < 10) {
++            number.insert(0, "0");
++        } else if (offset < 100) {
++            number.insert(0, " ");
++        }
++        base = "dun/item/main_wep/";
++        base += prefixes[chara];
++        base += number;
++    }
++    return std::pair{base + ".mds", base + ".img"};
++}
++
++bool Render(int item_no, CTexture &out, unsigned &out_key) {
++    const int model_item = ModelItem(item_no);
++    auto      paths = model_item >= 0 ? ModelPaths(model_item) : std::nullopt;
++    if (!paths) {
++        if (Debug()) {
++            std::fprintf(stderr, "item icon 3d: item %d has no model\n", item_no);
++        }
++        return false;
++    }
++    auto &[model_path, texture_path] = *paths;
++    Work &work = GetWork();
++    int   size = 0;
++    if (Debug()) {
++        std::fprintf(stderr, "item icon 3d: item %d reads %s and %s\n", item_no, model_path.c_str(), texture_path.c_str());
++    }
++    if (!LoadFile2(model_path.data(), work.model, &size, 0) || size <= 0 ||
++        static_cast<std::size_t>(size) + 2048 > kModelBytes) {
++        return false;
++    }
++    if (!LoadFile2(texture_path.data(), work.image, &size, 0) || size <= 0 ||
++        static_cast<std::size_t>(size) + 2048 > kImageBytes) {
++        return false;
++    }
++
++    const std::string  name = "item icon 3d " + std::to_string(item_no);
++    unsigned           key = PortCreatePlaceholder(name, kIconSize, kIconSize, 4, PortTextureOwner::Other, nullptr);
++    gfx::TextureHandle target = gfx::FindNamedRenderTarget(name);
++    gfx::TextureHandle scratch = gfx::NamedRenderTarget(kScratch, 640, 480, true);
++    if (key == 0 || target == gfx::kNullTexture || scratch == gfx::kNullTexture) {
++        if (Debug()) {
++            std::fprintf(stderr, "item icon 3d: item %d: no target (key %u)\n", item_no, key);
++        }
++        if (key != 0) {
++            PortReleaseKey(key);
++        }
++        return false;
++    }
++
++    // Smooth the model's normals while it is built and drawn here, so a rounded thing is lit as a curve (see
++    // normal_smoothing.hpp); DC_ITEM_ICONS_3D_SMOOTH is the crease angle in degrees, 0 for retail's flat shading.
++    struct SmoothScope {
++        float previous;
++
++        SmoothScope() : previous(PortSetNormalSmoothing(EnvFloat("DC_ITEM_ICONS_3D_SMOOTH", 60.0f))) {}
++
++        ~SmoothScope() { PortSetNormalSmoothing(previous); }
++    } smooth_scope;
++
++    SetTempTexture(kBlock, reinterpret_cast<char *>(work.image));
++    CDataAlloc2<1> arena(-1);
++    arena.base = work.arena_base;
++    arena.limit = static_cast<int>(kArenaBytes >> 4);
++    arena.Reset();
++    g_frame = LoadMDSFile(reinterpret_cast<u_int *>(work.model), &arena, 0, nullptr, nullptr);
++    if (g_frame == nullptr) {
++        TexManager.DeleteTextureBlock(kBlock);
++        PortReleaseKey(key);
++        return false;
++    }
++    // Frame the model: centre its bound on the origin, turn it so its long side runs corner to corner, and scale it
++    // so the bound fills kFill pixels of the scratch target.
++    CBoxVu0 box;
++    g_frame->GetBoundBox(&box, 1);
++    float ext[3], mid[4];
++    for (int i = 0; i < 3; i++) {
++        ext[i] = box.max[i] - box.min[i];
++        mid[i] = (box.max[i] + box.min[i]) * 0.5f;
++    }
++    mid[3] = 1.0f;
++    float radius = 0.5f * std::sqrt(ext[0] * ext[0] + ext[1] * ext[1] + ext[2] * ext[2]);
++    if (!(radius > 0.0001f)) {
++        radius = 1.0f;
++    }
++    // The pose: the one the treasure chest presents the item in, which depends on who the weapon belongs to
++    // (BtGetTreasureboxBig_Init); everything else is shown as the chest shows a consumable.
++    // DC_ITEM_ICONS_3D_POSE_SHAPE keeps the older rule that turns the long side onto a diagonal.
++    const bool weapon = model_item >= ITEM_WEAPON_START;
++    float      rx = 1.5707964f, ry = 0.0f, rz = 1.5707964f;
++    const bool shape_pose = EnvOn("DC_ITEM_ICONS_3D_POSE_SHAPE");
++    if (shape_pose) {
++        rx = 0.35f;
++        ry = 0.0f;
++        rz = 0.785f;
++        if (ext[2] > ext[0] && ext[2] > ext[1]) {
++            rx = 1.2f;
++        }
++    } else if (weapon) {
++        switch (WeaponOwner(model_item)) {
++            case CHARA_XIAO:
++                rx = -1.5707964f;
++                ry = -1.5707964f;
++                rz = 0.0f;
++                break;
++            case CHARA_OSMOND:
++                rx = -1.5707964f;
++                ry = 3.1415927f;
++                rz = 0.0f;
++                break;
++            case CHARA_RUBY:
++                rx = 0.0f;
++                ry = 1.5707964f;
++                rz = 0.0f;
++                break;
++            default:
++                break;
++        }
++    }
++    if (Debug()) {
++        std::fprintf(stderr, "item icon 3d: item %d pose %.2f %.2f %.2f\n", item_no, rx, ry, rz);
++    }
++    g_frame->SetRotation(rx, ry, rz);
++    // The pose is the chest's, seen by the chest's camera. The picture's own turns sit on top of it, one frame per
++    // turn so each is about the axis it names: stand it up, turn it about the vertical, tip it to look from a little
++    // above, and last roll it in the picture. Scale and place are on the outermost.
++    static CFrameVu1 stand, yaw, elev, root;
++    CFrameVu1       *chain[4] = {&stand, &yaw, &elev, &root};
++    for (CFrameVu1 *frame : chain) {
++        frame->visual = nullptr;
++        frame->SetChild(nullptr);
++    }
++    g_frame->parent = nullptr;
++    root.SetChild(&elev);
++    elev.SetChild(&yaw);
++    yaw.SetChild(&stand);
++    stand.SetChild(g_frame);
++    g_root = &root;
++    float stand_x = weapon ? -1.15f : -1.5707964f;
++    float tip = weapon ? 0.0f : 0.35f;
++    if (const char *text = std::getenv("DC_ITEM_ICONS_3D_TIP")) {
++        tip = static_cast<float>(std::atof(text));
++    }
++    float turn_now = 0.5f, roll = 0.0f;
++    auto  apply = [&]() {
++        stand.SetRotation(stand_x, 0.0f, 0.0f);
++        yaw.SetRotation(0.0f, turn_now, 0.0f);
++        elev.SetRotation(tip, 0.0f, 0.0f);
++        root.SetRotation(0.0f, 0.0f, roll);
++    };
++    apply();
++    root.SetScale(1.0f, 1.0f, 1.0f);
++    float origin[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    root.SetPosition(origin);
++    // The picture's extent. A box's eight corners overstate a rounded thing (a bottle or fruit is nearer an ellipsoid
++    // in its box), so the extent is the mean of the box's and the ellipsoid's reach along each picture axis.
++    float rotated[4] = {0, 0, 0, 1};
++    float lo[3], hi[3];
++    auto  measure = [&]() {
++        float o[4] = {0, 0, 0, 1}, wo[4], we[3][4];
++        g_frame->GetWorldPosition(wo, o);
++        for (int i = 0; i < 3; i++) {
++            float e[4] = {i == 0 ? 1.0f : 0.0f, i == 1 ? 1.0f : 0.0f, i == 2 ? 1.0f : 0.0f, 1.0f};
++            g_frame->GetWorldPosition(we[i], e);
++        }
++        float mid_local[4] = {mid[0], mid[1], mid[2], 1.0f}, centre_world[4];
++        g_frame->GetWorldPosition(centre_world, mid_local);
++        for (int k = 0; k < 3; k++) {
++            float sum_box = 0.0f, sum_sq = 0.0f;
++            for (int i = 0; i < 3; i++) {
++                const float reach = 0.5f * ext[i] * (we[i][k] - wo[k]);
++                sum_box += std::fabs(reach);
++                sum_sq += reach * reach;
++            }
++            const float half = k == 2 ? 0.0f : 0.5f * (sum_box + std::sqrt(sum_sq));
++            lo[k] = centre_world[k] - half;
++            hi[k] = centre_world[k] + half;
++        }
++    };
++    measure();
++    // A plate (a medallion, a scroll, a tablet): its broad face should face us, whichever way the chest pose lays it.
++    float sorted_ext[3] = {ext[0], ext[1], ext[2]};
++    std::sort(sorted_ext, sorted_ext + 3);
++    const bool plate = !weapon && sorted_ext[2] > 0.0001f && sorted_ext[0] < 0.6f * sorted_ext[1] &&
++                       sorted_ext[1] > 0.5f * sorted_ext[2];
++    if (plate && !shape_pose) {
++        float best = -1.0f, best_stand = stand_x, best_turn = turn_now;
++        for (int quarter = -2; quarter <= 2; quarter++) {
++            for (int step = -6; step <= 6; step++) {
++                stand_x = quarter * 1.5707964f;
++                turn_now = step * 0.2618f;
++                apply();
++                measure();
++                const float area = (hi[0] - lo[0]) * (hi[1] - lo[1]);
++                const float score =
++                    area * (1.0f - 0.01f * std::fabs(turn_now) - 0.01f * std::fabs(stand_x + 1.5707964f));
++                if (score > best) {
++                    best = score;
++                    best_stand = stand_x;
++                    best_turn = turn_now;
++                }
++            }
++        }
++        stand_x = best_stand;
++        turn_now = best_turn;
++        tip = 0.0f;
++        apply();
++        measure();
++    }
++    // The turn about the vertical: the chest pose keeps the item upright but not facing us, so a flat thing can be
++    // edge-on here. Try a spread of turns and keep the one whose box shows the most (the widest face), leaning to the
++    // usual three-quarter turn when two are as good.
++    if (!shape_pose && !plate && !EnvOn("DC_ITEM_ICONS_3D_NO_TURN_SEARCH")) {
++        float best_score = -1.0f, best_turn = turn_now;
++        for (int step = -6; step <= 6; step++) {
++            turn_now = step * 0.2618f; // 15 degrees
++            apply();
++            measure();
++            const float area = (hi[0] - lo[0]) * (hi[1] - lo[1]);
++            const float score = area * (1.0f - 0.04f * std::fabs(turn_now - 0.5f));
++            if (score > best_score) {
++                best_score = score;
++                best_turn = turn_now;
++            }
++        }
++        turn_now = best_turn;
++        // Everything but weapons reads better turned a little more to the left than the widest face has it.
++        if (!weapon) {
++            turn_now += EnvFloat("DC_ITEM_ICONS_3D_ITEM_TURN", -0.2618f);
++        }
++        apply();
++        measure();
++    }
++    // Long and thin as seen (weapons, keys, rods): lay it along the diagonal, which is how the retail icons draw them,
++    // and which fills a square cell the best.
++    const float width = hi[0] - lo[0], height = hi[1] - lo[1];
++    if (!shape_pose && (width > 2.0f * height || height > 2.0f * width)) {
++        roll += width > height ? 0.785f : -0.785f;
++        apply();
++        measure();
++    }
++    for (int i = 0; i < 3; i++) {
++        rotated[i] = (lo[i] + hi[i]) * 0.5f;
++    }
++    radius = 0.5f * std::max(hi[0] - lo[0], hi[1] - lo[1]);
++    if (!(radius > 0.0001f)) {
++        radius = 1.0f;
++    }
++
++    RenderInfo               saved = mgRenderInfo;
++    const gfx::TextureHandle previous = gfx::CurrentRenderTarget();
++    gfx::SetRenderTarget(scratch);
++    const uint8_t none[4] = {};
++
++    // Pixels per world unit at the origin, from one trial draw, which also puts the camera in place for the projection.
++    static float pixels_per_unit = 0.0f;
++    if (pixels_per_unit <= 0.0f) {
++        gfx::Clear(true, none, true, 0.0f);
++        MenuPolygonDraw(0x80, DrawModel);
++        float a[4] = {0, 0, 0, 1}, c[4] = {10.0f, 0, 0, 1};
++        int   pa[4], pc[4];
++        MGRotTransPers2D(pa, a, 0);
++        MGRotTransPers2D(pc, c, 0);
++        pixels_per_unit = std::fabs(static_cast<float>(pc[0] - pa[0])) / 10.0f;
++        if (pixels_per_unit <= 0.0f) {
++            pixels_per_unit = 3.0f;
++        }
++    }
++    int frames = 0;
++    NoCull(g_frame, frames);
++    if (Debug()) {
++        std::fprintf(stderr, "item icon 3d: %d frames\n", frames);
++    }
++    const float scale = (kFill * 0.5f) / (pixels_per_unit * radius);
++    root.SetScale(scale, scale, scale);
++    float position[4] = {-rotated[0] * scale, -rotated[1] * scale, -rotated[2] * scale, 1.0f};
++    root.SetPosition(position);
++    gfx::Clear(true, none, true, 0.0f);
++    if (!EnvOn("DC_ITEM_ICONS_3D_NO_OUTLINE")) {
++        // The outline and shadow: the unlit (black) model drawn shifted about the picture, a pixel of the icon (4 of
++        // the scratch's) each way and a little more down and right for the shadow, then the lit model on top.
++        const float step = 4.0f / pixels_per_unit;
++        const float shifts[9][2] = {
++            {-1,     0     },
++            {1,      0     },
++            {0,      -1    },
++            {0,      1     },
++            {-0.75f, -0.75f},
++            {0.75f,  -0.75f},
++            {-0.75f, 0.75f },
++            {0.75f,  0.75f },
++            {1.4f,   -1.6f }
++        };
++        g_pass = 1;
++        for (const auto &shift : shifts) {
++            float moved[4] = {position[0] + shift[0] * step, position[1] + shift[1] * step, position[2], 1.0f};
++            root.SetPosition(moved);
++            MenuPolygonDraw(0x80, DrawModel);
++        }
++        g_pass = 0;
++        root.SetPosition(position);
++        gfx::Clear(false, none, true, 0.0f);
++    }
++    MenuPolygonDraw(0x80, DrawModel);
++    int centre[2] = {320, 240};
++    Get3DPosTo2DPos(g_root, centre);
++    // Supersample down in exact halves: kCrop -> kCrop/2 -> the icon.
++    gfx::TextureHandle half = gfx::NamedRenderTarget("item icon 3d half", kCrop / 2, kCrop / 2, true);
++    const gfx::Rect    from = {320 - kCrop / 2, 240 - kCrop / 2, kCrop, kCrop};
++    gfx::SetRenderTarget(previous);
++    if (half != gfx::kNullTexture) {
++        gfx::BlitTexture(scratch, from, half, {0, 0, kCrop / 2, kCrop / 2}, gfx::Filter::Linear);
++        gfx::BlitTexture(half, {0, 0, kCrop / 2, kCrop / 2}, target, {0, 0, kIconSize, kIconSize}, gfx::Filter::Linear);
++    } else {
++        gfx::BlitTexture(scratch, from, target, {0, 0, kIconSize, kIconSize}, gfx::Filter::Linear);
++    }
++    mgRenderInfo = saved;
++    TexManager.DeleteTextureBlock(kBlock);
++    root.SetChild(nullptr);
++    g_frame = nullptr;
++    g_root = nullptr;
++    if (Debug()) {
++        std::fprintf(stderr, "item icon 3d: item %d %s radius %.2f scale %.3f ppu %.2f centre %d,%d\n", item_no,
++                     model_path.c_str(), radius, scale, pixels_per_unit, centre[0], centre[1]);
++    }
++
++    out.block = -1;
++    out.width = kIconSize;
++    out.height = kIconSize;
++    out.bpp = 4;
++    std::snprintf(out.name, sizeof out.name, "%s", name.c_str());
++    out.tex0 = Tex0(key, kIconSize / 64 + 1, SCE_GS_PSMCT32, 5, 5);
++    out_key = key;
++    return true;
++}
++
++// Whether another icon may be drawn for the first time now: at most kNewIconsPerFrame in any frame's worth of time.
++bool TakeNewIconBudget() {
++    using Clock = std::chrono::steady_clock;
++    static Clock::time_point window;
++    static int               used = 0;
++    const Clock::time_point  now = Clock::now();
++    if (now - window > std::chrono::milliseconds(12)) {
++        window = now;
++        used = 0;
++    }
++    if (used >= kNewIconsPerFrame) {
++        return false;
++    }
++    used++;
++    return true;
++}
++
++} // namespace
++
++bool ItemIcons3DEnabled() {
++    static const char *forced = std::getenv("DC_ITEM_ICONS_3D");
++    if (forced != nullptr && forced[0] != 0) {
++        return forced[0] != '0';
++    }
++    return dc::platform::ConfigGet().item_icons_3d;
++}
++
++CTexture *ItemIcon3DTexture(int item_no) {
++    if (!ItemIcons3DEnabled()) {
++        return nullptr;
++    }
++    Icon &icon = g_icons[item_no];
++    if (icon.failed) {
++        return nullptr;
++    }
++    if (icon.texture && PortKeyLive(icon.key)) {
++        return icon.texture.get();
++    }
++    // Drawing is dropped outside a frame, and a frame draws only a few new icons: the sheet's picture until then.
++    if (!gfx::InFrame() || !TakeNewIconBudget()) {
++        return nullptr;
++    }
++    auto     texture = std::make_unique<CTexture>();
++    unsigned key = 0;
++    if (!Render(item_no, *texture, key)) {
++        icon.failed = true;
++        return nullptr;
++    }
++    icon.texture = std::move(texture);
++    icon.key = key;
++    return icon.texture.get();
++}
++
++} // namespace dc::game
 diff --git a/port/src/game/itembombeffect.cpp b/port/src/game/itembombeffect.cpp
 index ab6e06df..b43fcdf2 100644
 --- a/port/src/game/itembombeffect.cpp
@@ -15533,10 +16265,18 @@ index 4d57067c..297448d2 100644
 +
 +} // namespace dc::save
 diff --git a/port/src/game/menu_draw.cpp b/port/src/game/menu_draw.cpp
-index b13666a0..d8ddd3a9 100644
+index b13666a0..09c6fa62 100644
 --- a/port/src/game/menu_draw.cpp
 +++ b/port/src/game/menu_draw.cpp
-@@ -48,6 +48,7 @@
+@@ -25,6 +25,7 @@
+ #include "gamepad.hpp"
+ #include "gameutil.hpp"
+ #include "gfx/gfx.hpp"
++#include "item_icon3d.hpp"
+ #include "itemdata.hpp"
+ #include "localize/localize.hpp"
+ #include "mainitemmodel.hpp"
+@@ -48,6 +49,7 @@
  #include "ui/menu_pointer.hpp"
  #include "ui/name_mouse.hpp"
  #include "userstatus.hpp"
@@ -15544,7 +16284,7 @@ index b13666a0..d8ddd3a9 100644
  
  namespace dc::game {
  
-@@ -890,6 +891,13 @@ void FadeTexX(int left_x, int left_width, int right_x, int right_width, char *na
+@@ -890,6 +892,13 @@ void FadeTexX(int left_x, int left_width, int right_x, int right_width, char *na
  }
  
  CTexture *RetCTex(short item_no, int &u, int &v) {
@@ -15558,7 +16298,21 @@ index b13666a0..d8ddd3a9 100644
      const COM_ITEM_INFO *info = GetCommonItemInfo(item_no);
  
      if (info == nullptr) {
-@@ -1296,8 +1304,8 @@ void InitPersonalBoardMode(CUserStatus *status, PERSONAL_BOARD *board, int mode,
+@@ -902,6 +911,13 @@ CTexture *RetCTex(short item_no, int &u, int &v) {
+         return nullptr;
+     }
+ 
++    // Then the item's model drawn as its icon (item_icon3d.hpp), the texture's whole 32x32 again.
++    if (CTexture *model = ItemIcon3DTexture(item_no)) {
++        u = 0;
++        v = 0;
++        return model;
++    }
++
+     u = (icon % 8) << 5;
+     v = (icon >> 3) << 5;
+ 
+@@ -1296,8 +1312,8 @@ void InitPersonalBoardMode(CUserStatus *status, PERSONAL_BOARD *board, int mode,
              full = BOARD_PAGE_ATTACH;
          }
  
@@ -15569,7 +16323,7 @@ index b13666a0..d8ddd3a9 100644
                  full = BOARD_PAGE_WEAPON;
                  break;
              }
-@@ -1633,7 +1641,8 @@ int PersonalRetMax(int board_mode) {
+@@ -1633,7 +1649,8 @@ int PersonalRetMax(int board_mode) {
          case BOARD_PAGE_ITEM:
              return PerBoardPt->item_pack->num;
          case BOARD_PAGE_WEAPON:
@@ -15579,7 +16333,7 @@ index b13666a0..d8ddd3a9 100644
          case BOARD_PAGE_ATTACH:
              return 40;
          case BOARD_PAGE_ATLA_VILLAGE:
-@@ -1780,14 +1789,13 @@ void CommonIconDraw(int page, int count, int x, int y, int top, int bottom, int
+@@ -1780,14 +1797,13 @@ void CommonIconDraw(int page, int count, int x, int y, int top, int bottom, int
              }
  
              draw_x = weapon_x;
@@ -15595,7 +16349,7 @@ index b13666a0..d8ddd3a9 100644
                      DrawNowEquipWeaponMark(draw_x - 2, draw_y - 4, top + 1, bottom, alpha);
  
                      if (icon != nullptr) {
-@@ -2193,7 +2201,7 @@ int IsEnableTrushThrow(int item_no) {
+@@ -2193,7 +2209,7 @@ int IsEnableTrushThrow(int item_no) {
              }
          }
  
@@ -15604,7 +16358,7 @@ index b13666a0..d8ddd3a9 100644
              enable = true;
          }
  
-@@ -2511,6 +2519,11 @@ int WhatIsKindofItem(int item_no) {
+@@ -2511,6 +2527,11 @@ int WhatIsKindofItem(int item_no) {
  }
  
  int WhoIsWeaponEquip(int weapon_no) {
@@ -15616,7 +16370,7 @@ index b13666a0..d8ddd3a9 100644
      const COM_ITEM_INFO *info = GetCommonItemInfo(weapon_no);
  
      if (info == nullptr || info->kind != ITEMKIND_WEAPON) {
-@@ -2663,7 +2676,7 @@ int GetNowModeMaxNum(int page, int *overflow) {
+@@ -2663,7 +2684,7 @@ int GetNowModeMaxNum(int page, int *overflow) {
              break;
          }
          case BOARD_PAGE_WEAPON:
@@ -19504,18 +20258,123 @@ index 642b570f..f2ce62f5 100644
 +
  } // namespace dc::game
 diff --git a/port/src/game/visualvu1.cpp b/port/src/game/visualvu1.cpp
-index 0f9279b2..091eb858 100644
+index 0f9279b2..a9e28f5c 100644
 --- a/port/src/game/visualvu1.cpp
 +++ b/port/src/game/visualvu1.cpp
-@@ -13,6 +13,7 @@
+@@ -2,10 +2,12 @@
+ #include <array>
+ #include <bit>
+ #include <cmath>
++#include <cstdlib>
+ #include <cstring>
+ #include <span>
+ #include <string>
+ #include <string_view>
++#include <unordered_map>
+ #include <utility>
+ #include <vector>
+ 
+@@ -13,7 +15,9 @@
  #include "dataset.hpp"
  #include "mathutil.hpp"
  #include "mdt.hpp"
 +#include "moonmod/mod_model.hpp"
  #include "mglib.hpp"
++#include "normal_smoothing.hpp"
  #include "platform/load_work_profile.hpp"
  #include "render/draw3d.hpp"
-@@ -750,6 +751,15 @@ int CVisualVu1::CreateVUdataFromMDT(u_int *block, u_int *data, int /*unknown0*/,
+ #include "renderinfo.hpp"
+@@ -667,6 +671,79 @@ void SpanWholeTexture(Draw3DVisual &visual, std::span<const TextureRun> runs) {
+     }
+ }
+ 
++// Normal smoothing (normal_smoothing.hpp). -1: not read from the environment yet.
++float g_smooth_degrees = -1.0f;
++
++float SmoothingAngle() {
++    if (g_smooth_degrees < 0.0f) {
++        const char *text = std::getenv("DC_SMOOTH_NORMALS");
++        g_smooth_degrees = text != nullptr ? static_cast<float>(std::atof(text)) : 0.0f;
++        if (!(g_smooth_degrees > 0.0f)) {
++            g_smooth_degrees = 0.0f;
++        }
++    }
++    return g_smooth_degrees;
++}
++
++// Averages each vertex's normal with those of the vertices at the same point whose normals are within the crease
++// angle of its own. Vertices are found by position, so it works across strips and across texture seams.
++void SmoothNormals(std::vector<gfx::Vertex3D> &vertices, float crease_degrees) {
++    const float threshold = std::cos(crease_degrees * 0.017453292f);
++
++    struct Key {
++        int32_t x, y, z;
++
++        bool operator==(const Key &o) const { return x == o.x && y == o.y && z == o.z; }
++    };
++
++    struct KeyHash {
++        size_t operator()(const Key &k) const {
++            return (static_cast<size_t>(k.x) * 73856093u) ^ (static_cast<size_t>(k.y) * 19349663u) ^
++                   (static_cast<size_t>(k.z) * 83492791u);
++        }
++    };
++
++    std::unordered_map<Key, std::vector<uint32_t>, KeyHash> groups;
++    groups.reserve(vertices.size());
++    for (uint32_t i = 0; i < vertices.size(); i++) {
++        const float *p = vertices[i].position;
++        groups[{static_cast<int32_t>(std::lround(p[0] * 256.0f)), static_cast<int32_t>(std::lround(p[1] * 256.0f)),
++                static_cast<int32_t>(std::lround(p[2] * 256.0f))}]
++            .push_back(i);
++    }
++    std::vector<std::array<float, 3>> original(vertices.size());
++    for (uint32_t i = 0; i < vertices.size(); i++) {
++        const float *n = vertices[i].normal;
++        const float  length = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
++        const float  scale = length > 1e-6f ? 1.0f / length : 0.0f;
++        original[i] = {n[0] * scale, n[1] * scale, n[2] * scale};
++    }
++    for (auto &entry : groups) {
++        const std::vector<uint32_t> &members = entry.second;
++        if (members.size() < 2) {
++            continue;
++        }
++        for (uint32_t i : members) {
++            float sum[3] = {0, 0, 0};
++            for (uint32_t j : members) {
++                const float dot = original[i][0] * original[j][0] + original[i][1] * original[j][1] +
++                                  original[i][2] * original[j][2];
++                if (dot >= threshold) {
++                    sum[0] += original[j][0];
++                    sum[1] += original[j][1];
++                    sum[2] += original[j][2];
++                }
++            }
++            const float length = std::sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]);
++            if (length > 1e-6f) {
++                vertices[i].normal[0] = sum[0] / length;
++                vertices[i].normal[1] = sum[1] / length;
++                vertices[i].normal[2] = sum[2] / length;
++            }
++        }
++    }
++}
++
+ } // namespace
+ 
+ int CVisualVu1::DrawVu1(u_int * /*packet*/, float (*matrix)[4], RenderInfo *info, VU1_PROGRAM program,
+@@ -740,6 +817,9 @@ int CVisualVu1::CreateVUdataFromMDT(u_int *block, u_int *data, int /*unknown0*/,
+         visual.strips.push_back(strip);
+     }
+ 
++    if (SmoothingAngle() > 0.0f) {
++        SmoothNormals(visual.vertices, SmoothingAngle());
++    }
+     SpanWholeTexture(visual, runs);
+     AddForestGroundTransitions(visual);
+     AddForestGroundBorders(visual);
+@@ -750,6 +830,15 @@ int CVisualVu1::CreateVUdataFromMDT(u_int *block, u_int *data, int /*unknown0*/,
              strip.ground_uv_flip_v = true;
          }
      }
@@ -19531,7 +20390,7 @@ index 0f9279b2..091eb858 100644
      visual.cache_strip_runs_on_finish = true;
      Draw3DFinishVisual(visual);
      return vu_size;
-@@ -784,16 +794,21 @@ int CVisualVu1::CreateVUdataFromMDTRemake(u_int *block, u_int *data, int /*unkno
+@@ -784,16 +873,21 @@ int CVisualVu1::CreateVUdataFromMDTRemake(u_int *block, u_int *data, int /*unkno
              }
          }
          strip_number++;
@@ -19559,6 +20418,17 @@ index 0f9279b2..091eb858 100644
      // Record stationary poses too: a display frame needs both ends when animation starts or stops.
      Draw3DInvalidateStripRuns(*visual);
      if (visual->mesh != gfx::kNullMesh) {
+@@ -825,4 +919,10 @@ int CVisualMDTVu1::RemakeData(u_int * /*block*/) {
+     return CreateVUdataFromMDTRemake(vu_data_buffer[0], data, 1);
+ }
+ 
++float PortSetNormalSmoothing(float crease_degrees) {
++    const float previous = SmoothingAngle();
++    g_smooth_degrees = crease_degrees > 0.0f ? crease_degrees : 0.0f;
++    return previous;
++}
++
+ } // namespace dc::game
 diff --git a/port/src/game/weapon_buildup.cpp b/port/src/game/weapon_buildup.cpp
 index 7d3876c8..1f820d91 100644
 --- a/port/src/game/weapon_buildup.cpp
@@ -38018,10 +38888,10 @@ index 00000000..812b3683
 +}
 diff --git a/port/src/moonmod/item_icon_override.cpp b/port/src/moonmod/item_icon_override.cpp
 new file mode 100644
-index 00000000..ffcb032d
+index 00000000..ed1650df
 --- /dev/null
 +++ b/port/src/moonmod/item_icon_override.cpp
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,148 @@
 +#include "moonmod/item_icon_override.hpp"
 +
 +#include <cstdio>
@@ -38118,7 +38988,8 @@ index 00000000..ffcb032d
 +    return icon.texture.get();
 +}
 +
-+// RetCTex (item_icon3d.cpp) asks ItemIconOverrideTexture first, so a mod's own icon wins.
++// RetCTex (menu_draw.cpp) asks ItemIconOverrideTexture first, so a mod's own icon wins over the model icon
++// (item_icon3d.hpp) and the sheet's cell.
 +
 +namespace {
 +
@@ -49187,7 +50058,7 @@ index 00000000..adae0bb7
 +
 +} // namespace dc::options::mod_manager_ui
 diff --git a/port/src/options/rows.cpp b/port/src/options/rows.cpp
-index 61ef167b..97d9627d 100644
+index 61ef167b..360f96db 100644
 --- a/port/src/options/rows.cpp
 +++ b/port/src/options/rows.cpp
 @@ -9,7 +9,10 @@
@@ -49221,7 +50092,17 @@ index 61ef167b..97d9627d 100644
      OnOffRow<&Config::discord_rich_presence>("discord.rich_presence", "Enable Discord",
                                               "\"Discord Rich Presence\"\nShows what you are\nplaying on Discord."),
      OnOffRow<&Config::element_quick_select>("game.element_quick_select", "Element Quick Select",
-@@ -928,7 +937,7 @@ std::vector<std::pair<std::string, std::string>> RowStrings() {
+@@ -652,6 +661,9 @@ constexpr Row kDisplayRows[] = {
+     NamedRow<&Config::enhanced_cloth>("video.cloth", "Cloth",
+                                       "\"Cloth\"\nOriginal: the PS2's.\nEnhanced: the body no\nlonger passes through.",
+                                       "Original|Enhanced"),
++    NamedRow<&Config::item_icons_3d>("video.item_icons", "Item Icons",
++                                     "\"Item Icons\"\nOriginal: the PS2's.\n3D: drawn from each\nitem's own model.",
++                                     "Original|3D"),
+ };
+ 
+ #ifdef __ANDROID__
+@@ -928,7 +940,7 @@ std::vector<std::pair<std::string, std::string>> RowStrings() {
              if (row.help != nullptr) {
                  add(prefix + ".help", row.help);
              }
@@ -49230,7 +50111,7 @@ index 61ef167b..97d9627d 100644
                  const int count = row.count(ConfigGet());
                  for (int choice = 0; choice < count; ++choice) {
                      add(prefix + ".choice." + std::to_string(choice), ChoiceName(row.names, choice));
-@@ -945,6 +954,9 @@ std::string RowValue(const Row &row, const Config &config) {
+@@ -945,6 +957,9 @@ std::string RowValue(const Row &row, const Config &config) {
      if (row.action != nullptr) {
          return InputBindingLabel(row.action);
      }
@@ -49240,7 +50121,7 @@ index 61ef167b..97d9627d 100644
      std::string value = row.text != nullptr ? ValueText(row, row.text(config)) : ChoiceText(row, row.get(config));
      if (ConfigAppliesOnRestart(row.key)) {
          value += " *";
-@@ -953,7 +965,8 @@ std::string RowValue(const Row &row, const Config &config) {
+@@ -953,7 +968,8 @@ std::string RowValue(const Row &row, const Config &config) {
  }
  
  bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
@@ -49250,7 +50131,7 @@ index 61ef167b..97d9627d 100644
          return false;
      }
      const int count = row.count(config);
-@@ -973,11 +986,13 @@ bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
+@@ -973,11 +989,13 @@ bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
  void ResetPage(const Page &page, Config &config) {
      const Config defaults;
      for (const Row &row : page.rows) {
@@ -49354,10 +50235,10 @@ index 2f381d6f..51003612 100644
              ShowHelp();
              break;
 diff --git a/port/src/platform/config.cpp b/port/src/platform/config.cpp
-index fbd5a5d2..bea30d90 100644
+index fbd5a5d2..d137a4e9 100644
 --- a/port/src/platform/config.cpp
 +++ b/port/src/platform/config.cpp
-@@ -606,6 +606,28 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
+@@ -606,12 +606,37 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
          config.shadow_distance = distance;
          return true;
      }
@@ -49386,7 +50267,24 @@ index fbd5a5d2..bea30d90 100644
      if (name == "discord.rich_presence") {
          return ReadBool(value, config.discord_rich_presence);
      }
-@@ -798,6 +820,14 @@ std::string ConfigSerialize(const Config &config) {
+     if (name == "video.cloth") {
+         return ReadChoice(value, "original", "enhanced", config.enhanced_cloth);
+     }
++    if (name == "video.item_icons") {
++        return ReadChoice(value, "original", "3d", config.item_icons_3d);
++    }
+     if (name == "audio.soundtrack") {
+         return ReadChoice(value, "ps2", "custom", config.soundtrack);
+     }
+@@ -774,6 +799,7 @@ std::string ConfigSerialize(const Config &config) {
+     root["video"]["anisotropy"] = config.anisotropy;
+     root["video"]["soft_focus"] = options.soft_focus;
+     root["video"]["cloth"] = config.enhanced_cloth ? "enhanced" : "original";
++    root["video"]["item_icons"] = config.item_icons_3d ? "3d" : "original";
+     root["audio"]["master_volume"] = Shortest(config.master_volume);
+     root["audio"]["sound"] = SoundName(config);
+     root["audio"]["soundtrack"] = config.soundtrack ? "custom" : "ps2";
+@@ -798,6 +824,14 @@ std::string ConfigSerialize(const Config &config) {
      root["input"]["mouse_release"] = config.mouse_release_keys;
      root["input"]["vibration"] = options.vibration;
      root["input"]["bindings"] = std::move(bindings);
@@ -49402,11 +50300,14 @@ index fbd5a5d2..bea30d90 100644
      return root.dump(4) + "\n";
  }
 diff --git a/port/src/platform/config.hpp b/port/src/platform/config.hpp
-index b06a678d..2e36d0e0 100644
+index b06a678d..2011bbcd 100644
 --- a/port/src/platform/config.hpp
 +++ b/port/src/platform/config.hpp
-@@ -70,6 +70,20 @@ struct Config : HostSettings {
+@@ -68,8 +68,23 @@ struct Config : HostSettings {
+     float             shadow_distance = 0.0f;
+     int               anisotropy = 0;
      bool              enhanced_cloth = false;     /**< video.cloth: false runs the PS2's cloth, true also keeps it out of the body. */
++    bool              item_icons_3d = true;       /**< video.item_icons: "3d" draws menu item icons from the items' models, "original" from the icon sheets. */
      float             mouse_camera_return = 0.2f; /**< Third-person vertical return after mouse input: 0 holds height, 1 is retail's rate. */
      ConfigGameOptions options;
 +    bool              fit_dungeon_map = true;    /**< game.fit_dungeon_map: fit the dungeon map to the screen. */
@@ -61909,10 +62810,10 @@ index 57eeb084..45db5d4a 100644
      InitializeDataBuffer();
      SetDataBuffer(&TextureData, 2000);
 diff --git a/port/src/tests/platform_config_test.cpp b/port/src/tests/platform_config_test.cpp
-index 78f40d5f..73a9f68b 100644
+index 78f40d5f..e3c8ce90 100644
 --- a/port/src/tests/platform_config_test.cpp
 +++ b/port/src/tests/platform_config_test.cpp
-@@ -61,6 +61,33 @@ TEST(PlatformConfig, ShadowDistance) {
+@@ -61,6 +61,43 @@ TEST(PlatformConfig, ShadowDistance) {
      ASSERT_TRUE(ConfigParse(ConfigSerialize(config)).shadow_distance == 320.0f);
  }
  
@@ -61941,6 +62842,16 @@ index 78f40d5f..73a9f68b 100644
 +    ASSERT_FLOAT_EQ(bad.aerial_map_ceiling, 400.0f);
 +    ASSERT_FLOAT_EQ(bad.aerial_map_zoom, 1.0f);
 +    ASSERT_FLOAT_EQ(bad.aerial_map_model_scale, 8.0f);
++}
++
++TEST(PlatformConfig, ItemIcons) {
++    ASSERT_TRUE(ConfigParse("").item_icons_3d);
++    ASSERT_FALSE(ConfigParse(R"({"video": {"item_icons": "original"}})").item_icons_3d);
++    ASSERT_TRUE(ConfigParse(R"({"video": {"item_icons": "3d"}})").item_icons_3d);
++    ASSERT_TRUE(ConfigParse(R"({"video": {"item_icons": "flat"}})").item_icons_3d);
++    Config config;
++    config.item_icons_3d = false;
++    ASSERT_EQ(ConfigParse(ConfigSerialize(config)), config);
 +}
 +
  TEST(PlatformConfig, OptionalMouseZoomRoundTripsAndKeepsResetBindings) {
