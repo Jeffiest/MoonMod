@@ -638,6 +638,8 @@ local function apply_effects()
     shots_pierce = who == "ruby" and sig("ruby", 5),
     reach_scale = (who == "ungaga" and sig("ungaga", 1)) and 1.2 or 1,
     map_hidden = eternal("blind") > 0,
+    -- Vigil's map: the corner map is a square that scrolls around you (the Map screen, below, shows the whole floor)
+    map_window = setting("square_map", true),
     status_duration = eternal("hardy") > 0 and 0.5 or 1,
     status_immune = eternal("clearmind") > 0 and {"freeze", "stamina"} or nil,
     swap_delay = eternal("swift") > 0 and 0 or 1,
@@ -3642,11 +3644,38 @@ refresh_key_icons = function()
   end
 end
 end
-local function poll_input()
-  local key = try(game.input.consume, {id = "curse_key"})
-  local back = try(game.input.consume, {id = "curse_pad_back"})
-  local l1 = try(game.input.state, {id = "curse_pad_l1"})
-  if (key and key.pressed) or (back and back.pressed and l1 and l1.down) then toggle_curse() end
+-- The map screen, as Vigil has it: Select (without L1, which curses), L3 or M pauses on the whole floor as far as
+-- you've seen it (all of it with a Lamp), with you on it; Triangle puts a waypoint, which the corner map flags too.
+local poll_input
+do
+  local map_up, map_closed_at = false, -100
+  call(game.input.bind, {id = "map_key", keys = {"M", "Gamepad:leftstick"}})
+  local function open_map()
+    if not (run and run.phase == "active" and floor) then return end
+    if eternal("blind") > 0 then toast("Blind Halls: this run has no map."); return end
+    local b = biome_def(run.pos)
+    local subtitle = floor.rest and "Rest" or (run.slot >= WARDEN_SLOT and "Warden" or ("Floor " .. (FLOOR_LABEL[run.slot] or "?")))
+    if try(game.ui.map_open, {id = "gauntlet.map", title = b and b.name or "Gauntlet",
+                              subtitle = string.format("%s  (biome %d of %d)", subtitle, run.pos, #run.biomes), waypoints = true}) then
+      map_up = true
+    end
+  end
+  moonmod.on("ui.map_closed", function(e)
+    if type(e) == "table" and e.id == "gauntlet.map" then map_up, map_closed_at = false, frame end
+  end)
+  poll_input = function()
+    local key = try(game.input.consume, {id = "curse_key"})
+    local back = try(game.input.consume, {id = "curse_pad_back"})
+    local map_key = try(game.input.consume, {id = "map_key"})
+    local l1 = try(game.input.state, {id = "curse_pad_l1"})
+    local select = back and back.pressed
+    if (key and key.pressed) or (select and l1 and l1.down) then
+      toggle_curse()
+    elseif (select or (map_key and map_key.pressed)) and setting("map_screen", true) and not map_up and frame - map_closed_at > 15 then
+      -- the press that closed the map is not one that opens it again
+      open_map()
+    end
+  end
 end
 
 -- Transitions ----------------------------------------------------------------------------------------------

@@ -169,6 +169,12 @@ function F.new(opts)
       S.sheet = deepcopy(a); return {set = true}
     end,
     sheet_clear = function() S.sheet = nil; return {cleared = true} end,
+    -- The map screen (Vigil's): one open at a time; S.emit("ui.map_closed", {id}) closes it as Circle would.
+    map_open = function(a)
+      assert(type(a.id) == "string" and type(a.title) == "string" and #a.title >= 1, "map id and title")
+      assert(a.marks == nil or #a.marks <= 64, "map marks")
+      S.map = deepcopy(a); S.maps_opened = (S.maps_opened or 0) + 1; return {opened = true}
+    end,
     sheet_open = function() return fail("failed", "not in play") end,
     -- The choice panel: one at a time, in a dungeon; S.pick(n) answers it as the player would.
     choice_open = function(a)
@@ -457,7 +463,7 @@ function F.new(opts)
     end,
     tuning_set = function(a)
       for k, v in pairs(a) do
-        if k == "map_reveal" or k == "monster_reveal" or k == "map_hidden" then assert(type(v) == "boolean")
+        if k == "map_reveal" or k == "monster_reveal" or k == "map_hidden" or k == "map_window" then assert(type(v) == "boolean")
         elseif k == "swap_delay" then assert(type(v) == "number" and v >= 0 and v <= 4, "swap_delay 0-4")
         elseif k == "dodge_power" then assert(v == 0 or (type(v) == "number" and v >= 0.25 and v <= 4), "dodge_power 0 or 0.25-4")
         elseif k == "dodge_invincible_frames" then assert(math.type(v) == "integer" and v >= 0 and v <= 60, "dodge frames")
