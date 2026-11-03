@@ -44,10 +44,10 @@ index 00000000..2147797e
 +Regression suites: `DungeonAerialCache`, `DungeonAerialProjection`, `DungeonVisibility`, and `PlatformConfig.AerialMap`.
 diff --git a/docs/port/item-icons-3d.md b/docs/port/item-icons-3d.md
 new file mode 100644
-index 00000000..356f19da
+index 00000000..248bb28a
 --- /dev/null
 +++ b/docs/port/item-icons-3d.md
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,42 @@
 +# Item icons from the 3D models
 +
 +The menus draw an item from a 32x32 cell of the `itemicon` / `wepicon` sheets, all through `RetCTex`. The treasure
@@ -60,30 +60,36 @@ index 00000000..356f19da
 +sheet's cell. An item with no model of its own keeps the sheet's picture. A weapon a mod registers (items 377-408)
 +shows the built-in weapon it was made from, as its sheet icon does, unless the mod gave it an icon.
 +
-+Configuration: `video.item_icons` in `config.json`, `"3d"` (the default) or `"original"`, also on the Options
-+screen's Display page as Item Icons. It takes effect at once. `DC_ITEM_ICONS_3D=0` or `1` overrides both.
++It is off unless a mod turns it on. The bundled `moonmod.model-icons` package does, and its settings set the look:
++
++```lua
++game.render.item_icons_3d_set({enabled = true, key_light = 120, fill_light = 36, ambient = 70, smoothing = 60,
++                               outline = true})
++```
++
++`render.item_icons_3d_set` (`content.register`) takes `enabled` and, optionally, `key_light`, `fill_light` and
++`ambient` (0-255), `smoothing` (the crease angle in degrees, 0-180; 0 is retail's flat shading) and `outline`; a field
++left out takes the default shown. One mod at a time owns the icons: another's call fails until it turns them off or
++is unloaded, which turns them off. A new look draws the icons again, a few a frame, as the menus ask for them.
 +
 +How an icon is drawn (`Render` in `port/src/game/item_icon3d.cpp`):
 +
 +* The model is read into its own buffers and texture block 0x47 (held only while it is drawn), built with smoothed
-+  normals (`normal_smoothing.hpp`, 60 degree crease), and posed as the chest presents it, by whose weapon it is.
++  normals (`normal_smoothing.hpp`, the style's crease angle), and posed as the chest presents it, by whose weapon it is.
 +* It is stood up, turned to show its widest face, tipped to be seen from a little above, and a long thin one is laid
 +  on the diagonal as the retail icons draw them. A flat plate is turned face on.
-+* It is drawn with the menu camera into a 640x480 scratch target, with a key light from the upper left and a weak
-+  fill, over a black outline and drop shadow made from the unlit model; the 128x128 around it is halved twice into the
++* It is drawn with the menu camera into a 640x480 scratch target, with the style's key light from the upper left and
++  weak fill, over a black outline and drop shadow made from the unlit model; the 128x128 around it is halved twice into the
 +  32x32 icon.
 +* At most three icons are drawn for the first time in a frame, so opening a full page never stalls; the rest show
 +  the sheet's picture for a frame or two.
 +
-+Tuning (environment, read when an icon is drawn): `DC_ITEM_ICONS_3D_KEY` (120), `DC_ITEM_ICONS_3D_FILL_LIGHT` (36),
-+`DC_ITEM_ICONS_3D_AMBIENT` (70), `DC_ITEM_ICONS_3D_SMOOTH` (60, 0 for flat shading), `DC_ITEM_ICONS_3D_TIP`,
-+`DC_ITEM_ICONS_3D_ITEM_TURN` (-0.26), `DC_ITEM_ICONS_3D_NO_OUTLINE=1`, `DC_ITEM_ICONS_3D_NO_TURN_SEARCH=1`,
-+`DC_ITEM_ICONS_3D_POSE_SHAPE=1`. `DC_ITEM_ICONS_3D_DEBUG=1` prints each item drawn and where it landed.
++`DC_ITEM_ICONS_3D_DEBUG=1` prints each item drawn and where it landed.
 +
 +The dungeon HUD's quick item and weapon slots copy their pictures from the sheets into `itempack` when the floor
 +loads (`DngActiveItemTextureCopy`), outside any menu, and keep the sheet's pictures.
 +
-+Regression suite: `PlatformConfig.ItemIcons`.
++Regression suite: `MoonModRenderApi.ItemIcons3DBelongToOneModAndGoWithIt`.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
 index 5a0b2fc1..3e4a63e7 100644
 --- a/port/CMakeLists.txt
@@ -893,10 +899,10 @@ index e2f6eb1b..bd381616 100644
  } // namespace dc::game
 diff --git a/port/include/game/item_icon3d.hpp b/port/include/game/item_icon3d.hpp
 new file mode 100644
-index 00000000..f646dfb5
+index 00000000..f59cc03c
 --- /dev/null
 +++ b/port/include/game/item_icon3d.hpp
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,43 @@
 +#pragma once
 +
 +#include "common.h"
@@ -912,11 +918,28 @@ index 00000000..f646dfb5
 +// drawn into the first time it was asked for, and the cell is its whole 32x32. Items without a model keep the
 +// sheet's picture, and a mod's own icon (item_icon_override.hpp) still comes first.
 +//
-+// video.item_icons in config.json ("3d", the default, or "original"), the Options screen's Display page, or
-+// DC_ITEM_ICONS_3D=<0|1> over both. See docs/port/item-icons-3d.md.
++// Off unless a mod turns it on (render.item_icons_3d_set, which the moonmod.model-icons package calls). See
++// docs/port/item-icons-3d.md.
++
++/// How the icons are lit and drawn; the defaults are the look the icons were tuned to.
++struct ItemIcons3DStyle {
++    float key_light = 120.0f; ///< the key light from the upper left, 0-255
++    float fill_light = 36.0f; ///< the weak fill from the lower right, 0-255
++    float ambient = 70.0f;    ///< the light every face gets, 0-255
++    float smoothing = 60.0f;  ///< crease angle in degrees the normals are smoothed across; 0 is retail's flat shading
++    bool  outline = true;     ///< a black outline and drop shadow around the model, as the retail icons have
++
++    bool operator==(const ItemIcons3DStyle &) const = default;
++};
++
++/// Turns the model icons on or off and sets their look. Icons already drawn in another style are drawn again.
++void ItemIcons3DSet(bool enabled, const ItemIcons3DStyle &style);
 +
 +/// Whether item icons are drawn from models.
 +bool ItemIcons3DEnabled();
++
++/// The look the icons are drawn with.
++const ItemIcons3DStyle &ItemIcons3DCurrentStyle();
 +
 +/// The icon texture for an item, drawing it on first use; null where the item has no model, this is off, or the
 +/// icon is not drawn yet (outside a frame, or more icons were asked for in this frame than are drawn in one).
@@ -3966,7 +3989,7 @@ index 00000000..fffa0637
 +
 +} // namespace moonmod
 diff --git a/port/lang/de_de.json b/port/lang/de_de.json
-index 693c0b45..483230b7 100644
+index 693c0b45..c7b3a2c8 100644
 --- a/port/lang/de_de.json
 +++ b/port/lang/de_de.json
 @@ -7,6 +7,8 @@
@@ -3993,18 +4016,7 @@ index 693c0b45..483230b7 100644
      "options.game.time_speed.label": "Zeitgeschwindigkeit",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Schnell",
-@@ -95,6 +105,10 @@
-     "options.video.cloth.help": "\"Stoff\"\nOriginal: wie auf der PS2.\nVerbessert: der Körper\ngeht nicht mehr hindurch.",
-     "options.video.cloth.choice.0": "Original",
-     "options.video.cloth.choice.1": "Verbessert",
-+    "options.video.item_icons.label": "Item-Symbole",
-+    "options.video.item_icons.help": "\"Item-Symbole\"\nOriginal: wie auf der PS2.\n3D: aus dem Modell\ndes Gegenstands.",
-+    "options.video.item_icons.choice.0": "Original",
-+    "options.video.item_icons.choice.1": "3D",
-     "options.page.audio": "Audio",
-     "options.audio.master_volume.label": "Lautstärke",
-     "options.audio.master_volume.help": "\"Lautstärke\"\nWie laut das Spiel ist.",
-@@ -383,5 +397,12 @@
+@@ -383,5 +393,12 @@
      "quest.carls_slingshot.gina.excuse": "Carls Schleuder?{page}Ähm... ein, ein großer Vogel hat sie geklaut! Er war *SO* groß!{page}Er hat wusch gemacht und ist damit weggeflogen!",
      "quest.carls_slingshot.gina.bird": "Der Vogel hat sie geklaut! Ehrlich!",
      "quest.carls_slingshot.gina.confess": "...Carl glaubt das mit dem Vogel nicht?{page}...Na gut. Ich hab auf Flaschen geschossen, und dann hat es KNACKS gemacht.{page}Das wollte ich nicht! Darum hab ich ihm eine neue gebastelt!{page}Kannst du sie ihm geben? Ich hab Angst, dass er sauer ist..",
@@ -4020,7 +4032,7 @@ index 693c0b45..483230b7 100644
  }
 \ No newline at end of file
 diff --git a/port/lang/es_es.json b/port/lang/es_es.json
-index ec974d09..2e383def 100644
+index ec974d09..b1343dae 100644
 --- a/port/lang/es_es.json
 +++ b/port/lang/es_es.json
 @@ -7,6 +7,8 @@
@@ -4047,18 +4059,7 @@ index ec974d09..2e383def 100644
      "options.game.time_speed.label": "Velocidad del tiempo",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rápido",
-@@ -95,6 +105,10 @@
-     "options.video.cloth.help": "\"Tela\"\nOriginal: la de PS2.\nMejorada: el cuerpo\nya no la atraviesa.",
-     "options.video.cloth.choice.0": "Original",
-     "options.video.cloth.choice.1": "Mejorada",
-+    "options.video.item_icons.label": "Iconos de objetos",
-+    "options.video.item_icons.help": "\"Iconos de objetos\"\nOriginal: los de PS2.\n3D: dibujados con el\nmodelo del objeto.",
-+    "options.video.item_icons.choice.0": "Original",
-+    "options.video.item_icons.choice.1": "3D",
-     "options.page.audio": "Audio",
-     "options.audio.master_volume.label": "Volumen",
-     "options.audio.master_volume.help": "\"Volumen\"\nQué tan alto suena.",
-@@ -383,5 +397,12 @@
+@@ -383,5 +393,12 @@
      "quest.carls_slingshot.gina.excuse": "¿La honda de Carlos?{page}Esto... ¡un, un pájaro enorme se la llevó! ¡Era *ASÍ* de grande!{page}¡Hizo fiuuu y se fue volando con ella!",
      "quest.carls_slingshot.gina.bird": "¡Se la llevó el pájaro! ¡De verdad!",
      "quest.carls_slingshot.gina.confess": "...¿Carlos no se cree lo del pájaro?{page}...Vale. Estaba disparando a botellas, y hizo CRAC.{page}¡No fue a propósito! ¡Así que le hice una nueva!{page}¿Se la puedes dar? Me da miedo que se enfade..",
@@ -4074,7 +4075,7 @@ index ec974d09..2e383def 100644
  }
 \ No newline at end of file
 diff --git a/port/lang/fr_fr.json b/port/lang/fr_fr.json
-index 3596beb8..c396068e 100644
+index 3596beb8..2978543d 100644
 --- a/port/lang/fr_fr.json
 +++ b/port/lang/fr_fr.json
 @@ -7,6 +7,8 @@
@@ -4101,18 +4102,7 @@ index 3596beb8..c396068e 100644
      "options.game.time_speed.label": "Vitesse du temps",
      "options.game.time_speed.choice.0": "Normal",
      "options.game.time_speed.choice.1": "Rapide",
-@@ -95,6 +105,10 @@
-     "options.video.cloth.help": "\"Tissus\"\nOriginal: celui de la PS2.\nAmélioré: le corps\nne le traverse plus.",
-     "options.video.cloth.choice.0": "Original",
-     "options.video.cloth.choice.1": "Amélioré",
-+    "options.video.item_icons.label": "Icônes d'objets",
-+    "options.video.item_icons.help": "\"Icônes d'objets\"\nOriginal: celles de la PS2.\n3D: dessinées d'après\nle modèle de l'objet.",
-+    "options.video.item_icons.choice.0": "Original",
-+    "options.video.item_icons.choice.1": "3D",
-     "options.page.audio": "Audio",
-     "options.audio.master_volume.label": "Volume",
-     "options.audio.master_volume.help": "\"Volume\"\nLe volume du jeu.",
-@@ -383,5 +397,12 @@
+@@ -383,5 +393,12 @@
      "quest.carls_slingshot.gina.excuse": "Le lance-pierre de Carl ?{page}Euh... un, un gros oiseau l'a pris ! Il était *GRAND COMME ÇA* !{page}Il a fait whoosh, et il s'est envolé avec !",
      "quest.carls_slingshot.gina.bird": "C'est l'oiseau qui l'a pris ! Promis !",
      "quest.carls_slingshot.gina.confess": "...Carl ne croit pas à l'oiseau ?{page}...Bon. Je tirais sur des bouteilles, et ça a fait CRAC.{page}J'ai pas fait exprès ! Alors je lui en ai fabriqué un nouveau !{page}Tu peux le lui donner ? J'ai peur qu'il soit fâché..",
@@ -4128,7 +4118,7 @@ index 3596beb8..c396068e 100644
  }
 \ No newline at end of file
 diff --git a/port/lang/it_it.json b/port/lang/it_it.json
-index a914df22..50348db0 100644
+index a914df22..8435418d 100644
 --- a/port/lang/it_it.json
 +++ b/port/lang/it_it.json
 @@ -7,6 +7,8 @@
@@ -4155,18 +4145,7 @@ index a914df22..50348db0 100644
      "options.game.time_speed.label": "Velocità del tempo",
      "options.game.time_speed.choice.0": "Normale",
      "options.game.time_speed.choice.1": "Veloce",
-@@ -95,6 +105,10 @@
-     "options.video.cloth.help": "\"Tessuti\"\nOriginale: come su PS2.\nMigliorato: il corpo\nnon li attraversa più.",
-     "options.video.cloth.choice.0": "Originale",
-     "options.video.cloth.choice.1": "Migliorato",
-+    "options.video.item_icons.label": "Icone oggetti",
-+    "options.video.item_icons.help": "\"Icone oggetti\"\nOriginale: come su PS2.\n3D: disegnate dal\nmodello dell'oggetto.",
-+    "options.video.item_icons.choice.0": "Originale",
-+    "options.video.item_icons.choice.1": "3D",
-     "options.page.audio": "Audio",
-     "options.audio.master_volume.label": "Volume",
-     "options.audio.master_volume.help": "\"Volume\"\nQuanto forte è il\ngioco.",
-@@ -383,5 +397,12 @@
+@@ -383,5 +393,12 @@
      "quest.carls_slingshot.gina.excuse": "La fionda di Carl?{page}Ehm... un, un grosso uccello l'ha presa! Era grande *COSÌ*!{page}Ha fatto fiuuu, ed è volato via con lei!",
      "quest.carls_slingshot.gina.bird": "L'ha presa l'uccello! Davvero!",
      "quest.carls_slingshot.gina.confess": "...Carl non crede all'uccello?{page}...Va bene. Tiravo alle bottiglie, e ha fatto CRAC.{page}Non l'ho fatto apposta! Così gliene ho fatta una nuova!{page}Puoi dargliela tu? Ho paura che si arrabbi..",
@@ -15079,10 +15058,10 @@ index 51e0338d..78d5b76f 100644
  
 diff --git a/port/src/game/item_icon3d.cpp b/port/src/game/item_icon3d.cpp
 new file mode 100644
-index 00000000..7be93e42
+index 00000000..6791c8aa
 --- /dev/null
 +++ b/port/src/game/item_icon3d.cpp
-@@ -0,0 +1,586 @@
+@@ -0,0 +1,582 @@
 +#include "item_icon3d.hpp"
 +
 +#include <algorithm>
@@ -15111,7 +15090,6 @@ index 00000000..7be93e42
 +#include "menuetc.hpp"
 +#include "mglib.hpp"
 +#include "normal_smoothing.hpp"
-+#include "platform/config.hpp"
 +#include "render/texture_registry.hpp"
 +#include "renderinfo.hpp"
 +#include "texture.hpp"
@@ -15139,11 +15117,6 @@ index 00000000..7be93e42
 +    return value != nullptr && value[0] != 0 && value[0] != '0';
 +}
 +
-+float EnvFloat(const char *name, float fallback) {
-+    const char *text = std::getenv(name);
-+    return text != nullptr ? static_cast<float>(std::atof(text)) : fallback;
-+}
-+
 +bool Debug() {
 +    static const bool on = EnvOn("DC_ITEM_ICONS_3D_DEBUG");
 +    return on;
@@ -15156,6 +15129,8 @@ index 00000000..7be93e42
 +};
 +
 +std::map<int, Icon> g_icons;
++bool                g_enabled = false;
++ItemIcons3DStyle    g_style;
 +
 +u_long Tex0(unsigned tbp, int tbw, int psm, int tw, int th) {
 +    return static_cast<u_long>(tbp) | (static_cast<u_long>(tbw) << 14) | (static_cast<u_long>(psm) << 20) |
@@ -15223,12 +15198,9 @@ index 00000000..7be93e42
 +            dir[i][0] = key[i] / key_length;
 +            dir[i][1] = fill[i] / fill_length;
 +        }
-+        const float key_strength = EnvFloat("DC_ITEM_ICONS_3D_KEY", 120.0f);
-+        const float fill_strength = EnvFloat("DC_ITEM_ICONS_3D_FILL_LIGHT", 36.0f);
-+        colour[0][0] = colour[0][1] = colour[0][2] = key_strength;
-+        colour[1][0] = colour[1][1] = colour[1][2] = fill_strength;
-+        float ambient[4] = {EnvFloat("DC_ITEM_ICONS_3D_AMBIENT", 70.0f), 0.0f, 0.0f, 128.0f};
-+        ambient[1] = ambient[2] = ambient[0];
++        colour[0][0] = colour[0][1] = colour[0][2] = g_style.key_light;
++        colour[1][0] = colour[1][1] = colour[1][2] = g_style.fill_light;
++        float ambient[4] = {g_style.ambient, g_style.ambient, g_style.ambient, 128.0f};
 +        MGSetPLight(dir, colour);
 +        MGSetAmbient(ambient);
 +    }
@@ -15330,11 +15302,11 @@ index 00000000..7be93e42
 +    }
 +
 +    // Smooth the model's normals while it is built and drawn here, so a rounded thing is lit as a curve (see
-+    // normal_smoothing.hpp); DC_ITEM_ICONS_3D_SMOOTH is the crease angle in degrees, 0 for retail's flat shading.
++    // normal_smoothing.hpp); the style's crease angle in degrees, 0 for retail's flat shading.
 +    struct SmoothScope {
 +        float previous;
 +
-+        SmoothScope() : previous(PortSetNormalSmoothing(EnvFloat("DC_ITEM_ICONS_3D_SMOOTH", 60.0f))) {}
++        SmoothScope() : previous(PortSetNormalSmoothing(g_style.smoothing)) {}
 +
 +        ~SmoothScope() { PortSetNormalSmoothing(previous); }
 +    } smooth_scope;
@@ -15366,18 +15338,9 @@ index 00000000..7be93e42
 +    }
 +    // The pose: the one the treasure chest presents the item in, which depends on who the weapon belongs to
 +    // (BtGetTreasureboxBig_Init); everything else is shown as the chest shows a consumable.
-+    // DC_ITEM_ICONS_3D_POSE_SHAPE keeps the older rule that turns the long side onto a diagonal.
 +    const bool weapon = model_item >= ITEM_WEAPON_START;
 +    float      rx = 1.5707964f, ry = 0.0f, rz = 1.5707964f;
-+    const bool shape_pose = EnvOn("DC_ITEM_ICONS_3D_POSE_SHAPE");
-+    if (shape_pose) {
-+        rx = 0.35f;
-+        ry = 0.0f;
-+        rz = 0.785f;
-+        if (ext[2] > ext[0] && ext[2] > ext[1]) {
-+            rx = 1.2f;
-+        }
-+    } else if (weapon) {
++    if (weapon) {
 +        switch (WeaponOwner(model_item)) {
 +            case CHARA_XIAO:
 +                rx = -1.5707964f;
@@ -15419,9 +15382,6 @@ index 00000000..7be93e42
 +    g_root = &root;
 +    float stand_x = weapon ? -1.15f : -1.5707964f;
 +    float tip = weapon ? 0.0f : 0.35f;
-+    if (const char *text = std::getenv("DC_ITEM_ICONS_3D_TIP")) {
-+        tip = static_cast<float>(std::atof(text));
-+    }
 +    float turn_now = 0.5f, roll = 0.0f;
 +    auto  apply = [&]() {
 +        stand.SetRotation(stand_x, 0.0f, 0.0f);
@@ -15464,7 +15424,7 @@ index 00000000..7be93e42
 +    std::sort(sorted_ext, sorted_ext + 3);
 +    const bool plate = !weapon && sorted_ext[2] > 0.0001f && sorted_ext[0] < 0.6f * sorted_ext[1] &&
 +                       sorted_ext[1] > 0.5f * sorted_ext[2];
-+    if (plate && !shape_pose) {
++    if (plate) {
 +        float best = -1.0f, best_stand = stand_x, best_turn = turn_now;
 +        for (int quarter = -2; quarter <= 2; quarter++) {
 +            for (int step = -6; step <= 6; step++) {
@@ -15491,7 +15451,7 @@ index 00000000..7be93e42
 +    // The turn about the vertical: the chest pose keeps the item upright but not facing us, so a flat thing can be
 +    // edge-on here. Try a spread of turns and keep the one whose box shows the most (the widest face), leaning to the
 +    // usual three-quarter turn when two are as good.
-+    if (!shape_pose && !plate && !EnvOn("DC_ITEM_ICONS_3D_NO_TURN_SEARCH")) {
++    if (!plate) {
 +        float best_score = -1.0f, best_turn = turn_now;
 +        for (int step = -6; step <= 6; step++) {
 +            turn_now = step * 0.2618f; // 15 degrees
@@ -15507,7 +15467,7 @@ index 00000000..7be93e42
 +        turn_now = best_turn;
 +        // Everything but weapons reads better turned a little more to the left than the widest face has it.
 +        if (!weapon) {
-+            turn_now += EnvFloat("DC_ITEM_ICONS_3D_ITEM_TURN", -0.2618f);
++            turn_now -= 0.2618f;
 +        }
 +        apply();
 +        measure();
@@ -15515,7 +15475,7 @@ index 00000000..7be93e42
 +    // Long and thin as seen (weapons, keys, rods): lay it along the diagonal, which is how the retail icons draw them,
 +    // and which fills a square cell the best.
 +    const float width = hi[0] - lo[0], height = hi[1] - lo[1];
-+    if (!shape_pose && (width > 2.0f * height || height > 2.0f * width)) {
++    if (width > 2.0f * height || height > 2.0f * width) {
 +        roll += width > height ? 0.785f : -0.785f;
 +        apply();
 +        measure();
@@ -15557,7 +15517,7 @@ index 00000000..7be93e42
 +    float position[4] = {-rotated[0] * scale, -rotated[1] * scale, -rotated[2] * scale, 1.0f};
 +    root.SetPosition(position);
 +    gfx::Clear(true, none, true, 0.0f);
-+    if (!EnvOn("DC_ITEM_ICONS_3D_NO_OUTLINE")) {
++    if (g_style.outline) {
 +        // The outline and shadow: the unlit (black) model drawn shifted about the picture, a pixel of the icon (4 of
 +        // the scratch's) each way and a little more down and right for the shadow, then the lit model on top.
 +        const float step = 4.0f / pixels_per_unit;
@@ -15634,12 +15594,27 @@ index 00000000..7be93e42
 +
 +} // namespace
 +
-+bool ItemIcons3DEnabled() {
-+    static const char *forced = std::getenv("DC_ITEM_ICONS_3D");
-+    if (forced != nullptr && forced[0] != 0) {
-+        return forced[0] != '0';
++void ItemIcons3DSet(bool enabled, const ItemIcons3DStyle &style) {
++    g_enabled = enabled;
++    if (style == g_style) {
++        return;
 +    }
-+    return dc::platform::ConfigGet().item_icons_3d;
++    g_style = style;
++    // Icons drawn in the old style are drawn again, a few a frame, as the menus next ask for them.
++    for (auto &[item_no, icon] : g_icons) {
++        if (icon.key != 0) {
++            PortReleaseKey(icon.key);
++        }
++    }
++    g_icons.clear();
++}
++
++bool ItemIcons3DEnabled() {
++    return g_enabled;
++}
++
++const ItemIcons3DStyle &ItemIcons3DCurrentStyle() {
++    return g_style;
 +}
 +
 +CTexture *ItemIcon3DTexture(int item_no) {
@@ -20863,10 +20838,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..c0079088
+index 00000000..96bcc6f4
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,605 @@
+@@ -0,0 +1,606 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -21140,6 +21115,7 @@ index 00000000..c0079088
 +    {"render.hud_icon_remove", "render", "hud_icon_remove", "render", "content.register", "Remove a HUD icon owned by this mod."},
 +    {"render.floor_label_set", "render", "floor_label_set", "render", "content.register", "Show up to six characters on the floor plate in place of its number."},
 +    {"render.floor_label_clear", "render", "floor_label_clear", "render", "content.register", "Give the floor plate its number back."},
++    {"render.item_icons_3d_set", "render", "item_icons_3d_set", "render", "content.register", "Draw the menus' item icons from the items' 3D models, and set how they are lit."},
 +    {"render.camera_get", "render", "camera_get", "any", "game.read", "Read the active dungeon camera pose."},
 +    {"render.camera_set", "render", "camera_set", "render", "game.write", "Set bounded distance, height, or angle on the active dungeon follow camera."},
 +    {"text.get", "text", "get", "any", "game.read", "Read a game message by its language-file key, and whether a mod, the language file or the disc gives it."},
@@ -22334,10 +22310,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..90b9385d
+index 00000000..7af2440d
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,14917 @@
+@@ -0,0 +1,14985 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/symlinks.hpp"
@@ -22370,6 +22346,7 @@ index 00000000..90b9385d
 +#include <cstring>
 +#include <filesystem>
 +#include <fstream>
++#include <initializer_list>
 +#include <iterator>
 +#include <limits>
 +#include <map>
@@ -22380,6 +22357,7 @@ index 00000000..90b9385d
 +#include <vector>
 +
 +#include "itemdata.hpp"
++#include "item_icon3d.hpp"
 +#include "item_icon_override.hpp"
 +#include "data/data_read.hpp"
 +#include "userstatus.hpp"
@@ -33175,6 +33153,66 @@ index 00000000..90b9385d
 +    return {ApiCallStatus::Ok, {{"cleared", owned}}, {}};
 +}
 +
++// Menu item icons drawn from the items' 3D models (render.item_icons_3d_set, item_icon3d.hpp): one mod at a time
++// turns them on and sets their look; unloading it turns them off.
++std::string g_item_icons_3d_owner;
++
++Json ItemIcons3DJson() {
++    const ItemIcons3DStyle &style = ItemIcons3DCurrentStyle();
++    return {{"enabled", ItemIcons3DEnabled()},
++            {"key_light", static_cast<int>(style.key_light)},
++            {"fill_light", static_cast<int>(style.fill_light)},
++            {"ambient", static_cast<int>(style.ambient)},
++            {"smoothing", static_cast<int>(style.smoothing)},
++            {"outline", style.outline}};
++}
++
++ApiCallResult SetItemIcons3D(std::string_view mod_id, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("enabled") ||
++        !args[0]["enabled"].is_boolean()) {
++        return Invalid("expected {enabled = boolean, key_light?, fill_light?, ambient? = 0-255, smoothing? = 0-180, "
++                       "outline? = boolean}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "enabled" && field.key() != "key_light" && field.key() != "fill_light" &&
++            field.key() != "ambient" && field.key() != "smoothing" && field.key() != "outline") {
++            return Invalid("render.item_icons_3d_set accepts only enabled, key_light, fill_light, ambient, smoothing, "
++                           "and outline");
++        }
++    }
++    if (!g_item_icons_3d_owner.empty() && g_item_icons_3d_owner != mod_id) {
++        return Failed("another mod draws the item icons");
++    }
++    ItemIcons3DStyle style;
++    struct Bound {
++        const char *key;
++        int         maximum;
++        float      &field;
++    };
++    for (const Bound &bound : {Bound{"key_light", 255, style.key_light}, Bound{"fill_light", 255, style.fill_light},
++                               Bound{"ambient", 255, style.ambient}, Bound{"smoothing", 180, style.smoothing}}) {
++        if (!request.contains(bound.key)) continue;
++        int value = 0;
++        if (!ReadBoundedInt(request, bound.key, 0, bound.maximum, value)) {
++            return Invalid(std::string(bound.key) + " must be an integer from 0 to " + std::to_string(bound.maximum));
++        }
++        bound.field = static_cast<float>(value);
++    }
++    if (request.contains("outline")) {
++        if (!request["outline"].is_boolean()) return Invalid("outline must be a boolean");
++        style.outline = request["outline"].get<bool>();
++    }
++    const bool enabled = request["enabled"].get<bool>();
++    ItemIcons3DSet(enabled, style);
++    if (enabled) {
++        g_item_icons_3d_owner = std::string(mod_id);
++    } else {
++        g_item_icons_3d_owner.clear();
++    }
++    return {ApiCallStatus::Ok, ItemIcons3DJson(), {}};
++}
++
 +ApiCallResult RemoveRenderBar(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 ||
 +        !args[0].contains("id") || !args[0]["id"].is_string()) {
@@ -34706,6 +34744,7 @@ index 00000000..90b9385d
 +    if (operation.path == "render.hud_icon_remove") return RemoveHudIcon(mod_id, args);
 +    if (operation.path == "render.floor_label_set") return SetFloorLabel(mod_id, args);
 +    if (operation.path == "render.floor_label_clear") return ClearFloorLabel(mod_id, args);
++    if (operation.path == "render.item_icons_3d_set") return SetItemIcons3D(mod_id, args);
 +    if (operation.path == "debug.overlay_register") return RegisterDebugOverlay(mod_id, args);
 +    return {ApiCallStatus::Unsupported, nullptr, "this Chronicle adapter does not implement the operation"};
 +}
@@ -36979,6 +37018,7 @@ index 00000000..90b9385d
 +    config.api_capabilities.push_back({"render.hud_icon_remove", true, {}});
 +    config.api_capabilities.push_back({"render.floor_label_set", true, {}});
 +    config.api_capabilities.push_back({"render.floor_label_clear", true, {}});
++    config.api_capabilities.push_back({"render.item_icons_3d_set", true, {}});
 +    for (const char *path : {"input.bind", "input.unbind", "input.state", "input.consume", "input.axis", "input.wheel_mode_set", "input.block_native",
 +                             "input.context_push", "input.context_pop", "input.context_get"}) {
 +        config.api_capabilities.push_back({path, true, {}});
@@ -37122,6 +37162,10 @@ index 00000000..90b9385d
 +            g_floor_label_owner.clear();
 +            g_floor_label.clear();
 +            g_floor_number = 0;
++        }
++        if (g_item_icons_3d_owner == mod_id) {
++            ItemIcons3DSet(false, ItemIcons3DCurrentStyle());
++            g_item_icons_3d_owner.clear();
 +        }
 +        RemoveTitleModesByOwner(mod_id);
 +    };
@@ -50058,7 +50102,7 @@ index 00000000..adae0bb7
 +
 +} // namespace dc::options::mod_manager_ui
 diff --git a/port/src/options/rows.cpp b/port/src/options/rows.cpp
-index 61ef167b..360f96db 100644
+index 61ef167b..97d9627d 100644
 --- a/port/src/options/rows.cpp
 +++ b/port/src/options/rows.cpp
 @@ -9,7 +9,10 @@
@@ -50092,17 +50136,7 @@ index 61ef167b..360f96db 100644
      OnOffRow<&Config::discord_rich_presence>("discord.rich_presence", "Enable Discord",
                                               "\"Discord Rich Presence\"\nShows what you are\nplaying on Discord."),
      OnOffRow<&Config::element_quick_select>("game.element_quick_select", "Element Quick Select",
-@@ -652,6 +661,9 @@ constexpr Row kDisplayRows[] = {
-     NamedRow<&Config::enhanced_cloth>("video.cloth", "Cloth",
-                                       "\"Cloth\"\nOriginal: the PS2's.\nEnhanced: the body no\nlonger passes through.",
-                                       "Original|Enhanced"),
-+    NamedRow<&Config::item_icons_3d>("video.item_icons", "Item Icons",
-+                                     "\"Item Icons\"\nOriginal: the PS2's.\n3D: drawn from each\nitem's own model.",
-+                                     "Original|3D"),
- };
- 
- #ifdef __ANDROID__
-@@ -928,7 +940,7 @@ std::vector<std::pair<std::string, std::string>> RowStrings() {
+@@ -928,7 +937,7 @@ std::vector<std::pair<std::string, std::string>> RowStrings() {
              if (row.help != nullptr) {
                  add(prefix + ".help", row.help);
              }
@@ -50111,7 +50145,7 @@ index 61ef167b..360f96db 100644
                  const int count = row.count(ConfigGet());
                  for (int choice = 0; choice < count; ++choice) {
                      add(prefix + ".choice." + std::to_string(choice), ChoiceName(row.names, choice));
-@@ -945,6 +957,9 @@ std::string RowValue(const Row &row, const Config &config) {
+@@ -945,6 +954,9 @@ std::string RowValue(const Row &row, const Config &config) {
      if (row.action != nullptr) {
          return InputBindingLabel(row.action);
      }
@@ -50121,7 +50155,7 @@ index 61ef167b..360f96db 100644
      std::string value = row.text != nullptr ? ValueText(row, row.text(config)) : ChoiceText(row, row.get(config));
      if (ConfigAppliesOnRestart(row.key)) {
          value += " *";
-@@ -953,7 +968,8 @@ std::string RowValue(const Row &row, const Config &config) {
+@@ -953,7 +965,8 @@ std::string RowValue(const Row &row, const Config &config) {
  }
  
  bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
@@ -50131,7 +50165,7 @@ index 61ef167b..360f96db 100644
          return false;
      }
      const int count = row.count(config);
-@@ -973,11 +989,13 @@ bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
+@@ -973,11 +986,13 @@ bool StepRow(const Row &row, Config &config, int direction, bool wrap) {
  void ResetPage(const Page &page, Config &config) {
      const Config defaults;
      for (const Row &row : page.rows) {
@@ -50235,10 +50269,10 @@ index 2f381d6f..51003612 100644
              ShowHelp();
              break;
 diff --git a/port/src/platform/config.cpp b/port/src/platform/config.cpp
-index fbd5a5d2..d137a4e9 100644
+index fbd5a5d2..bea30d90 100644
 --- a/port/src/platform/config.cpp
 +++ b/port/src/platform/config.cpp
-@@ -606,12 +606,37 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
+@@ -606,6 +606,28 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
          config.shadow_distance = distance;
          return true;
      }
@@ -50267,24 +50301,7 @@ index fbd5a5d2..d137a4e9 100644
      if (name == "discord.rich_presence") {
          return ReadBool(value, config.discord_rich_presence);
      }
-     if (name == "video.cloth") {
-         return ReadChoice(value, "original", "enhanced", config.enhanced_cloth);
-     }
-+    if (name == "video.item_icons") {
-+        return ReadChoice(value, "original", "3d", config.item_icons_3d);
-+    }
-     if (name == "audio.soundtrack") {
-         return ReadChoice(value, "ps2", "custom", config.soundtrack);
-     }
-@@ -774,6 +799,7 @@ std::string ConfigSerialize(const Config &config) {
-     root["video"]["anisotropy"] = config.anisotropy;
-     root["video"]["soft_focus"] = options.soft_focus;
-     root["video"]["cloth"] = config.enhanced_cloth ? "enhanced" : "original";
-+    root["video"]["item_icons"] = config.item_icons_3d ? "3d" : "original";
-     root["audio"]["master_volume"] = Shortest(config.master_volume);
-     root["audio"]["sound"] = SoundName(config);
-     root["audio"]["soundtrack"] = config.soundtrack ? "custom" : "ps2";
-@@ -798,6 +824,14 @@ std::string ConfigSerialize(const Config &config) {
+@@ -798,6 +820,14 @@ std::string ConfigSerialize(const Config &config) {
      root["input"]["mouse_release"] = config.mouse_release_keys;
      root["input"]["vibration"] = options.vibration;
      root["input"]["bindings"] = std::move(bindings);
@@ -50300,14 +50317,11 @@ index fbd5a5d2..d137a4e9 100644
      return root.dump(4) + "\n";
  }
 diff --git a/port/src/platform/config.hpp b/port/src/platform/config.hpp
-index b06a678d..2011bbcd 100644
+index b06a678d..2e36d0e0 100644
 --- a/port/src/platform/config.hpp
 +++ b/port/src/platform/config.hpp
-@@ -68,8 +68,23 @@ struct Config : HostSettings {
-     float             shadow_distance = 0.0f;
-     int               anisotropy = 0;
+@@ -70,6 +70,20 @@ struct Config : HostSettings {
      bool              enhanced_cloth = false;     /**< video.cloth: false runs the PS2's cloth, true also keeps it out of the body. */
-+    bool              item_icons_3d = true;       /**< video.item_icons: "3d" draws menu item icons from the items' models, "original" from the icon sheets. */
      float             mouse_camera_return = 0.2f; /**< Third-person vertical return after mouse input: 0 holds height, 1 is retail's rate. */
      ConfigGameOptions options;
 +    bool              fit_dungeon_map = true;    /**< game.fit_dungeon_map: fit the dungeon map to the screen. */
@@ -55222,15 +55236,16 @@ index 00000000..4ac4f6c9
 +}
 diff --git a/port/src/tests/moonmod_debug_inspect_test.cpp b/port/src/tests/moonmod_debug_inspect_test.cpp
 new file mode 100644
-index 00000000..467a995d
+index 00000000..a6e5e0dd
 --- /dev/null
 +++ b/port/src/tests/moonmod_debug_inspect_test.cpp
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,286 @@
 +#include <gtest/gtest.h>
 +
 +#include <memory>
 +#include <ranges>
 +
++#include "item_icon3d.hpp"
 +#include "main.hpp"
 +#include "mainselect.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -55447,6 +55462,69 @@ index 00000000..467a995d
 +    config.api_owner_unloaded(owner);
 +    EXPECT_TRUE(moonmod::ChronicleHudIcons().empty());
 +    EXPECT_TRUE(moonmod::ChronicleFloorLabel().empty());
++}
++
++TEST(MoonModRenderApi, ItemIcons3DBelongToOneModAndGoWithIt) {
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleApi(config);
++    const auto *icons_set = moonmod::FindApiOperation("render.item_icons_3d_set");
++    ASSERT_NE(icons_set, nullptr);
++    EXPECT_EQ(icons_set->permission, "content.register");
++
++    constexpr std::string_view owner = "test.moonmod.model-icons";
++    constexpr std::string_view other = "test.moonmod.other-icons";
++    struct Cleanup {
++        moonmod::RuntimeConfig &config;
++        ~Cleanup() {
++            if (config.api_owner_unloaded) {
++                config.api_owner_unloaded("test.moonmod.model-icons");
++                config.api_owner_unloaded("test.moonmod.other-icons");
++            }
++        }
++    } cleanup{config};
++
++    EXPECT_FALSE(ItemIcons3DEnabled()) << "off until a mod turns it on";
++
++    const moonmod::ApiCallResult on = config.api_handler(
++        owner, *icons_set,
++        moonmod::Json::array({{{"enabled", true}, {"key_light", 100}, {"smoothing", 0}, {"outline", false}}}));
++    ASSERT_EQ(on.status, moonmod::ApiCallStatus::Ok) << on.message;
++    EXPECT_TRUE(ItemIcons3DEnabled());
++    EXPECT_TRUE(on.value.at("enabled").get<bool>());
++    EXPECT_EQ(on.value.at("key_light").get<int>(), 100);
++    EXPECT_EQ(on.value.at("fill_light").get<int>(), 36) << "a field left out keeps its default";
++    EXPECT_EQ(on.value.at("smoothing").get<int>(), 0);
++    EXPECT_FALSE(on.value.at("outline").get<bool>());
++    EXPECT_FLOAT_EQ(ItemIcons3DCurrentStyle().key_light, 100.0f);
++
++    const moonmod::ApiCallResult taken = config.api_handler(
++        other, *icons_set, moonmod::Json::array({{{"enabled", true}}}));
++    EXPECT_EQ(taken.status, moonmod::ApiCallStatus::Failed);
++
++    for (const moonmod::Json &bad : {moonmod::Json::array(), moonmod::Json::array({{{"key_light", 10}}}),
++                                     moonmod::Json::array({{{"enabled", true}, {"ambient", 256}}}),
++                                     moonmod::Json::array({{{"enabled", true}, {"outline", 1}}}),
++                                     moonmod::Json::array({{{"enabled", true}, {"colour", 1}}})}) {
++        EXPECT_EQ(config.api_handler(owner, *icons_set, bad).status, moonmod::ApiCallStatus::InvalidArgument) << bad.dump();
++    }
++    EXPECT_TRUE(ItemIcons3DEnabled()) << "a refused call changes nothing";
++
++    // Unloading the owner turns the icons off and lets another mod have them.
++    config.api_owner_unloaded(owner);
++    EXPECT_FALSE(ItemIcons3DEnabled());
++    const moonmod::ApiCallResult other_on = config.api_handler(
++        other, *icons_set, moonmod::Json::array({{{"enabled", true}}}));
++    ASSERT_EQ(other_on.status, moonmod::ApiCallStatus::Ok) << other_on.message;
++    EXPECT_FLOAT_EQ(ItemIcons3DCurrentStyle().key_light, 120.0f);
++    EXPECT_TRUE(ItemIcons3DCurrentStyle().outline);
++
++    // Turning them off gives them up too.
++    const moonmod::ApiCallResult off = config.api_handler(
++        other, *icons_set, moonmod::Json::array({{{"enabled", false}}}));
++    ASSERT_EQ(off.status, moonmod::ApiCallStatus::Ok) << off.message;
++    EXPECT_FALSE(ItemIcons3DEnabled());
++    EXPECT_EQ(config.api_handler(owner, *icons_set, moonmod::Json::array({{{"enabled", false}}})).status,
++              moonmod::ApiCallStatus::Ok);
 +}
 diff --git a/port/src/tests/moonmod_dungeons_api_test.cpp b/port/src/tests/moonmod_dungeons_api_test.cpp
 new file mode 100644
@@ -62810,10 +62888,10 @@ index 57eeb084..45db5d4a 100644
      InitializeDataBuffer();
      SetDataBuffer(&TextureData, 2000);
 diff --git a/port/src/tests/platform_config_test.cpp b/port/src/tests/platform_config_test.cpp
-index 78f40d5f..e3c8ce90 100644
+index 78f40d5f..73a9f68b 100644
 --- a/port/src/tests/platform_config_test.cpp
 +++ b/port/src/tests/platform_config_test.cpp
-@@ -61,6 +61,43 @@ TEST(PlatformConfig, ShadowDistance) {
+@@ -61,6 +61,33 @@ TEST(PlatformConfig, ShadowDistance) {
      ASSERT_TRUE(ConfigParse(ConfigSerialize(config)).shadow_distance == 320.0f);
  }
  
@@ -62842,16 +62920,6 @@ index 78f40d5f..e3c8ce90 100644
 +    ASSERT_FLOAT_EQ(bad.aerial_map_ceiling, 400.0f);
 +    ASSERT_FLOAT_EQ(bad.aerial_map_zoom, 1.0f);
 +    ASSERT_FLOAT_EQ(bad.aerial_map_model_scale, 8.0f);
-+}
-+
-+TEST(PlatformConfig, ItemIcons) {
-+    ASSERT_TRUE(ConfigParse("").item_icons_3d);
-+    ASSERT_FALSE(ConfigParse(R"({"video": {"item_icons": "original"}})").item_icons_3d);
-+    ASSERT_TRUE(ConfigParse(R"({"video": {"item_icons": "3d"}})").item_icons_3d);
-+    ASSERT_TRUE(ConfigParse(R"({"video": {"item_icons": "flat"}})").item_icons_3d);
-+    Config config;
-+    config.item_icons_3d = false;
-+    ASSERT_EQ(ConfigParse(ConfigSerialize(config)), config);
 +}
 +
  TEST(PlatformConfig, OptionalMouseZoomRoundTripsAndKeepsResetBindings) {

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.model-icons",
+  "name": "Model Icons",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Draws the menus' item and weapon icons from each item's own 3D model instead of the flat icon sheets.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["content.register"],
+  "settings": [
+    {"id": "key_light", "name": "Key light", "description": "The light from the upper left.", "type": "integer", "default": 120, "min": 0, "max": 255, "step": 5},
+    {"id": "fill_light", "name": "Fill light", "description": "The weak light from the lower right.", "type": "integer", "default": 36, "min": 0, "max": 255, "step": 2},
+    {"id": "ambient", "name": "Ambient light", "description": "The light every side of the model gets.", "type": "integer", "default": 70, "min": 0, "max": 255, "step": 5},
+    {"id": "smoothing", "name": "Smooth shading", "description": "Crease angle in degrees the shading is smoothed across; 0 is the PS2's faceted look.", "type": "integer", "default": 60, "min": 0, "max": 180, "step": 15},
+    {"id": "outline", "name": "Outline and shadow", "description": "A black outline and drop shadow, as the original icons have.", "type": "boolean", "default": true}
+  ]
+}

@@ -571,6 +571,18 @@ local blade = assert(game.weapons.register({
 - `weapons.get().assets` reports `model` and `icon` game paths.
 - The model shows once the weapon is equipped (`weapons.equip` in town or a dungeon, or the game's menus).
 
+### Chronicle menu icons from the items' models (`render.item_icons_3d_set`)
+
+`render.item_icons_3d_set({enabled, key_light?, fill_light?, ambient?, smoothing?, outline?})` (`content.register`)
+makes the menus draw each item's and weapon's icon from its own 3D model, the one the treasure chest shows, instead
+of its cell of the `itemicon` / `wepicon` sheets. `key_light`, `fill_light` and `ambient` (integers 0-255, defaults
+120, 36 and 70) light it; `smoothing` (0-180 degrees, default 60; 0 is retail's flat shading) smooths its shading;
+`outline` (default `true`) draws the black outline and drop shadow the retail icons have. It returns the settings in
+force. One mod owns the icons at a time: another's call fails until the owner passes `enabled = false` or is
+unloaded, which puts the sheets back. A mod's own icon (`items.icon_set`, `weapons.register` `icon`) still wins, an
+item with no model keeps its sheet cell, and a registered weapon shows its template's model. The bundled
+`moonmod.model-icons` package calls it from its settings.
+
 ### Chronicle Georama variants with their own footprint
 
 ```lua

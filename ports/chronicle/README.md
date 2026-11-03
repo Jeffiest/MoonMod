@@ -44,9 +44,9 @@ Since `d3666bcb` the port compiles its own fork of the game (`port/src/game`, `p
   `CDungeonMap::DrawMap` uses. `render/draw3d.cpp` adds its orthographic pass. `docs/port/aerial-map.md` has the
   settings and keys.
 - `port/src/game/item_icon3d.cpp`, `port/include/game/{item_icon3d,normal_smoothing}.hpp`: menu item icons drawn
-  from each item's own 3D model (`video.item_icons`, "3d" by default; Options > Display > Item Icons), which
-  `RetCTex` hands out after a mod's own icon and before the sheet's cell. `game/visualvu1.cpp` adds the normal
-  smoothing they are lit with. `docs/port/item-icons-3d.md` has the details.
+  from each item's own 3D model, which `RetCTex` hands out after a mod's own icon and before the sheet's cell. Off
+  until a mod calls `render.item_icons_3d_set`; the bundled `moonmod.model-icons` package does. `game/visualvu1.cpp`
+  adds the normal smoothing they are lit with. `docs/port/item-icons-3d.md` has the details.
 - `port/src/tests/moonmod_*_test.cpp`: the tests. `darkcloud_tests --gtest_filter='MoonMod*'` runs them.
 
 Upstream's native autosave (on each town and dungeon floor) is kept; it writes nothing during a sandbox session.

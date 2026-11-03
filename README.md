@@ -50,6 +50,7 @@ image; nothing from either game is included here.
   | `moonmod.roguelike` Dark Genie's Gauntlet | A roguelike game mode on the title menu, with its own title screen and progress and no save file: five biomes of three floors and a Warden, Cursed Gates, fast ABS, Shatter, an in-run Diorama, drafted allies and the Norune Eternal unlocks ([guide](mods/moonmod.roguelike/README.md)) |
   | `moonmod.controls` Controls | Dungeon quick-item hotkeys, party shortcuts and a first-person toggle |
   | `moonmod.autosave` Autosave | Controls Chronicle's guarded town autosave slot |
+  | `moonmod.model-icons` Model Icons | Draws the menus' item and weapon icons from each item's own 3D model, with adjustable lighting |
   | `moonmod.expanded-town` Expanded Town Camera | Toggles the legacy overhead camera while walking in towns |
   | `moonmod.hub` MoonMod Hub | Quick links to the other mods' pages in the manager |
 

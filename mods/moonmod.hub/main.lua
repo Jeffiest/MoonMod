@@ -5,6 +5,7 @@ local destinations = {
   {id="dungeon_journal", label="Dungeon+: Trophy Journal", mod_id="moonmod.dungeon-plus", tab="journal"},
   {id="controls_settings", label="Controls: Shortcuts", mod_id="moonmod.controls", tab="settings"},
   {id="autosave_settings", label="Autosave: Settings", mod_id="moonmod.autosave", tab="settings"},
+  {id="model_icons_settings", label="Model Icons: Lighting", mod_id="moonmod.model-icons", tab="settings"},
   {id="town_camera_settings", label="Expanded Town: Settings", mod_id="moonmod.expanded-town", tab="settings"},
   {id="town_camera_actions", label="Expanded Town: Actions", mod_id="moonmod.expanded-town", tab="actions"},
   {id="gauntlet_actions", label="Gauntlet: Run Actions", mod_id="moonmod.roguelike", tab="actions"},
