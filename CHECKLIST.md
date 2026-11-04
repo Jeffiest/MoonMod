@@ -28,7 +28,9 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
       seed; a daily seed from the date and a share code. Built: `mods/moonmod.randomizer` (shops, weapon stats,
       monster drops, chest items, floor layouts), 26 headless checks. The engine's `info.get` now reports the date.
       Not shuffled: chest weapons and Atla, which have no API yet. Needs a playtest.
-- [ ] **6. The Shaft reborn.** An endless descent title mode: modifiers every ten floors, floor scaling, records.
+- [x] **6. The Shaft reborn.** An endless descent title mode: modifiers every ten floors, floor scaling, records.
+      Built: the Shaft on the Challenges row (`mods/moonmod.challenges`), guardians and pacts every ten floors.
+      66 headless checks for the mod; needs a playtest.
 - [ ] **7. Seda's Chronicle.** A prologue title mode, Seda four hundred years before the game.
 - [ ] **8. The eighth hero: Seda.** Seda as a playable character in the Gauntlet and the story, on Opar's pipeline.
 - [ ] **9. Living towns.** Villager bounties on dungeon floors, shop stock that follows the story.

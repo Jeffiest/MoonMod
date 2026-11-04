@@ -11,8 +11,18 @@
 -- forms of the Dark Genie. The party grows to each boss's place in the story (max HP and a damage multiplier), and
 -- between bosses a panel offers a boon. The clock runs from the first step to the last blow; the best time is kept.
 --
+-- The Shaft (title menu > Challenges): an endless descent. One registered floor in each of three dungeons leads back
+-- to itself, built anew each time, so the floors never run out. Monsters grow with depth, and so does the party.
+-- Every tenth floor is a guardian's: its room is sealed until the rest of the floor is clear, and inside waits the
+-- floor's toughest monster grown huge. Felling it heals the party and offers a pact (a harder rule with a reward);
+-- then the descent moves on to the next dungeon. Start opens a menu to end the descent; the deepest floor is kept.
+--
 -- The title menu has room for two mod rows (each pushes the copyright banner down), and the Gauntlet holds one, so
 -- every challenge mode lives on this one row's pages.
+--
+-- Floor slots: a dungeon holds 25 floors and the Gauntlet takes seven in each of the five, which fills the Shipwreck
+-- (18 of its own) and the Sun and Moon Temple (18). The arena goes in the Divine Beast Cave or the Moon Sea and the
+-- Shaft in the Cave, Wise Owl Forest and the Moon Sea, so both fit beside the Gauntlet.
 
 local ID = "moonmod.challenges"
 local MODE = "challenges"
@@ -63,6 +73,8 @@ local tracked = {}     -- by entity handle: {model, phase, base, defense, carded
 local floor_token = nil
 local bar_shown = false
 local rush = nil       -- the Boss Rush run, while one is going (below)
+local shaft = nil      -- the Shaft's descent, while one is going (below)
+local shaft_generating -- the Shaft's floor setup (below)
 
 local function phase_mult(phase)
   local enraged = setting("phase_damage", 140) / 100
@@ -149,8 +161,7 @@ local function adopt(r)
   if f and f.id then arena = f.id; return true end
   return false
 end
-for dungeon = 0, 4 do
-  -- Each dungeon holds 25 floors at most and other mods add their own, so the arena goes where there is room.
+for _, dungeon in ipairs({0, 4}) do
   local r = try(game.dungeons.register, {id = "boss-rush", name = "Boss Rush", dungeon = dungeon,
       floors = {{id = "arena", name = "Boss Rush Arena", source_floor = 1, enemies = {}}}})
   if adopt(r) then break end
@@ -305,6 +316,10 @@ local function rush_tick()
 end
 
 moonmod.on("game.dungeon.warden_room", function(e)
+  if shaft and shaft.live and e and e.state == "entered" and type(e.center) == "table" and shaft.guardian_floor and not shaft.room then
+    shaft.room = {x = tonumber(e.center.x) or 0, y = tonumber(e.center.y) or 0, z = tonumber(e.center.z) or 0}
+    return
+  end
   if not (rush and rush.live) or rush.center or not e then return end
   if e.state == "entered" and type(e.center) == "table" then
     rush.center = {x = tonumber(e.center.x) or 0, y = tonumber(e.center.y) or 0, z = tonumber(e.center.z) or 0}
@@ -312,10 +327,13 @@ moonmod.on("game.dungeon.warden_room", function(e)
   end
 end)
 
-moonmod.on("game.dungeon.generating", function()
-  if not rush then return end
-  try(game.dungeons.set_modifiers, {chests = -100})
-  try(game.dungeons.set_warden_room, {enabled = true, lock_in = true})
+moonmod.on("game.dungeon.generating", function(e)
+  if rush then
+    try(game.dungeons.set_modifiers, {chests = -100})
+    try(game.dungeons.set_warden_room, {enabled = true, lock_in = true})
+  elseif shaft and e then
+    shaft_generating(e)
+  end
 end)
 
 local function rush_cleanup()
@@ -326,21 +344,237 @@ local function rush_cleanup()
   remove_bar()
 end
 
+local page, message = "root", nil
+local show -- the title pages, below
+
+-- The Shaft ----------------------------------------------------------------------------------------------------------
+local SHAFT_DUNGEONS = {0, 1, 4}
+local SHAFT_NAMES = {[0] = "Divine Beast Cave", [1] = "Wise Owl Forest", [4] = "Moon Sea"}
+local shaft_floors = {}  -- in descent order: {dungeon, id, native}
+for _, dungeon in ipairs(SHAFT_DUNGEONS) do
+  local local_id = "shaft-" .. dungeon
+  local r = try(game.dungeons.register, {id = local_id, name = "The Shaft", dungeon = dungeon,
+      floors = {{id = "depth", name = "The Shaft", source_floor = dungeon == 0 and 5 or 6}}})
+  r = r or try(game.dungeons.get, local_id)
+  local f = r and r.floors and r.floors[1]
+  if f and f.id then
+    local native = tonumber(f.native_floor_id)
+    shaft_floors[#shaft_floors + 1] = {dungeon = dungeon, id = f.id, native = native}
+    -- its exit gate leads back to itself, built anew: the floors never run out
+    if native then try(game.dungeons.floor_redirect, {dungeon_id = dungeon, floor_id = native, to_floor_id = native}) end
+  end
+end
+if #shaft_floors == 0 then moonmod.log("warn", "The Shaft: no dungeon had room for its floor") end
+
+-- Pacts: one is offered three at a time after each guardian. Each makes the descent harder and pays for it.
+local PACTS = {
+  {id = "swarm", title = "Swarm", lines = {{text = "+40% monsters", tone = "bad"}, {text = "+50% Gilda from kills", tone = "good"}}},
+  {id = "glass", title = "Glass", lines = {{text = "Monsters hit 30% harder", tone = "bad"}, {text = "You hit 25% harder", tone = "good"}}},
+  {id = "iron", title = "Iron", lines = {{text = "Monsters +40% life", tone = "bad"}, {text = "Weapons wear half as fast", tone = "good"}}},
+  {id = "drought", title = "Drought", lines = {{text = "Thirst twice as fast", tone = "bad"}, {text = "+50% chests", tone = "good"}}},
+  {id = "dark", title = "Darkness", lines = {{text = "No map", tone = "bad"}, {text = "+60% weapon ABS from kills", tone = "good"}}},
+  {id = "hunger", title = "Hunger", lines = {{text = "No healing between strata", tone = "bad"}, {text = "+1 Fruit of Eden now", tone = "good"}}},
+}
+local PACT = {}
+for _, pact in ipairs(PACTS) do PACT[pact.id] = pact end
+
+-- shaft: {depth, stratum, pacts, scaled, toughest, room, guardian, ...}
+
+local function pact_count(id)
+  local n = 0
+  for _, p in ipairs(shaft and shaft.pacts or {}) do if p == id then n = n + 1 end end
+  return n
+end
+
+local function shaft_floor() return shaft_floors[((shaft.stratum - 1) % #shaft_floors) + 1] end
+
+local function shaft_tuning()
+  try(game.player.tuning_set, {thirst_drain = clamp(2 ^ pact_count("drought"), 0.25, 4),
+                               durability_wear = clamp(0.5 ^ pact_count("iron"), 0.25, 4),
+                               map_hidden = pact_count("dark") > 0})
+  -- the party grows with depth: a little less than the monsters do
+  local power = (1 + 0.1 * math.max(0, shaft.depth - 1)) * (1.25 ^ pact_count("glass"))
+  try(game.combat.register_formula, {id = "shaft_power", operation = "multiply", priority = 60, value = clamp(power, 0, 100)})
+  local hp = math.min(999, 100 + 6 * math.max(0, shaft.depth - 1))
+  for _, c in ipairs(members()) do try(game.player.set, {max_hp = hp, character = c}) end
+end
+
+local function shaft_heal()
+  for _, c in ipairs(members()) do try(game.player.heal, {amount = 999, character = c}) end
+end
+
+local function shaft_menu()
+  local lines = {string.format("Floor %d, stratum %d: %s", shaft.depth, shaft.stratum, SHAFT_NAMES[shaft_floor().dungeon] or "?")}
+  local names = {}
+  for _, p in ipairs(shaft.pacts) do names[#names + 1] = PACT[p].title end
+  lines[#lines + 1] = "Pacts: " .. (#names > 0 and table.concat(names, ", ") or "none yet")
+  lines[#lines + 1] = string.format("Deepest: floor %d", math.max(records.shaft_deepest or 0, shaft.depth))
+  try(game.ui.run_menu_set, {title = "THE SHAFT", tabs = {{id = "descent", title = "Descent", lines = lines,
+      rows = {{id = "end", label = "End the descent", detail = "Back to the title. The floor you reached is kept."}}}}})
+end
+
+local function shaft_records()
+  records.shaft_deepest = math.max(records.shaft_deepest or 0, shaft.depth)
+  save_records()
+end
+
+-- Every monster grows with depth (and the pacts) the first time it is seen.
+local function shaft_scale()
+  local q = try(game.entities.query, {type = "monster"})
+  local d = shaft.depth - 1
+  local life = (1 + 0.15 * d) * (1.4 ^ pact_count("iron"))
+  local hits = (1 + 0.06 * d) * (1.3 ^ pact_count("glass"))
+  local gilda = 1.5 ^ pact_count("swarm")
+  for _, e in ipairs(q and q.entities or {}) do
+    local handle = e.entity_id or e.id
+    local key = tostring(handle)
+    local max = e.health and tonumber(e.health.maximum) or 0
+    if handle and e.revealed ~= false and max > 0 and not shaft.scaled[key] and key ~= tostring(shaft.guardian) then
+      shaft.scaled[key] = true
+      local model = tonumber(e.native_model_id)
+      if model and not BOSS[model] and (not shaft.toughest or max > shaft.toughest.hp) then shaft.toughest = {model = model, hp = max} end
+      local hp = math.floor(clamp(max * life, 1, 1000000))
+      local combat = e.combat or {}
+      try(game.entities.set_stats, {entity = handle, max_hp = hp, hp = hp, damage_scale = clamp(hits, 0, 100),
+          defense = math.floor(clamp((tonumber(combat.defense) or 0) + d, 0, 32767)),
+          reward_money = math.floor(clamp((tonumber(combat.reward_money) or 0) * gilda, 0, 2147483647))})
+    end
+  end
+end
+
+local function spawn_guardian()
+  local t = shaft.toughest
+  if not t then shaft.guardian_done = true; return true end -- nothing to grow one from: the floor is its own reward
+  local s = try(game.characters.spawn, {character = variant(t.model, "Guardian"), position = shaft.room})
+  local handle = s and (s.entity_handle or s.id)
+  if not handle then return false end
+  local hp = math.floor(clamp(t.hp * 6 * (1 + 0.15 * (shaft.depth - 1)), 1, 1000000))
+  try(game.entities.set_stats, {entity = handle, max_hp = hp, hp = hp,
+      damage_scale = clamp(1.3 * (1 + 0.06 * (shaft.depth - 1)) * (1.3 ^ pact_count("glass")), 0, 100)})
+  try(game.entities.scale_set, {entity = handle, scale = 1.8})
+  shaft.guardian, shaft.guardian_alive = handle, false
+  try(game.ui.boss_card, {kicker = string.format("THE SHAFT  FLOOR %d", shaft.depth), name = "Guardian of the Stratum",
+                          epithet = SHAFT_NAMES[shaft_floor().dungeon], frames = 150})
+  return true
+end
+
+local function offer_pacts()
+  local pool = {}
+  for _, p in ipairs(PACTS) do pool[#pool + 1] = p end
+  local options, ids = {}, {}
+  for i = 1, 3 do
+    local j = math.random(#pool)
+    local p = table.remove(pool, j)
+    options[i] = {title = p.title, lines = p.lines}
+    ids[i] = p.id
+  end
+  shaft.offer = ids
+  try(game.ui.choice_open, {id = "shaft_pact", title = "A PACT FOR THE DEPTHS",
+      subtitle = string.format("Stratum %d is behind you. Choose one to go on.", shaft.stratum), options = options})
+end
+
+local function guardian_fallen()
+  shaft.guardian = nil
+  shaft.guardian_done = true
+  notify("The guardian falls. The way down opens.")
+  offer_pacts()
+end
+
+local function shaft_tick()
+  if not shaft.live then return end
+  if shaft.next_at and frame >= shaft.next_at then
+    local f = shaft_floor()
+    if try(game.world.transition, {id = f.id}) then shaft.next_at = nil else shaft.next_at = frame + 90 end
+  end
+  if shaft.finish_at and frame >= shaft.finish_at then
+    shaft.finish_at = nil
+    try(game.session.finish)
+  end
+  if frame % 20 == 0 then shaft_scale() end
+  if shaft.room and not shaft.guardian and not shaft.guardian_done and shaft.guardian_floor then spawn_guardian() end
+  if shaft.guardian then
+    local e = try(game.entities.get, shaft.guardian)
+    if e and e.status == "alive" then shaft.guardian_alive = true
+    elseif shaft.guardian_alive or (e and e.status == "dead") then guardian_fallen() end
+  end
+end
+
+shaft_generating = function(e)
+  if e.back_floor or e.prebuild then return end
+  shaft.depth = shaft.depth + 1
+  shaft.scaled, shaft.toughest, shaft.room, shaft.guardian, shaft.guardian_done = {}, nil, nil, nil, false
+  shaft.guardian_floor = shaft.depth % 10 == 0
+  local swarm = pact_count("swarm")
+  try(game.dungeons.set_modifiers, {monsters = math.min(200, 5 * (shaft.stratum - 1) + 40 * swarm),
+                                     chests = math.min(200, 50 * pact_count("drought"))})
+  try(game.dungeons.set_warden_room, {enabled = shaft.guardian_floor, lock_in = true})
+  shaft_tuning()
+  shaft_records()
+  shaft_menu()
+end
+
+moonmod.on("ui.choice_made", function(e)
+  if not (shaft and shaft.offer and e and e.id == "shaft_pact") then return end
+  local id = shaft.offer[tonumber(e.index) or 1] or shaft.offer[1]
+  shaft.offer = nil
+  shaft.pacts[#shaft.pacts + 1] = id
+  if id == "hunger" then try(game.items.give, {id = "chronicle:item:180", count = 1}) end
+  if pact_count("hunger") == 0 then shaft_heal() end
+  shaft.stratum = shaft.stratum + 1
+  notify(string.format("Pact of %s. Down to stratum %d.", PACT[id].title, shaft.stratum))
+  shaft.next_at = frame + 60
+end)
+
+moonmod.on("ui.run_menu_action", function(e)
+  if not (shaft and shaft.live and e and e.row == "end") then return end
+  try(game.ui.run_menu_close)
+  shaft.finish_at = frame + 10
+end)
+
+local function start_shaft()
+  if #shaft_floors == 0 then message = "The Shaft has no floors this session."; show("root"); return end
+  shaft = {depth = 0, stratum = 1, pacts = {}, scaled = {}, live = false}
+  local everyone = setting("shaft_party", "Everyone") == "Everyone"
+  local ok, err = try(game.session.start, {floor = shaft_floors[1].id, party_size = everyone and 6 or 1, character = "toan"})
+  if not ok then
+    shaft = nil
+    message = ("The Shaft could not start: " .. errmsg(err)):sub(1, 64)
+    show("root")
+    return
+  end
+  records.shaft_runs = (records.shaft_runs or 0) + 1
+  save_records()
+end
+
+local function shaft_cleanup()
+  try(game.dungeons.set_warden_room, {enabled = false})
+  try(game.dungeons.set_modifiers, {})
+  try(game.dungeons.set_exits, {})
+  try(game.player.tuning_clear)
+  try(game.combat.register_formula, {id = "shaft_power", operation = "multiply", priority = 60, value = 1})
+  try(game.ui.run_menu_clear)
+end
+
 -- Title pages --------------------------------------------------------------------------------------------------------
-local page = "root"
 local function best_line()
   if records.best then return string.format("Best time %s, %d clear%s", clock(records.best), records.clears, records.clears == 1 and "" or "s") end
   if (records.furthest or 0) > 0 then return string.format("Furthest: %d of %d bosses", records.furthest, #RUSH_ORDER) end
   return "Not yet cleared"
 end
 
-local message = nil
-local function show(name)
+show = function(name)
   page = name
   if name == "root" then
     try(game.title.mode_set, {id = MODE, title = "CHALLENGES", subtitle = "Tests for a seasoned adventurer",
         lines = {message or "Choose a challenge."}, root = true,
-        entries = {{id = "boss_rush", label = "Boss Rush", enabled = arena ~= nil}}})
+        entries = {{id = "boss_rush", label = "Boss Rush", enabled = arena ~= nil},
+                   {id = "shaft", label = "The Shaft", enabled = #shaft_floors > 0}}})
+  elseif name == "shaft" then
+    try(game.title.mode_set, {id = MODE, title = "THE SHAFT", subtitle = "How deep can you go?", root = false,
+        lines = {"An endless descent. Monsters grow with every floor.", "Every tenth floor, a guardian; then a pact,",
+                 "a harder rule that pays, and a new stratum.", string.format("Deepest: floor %d", records.shaft_deepest or 0),
+                 "Party: " .. setting("shaft_party", "Everyone") .. " (Mod Manager settings)"},
+        entries = {{id = "shaft_start", label = "Descend"}}})
   elseif name == "boss_rush" then
     try(game.title.mode_set, {id = MODE, title = "BOSS RUSH", subtitle = "Every story boss, one after another", root = false,
         lines = {"Seven fights in one sealed arena, in the story's order.", "The party grows to each boss's place in the story.",
@@ -380,7 +614,9 @@ moonmod.on("game.title.selected", function(e)
     return
   end
   if entry == "boss_rush" then show("boss_rush")
-  elseif entry == "rush_start" then start_rush() end
+  elseif entry == "rush_start" then start_rush()
+  elseif entry == "shaft" then show("shaft")
+  elseif entry == "shaft_start" then start_shaft() end
 end)
 
 -- Sessions -----------------------------------------------------------------------------------------------------------
@@ -392,6 +628,15 @@ moonmod.on("game.session.started", function(e)
     rush.live = true
     apply_tier()
     heal_party(1)
+  elseif session_owner == ID and shaft then
+    shaft.live = true
+    -- the gate always leads down and the Escape menu is refused: the run menu ends a descent
+    try(game.dungeons.set_exits, {town = "shrines"})
+    shaft_tuning()
+    shaft_heal()
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 3})
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.water, count = 2})
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 2})
   end
 end)
 
@@ -402,6 +647,11 @@ moonmod.on("game.session.ended", function(e)
     if not rush.won then finish_records(false) end
     rush = nil
     rush_cleanup()
+  end
+  if mine and shaft then
+    shaft_records()
+    shaft = nil
+    shaft_cleanup()
   end
   tracked, floor_token = {}, nil
   remove_bar()
@@ -416,6 +666,7 @@ end
 moonmod.on("game.tick", function()
   frame = frame + 1
   if rush then rush_tick() end
+  if shaft then shaft_tick() end
   if other_session() then return end
   local world = try(game.world.get)
   if not (world and world.context == "dungeon") then

@@ -65,15 +65,31 @@ local function boot(overrides, opts)
         assert(#a.floors >= 1 and #a.floors <= 8)
         if S.dungeon_full[a.dungeon] then return fail("failed", "the dungeon has 25 floors") end
         assert(a.floors[1].source_floor and a.floors[1].id)
-        S.registered_floor = {dungeon = a.dungeon, id = ID .. ":boss-rush/arena"}
-        return {id = ID .. ":boss-rush", floors = {{id = S.registered_floor.id}}}
+        assert(a.dungeon == 0 or a.dungeon == 1 or a.dungeon == 4, "Challenges keeps out of the Shipwreck and the Temple")
+        if a.id == "boss-rush" then
+          S.registered_floor = {dungeon = a.dungeon, id = ID .. ":boss-rush/arena"}
+          return {id = ID .. ":boss-rush", floors = {{id = S.registered_floor.id}}}
+        end
+        S.shaft_floors = S.shaft_floors or {}
+        local f = {dungeon = a.dungeon, id = ID .. ":" .. a.id .. "/depth", native_floor_id = 20 + a.dungeon}
+        table.insert(S.shaft_floors, f)
+        return {id = ID .. ":" .. a.id, floors = {f}}
       end,
+      floor_redirect = function(a)
+        for k in pairs(a) do assert(k == "dungeon_id" or k == "floor_id" or k == "to_floor_id") end
+        S.redirects = S.redirects or {}; S.redirects[a.dungeon_id .. ":" .. a.floor_id] = a.to_floor_id; return {}
+      end,
+      set_exits = function(a) S.exits = a.town; return {} end,
       get = function() return fail("not_found", "no") end,
       set_layout = function(a)
         if next(a) ~= nil then assert(a.rooms >= 2 and a.rooms <= 64 and a.area > a.room_max and a.room_min >= 3) end
         S.layout = a; return a
       end,
-      set_modifiers = function(a) only(a, set({"rooms", "monsters", "chests", "chest_value"}), "set_modifiers"); S.modifiers = a; return a end,
+      set_modifiers = function(a)
+        only(a, set({"rooms", "monsters", "chests", "chest_value"}), "set_modifiers")
+        for _, v in pairs(a) do assert(v >= -100 and v <= 300) end
+        S.modifiers = a; return a
+      end,
       set_warden_room = function(a) only(a, set({"enabled", "lock_in"}), "set_warden_room"); S.warden_room = a.enabled; return a end,
     },
     characters = {
@@ -86,9 +102,10 @@ local function boot(overrides, opts)
         only(a, set({"character", "position", "arena_origin", "grounded", "arena_slot"}), "characters.spawn")
         if S.spawn_refuse then S.spawn_refuse = S.spawn_refuse - 1; if S.spawn_refuse >= 0 then return fail("failed", "not ready") end end
         local model = tonumber(a.character:match("rush%-(%d+)$"))
-        assert(a.arena_origin and a.arena_slot and a.arena_slot >= 0 and a.arena_slot <= 15, "arena spawn")
+        assert((a.arena_origin == nil) == (a.arena_slot == nil), "arena_slot goes with arena_origin")
+        assert(a.arena_slot == nil or (a.arena_slot >= 0 and a.arena_slot <= 15), "arena spawn")
         local h = "e" .. S.next_handle; S.next_handle = S.next_handle + 1
-        local m = {handle = h, model = model, hp = 1000, max = 1000, defense = 20, slot = a.arena_slot}
+        local m = {handle = h, model = model, hp = 1000, max = 1000, defense = 20, slot = a.arena_slot or -1}
         table.insert(S.monsters, m); table.insert(S.spawns, m)
         return {entity_handle = h, stats = {hp = 1000, defense = 20}}
       end,
@@ -97,7 +114,7 @@ local function boot(overrides, opts)
       query = function(a) assert(a.type == "monster"); if S.context ~= "dungeon" then return fail("failed", "no dungeon") end return {entities = entity_list()} end,
       get = function(h) local m = find(h); if not m then return {status = "expired"} end return {status = m.hp > 0 and "alive" or "dead"} end,
       set_stats = function(a)
-        only(a, set({"entity", "hp", "max_hp", "defense", "damage_scale", "hit_share"}), "set_stats")
+        only(a, set({"entity", "hp", "max_hp", "defense", "damage_scale", "hit_share", "reward_money"}), "set_stats")
         local m = find(a.entity); if not m then return fail("expired", "gone") end
         if a.damage_scale then assert(a.damage_scale >= 0 and a.damage_scale <= 100); m.damage = a.damage_scale end
         if a.max_hp then assert(a.max_hp >= 1 and a.max_hp <= 1000000); m.max = a.max_hp end
@@ -117,6 +134,13 @@ local function boot(overrides, opts)
         assert(a.frames >= 30 and a.frames <= 600 and #a.name <= 40 and (not a.kicker or #a.kicker <= 48))
         table.insert(S.cards, a); return true
       end,
+      run_menu_set = function(a)
+        assert(a.title and #a.tabs >= 1 and #a.tabs <= 6)
+        for _, t in ipairs(a.tabs) do assert(t.rows == nil or #t.rows > 0, "an empty rows table reaches the engine as an object") end
+        S.run_menu = a; return {}
+      end,
+      run_menu_close = function() return {} end,
+      run_menu_clear = function() S.run_menu = nil; return {} end,
       choice_open = function(a)
         assert(#a.options >= 1 and #a.options <= 4)
         S.choice = a; return true
@@ -155,6 +179,14 @@ local function boot(overrides, opts)
       end,
       heal = function(a) assert(a.amount >= 1 and a.amount <= 32767); S.healed[a.character] = (S.healed[a.character] or 0) + a.amount; return {} end,
       get = function() return {character = "toan", weapon = {id = "w", slot = 0, durability = 3, durability_max = 30}} end,
+      tuning_set = function(t)
+        for k, v in pairs(t) do
+          assert(k == "thirst_drain" or k == "durability_wear" or k == "map_hidden", "tuning field " .. k)
+          if type(v) == "number" then assert(v >= 0.25 and v <= 4, k) end
+        end
+        S.tuning = t; return {}
+      end,
+      tuning_clear = function() S.tuning = nil; return {} end,
     },
     weapons = {durability_set = function(a) S.mended = a.durability; return {} end},
     items = {give = function(a) S.given[a.id] = (S.given[a.id] or 0) + a.count; return {} end},
@@ -162,7 +194,8 @@ local function boot(overrides, opts)
       only(a, set({"id", "operation", "value", "priority"}), "register_formula")
       assert(a.value >= 0 and a.value <= 100); S.formula[a.id] = a.value; return {}
     end},
-    world = {get = function() return {context = S.context, dungeon_id = 0, floor_id = S.floor or 20, floor_seed = 1} end},
+    world = {transition = function(a) S.transitions = S.transitions or {}; table.insert(S.transitions, a.id); return {queued = true} end,
+             get = function() return {context = S.context, dungeon_id = 0, floor_id = S.floor or 20, floor_seed = 1} end},
   }
   assert(loadfile(MOD_DIR .. "/main.lua"))()
   function S.emit(name, ...) for _, fn in ipairs(S.handlers[name] or {}) do fn(...) end end
@@ -203,7 +236,7 @@ print("Boss Rush: the arena and the title page")
 S = boot()
 check(S.registered_floor and S.registered_floor.dungeon == 0, "the arena floor is registered in the Divine Beast Cave")
 S = boot(nil, {dungeon_full = {[0] = true, [1] = true}})
-check(S.registered_floor and S.registered_floor.dungeon == 2, "a full dungeon passes it on to the next")
+check(S.registered_floor and S.registered_floor.dungeon == 4, "a full Divine Beast Cave passes it on to the Moon Sea")
 check(S.title and S.title.label == "Challenges" and S.title.entries[1].id == "boss_rush" and S.title.entries[1].enabled, "the Challenges row with Boss Rush")
 S.emit("game.title.opened")
 S.emit("game.title.selected", {entry = "boss_rush"})
@@ -285,6 +318,60 @@ S.emit("game.title.opened"); S.emit("game.title.selected", {entry = "boss_rush"}
 local found = false
 for _, l in ipairs(S.title.lines) do if l:find("Best time") then found = true end end
 check(found, "the page shows the best time")
+
+
+print("The Shaft")
+S = boot()
+check(#S.shaft_floors == 3 and S.shaft_floors[1].dungeon == 0 and S.shaft_floors[2].dungeon == 1 and S.shaft_floors[3].dungeon == 4,
+      "one floor each in the Cave, the Forest and the Moon Sea")
+check(S.redirects["0:20"] == 20 and S.redirects["1:21"] == 21, "each floor's gate leads back to itself")
+S.emit("game.title.opened")
+check(S.title.entries[2].id == "shaft" and S.title.entries[2].enabled, "the Challenges page lists the Shaft")
+S.emit("game.title.selected", {entry = "shaft"})
+check(S.title.title == "THE SHAFT" and S.title.entries[1].id == "shaft_start", "its page")
+S.emit("game.title.selected", {entry = "shaft_start"})
+check(S.started.floor == S.shaft_floors[1].id and S.started.party_size == 6, "Descend starts on the Cave's floor")
+S.session = ID; S.emit("game.session.started", {owner = ID}); S.context = "dungeon"
+check(S.exits == "shrines" and S.tuning and S.formula.shaft_power == 1, "the gate only leads down; no escape to town")
+local function floor_n(dungeon)
+  S.floor = (S.floor or 0) + 1
+  S.emit("game.dungeon.generating", {dungeon_id = dungeon or 0, floor_id = 20})
+end
+floor_n()
+check(S.run_menu and S.run_menu.tabs[1].lines[1]:find("Floor 1, stratum 1"), "the run menu shows the floor")
+S.monsters = {{handle = "a", model = 3, hp = 100, max = 100, defense = 10}, {handle = "b", model = 1, hp = 200, max = 200, defense = 10}}
+S.tick(20)
+check(S.monsters[1].max == 100 and S.monsters[1].damage == 1, "floor 1: monsters as they are")
+for _ = 2, 9 do floor_n() end
+S.monsters = {{handle = "c", model = 3, hp = 100, max = 100, defense = 10}, {handle = "d", model = 1, hp = 200, max = 200, defense = 10}}
+S.tick(20)
+check(S.monsters[1].max == 220 and math.abs(S.monsters[1].damage - 1.48) < 1e-9 and S.monsters[1].defense == 18, "floor 9: more life, harder hits, more defense", S.monsters[1].max)
+check(S.formula.shaft_power and math.abs(S.formula.shaft_power - 1.8) < 1e-9 and S.max_hp.toan == 148, "and the party grows too")
+check(S.storage.records.shaft_deepest == 9, "the deepest floor is kept as you go")
+floor_n()
+check(S.warden_room == true, "floor 10 is a guardian's: its room is sealed")
+S.monsters = {{handle = "e", model = 3, hp = 100, max = 100, defense = 10}, {handle = "f", model = 1, hp = 200, max = 200, defense = 10}}
+S.tick(20)
+S.emit("game.dungeon.warden_room", {state = "entered", center = {x = 1, y = 0, z = 2}})
+S.tick(1)
+local guardian = S.spawns[#S.spawns]
+check(guardian and guardian.model == 1 and guardian.scale == 1.8 and math.abs(guardian.max - 2820) <= 1, "the floor's toughest monster waits inside, grown huge", guardian and guardian.max)
+check(S.cards[#S.cards].name == "Guardian of the Stratum", "with a card")
+guardian.hp = 0; S.tick(1)
+check(S.choice and S.choice.id == "shaft_pact" and #S.choice.options == 3, "felled: three pacts to choose from")
+local chosen = S.choice.options[1].title
+S.emit("ui.choice_made", {id = "shaft_pact", index = 1})
+S.tick(61)
+check(S.transitions and S.transitions[1] == S.shaft_floors[2].id, "then down to the Forest's stratum")
+floor_n(1)
+check(S.run_menu.tabs[1].lines[1]:find("Floor 11, stratum 2: Wise Owl Forest") and S.run_menu.tabs[1].lines[2]:find(chosen), "the menu shows the stratum and the pact", S.run_menu.tabs[1].lines[2])
+check(S.warden_room == false, "an ordinary floor again")
+S.emit("ui.run_menu_action", {tab = "descent", row = "end"})
+S.tick(11)
+check(S.finished == 1, "End the descent finishes the session")
+S.session = nil; S.emit("game.session.ended", {owner = ID, reason = "ended"})
+check(S.storage.records.shaft_deepest == 11 and S.tuning == nil and S.exits == nil and S.run_menu == nil and S.formula.shaft_power == 1,
+      "the record is kept and everything is put back")
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)
