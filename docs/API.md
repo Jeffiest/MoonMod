@@ -12,6 +12,7 @@ The first runtime slice implements the marked surfaces:
 | `moonmod.on(event, callback)` | Event subscription with an isolated Lua callback budget | Implemented: `runtime.loaded`, `runtime.unloaded`, `game.tick` |
 | `game.events.list/subscribe/unsubscribe` | Discover verified event names per game and subscribe with owner-scoped tokens | Implemented in the shared runtime; the list includes short descriptions and omits game-specific events from the other port |
 | `moonmod.game` | Game id, framework API version, and capability queries | Implemented: id and API major |
+| `game.info.get()` | Game id and name, API major, the calling mod's id, and today's `date` `{year, month, day}` | Implemented; the date is the UTC calendar day, the same for every player, for daily seeds (Chronicle; the Lua sandbox has no `os`) |
 | `moonmod.settings.get(id)` | Read a mod's declared, typed settings | Implemented |
 | `moonmod.storage.get/set/delete(key, value)` | Per-mod key/value persistence | Implemented with `storage.read` / `storage.write` permissions |
 | `game.save.get/set(key, value)` | JSON-compatible per-mod save data | Implemented with `game.read` / `game.write` permissions and atomic persistence |
