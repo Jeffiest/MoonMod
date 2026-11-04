@@ -47,6 +47,7 @@ local function boot(overrides, opts)
     on = function(name, fn) S.handlers[name] = S.handlers[name] or {}; table.insert(S.handlers[name], fn) end,
     log = function() end,
   }
+  S.registered_playable = nil
   local function entity_list()
     local list = {}
     for _, m in ipairs(S.monsters) do
@@ -93,6 +94,10 @@ local function boot(overrides, opts)
       set_warden_room = function(a) only(a, set({"enabled", "lock_in"}), "set_warden_room"); S.warden_room = a.enabled; return a end,
     },
     characters = {
+      register_playable = function(a)
+        assert(a.id == "seda" and a.pack and #a.name <= 10 and a.fights_as == "toan")
+        S.registered_playable = a; return {id = a.id, character_id = 7, count = 2}
+      end,
       register = function(a)
         only(a, set({"id", "kind", "name", "template_monster_id"}), "characters.register")
         assert(a.kind == "enemy" and #a.name <= 30)
@@ -170,7 +175,13 @@ local function boot(overrides, opts)
       get = function() return S.session and {kind = "sandbox", owner = S.session} or {kind = "story"} end,
       finish = function() S.finished = S.finished + 1; return {} end,
     },
-    party = {list = function() local l = {} for i, c in ipairs(S.party) do l[i] = {id = c} end return l end},
+    party = {list = function() local l = {} for i, c in ipairs(S.party) do l[i] = {id = c} end return l end,
+             set_active = function(a) S.active_hero = a.id; return {} end},
+    resources = {override = function(a)
+      assert(a.path and a.game_path)
+      if not S.seda_pack then return fail("not_found", "no such package file") end
+      return {game_path = a.game_path}
+    end},
     player = {
       set = function(a)
         local n = 0 for k in pairs(a) do if k ~= "character" then n = n + 1 end end
@@ -194,7 +205,8 @@ local function boot(overrides, opts)
       only(a, set({"id", "operation", "value", "priority"}), "register_formula")
       assert(a.value >= 0 and a.value <= 100); S.formula[a.id] = a.value; return {}
     end},
-    world = {transition = function(a) S.transitions = S.transitions or {}; table.insert(S.transitions, a.id); return {queued = true} end,
+    world = {dungeon_npc_set = function(a) S.npc = a.id; return {} end, dungeon_npc_clear = function() S.npc = nil; return {} end,
+             transition = function(a) S.transitions = S.transitions or {}; table.insert(S.transitions, a.id); return {queued = true} end,
              get = function() return {context = S.context, dungeon_id = 0, floor_id = S.floor or 20, floor_seed = 1} end},
   }
   assert(loadfile(MOD_DIR .. "/main.lua"))()
@@ -372,6 +384,81 @@ check(S.finished == 1, "End the descent finishes the session")
 S.session = nil; S.emit("game.session.ended", {owner = ID, reason = "ended"})
 check(S.storage.records.shaft_deepest == 11 and S.tuning == nil and S.exits == nil and S.run_menu == nil and S.formula.shaft_power == 1,
       "the record is kept and everything is put back")
+
+
+print("Seda's Chronicle")
+S = boot()
+S.emit("game.title.opened")
+check(S.title.entries[3].id == "seda" and S.title.entries[3].enabled, "the Challenges page lists Seda's Chronicle")
+S.emit("game.title.selected", {entry = "seda"})
+check(S.title.title == "SEDA'S CHRONICLE" and S.title.entries[1].id == "seda_start", "its page")
+S.emit("game.title.selected", {entry = "seda_start"})
+check(S.started.floor == S.shaft_floors[1].id and S.started.party_size == 1 and S.registered_playable == nil, "no pack: Toan alone starts in the cave")
+S.session = ID; S.emit("game.session.started", {owner = ID}); S.context = "dungeon"
+check(S.cards[#S.cards].kicker == "CHAPTER I" and S.formula.seda_power == 3 and S.max_hp.toan == 220, "Chapter I's card, and a veteran's strength")
+S.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 20})
+check(S.npc == "wanderer", "a wanderer stands by the exit gate")
+S.tick(161)
+check(S.choice and S.choice.id == "seda_story" and S.choice.options[1].title == "Begin", "the chapter's story page")
+S.emit("ui.choice_made", {id = "seda_story", index = 1})
+for _ = 1, 11 do S.emit("game.enemy_defeated", {}) end
+check(S.run_menu.tabs[1].lines[2]:find("11 of 12"), "the run menu counts the task", S.run_menu.tabs[1].lines[2])
+S.emit("game.enemy_defeated", {})
+check(S.choice.title == "CHAPTER I ENDS", "twelve felled: the chapter ends")
+S.emit("ui.choice_made", {id = "seda_story", index = 1})
+S.tick(31)
+check(S.transitions and S.transitions[#S.transitions] == S.shaft_floors[2].id, "on to the forest")
+S.emit("game.dungeon.generating", {dungeon_id = 1, floor_id = 21})
+check(S.cards[#S.cards].kicker == "CHAPTER II" and S.modifiers.chests == 60, "Chapter II opens on its floor, with more chests")
+S.tick(161); S.emit("ui.choice_made", {id = "seda_story", index = 1})
+for chest = 1, 3 do S.emit("game.chest.opened", {chest = chest, item_id = 148}) end
+check(S.choice.title == "CHAPTER II ENDS", "three relics found")
+S.emit("ui.choice_made", {id = "seda_story", index = 1}); S.tick(31)
+check(S.transitions[#S.transitions] == S.shaft_floors[3].id, "on to the Moon Sea")
+S.emit("game.dungeon.generating", {dungeon_id = 4, floor_id = 24})
+check(S.warden_room == true and S.cards[#S.cards].kicker == "CHAPTER III", "Chapter III: a sealed room")
+S.tick(161); S.emit("ui.choice_made", {id = "seda_story", index = 1})
+S.monsters = {{handle = "s1", model = 30, hp = 300, max = 300, defense = 10}, {handle = "s2", model = 31, hp = 500, max = 500, defense = 10}}
+S.tick(20)
+S.monsters = {}
+S.emit("game.dungeon.warden_room", {state = "entered", center = {x = 5, y = 0, z = 5}})
+S.tick(1)
+local gate = S.spawns[#S.spawns]
+check(gate and gate.model == 31 and gate.max == 4000 and gate.scale == 1.9, "the gate's guardian rises from the toughest monster")
+gate.hp = 0; S.tick(1)
+check(S.choice.title == "CHAPTER III ENDS", "it falls: the chapter ends")
+S.emit("ui.choice_made", {id = "seda_story", index = 1}); S.tick(31)
+check(S.transitions[#S.transitions] == ID .. ":boss-rush/arena", "on to the Genie's lair, in the arena")
+S.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 15})
+check(S.modifiers.chests == -100 and S.warden_room == true and S.cards[#S.cards].kicker == "CHAPTER IV", "Chapter IV")
+S.tick(161); S.emit("ui.choice_made", {id = "seda_story", index = 1})
+local before = #S.spawns
+S.emit("game.dungeon.warden_room", {state = "entered", center = {x = 9, y = 0, z = 9}})
+S.tick(1)
+local pink = S.boss()
+check(pink and pink.model == 84 and #S.spawns - before == 8, "the pink Genie with his seven helpers")
+pink.hp = 0; S.tick(1)
+check(S.notices[#S.notices]:find("darkness itself"), "his body bursts")
+S.tick(151)
+local dark = S.boss()
+check(dark and dark.model == 106, "and his true form rises")
+dark.hp = 0; S.tick(1)
+check(S.choice.title == "EPILOGUE", "the epilogue")
+for _ = 1, 4 do S.emit("ui.choice_made", {id = "seda_story", index = 1}) end
+check(S.cards[#S.cards].name == "The End" and S.storage.records.seda_clears == 1 and S.storage.records.seda_chapter == 4, "the end, kept in the records")
+S.tick(261)
+check(S.finished == 1, "back to the title")
+S.session = nil; S.emit("game.session.ended", {owner = ID, reason = "ended"})
+check(S.npc == nil and S.exits == nil and S.formula.seda_power == 1 and S.warden_room == false, "everything put back")
+
+print("Seda's Chronicle with Seda's pack")
+S = boot()
+S.seda_pack = true
+S.emit("game.title.selected", {entry = "seda"}); S.emit("game.title.selected", {entry = "seda_start"})
+check(S.registered_playable and S.registered_playable.pack == "dun/mainchara/c08d.chr", "Seda registers as the Chronicle starts")
+check(S.started.party_size == 8, "the party reaches his place")
+S.session = ID; S.emit("game.session.started", {owner = ID})
+check(S.active_hero == "seda", "and Seda takes the field")
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

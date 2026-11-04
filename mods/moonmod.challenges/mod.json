@@ -2,9 +2,9 @@
   "schema_version": 1,
   "id": "moonmod.challenges",
   "name": "Challenges",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Jeffiest",
-  "description": "Boss fights worth the name, and challenge modes on the title menu's Challenges row. Story bosses get a name card, an HP bar and two more phases: enraged at half health, desperate near the end. Boss Rush fights every story boss in a row in one sealed arena. The Shaft is an endless descent: monsters grow with every floor, a guardian waits every tenth, and each stratum asks for a pact.",
+  "description": "Boss fights worth the name, and challenge modes on the title menu's Challenges row. Story bosses get a name card, an HP bar and two more phases: enraged at half health, desperate near the end. Boss Rush fights every story boss in a row in one sealed arena. The Shaft is an endless descent: monsters grow with every floor, a guardian waits every tenth, and each stratum asks for a pact. Seda's Chronicle is a four-chapter prologue, four hundred years before Dark Cloud.",
   "framework_api": 1,
   "games": [
     "chronicle"

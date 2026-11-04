@@ -31,7 +31,9 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
 - [x] **6. The Shaft reborn.** An endless descent title mode: modifiers every ten floors, floor scaling, records.
       Built: the Shaft on the Challenges row (`mods/moonmod.challenges`), guardians and pacts every ten floors.
       66 headless checks for the mod; needs a playtest.
-- [ ] **7. Seda's Chronicle.** A prologue title mode, Seda four hundred years before the game.
+- [x] **7. Seda's Chronicle.** A prologue title mode, Seda four hundred years before the game. Built: four
+      chapters and an epilogue on the Challenges row, on the Shaft's floors and the arena. 93 headless checks for
+      the mod. Toan walks in Seda's place until item 8 gives Seda his pack.
 - [ ] **8. The eighth hero: Seda.** Seda as a playable character in the Gauntlet and the story, on Opar's pipeline.
 - [ ] **9. Living towns.** Villager bounties on dungeon floors, shop stock that follows the story.
 

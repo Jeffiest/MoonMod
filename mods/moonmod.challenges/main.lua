@@ -73,6 +73,9 @@ local tracked = {}     -- by entity handle: {model, phase, base, defense, carded
 local floor_token = nil
 local bar_shown = false
 local rush = nil       -- the Boss Rush run, while one is going (below)
+local seda = nil       -- Seda's Chronicle, while it is being played (below)
+local seda_generating  -- its floor setup (below)
+local seda_registered  -- Seda's engine index once registered, false if he can't be (below)
 local shaft = nil      -- the Shaft's descent, while one is going (below)
 local shaft_generating -- the Shaft's floor setup (below)
 
@@ -214,17 +217,16 @@ local function clock(frames)
   return string.format("%d:%02d", s // 60, s % 60)
 end
 
-local function spawn_stage()
-  local model = RUSH_ORDER[rush.stage]
+-- A story boss and its cast at `at`, its arena's centre, with `life` times its native life (and the Genie's
+-- footing). Returns its handle, or nil while the floor can't place it yet.
+local function spawn_boss(model, at, life)
   local def = BOSS[model]
-  local at = rush.center
-  apply_tier()
   local s = try(game.characters.spawn, {character = variant(model, def.name), position = at, arena_origin = at,
                                         grounded = def.grounded, arena_slot = 0})
   local handle = s and (s.entity_handle or s.id)
   if not handle then return false end -- the floor isn't ready to place it: asked again next tick
   local base = s.stats and tonumber(s.stats.hp) or 1000
-  local hp = math.floor(clamp(base * (def.hp or 1) * setting("rush_life", 100) / 100, 1, 1000000))
+  local hp = math.floor(clamp(base * (def.hp or 1) * life, 1, 1000000))
   -- with hit_share every hero hurts each part of a boss as much as the hero it suits best (the Ice Queen is
   -- otherwise Ruby's alone)
   try(game.entities.set_stats, {entity = handle, max_hp = hp, hp = hp, hit_share = true})
@@ -235,6 +237,15 @@ local function spawn_stage()
     local h = c and (c.entity_handle or c.id)
     if h then try(game.entities.set_stats, {entity = h, hit_share = true}) end
   end
+  return handle
+end
+
+local function spawn_stage()
+  local model = RUSH_ORDER[rush.stage]
+  local def = BOSS[model]
+  apply_tier()
+  local handle = spawn_boss(model, rush.center, setting("rush_life", 100) / 100)
+  if not handle then return false end -- the floor isn't ready to place it: asked again next tick
   rush.boss, rush.seen_alive, rush.damage = handle, false, 1
   try(game.ui.boss_card, {kicker = string.format("BOSS RUSH  %d OF %d", rush.stage, #RUSH_ORDER),
                           name = def.name, epithet = def.epithet, frames = 150})
@@ -316,6 +327,10 @@ local function rush_tick()
 end
 
 moonmod.on("game.dungeon.warden_room", function(e)
+  if seda and seda.live and e and e.state == "entered" and type(e.center) == "table" and not seda.room then
+    seda.room = {x = tonumber(e.center.x) or 0, y = tonumber(e.center.y) or 0, z = tonumber(e.center.z) or 0}
+    return
+  end
   if shaft and shaft.live and e and e.state == "entered" and type(e.center) == "table" and shaft.guardian_floor and not shaft.room then
     shaft.room = {x = tonumber(e.center.x) or 0, y = tonumber(e.center.y) or 0, z = tonumber(e.center.z) or 0}
     return
@@ -333,6 +348,8 @@ moonmod.on("game.dungeon.generating", function(e)
     try(game.dungeons.set_warden_room, {enabled = true, lock_in = true})
   elseif shaft and e then
     shaft_generating(e)
+  elseif seda and e then
+    seda_generating(e)
   end
 end)
 
@@ -526,6 +543,7 @@ moonmod.on("ui.choice_made", function(e)
 end)
 
 moonmod.on("ui.run_menu_action", function(e)
+  if seda and seda.live and e and e.row == "end" then try(game.ui.run_menu_close); seda.finish_at = frame + 10; return end
   if not (shaft and shaft.live and e and e.row == "end") then return end
   try(game.ui.run_menu_close)
   shaft.finish_at = frame + 10
@@ -555,6 +573,237 @@ local function shaft_cleanup()
   try(game.ui.run_menu_clear)
 end
 
+-- Seda's Chronicle -----------------------------------------------------------------------------------------------------
+-- A prologue, four hundred years before the game: Seda, a swordsman, goes down after the Dark Genie. Four chapters on
+-- floors the other modes already hold (the Shaft's three and the Boss Rush arena), so it takes no floor slot of its
+-- own. Each chapter opens with a card and a page of story, sets a task, and closes with another page.
+--
+-- Seda himself is a playable character (characters.register_playable) once his pack is built (docs/SEDA_PLAN.md):
+-- `resources/seda/c08d.chr`. Registering takes the next engine index, and the Gauntlet's Opar must keep 6, so Seda
+-- registers only when the Chronicle starts, long after every mod has loaded. Until the pack exists, Toan walks in
+-- his place.
+local SEDA_PACK = "dun/mainchara/c08d.chr"
+local function seda_floor(dungeon)
+  for _, f in ipairs(shaft_floors) do if f.dungeon == dungeon then return f.id end end
+end
+local CHAPTERS = {
+  {key = "cave", dungeon = 0, title = "THE MOONLIT CAVE", kicker = "CHAPTER I", goal = "kill", count = 12,
+   intro = {"Four hundred years ago. The Dark Genie's shadow", "lies over the land, and its creatures crawl", "up from the deep places.",
+            "Seda, a swordsman with nothing left to lose,", "goes down into the cave beneath the village."},
+   task = "Cut down twelve of the Genie's creatures.",
+   outro = {"The creatures thin. Deeper in, the stone hums", "with a moonlit voice: the Genie hides where", "the old forest grows over the ruins."}},
+  {key = "forest", dungeon = 1, title = "THE WISE OWL'S WOOD", kicker = "CHAPTER II", goal = "chests", count = 3,
+   intro = {"The owls of the forest keep the old sayings.", "One of them is a warning: the Genie cannot be", "struck down by any blade of this world.",
+            "But the forest remembers three relics", "of the Moon People, hidden in its roots."},
+   task = "Find three relics in the forest's chests.",
+   outro = {"Three relics, and in each a shard of moonlight.", "Bound to Seda's sword they burn cold and blue.", "The owls fall silent. They know where he goes."}},
+  {key = "sea", dungeon = 4, title = "THE MOON SEA", kicker = "CHAPTER III", goal = "guardian",
+   intro = {"Under the dry sea floor the Genie's gate is", "guarded by a beast grown fat on its darkness.",
+            "Clear the way, and the sealed room will open."},
+   task = "Clear the floor, then fell the guardian of the gate.",
+   outro = {"The guardian falls, and the gate stands open.", "Beyond it the air is thick and warm,", "and something laughs in the dark."}},
+  {key = "lair", arena = true, title = "THE GENIE'S LAIR", kicker = "CHAPTER IV", goal = "genie",
+   intro = {"The Dark Genie waits, as if it had been", "expecting him. It always has been.", "Seda raises the moonlit sword."},
+   task = "Defeat the Dark Genie.",
+   outro = {}},
+}
+local EPILOGUE = {
+  {"The Genie's body breaks apart in the moonlight.", "For a moment, there is only silence."},
+  {"Then the darkness laughs again. Its body is", "gone, but the Genie itself cannot die by a blade.", "It sinks into the earth to wait."},
+  {"Seda's sword is shattered. The curse of the", "Genie's last breath is on him: he will not rest", "while the Genie lives."},
+  {"He will wait in the cave, four hundred years,", "for someone who carries the Atlamillia.", "For a boy from Norune."},
+}
+
+local function seda_page(title, subtitle, lines, label)
+  seda.page = true
+  try(game.ui.choice_open, {id = "seda_story", title = title, subtitle = subtitle,
+      options = {{title = label or "Onward", lines = lines}}})
+end
+
+local function seda_chapter() return CHAPTERS[seda.chapter] end
+
+local function seda_menu()
+  local c = seda_chapter()
+  local progress = c.count and string.format(" (%d of %d)", math.min(seda.progress, c.count), c.count) or ""
+  try(game.ui.run_menu_set, {title = "SEDA'S CHRONICLE", tabs = {{id = "chronicle", title = "Chronicle",
+      lines = {c.kicker .. ": " .. c.title, c.task .. progress, seda.hero == "seda" and "Seda walks." or "Toan walks in Seda's place."},
+      rows = {{id = "end", label = "Leave the Chronicle", detail = "Back to the title. The chapters you finished are kept."}}}}})
+end
+
+local function seda_open_chapter()
+  local c = seda_chapter()
+  seda.progress, seda.done, seda.room, seda.boss, seda.boss_alive, seda.toughest, seda.genie = 0, false, nil, nil, false, nil, nil
+  try(game.ui.boss_card, {kicker = c.kicker, name = c.title, epithet = "Seda's Chronicle", frames = 150})
+  seda.story_at = frame + 160
+  seda_menu()
+end
+
+local function seda_chapter_done()
+  if seda.done then return end
+  seda.done = true
+  local c = seda_chapter()
+  records.seda_chapter = math.max(records.seda_chapter or 0, seda.chapter)
+  save_records()
+  if c.goal == "genie" then
+    seda.epilogue = 1
+    seda_page("EPILOGUE", "Four hundred years ago", EPILOGUE[1])
+    return
+  end
+  seda.leaving = true
+  seda_page(c.kicker .. " ENDS", c.title, c.outro)
+end
+
+local function seda_spawn_genie(model)
+  local h = spawn_boss(model, seda.room, 0.6)
+  if not h then return false end
+  seda.boss, seda.boss_alive, seda.genie = h, false, model
+  try(game.ui.boss_card, {kicker = "SEDA'S CHRONICLE", name = BOSS[model].name, epithet = BOSS[model].epithet, frames = 150})
+  return true
+end
+
+local function seda_tick()
+  if not seda.live then return end
+  if seda.story_at and frame >= seda.story_at then
+    seda.story_at = nil
+    local c = seda_chapter()
+    seda_page(c.kicker, c.title, c.intro, "Begin")
+  end
+  if seda.next_at and frame >= seda.next_at then
+    local c = seda_chapter()
+    local id = c.arena and arena or seda_floor(c.dungeon)
+    if id and try(game.world.transition, {id = id}) then seda.next_at = nil else seda.next_at = frame + 90 end
+  end
+  if seda.finish_at and frame >= seda.finish_at then seda.finish_at = nil; try(game.session.finish) end
+  local c = seda_chapter()
+  if c.goal == "guardian" and seda.room and not seda.boss and not seda.done then
+    local t = seda.toughest
+    if not t then seda_chapter_done()
+    else
+      local s = try(game.characters.spawn, {character = variant(t.model, "Gate Guardian"), position = seda.room})
+      local h = s and (s.entity_handle or s.id)
+      if h then
+        local hp = math.floor(clamp(t.hp * 8, 1, 1000000))
+        try(game.entities.set_stats, {entity = h, max_hp = hp, hp = hp, damage_scale = 1.5})
+        try(game.entities.scale_set, {entity = h, scale = 1.9})
+        seda.boss, seda.boss_alive = h, false
+        try(game.ui.boss_card, {kicker = "CHAPTER III", name = "Guardian of the Gate", epithet = "Fat on the Genie's darkness", frames = 150})
+      end
+    end
+  end
+  if c.goal == "genie" and seda.room and not seda.boss and not seda.done then seda_spawn_genie(seda.genie_next or 84) end
+  if seda.boss then
+    local e = try(game.entities.get, seda.boss)
+    if e and e.status == "alive" then seda.boss_alive = true
+    elseif seda.boss_alive or (e and e.status == "dead") then
+      seda.boss = nil
+      if c.goal == "genie" and seda.genie == 84 then
+        notify("The Genie's body bursts... and darkness itself rises!")
+        seda.genie_next, seda.room_hold = 106, seda.room
+        seda.room = nil
+        seda.rise_at = frame + 150
+      else
+        seda_chapter_done()
+      end
+    end
+  end
+  if seda.rise_at and frame >= seda.rise_at then seda.rise_at, seda.room = nil, seda.room_hold end
+  -- the guardian grows from the floor's toughest monster
+  if c.goal == "guardian" and frame % 20 == 0 then
+    local q = try(game.entities.query, {type = "monster"})
+    for _, e in ipairs(q and q.entities or {}) do
+      local model, max = tonumber(e.native_model_id), e.health and tonumber(e.health.maximum) or 0
+      if model and not BOSS[model] and tostring(e.entity_id or e.id) ~= tostring(seda.boss) and
+         (not seda.toughest or max > seda.toughest.hp) then seda.toughest = {model = model, hp = max} end
+    end
+  end
+end
+
+seda_generating = function(e)
+  if e.back_floor or e.prebuild then return end
+  if seda.opening then seda.opening = false; seda_open_chapter() end
+  local c = seda_chapter()
+  try(game.dungeons.set_modifiers, c.arena and {chests = -100} or (c.goal == "chests" and {chests = 60} or {}))
+  try(game.dungeons.set_warden_room, {enabled = c.goal == "guardian" or c.goal == "genie", lock_in = true})
+  -- a figure by the exit gate tells the chapter's task again
+  if not c.arena then try(game.world.dungeon_npc_set, {id = "wanderer", model = "gedit/e01/chara/p02a.chr", place = "exit"}) end
+end
+
+local function seda_hero()
+  -- a pack in the mod's resources: register Seda (once a game) and play him
+  if seda_registered == nil then
+    seda_registered = false
+    if try(game.resources.override, {path = "resources/seda/c08d.chr", game_path = SEDA_PACK}) then
+      local r = try(game.characters.register_playable, {id = "seda", name = "Seda", pack = SEDA_PACK, title = "Swordsman of Old",
+                                                         fights_as = "toan", hp = 160, defense = 40})
+      seda_registered = type(r) == "table" and r.character_id or false
+    end
+  end
+  return seda_registered
+end
+
+local function start_seda()
+  local first = seda_floor(0)
+  if not first then message = "Seda's Chronicle needs the Shaft's floors."; show("root"); return end
+  local index = seda_hero()
+  seda = {chapter = 1, live = false, hero = index and "seda" or "toan"}
+  local ok, err = try(game.session.start, {floor = first, party_size = index and (index + 1) or 1, character = "toan"})
+  if not ok then
+    seda = nil
+    message = ("The Chronicle could not start: " .. errmsg(err)):sub(1, 64)
+    show("root")
+    return
+  end
+end
+
+local function seda_cleanup()
+  try(game.dungeons.set_warden_room, {enabled = false})
+  try(game.dungeons.set_modifiers, {})
+  try(game.dungeons.set_exits, {})
+  try(game.world.dungeon_npc_clear)
+  try(game.combat.register_formula, {id = "seda_power", operation = "multiply", priority = 60, value = 1})
+  try(game.ui.run_menu_clear)
+end
+
+moonmod.on("game.enemy_defeated", function()
+  if not (seda and seda.live) or seda.done or seda_chapter().goal ~= "kill" then return end
+  seda.progress = seda.progress + 1
+  if seda.progress >= seda_chapter().count then seda_chapter_done() else seda_menu() end
+end)
+
+moonmod.on("game.chest.opened", function(e)
+  if not (seda and seda.live) or seda.done or seda_chapter().goal ~= "chests" or not e or e.chest == nil then return end
+  seda.progress = seda.progress + 1
+  notify(string.format("A relic of the Moon People (%d of 3).", math.min(seda.progress, 3)))
+  if seda.progress >= seda_chapter().count then seda_chapter_done() else seda_menu() end
+end)
+
+moonmod.on("game.dungeon_npc.near", function(e)
+  if not (seda and seda.live) or not e or e.id ~= "wanderer" then return end
+  notify("A wanderer: \"" .. seda_chapter().task .. "\"")
+end)
+
+moonmod.on("ui.choice_made", function(e)
+  if not (seda and seda.page and e and e.id == "seda_story") then return end
+  seda.page = false
+  if seda.epilogue then
+    seda.epilogue = seda.epilogue + 1
+    if EPILOGUE[seda.epilogue] then seda_page("EPILOGUE", "Four hundred years ago", EPILOGUE[seda.epilogue])
+    else
+      records.seda_clears = (records.seda_clears or 0) + 1
+      save_records()
+      try(game.ui.boss_card, {kicker = "SEDA'S CHRONICLE", name = "The End", epithet = "Dark Cloud begins", frames = 240})
+      seda.finish_at = frame + 260
+    end
+    return
+  end
+  if seda.leaving then
+    seda.leaving = false
+    seda.chapter = seda.chapter + 1
+    seda.next_at = frame + 30
+    seda.opening = true -- the chapter opens on its own floor
+  end
+end)
+
 -- Title pages --------------------------------------------------------------------------------------------------------
 local function best_line()
   if records.best then return string.format("Best time %s, %d clear%s", clock(records.best), records.clears, records.clears == 1 and "" or "s") end
@@ -568,7 +817,14 @@ show = function(name)
     try(game.title.mode_set, {id = MODE, title = "CHALLENGES", subtitle = "Tests for a seasoned adventurer",
         lines = {message or "Choose a challenge."}, root = true,
         entries = {{id = "boss_rush", label = "Boss Rush", enabled = arena ~= nil},
-                   {id = "shaft", label = "The Shaft", enabled = #shaft_floors > 0}}})
+                   {id = "shaft", label = "The Shaft", enabled = #shaft_floors > 0},
+                   {id = "seda", label = "Seda's Chronicle", enabled = #shaft_floors > 0 and arena ~= nil}}})
+  elseif name == "seda" then
+    try(game.title.mode_set, {id = MODE, title = "SEDA'S CHRONICLE", subtitle = "Four hundred years before Dark Cloud", root = false,
+        lines = {"A swordsman goes down after the Dark Genie.", "Four chapters, from the cave to the Genie's lair.",
+                 string.format("Chapters finished: %d of 4%s", records.seda_chapter or 0, (records.seda_clears or 0) > 0 and ", the end seen" or ""),
+                 "Toan walks in Seda's place until Seda's", "model is built (docs/SEDA_PLAN.md)."},
+        entries = {{id = "seda_start", label = "Begin the Chronicle"}}})
   elseif name == "shaft" then
     try(game.title.mode_set, {id = MODE, title = "THE SHAFT", subtitle = "How deep can you go?", root = false,
         lines = {"An endless descent. Monsters grow with every floor.", "Every tenth floor, a guardian; then a pact,",
@@ -616,7 +872,9 @@ moonmod.on("game.title.selected", function(e)
   if entry == "boss_rush" then show("boss_rush")
   elseif entry == "rush_start" then start_rush()
   elseif entry == "shaft" then show("shaft")
-  elseif entry == "shaft_start" then start_shaft() end
+  elseif entry == "shaft_start" then start_shaft()
+  elseif entry == "seda" then show("seda")
+  elseif entry == "seda_start" then start_seda() end
 end)
 
 -- Sessions -----------------------------------------------------------------------------------------------------------
@@ -628,6 +886,17 @@ moonmod.on("game.session.started", function(e)
     rush.live = true
     apply_tier()
     heal_party(1)
+  elseif session_owner == ID and seda then
+    seda.live = true
+    try(game.dungeons.set_exits, {town = "shrines"})
+    if seda.hero == "seda" then try(game.party.set_active, {id = "seda"}) end
+    -- Seda is a veteran: a strong blade and a deep well of life from the start
+    try(game.combat.register_formula, {id = "seda_power", operation = "multiply", priority = 60, value = 3})
+    for _, c in ipairs(members()) do try(game.player.set, {max_hp = 220, character = c}); try(game.player.heal, {amount = 999, character = c}) end
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 4})
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.water, count = 3})
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 3})
+    seda_open_chapter()
   elseif session_owner == ID and shaft then
     shaft.live = true
     -- the gate always leads down and the Escape menu is refused: the run menu ends a descent
@@ -648,6 +917,10 @@ moonmod.on("game.session.ended", function(e)
     rush = nil
     rush_cleanup()
   end
+  if mine and seda then
+    seda = nil
+    seda_cleanup()
+  end
   if mine and shaft then
     shaft_records()
     shaft = nil
@@ -667,6 +940,7 @@ moonmod.on("game.tick", function()
   frame = frame + 1
   if rush then rush_tick() end
   if shaft then shaft_tick() end
+  if seda then seda_tick() end
   if other_session() then return end
   local world = try(game.world.get)
   if not (world and world.context == "dungeon") then

@@ -45,6 +45,24 @@ Escape menu is refused; Start opens a menu with **End the descent**.
 The party starts with three Bread, two Tasty Water and two Repair Powder. *The Shaft party* in the settings chooses
 everyone or Toan alone.
 
+## Seda's Chronicle (title menu > Challenges)
+
+A prologue, four hundred years before Dark Cloud: Seda, a swordsman, goes down after the Dark Genie. Four chapters, each
+opening with a card and a page of story and closing with another:
+
+1. **The Moonlit Cave**: cut down twelve of the Genie's creatures.
+2. **The Wise Owl's Wood**: find three relics in the forest's chests (more chests than usual).
+3. **The Moon Sea**: clear the floor, then fell the guardian in the sealed room, grown from the floor's toughest monster.
+4. **The Genie's Lair**: the pink Dark Genie and then his true form, in the Boss Rush arena.
+
+An epilogue of four pages ties it to the game: the Genie survives, Seda is cursed to wait in the cave for a boy from
+Norune. A wanderer by each floor's exit gate repeats the chapter's task, and Start opens a menu to leave. The
+chapters reached and the end are kept on the page.
+
+The Chronicle uses the Shaft's floors and the Boss Rush arena, so it takes no floor slot of its own. Seda is a
+playable character once his pack is built (`docs/SEDA_PLAN.md`): with `resources/seda/c08d.chr` in this mod he
+registers as the Chronicle starts and takes the field. Until then Toan walks in his place.
+
 ## Floor slots
 
 A dungeon holds 25 floors, and the Gauntlet takes seven in each of the five, which fills the Shipwreck and the Sun and
@@ -67,4 +85,6 @@ Tests: `lua tools/tests/challenges/test_challenges.lua`.
 - [ ] Shaft: the gate on floor 1 leads to a new floor 2; Escape is refused; Start offers End the descent.
 - [ ] Shaft: floor 10's room opens once the floor is clear, the guardian is huge, and its fall offers the pacts.
 - [ ] Shaft: after a pact, the descent arrives in Wise Owl Forest at floor 11.
+- [ ] Seda's Chronicle: each chapter's card and story page show on arrival, the wanderer repeats the task, and
+      the epilogue leads back to the title.
 - [ ] Shaft: monsters by floor 20 feel hard but fair. Tune the growth numbers in `shaft_scale` and `shaft_tuning`.
