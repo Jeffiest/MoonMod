@@ -15,7 +15,9 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
       below half health, a third near the end. A Boss Rush title mode fights them in a row. Built:
       `mods/moonmod.challenges`, 46 headless checks; needs a playtest, above all the tier numbers. The HP bar is
       top left: the engine has no bottom bar yet.
-- [ ] **3. Character Paths for the whole party.** The RPG mod's paths for Xiao, Goro, Ruby, Ungaga and Osmond.
+- [x] **3. Character Paths for the whole party.** The RPG mod's paths for Xiao, Goro, Ruby, Ungaga and Osmond.
+      Built: RPG 2.0, three paths and three powers per hero (18 trees), Toan's saves carried over. 33 headless
+      checks in `tools/tests/rpg`; needs a playtest of each hero's powers.
 - [ ] **4. Duels and fishing.** An option to skip or simplify duel QTEs; a written survey of the fishing code
       for a later fishing mod.
 
