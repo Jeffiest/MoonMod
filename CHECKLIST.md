@@ -50,4 +50,6 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
       `moonfactory index/search/install/list` and the `mod-index` workflow that publishes the catalogue; 10 tests.
       Not done: browsing inside the game's Mod Manager, which needs network code in the engine (a design decision
       on what a mod may fetch); the catalogue format is ready for it.
-- [ ] **11. Blender add-on for the chr pipeline.** Export a rigged Blender model straight to a Dark Cloud pack.
+- [x] **11. Blender add-on for the chr pipeline.** Export a rigged Blender model straight to a Dark Cloud pack.
+      Built: `tools/chr/blender/moonmod_chr_addon.py` (Check, Fit Game Model, Build Pack, Install Pack); its rules
+      tested on Opar's and Seda's files, 6 tests. Building still runs the toolkit, so it was not run here.
