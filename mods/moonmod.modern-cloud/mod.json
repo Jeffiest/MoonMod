@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.modern-cloud",
+  "name": "Modern Cloud",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "Quality of life for the story game, each part its own setting: thirst down to none, slower weapon wear, a weapon guard that warns, repairs from your Repair Powder or never lets a weapon break, the floor map and monsters shown, quicker character switches, a quicker walk, and keys 1, 2 and 3 for the quick item slots.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write"],
+  "settings": [
+    {"id": "thirst", "name": "Thirst (%; 0 keeps the water gauge full)", "type": "integer", "default": 50, "min": 0, "max": 200, "step": 25},
+    {"id": "wear", "name": "Weapon wear (%)", "type": "integer", "default": 75, "min": 25, "max": 200, "step": 25},
+    {"id": "weapon_guard", "name": "Weapon guard", "type": "choice", "default": "Repair Powder", "choices": ["Off", "Warn", "Repair Powder", "Never break"]},
+    {"id": "warn_at", "name": "Warn when durability is below (%)", "type": "integer", "default": 25, "min": 5, "max": 50, "step": 5},
+    {"id": "map_reveal", "name": "Show the whole floor map", "type": "boolean", "default": false},
+    {"id": "monster_reveal", "name": "Show monsters on the map", "type": "boolean", "default": false},
+    {"id": "swap_speed", "name": "Character switch wait (%)", "type": "integer", "default": 50, "min": 0, "max": 100, "step": 25},
+    {"id": "run_speed", "name": "Walk speed in dungeons (%)", "type": "integer", "default": 100, "min": 100, "max": 150, "step": 5},
+    {"id": "quick_keys", "name": "Keys 1, 2, 3 use the quick item slots", "type": "boolean", "default": true}
+  ]
+}

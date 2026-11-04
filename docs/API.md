@@ -12,6 +12,7 @@ The first runtime slice implements the marked surfaces:
 | `moonmod.on(event, callback)` | Event subscription with an isolated Lua callback budget | Implemented: `runtime.loaded`, `runtime.unloaded`, `game.tick` |
 | `game.events.list/subscribe/unsubscribe` | Discover verified event names per game and subscribe with owner-scoped tokens | Implemented in the shared runtime; the list includes short descriptions and omits game-specific events from the other port |
 | `moonmod.game` | Game id, framework API version, and capability queries | Implemented: id and API major |
+| `game.info.get()` | Game id and name, API major, the calling mod's id, and today's `date` `{year, month, day}` | Implemented; the date is the UTC calendar day, the same for every player, for daily seeds (Chronicle; the Lua sandbox has no `os`) |
 | `moonmod.settings.get(id)` | Read a mod's declared, typed settings | Implemented |
 | `moonmod.storage.get/set/delete(key, value)` | Per-mod key/value persistence | Implemented with `storage.read` / `storage.write` permissions |
 | `game.save.get/set(key, value)` | JSON-compatible per-mod save data | Implemented with `game.read` / `game.write` permissions and atomic persistence |
@@ -1744,6 +1745,7 @@ set. Fields, all validated (a bad field rejects the whole call with `invalid_arg
 | `map_reveal` | boolean | the floor map draws every cell as if the Map item were held (the HUD shows the Map icon too) |
 | `monster_reveal` | boolean | monsters show on the map as if the Magical Crystal were held |
 | `map_hidden` | boolean | no floor map or minimap at all (wins over `map_reveal`) |
+| `map_window` | boolean | the minimap is always the framed square that scrolls around the player, as on a region's map, however small the floor (the Gauntlet's map) |
 | `status_duration` | 0.25 to 4 | scales how long Freeze (300 frames) and Stamina (1800) last |
 | `status_immune` | list of `freeze`, `stamina`, `poison`, `curse`, `goo` | the active player never takes these ailments (owners' lists combine) |
 | `swap_delay` | 0 to 4 | scales the two 20-frame waits of a battle-menu character switch; 0 switches as soon as the model loads |

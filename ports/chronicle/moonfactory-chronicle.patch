@@ -2482,10 +2482,10 @@ index 00000000..55226749
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..77eb0963
+index 00000000..da314d5e
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,215 @@
 +#pragma once
 +
 +#include <array>
@@ -2577,6 +2577,7 @@ index 00000000..77eb0963
 +    bool  map_reveal = false;           // the floor map acts as if the Map item were held
 +    bool  monster_reveal = false;       // monsters show on the map as if the Magical Crystal were held
 +    bool  map_hidden = false;           // no floor map at all (wins over map_reveal)
++    bool  map_window = false;           // the corner map is always the square that scrolls around the player
 +    float status_duration = 1.0f;       // scales the frames Freeze and Stamina last
 +    int   status_immune = 0;            // AILMENT_* bits the active player never takes
 +    float swap_delay = 1.0f;            // scales the battle menu's character-change waits (0 = none)
@@ -2610,6 +2611,7 @@ index 00000000..77eb0963
 +bool ChroniclePlayerMapReveal();
 +bool ChroniclePlayerMonsterReveal();
 +bool ChroniclePlayerMapHidden();
++bool ChroniclePlayerMapWindow();
 +// Charged hits: the dungeon loop reports each frame; a hit within a second of a charged move counts.
 +void ChronicleChargedActionTick();
 +// Shortcut doors: each frame, a locked door the player stands at opens with its key (dungeons.set_shortcuts).
@@ -3439,10 +3441,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..94e771be
+index 00000000..9a132fe7
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,309 @@
 +#pragma once
 +
 +/**
@@ -3470,6 +3472,7 @@ index 00000000..94e771be
 +bool  ChroniclePlayerMonsterReveal();
 +bool  ChroniclePlayerMapReveal();
 +bool  ChroniclePlayerMapHidden();
++bool  ChroniclePlayerMapWindow();
 +void  ChronicleChargedActionTick();
 +void  ChronicleShortcutDoorsTick();
 +void  ChronicleZoneGatesTick();
@@ -15325,7 +15328,7 @@ index 94ac1201..2db5a19d 100644
              }
          }
 diff --git a/port/src/game/dungeonmap.cpp b/port/src/game/dungeonmap.cpp
-index d84b3a67..344bd3ec 100644
+index d84b3a67..34ba8c26 100644
 --- a/port/src/game/dungeonmap.cpp
 +++ b/port/src/game/dungeonmap.cpp
 @@ -1,8 +1,15 @@
@@ -15528,7 +15531,7 @@ index d84b3a67..344bd3ec 100644
              if (selectMapNo != DUNGEON_MOON_SEA && UserStatus->cur_georama == 4) {
                  MGSetAmbient(old_ambient);
              }
-@@ -589,6 +682,74 @@ void CDungeonMap::DrawDummyModel(CCamera *camera) {
+@@ -589,6 +682,75 @@ void CDungeonMap::DrawDummyModel(CCamera *camera) {
  }
  
  void CDungeonMap::DrawMiniMap(float *pos, float angle) {
@@ -15586,9 +15589,10 @@ index d84b3a67..344bd3ec 100644
 +        DngMiniMapOriginX=380; DngMiniMapOriginY=64;
 +    }
 +    // MoonMod: a map that would shrink below 8-pixel tiles (several floors on one map) shows the part around the
-+    // player instead, at 12-pixel tiles, scrolling as they walk.
++    // player instead, at 12-pixel tiles, scrolling as they walk; player.tuning_set's map_window asks for that square
++    // on every floor.
 +    DngMiniMapClipX1 = DngMiniMapClipY1 = -1;
-+    if (!aerial && !platform::ConfigGet().fit_dungeon_map && DngMiniMapTile < 8) {
++    if (!aerial && !platform::ConfigGet().fit_dungeon_map && (DngMiniMapTile < 8 || moonmod::ChroniclePlayerMapWindow())) {
 +        constexpr int kTile = 12, kWide = 21, kHigh = 15;
 +        DngMiniMapTile = kTile;
 +        const int box_x = 380 + 256 - kWide * kTile, box_y = 64;
@@ -15603,7 +15607,7 @@ index d84b3a67..344bd3ec 100644
      int           status;
      unsigned char red;
      int           saved_map;
-@@ -621,13 +782,25 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -621,13 +783,25 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
      CRect_i_      atra_src;
      status = UserStatus->minimap_status;
  
@@ -15636,7 +15640,7 @@ index d84b3a67..344bd3ec 100644
  
      red = red_table[status];
      green = green_table[status];
-@@ -640,13 +813,22 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -640,13 +814,22 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
          BtEquipMasuisyou = 1;
      }
  
@@ -15662,7 +15666,7 @@ index d84b3a67..344bd3ec 100644
              masked = this->mask[cell_no];
              show = masked;
  
-@@ -657,34 +839,55 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -657,34 +840,55 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
                  alpha = green;
              }
  
@@ -15732,7 +15736,7 @@ index d84b3a67..344bd3ec 100644
      set2DSprite(Vif1Packet, symbol_texture, player_dst, player_src, 7, 7, angle);
  
      for (int i = 0; i < 3; i++) {
-@@ -694,10 +897,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -694,10 +898,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              continue;
          }
  
@@ -15748,7 +15752,7 @@ index d84b3a67..344bd3ec 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -709,25 +913,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -709,25 +914,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              trap_src.y = 112;
              trap_src.width = 8;
              trap_src.height = 8;
@@ -15785,7 +15789,7 @@ index d84b3a67..344bd3ec 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -739,25 +945,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -739,25 +946,27 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              box_src.y = 96;
              box_src.width = 8;
              box_src.height = 8;
@@ -15822,7 +15826,7 @@ index d84b3a67..344bd3ec 100644
          show = this->mask[cell];
  
          if (BtEquipMasuisyou == 1) {
-@@ -769,10 +977,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
+@@ -769,10 +978,11 @@ void CDungeonMap::DrawMiniMap(float *pos, float angle) {
              atra_src.y = 104;
              atra_src.width = 8;
              atra_src.height = 8;
@@ -15838,7 +15842,7 @@ index d84b3a67..344bd3ec 100644
              set2DSprite(Vif1Packet, symbol_texture, atra_dst, atra_src, blue);
          }
      }
-@@ -810,31 +1019,31 @@ void CDungeonMap::checkMask(float x, float z) {
+@@ -810,31 +1020,31 @@ void CDungeonMap::checkMask(float x, float z) {
  
                  for (row = this->rooms[room].y; row < this->rooms[room].y + this->rooms[room].height; row++) {
                      for (col = this->rooms[room].x; col < this->rooms[room].x + this->rooms[room].width; col++) {
@@ -15877,7 +15881,7 @@ index d84b3a67..344bd3ec 100644
              this->mask[i] = 1;
          }
      }
-@@ -963,12 +1172,19 @@ void CDungeonMap::DrawFire(CFrameVu1 *frame, CCameraFollow *camera) {
+@@ -963,12 +1173,19 @@ void CDungeonMap::DrawFire(CFrameVu1 *frame, CCameraFollow *camera) {
      // Only the cells around the camera show their fires.
      for (row = cam_row - 5; row < cam_row + 5; row++) {
          for (col = cam_col - 5; col < cam_col + 5; col++) {
@@ -15899,7 +15903,7 @@ index d84b3a67..344bd3ec 100644
                      for (j = 0; j < (part = &this->parts[this->cells[cell_no].parts_no])->fire_num; j++) {
                          float turn;
                          float rot_x;
-@@ -1046,8 +1262,8 @@ void CDungeonMap::DrawRaster(CFrameVu1 *frame) {
+@@ -1046,8 +1263,8 @@ void CDungeonMap::DrawRaster(CFrameVu1 *frame) {
      // Only the cells around the player cast a raster.
      for (row = cell_z - 4; row < cell_z + 4; row++) {
          for (col = cell_x - 4; col < cell_x + 4; col++) {
@@ -15910,7 +15914,7 @@ index d84b3a67..344bd3ec 100644
  
                  if (this->cells[cell_no].parts_no != MAP_PARTS_NONE && this->cells[cell_no].camera_dist <= 240.0f && this->cells[cell_no].visible == 1) {
                      CDungeonParts *part;
-@@ -1130,9 +1346,9 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
+@@ -1130,9 +1347,9 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
      }
  
      // One surface draws for the whole floor: the one nearest to the player.
@@ -15923,7 +15927,7 @@ index d84b3a67..344bd3ec 100644
              float dist;
  
              if (this->cells[cell_no].parts_no == MAP_PARTS_NONE) {
-@@ -1147,7 +1363,7 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
+@@ -1147,7 +1364,7 @@ void CDungeonMap::DrawWater(float *pos, int mute) {
              }
  
              vec[0] = 160.0f * static_cast<float>(col);
@@ -15932,7 +15936,7 @@ index d84b3a67..344bd3ec 100644
              vec[2] = 160.0f * static_cast<float>(row);
              dist = DistVector(pos, vec);
  
-@@ -1240,7 +1456,7 @@ void CDungeonMap::DrawItemBox(float *pos) {
+@@ -1240,7 +1457,7 @@ void CDungeonMap::DrawItemBox(float *pos) {
          return;
      }
  
@@ -15941,7 +15945,7 @@ index d84b3a67..344bd3ec 100644
          if (this->boxes[i].used == 0) {
              continue;
          }
-@@ -1285,7 +1501,7 @@ void CDungeonMap::DrawAtraBoll(float *pos) {
+@@ -1285,7 +1502,7 @@ void CDungeonMap::DrawAtraBoll(float *pos) {
          return;
      }
  
@@ -15950,7 +15954,7 @@ index d84b3a67..344bd3ec 100644
          return;
      }
  
-@@ -1334,16 +1550,20 @@ int CDungeonMap::CreateCollision(CCPoly *poly, CBoxVu0 box, int num) {
+@@ -1334,16 +1551,20 @@ int CDungeonMap::CreateCollision(CCPoly *poly, CBoxVu0 box, int num) {
  // they stay plain globals with external linkage, defined in this order.
  
  /** Labels each room while a special linked room is selected. */
@@ -15976,7 +15980,7 @@ index d84b3a67..344bd3ec 100644
  
  /** Gives the number of rooms that the builder placed. */
  s32 roomStackCnt;
-@@ -1359,8 +1579,8 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1359,8 +1580,8 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
      // that two rooms never come out sharing a wall.
      for (j = -1; j < h + 2; j++) {
          for (i = -1; i < w + 2; i++) {
@@ -15987,7 +15991,7 @@ index d84b3a67..344bd3ec 100644
                      ok = 0;
                  }
              }
-@@ -1373,9 +1593,9 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1373,9 +1594,9 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
  
      for (j = 0; j < h; j++) {
          for (i = 0; i < w; i++) {
@@ -16000,7 +16004,7 @@ index d84b3a67..344bd3ec 100644
          }
      }
  
-@@ -1384,6 +1604,75 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
+@@ -1384,6 +1605,75 @@ int buildRoom(int x, int y, int w, int h, int room_no) {
  
  } // namespace
  
@@ -16076,7 +16080,7 @@ index d84b3a67..344bd3ec 100644
  void mapPartsFilter() {
      int col;
      int row;
-@@ -1394,23 +1683,28 @@ void mapPartsFilter() {
+@@ -1394,23 +1684,28 @@ void mapPartsFilter() {
      int east;
      int west;
  
@@ -16113,7 +16117,7 @@ index d84b3a67..344bd3ec 100644
                      allow_north = 0;
                  }
  
-@@ -1419,8 +1713,13 @@ void mapPartsFilter() {
+@@ -1419,8 +1714,13 @@ void mapPartsFilter() {
                  if ((south & (BUILD_CELL_ROOM | BUILD_CELL_DOOR)) == BUILD_CELL_ROOM) {
                      allow_south = 0;
                  }
@@ -16128,7 +16132,7 @@ index d84b3a67..344bd3ec 100644
                      allow_south = 0;
                  }
  
-@@ -1429,8 +1728,13 @@ void mapPartsFilter() {
+@@ -1429,8 +1729,13 @@ void mapPartsFilter() {
                  if ((east & (BUILD_CELL_ROOM | BUILD_CELL_DOOR)) == BUILD_CELL_ROOM) {
                      allow_east = 0;
                  }
@@ -16143,7 +16147,7 @@ index d84b3a67..344bd3ec 100644
                      allow_east = 0;
                  }
  
-@@ -1439,26 +1743,31 @@ void mapPartsFilter() {
+@@ -1439,26 +1744,31 @@ void mapPartsFilter() {
                  if ((west & (BUILD_CELL_ROOM | BUILD_CELL_DOOR)) == BUILD_CELL_ROOM) {
                      allow_west = 0;
                  }
@@ -16182,7 +16186,7 @@ index d84b3a67..344bd3ec 100644
                              mask &= ~4;
                          }
                      }
-@@ -1466,19 +1775,42 @@ void mapPartsFilter() {
+@@ -1466,19 +1776,42 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 15; table_no++) {
                      if (mask == chainTableRoad[table_no][0]) {
@@ -16232,7 +16236,7 @@ index d84b3a67..344bd3ec 100644
  
                  if (north == BUILD_CELL_ROOM) {
                      mask &= ~1;
-@@ -1498,74 +1830,74 @@ void mapPartsFilter() {
+@@ -1498,74 +1831,74 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 8; table_no++) {
                      if (mask == chainTableRoom[table_no][0]) {
@@ -16329,7 +16333,7 @@ index d84b3a67..344bd3ec 100644
                  }
  
                  if ((north & BUILD_CELL_DIVIDING_WALL) == BUILD_CELL_DIVIDING_WALL) {
-@@ -1602,30 +1934,30 @@ void mapPartsFilter() {
+@@ -1602,30 +1935,30 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 6; table_no++) {
                      if (mask == chainTableDivid[table_no][0]) {
@@ -16368,7 +16372,7 @@ index d84b3a67..344bd3ec 100644
                  }
  
                  if ((north & BUILD_CELL_DIVIDING_WALL) == BUILD_CELL_DIVIDING_WALL) {
-@@ -1646,21 +1978,21 @@ void mapPartsFilter() {
+@@ -1646,21 +1979,21 @@ void mapPartsFilter() {
  
                  for (table_no = 0; table_no < 2; table_no++) {
                      if (mask == chainTableDividDoor[table_no][0]) {
@@ -16397,7 +16401,7 @@ index d84b3a67..344bd3ec 100644
              }
          }
      }
-@@ -1669,20 +2001,248 @@ void mapPartsFilter() {
+@@ -1669,20 +2002,248 @@ void mapPartsFilter() {
  namespace {
  
  void copyMapInfo(BUILD_MAP_INFO *dst, const BUILD_MAP_INFO *src) {
@@ -16653,7 +16657,7 @@ index d84b3a67..344bd3ec 100644
      int target_y;
      int dir;
      int distance;
-@@ -1718,29 +2278,29 @@ int joinRoom(int from_room, int to_room) {
+@@ -1718,29 +2279,29 @@ int joinRoom(int from_room, int to_room) {
          case MAP_DIR_NORTH:
              cx = roomStack[from_room].x + (roomStack[from_room].width >> 1);
              cy = roomStack[from_room].y - 1;
@@ -16691,7 +16695,7 @@ index d84b3a67..344bd3ec 100644
              steps = roomStack[from_room].x - (roomStack[to_room].x + roomStack[to_room].width);
              break;
      }
-@@ -1770,10 +2330,10 @@ int joinRoom(int from_room, int to_room) {
+@@ -1770,10 +2331,10 @@ int joinRoom(int from_room, int to_room) {
  
      while (done == 0) {
          if (steps != 0) {
@@ -16706,7 +16710,7 @@ index d84b3a67..344bd3ec 100644
                  steps--;
  
                  if (steps != 0) {
-@@ -1793,11 +2353,11 @@ int joinRoom(int from_room, int to_room) {
+@@ -1793,11 +2354,11 @@ int joinRoom(int from_room, int to_room) {
                      }
                  }
              } else {
@@ -16722,7 +16726,7 @@ index d84b3a67..344bd3ec 100644
                  }
  
                  done = 1;
-@@ -1820,16 +2380,16 @@ int joinRoom(int from_room, int to_room) {
+@@ -1820,16 +2381,16 @@ int joinRoom(int from_room, int to_room) {
                      for (i = 0; i < distance; i++) {
                          cx += step;
  
@@ -16747,7 +16751,7 @@ index d84b3a67..344bd3ec 100644
                              }
  
                              done = 1;
-@@ -1851,16 +2411,16 @@ int joinRoom(int from_room, int to_room) {
+@@ -1851,16 +2412,16 @@ int joinRoom(int from_room, int to_room) {
                      for (i = 0; i < distance; i++) {
                          cy += step;
  
@@ -16772,7 +16776,7 @@ index d84b3a67..344bd3ec 100644
                              }
  
                              done = 1;
-@@ -1904,6 +2464,38 @@ void setRoomObject() {
+@@ -1904,6 +2465,38 @@ void setRoomObject() {
  
      num = 0;
  
@@ -16811,7 +16815,7 @@ index d84b3a67..344bd3ec 100644
      for (i = 0; i < roomStackCnt; i++) {
  
          // Only two rooms on the floor take an object against their top wall.
-@@ -1911,7 +2503,7 @@ void setRoomObject() {
+@@ -1911,7 +2504,7 @@ void setRoomObject() {
              found = 0;
  
              for (x = 1; x < roomStack[i].width - 1; x++) {
@@ -16820,7 +16824,7 @@ index d84b3a67..344bd3ec 100644
                      found_x = x + roomStack[i].x;
                      found_y = roomStack[i].y;
                      found = 1;
-@@ -1919,8 +2511,8 @@ void setRoomObject() {
+@@ -1919,8 +2512,8 @@ void setRoomObject() {
              }
  
              if ((100.0f * static_cast<float>(rand())) / 2147483648.0f <= 30.0f) {
@@ -16831,7 +16835,7 @@ index d84b3a67..344bd3ec 100644
                      num++;
                  }
              }
-@@ -1931,7 +2523,7 @@ void setRoomObject() {
+@@ -1931,7 +2524,7 @@ void setRoomObject() {
  
          for (y = 1; y < roomStack[i].height - 1; y++) {
              for (x = 1; x < roomStack[i].width - 1; x++) {
@@ -16840,7 +16844,7 @@ index d84b3a67..344bd3ec 100644
                      found_x = x + roomStack[i].x;
                      found_y = y + roomStack[i].y;
                      found = 1;
-@@ -1941,7 +2533,7 @@ void setRoomObject() {
+@@ -1941,7 +2534,7 @@ void setRoomObject() {
  
          if ((100.0f * static_cast<float>(rand())) / 2147483648.0f <= 30.0f) {
              if (found == 1) {
@@ -16849,7 +16853,7 @@ index d84b3a67..344bd3ec 100644
              }
          }
      }
-@@ -1967,7 +2559,12 @@ void setRoomDivid() {
+@@ -1967,7 +2560,12 @@ void setRoomDivid() {
              ok = 1;
  
              for (x = 0; x < roomStack[i].width; x++) {
@@ -16863,7 +16867,7 @@ index d84b3a67..344bd3ec 100644
                      ok = 0;
                  }
              }
-@@ -1986,7 +2583,7 @@ void setRoomDivid() {
+@@ -1986,7 +2584,7 @@ void setRoomDivid() {
              ok = 1;
  
              for (y = 0; y < roomStack[i].height; y++) {
@@ -16872,7 +16876,7 @@ index d84b3a67..344bd3ec 100644
                      ok = 0;
                  }
              }
-@@ -2013,17 +2610,17 @@ void setRoomDivid() {
+@@ -2013,17 +2611,17 @@ void setRoomDivid() {
  
          if (line_dir[line_no] == 0) {
              for (x = line_x[line_no]; x < line_x[line_no] + line_len[line_no]; x++) {
@@ -16894,7 +16898,7 @@ index d84b3a67..344bd3ec 100644
                  .content |= BUILD_CELL_DIVIDING_DOOR;
          }
      }
-@@ -2046,9 +2643,12 @@ void setUnderDungeonStart() {
+@@ -2046,9 +2644,12 @@ void setUnderDungeonStart() {
      }
  
      // A room cell with no door and no dividing wall can hold the way down.
@@ -16910,7 +16914,7 @@ index d84b3a67..344bd3ec 100644
                  safe[safe_num * 2] = x;
                  safe[safe_num * 2 + 1] = y;
                  safe_num++;
-@@ -2067,12 +2667,12 @@ void setUnderDungeonStart() {
+@@ -2067,12 +2668,12 @@ void setUnderDungeonStart() {
          x = safe[pick * 2];
          y = safe[pick * 2 + 1];
  
@@ -16929,7 +16933,7 @@ index d84b3a67..344bd3ec 100644
                      searching = 0;
                  }
              }
-@@ -2091,13 +2691,25 @@ void setUnderDungeonStart() {
+@@ -2091,13 +2692,25 @@ void setUnderDungeonStart() {
  }
  
  void setStair() {
@@ -16955,7 +16959,7 @@ index d84b3a67..344bd3ec 100644
      // The stair down stands above a corridor that has a free cell over it.
      safe_num = 0;
  
-@@ -2105,10 +2717,10 @@ void setStair() {
+@@ -2105,10 +2718,10 @@ void setStair() {
          safe[i] = -1;
      }
  
@@ -16970,7 +16974,7 @@ index d84b3a67..344bd3ec 100644
                      safe[safe_num * 2] = x;
                      safe[safe_num * 2 + 1] = y;
                      safe_num++;
-@@ -2128,10 +2740,10 @@ void setStair() {
+@@ -2128,10 +2741,10 @@ void setStair() {
          y = safe[pick * 2 + 1];
      }
  
@@ -16985,7 +16989,7 @@ index d84b3a67..344bd3ec 100644
  
      // The stair up stands below one that has a free cell under it.
      safe_num = 0;
-@@ -2140,10 +2752,10 @@ void setStair() {
+@@ -2140,10 +2753,10 @@ void setStair() {
          safe[i] = -1;
      }
  
@@ -17000,7 +17004,7 @@ index d84b3a67..344bd3ec 100644
                      safe[safe_num * 2] = x;
                      safe[safe_num * 2 + 1] = y;
                      safe_num++;
-@@ -2163,10 +2775,10 @@ void setStair() {
+@@ -2163,10 +2776,10 @@ void setStair() {
          y = safe[pick * 2 + 1];
      }
  
@@ -17015,7 +17019,7 @@ index d84b3a67..344bd3ec 100644
  }
  
  // Returns the first free event slot; running out of slots stops the game.
-@@ -2208,6 +2820,7 @@ void CDungeonMap::SetupTrapCircle(float *pos) {
+@@ -2208,6 +2821,7 @@ void CDungeonMap::SetupTrapCircle(float *pos) {
          // Populate the first free slot with a trap circle of a random kind.
          if (is_free) {
              sceVu0CopyVector(this->trap_circle[i].pos, pos);
@@ -17023,7 +17027,7 @@ index d84b3a67..344bd3ec 100644
              this->trap_circle[i].state = 1;
              this->trap_circle[i].kind = static_cast<int>((10.0f * static_cast<float>(rand())) / 2147483648.0f);
  
-@@ -2282,7 +2895,8 @@ void CDungeonMap::StepTrapCircle() {
+@@ -2282,7 +2896,8 @@ void CDungeonMap::StepTrapCircle() {
  }
  
  int CDungeonMap::CheckTreasureBox(float *pos, float dist) {
@@ -17033,7 +17037,7 @@ index d84b3a67..344bd3ec 100644
          if (this->boxes[i].used != 0 && DistVector(this->boxes[i].pos, pos) < dist) {
              return 0;
          }
-@@ -2307,10 +2921,12 @@ int CDungeonMap::CheckAtra(float *pos, float dist) {
+@@ -2307,10 +2922,12 @@ int CDungeonMap::CheckAtra(float *pos, float dist) {
  }
  
  void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
@@ -17046,7 +17050,7 @@ index d84b3a67..344bd3ec 100644
  
      int event_no = FindFreeEvent(this->events);
  
-@@ -2322,10 +2938,52 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
+@@ -2322,10 +2939,52 @@ void CDungeonMap::SetAtraBoll(float *pos, int atra_no) {
      this->atra_num++;
  }
  
@@ -17100,7 +17104,7 @@ index d84b3a67..344bd3ec 100644
          if (this->boxes[i].used == 0) {
              box_no = i;
              break;
-@@ -2336,11 +2994,13 @@ int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no)
+@@ -2336,11 +2995,13 @@ int CDungeonMap::SetTreasureBox(float *pos, int item_no, int kind, int trap_no)
          return -1;
      }
  
@@ -17114,7 +17118,7 @@ index d84b3a67..344bd3ec 100644
      this->boxes[box_no].closed = 1;
      this->boxes[box_no].trap_no = trap_no;
  
-@@ -2396,8 +3056,21 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2396,8 +3057,21 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
      object_count = 0;
      target_count = static_cast<int>((4.0f * static_cast<float>(rand())) / 2147483648.0f) + 1;
  
@@ -17138,7 +17142,7 @@ index d84b3a67..344bd3ec 100644
          valid = 1;
  
          if (this->CheckTreasureBox(box_pos, 20.0f) == 0) {
-@@ -2413,8 +3086,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2413,8 +3087,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
          }
  
          if (valid != 0) {
@@ -17149,7 +17153,7 @@ index d84b3a67..344bd3ec 100644
  
                  if (item_no != -1) {
                      int trap_no = static_cast<int>((6.0f * static_cast<float>(rand())) / 2147483648.0f);
-@@ -2423,11 +3096,12 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2423,11 +3097,12 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                          trap_no = 1;
                      }
  
@@ -17165,7 +17169,7 @@ index d84b3a67..344bd3ec 100644
  
                  if (place_atla != 0) {
                      if (object_count == 0) {
-@@ -2440,8 +3114,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2440,8 +3115,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                  }
  
                  if (item_no != -1) {
@@ -17177,7 +17181,7 @@ index d84b3a67..344bd3ec 100644
                  }
              }
          }
-@@ -2451,7 +3126,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2451,7 +3127,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
  
      for (int i = 0; i < 3; i++) {
          if (static_cast<int>((100.0f * static_cast<float>(rand())) / 2147483648.0f) < 21) {
@@ -17186,7 +17190,7 @@ index d84b3a67..344bd3ec 100644
              valid = 1;
  
              if (this->CheckTreasureBox(object_pos, 20.0f) == 0) {
-@@ -2472,12 +3147,50 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2472,12 +3148,50 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
          }
      }
  
@@ -17238,7 +17242,7 @@ index d84b3a67..344bd3ec 100644
              valid = 1;
  
              if (this->CheckTreasureBox(object_pos, 20.0f) == 0) {
-@@ -2497,6 +3210,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2497,6 +3211,7 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
                  this->atra[this->atra_num].phase = 0.0f;
                  this->atra[this->atra_num].atra_no = atra_no[object_count];
                  this->atra[this->atra_num].used = 1;
@@ -17246,7 +17250,7 @@ index d84b3a67..344bd3ec 100644
  
                  int event_no = FindFreeEvent(this->events);
  
-@@ -2512,6 +3226,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
+@@ -2512,6 +3227,8 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
              }
          }
      }
@@ -17255,7 +17259,7 @@ index d84b3a67..344bd3ec 100644
  }
  
  void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind) {
-@@ -2523,7 +3239,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2523,7 +3240,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
  
      int box_no = -1;
  
@@ -17264,7 +17268,7 @@ index d84b3a67..344bd3ec 100644
          if (this->boxes[i].used == 0) {
              box_no = i;
              break;
-@@ -2541,11 +3257,13 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2541,11 +3258,13 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
      this->events[event_no].placed_flag = 0;
      this->events[event_no].index = box_no;
  
@@ -17278,7 +17282,7 @@ index d84b3a67..344bd3ec 100644
      this->boxes[box_no].closed = 1;
  
      switch (kind) {
-@@ -2565,7 +3283,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
+@@ -2565,7 +3284,7 @@ void CDungeonMap::SetMimicEvent(float x, float y, float z, int item_no, int kind
  }
  
  void CDungeonMap::RsetMimicEvent() {
@@ -17287,7 +17291,7 @@ index d84b3a67..344bd3ec 100644
          if (this->events[i].kind != DNG_EVENT_NONE) {
              if (this->events[i].kind == DNG_EVENT_MIMIC) {
                  this->events[i].kind = DNG_EVENT_NONE;
-@@ -2580,7 +3298,7 @@ int CDungeonMap::GetActiveIvent(CFrameVu1 *frame) {
+@@ -2580,7 +3299,7 @@ int CDungeonMap::GetActiveIvent(CFrameVu1 *frame) {
  
      sceVu0CopyVector(pos, frame->position);
  
@@ -17296,7 +17300,7 @@ index d84b3a67..344bd3ec 100644
          if (this->events[i].kind != DNG_EVENT_NONE && DistVector(this->events[i].pos, pos) <= this->events[i].radius) {
              return i;
          }
-@@ -2619,7 +3337,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2619,7 +3338,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 2; j++) {
                      for (i = 0; i < 2; i++) {
@@ -17305,7 +17309,7 @@ index d84b3a67..344bd3ec 100644
                              kind = -1;
                          }
                      }
-@@ -2638,7 +3356,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2638,7 +3357,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 2; j++) {
                      for (i = 0; i < 2; i++) {
@@ -17314,7 +17318,7 @@ index d84b3a67..344bd3ec 100644
                              kind = -1;
                          }
                      }
-@@ -2657,7 +3375,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2657,7 +3376,7 @@ void CDungeonMap::buildDummyModel() {
  
                  for (j = 0; j < 3; j++) {
                      for (i = 0; i < 3; i++) {
@@ -17323,7 +17327,7 @@ index d84b3a67..344bd3ec 100644
                              kind = -1;
                          }
                      }
-@@ -2683,9 +3401,9 @@ void CDungeonMap::buildDummyModel() {
+@@ -2683,9 +3402,9 @@ void CDungeonMap::buildDummyModel() {
                  }
              }
  
@@ -17336,7 +17340,7 @@ index d84b3a67..344bd3ec 100644
                          stair_pos[0] = 80.0f + 160.0f * z;
                          stair_pos[1] = 0.0f;
                          stair_pos[2] = 80.0f + 160.0f * x;
-@@ -2721,7 +3439,7 @@ void CDungeonMap::buildDummyModel() {
+@@ -2721,7 +3440,7 @@ void CDungeonMap::buildDummyModel() {
  
  void CDungeonMap::GetRoomLinkInfo() {
      int   door_pos[32][2];
@@ -17345,7 +17349,7 @@ index d84b3a67..344bd3ec 100644
      float pos[4];
      int   door_count;
      int   stair_x;
-@@ -2741,16 +3459,16 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2741,16 +3460,16 @@ void CDungeonMap::GetRoomLinkInfo() {
          this->room_link[i].used = 0;
      }
  
@@ -17366,7 +17370,7 @@ index d84b3a67..344bd3ec 100644
                  stair_x = x;
                  stair_y = y;
                  break;
-@@ -2758,15 +3476,15 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2758,15 +3477,15 @@ void CDungeonMap::GetRoomLinkInfo() {
          }
      }
  
@@ -17386,7 +17390,7 @@ index d84b3a67..344bd3ec 100644
                      break;
                  }
              }
-@@ -2776,50 +3494,50 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2776,50 +3495,50 @@ void CDungeonMap::GetRoomLinkInfo() {
      int door_no = static_cast<int>((static_cast<float>(door_count) * static_cast<float>(rand())) / 2147483648.0f);
      x = door_pos[door_no][0];
      y = door_pos[door_no][1];
@@ -17451,7 +17455,7 @@ index d84b3a67..344bd3ec 100644
              break;
          default:
              std::println("ERROR !!");
-@@ -2832,13 +3550,13 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2832,13 +3551,13 @@ void CDungeonMap::GetRoomLinkInfo() {
      while (active != 0) {
          active = false;
  
@@ -17469,7 +17473,7 @@ index d84b3a67..344bd3ec 100644
                      case BUILD_CELL_CORRIDOR:
                          propagation_mask = BUILD_CELL_CORRIDOR | BUILD_CELL_DOOR | BUILD_CELL_STAIR_DOWN;
                          break;
-@@ -2853,62 +3571,62 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2853,62 +3572,62 @@ void CDungeonMap::GetRoomLinkInfo() {
                          break;
                  }
  
@@ -17548,7 +17552,7 @@ index d84b3a67..344bd3ec 100644
                          active = true;
                      }
                  }
-@@ -2917,12 +3635,12 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2917,12 +3636,12 @@ void CDungeonMap::GetRoomLinkInfo() {
      }
  
      // The item goes in a room on the stair's side of the door.
@@ -17563,7 +17567,7 @@ index d84b3a67..344bd3ec 100644
              room_list[room_count++] = i;
          }
      }
-@@ -2964,8 +3682,8 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2964,8 +3683,8 @@ void CDungeonMap::GetRoomLinkInfo() {
  
              this->room_link[0].item_x = (pos[0] + 80.0f) / 160.0f;
              this->room_link[0].item_y = (pos[2] + 80.0f) / 160.0f;
@@ -17574,7 +17578,7 @@ index d84b3a67..344bd3ec 100644
              this->room_link[0].used = 1;
              result_no++;
              active = false;
-@@ -2973,10 +3691,155 @@ void CDungeonMap::GetRoomLinkInfo() {
+@@ -2973,10 +3692,155 @@ void CDungeonMap::GetRoomLinkInfo() {
      }
  }
  
@@ -17733,7 +17737,7 @@ index d84b3a67..344bd3ec 100644
      }
  }
  
-@@ -2990,18 +3853,22 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -2990,18 +3854,22 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
      int free;
      int i;
  
@@ -17760,7 +17764,7 @@ index d84b3a67..344bd3ec 100644
                          break;
                      }
                  }
-@@ -3012,20 +3879,20 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -3012,20 +3880,20 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
                  for (i = 0; i < 4; i++) {
                      int dx = adjacent.offset[i][0];
                      int dy = adjacent.offset[i][1];
@@ -17784,7 +17788,7 @@ index d84b3a67..344bd3ec 100644
                          break;
                      }
                  }
-@@ -3038,6 +3905,13 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
+@@ -3038,6 +3906,13 @@ int CDungeonMap::CreatPartsList(int *list, int max, int first_part, int last_par
  
  namespace {
  
@@ -17798,7 +17802,7 @@ index d84b3a67..344bd3ec 100644
  int RollPercent() {
      return static_cast<int>((100.0f * static_cast<float>(rand())) / 2147483648.0f);
  }
-@@ -3056,11 +3930,400 @@ MAP_CELL &PickCell(CDungeonMap &map, std::span<const int> list, int num) {
+@@ -3056,11 +3931,400 @@ MAP_CELL &PickCell(CDungeonMap &map, std::span<const int> list, int num) {
      return map.cells[list[entry] + list[entry + 1] * kMapWidth];
  }
  
@@ -18200,7 +18204,7 @@ index d84b3a67..344bd3ec 100644
      }
  
      return num;
-@@ -3070,7 +4333,9 @@ int PlaceKeyDoor(CDungeonMap &map, std::span<int> list, int key_door_north) {
+@@ -3070,7 +4334,9 @@ int PlaceKeyDoor(CDungeonMap &map, std::span<int> list, int key_door_north) {
      int num = map.CreatPartsList(list.data(), kMaxPartsCandidates, MAP_PARTS_ROOM_DOOR_NORTH, MAP_PARTS_ROOM_DOOR_WEST);
  
      if (HasCandidates(num)) {
@@ -18211,7 +18215,7 @@ index d84b3a67..344bd3ec 100644
      }
  
      return num;
-@@ -3107,7 +4372,7 @@ void CDungeonMap::BuildCharaSpecialParts() {
+@@ -3107,7 +4373,7 @@ void CDungeonMap::BuildCharaSpecialParts() {
          roll = 0;
      }
  
@@ -18220,7 +18224,7 @@ index d84b3a67..344bd3ec 100644
          PlaceKeyPart(*this, list, MAP_PARTS_KEY_XIAO);
      }
  
-@@ -3118,80 +4383,80 @@ void CDungeonMap::BuildCharaSpecialParts() {
+@@ -3118,80 +4384,80 @@ void CDungeonMap::BuildCharaSpecialParts() {
  
      switch (selectMapNo) {
          case DUNGEON_WISE_OWL_FOREST:
@@ -18315,7 +18319,7 @@ index d84b3a67..344bd3ec 100644
                  PlaceKeyPart(*this, list, MAP_PARTS_KEY_OSMOND);
              }
  
-@@ -3228,7 +4493,16 @@ int CDungeonMap::SetCharaDoor(int chara_no) {
+@@ -3228,7 +4494,16 @@ int CDungeonMap::SetCharaDoor(int chara_no) {
      }
  }
  
@@ -18332,7 +18336,7 @@ index d84b3a67..344bd3ec 100644
      int w;
      int h;
      int j;
-@@ -3243,18 +4517,44 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3243,18 +4518,44 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      int near_no;
      int near_dist;
  
@@ -18379,7 +18383,7 @@ index d84b3a67..344bd3ec 100644
          this->boxes[i].used = 0;
          this->boxes[i].lid_angle = 0;
          this->boxes[i].trap_no = 0;
-@@ -3272,39 +4572,41 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3272,39 +4573,41 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          this->room_link[i].used = 0;
      }
  
@@ -18433,7 +18437,7 @@ index d84b3a67..344bd3ec 100644
                  roomStackCnt++;
                  done = 1;
              } else {
-@@ -3317,29 +4619,39 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3317,29 +4620,39 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          }
      }
  
@@ -18478,7 +18482,7 @@ index d84b3a67..344bd3ec 100644
                      w = (roomStack[roomStackCnt - 1].x + roomStack[roomStackCnt - 1].width / 2) - (roomStack[j].x + roomStack[j].width / 2);
                      h = (roomStack[roomStackCnt - 1].y + roomStack[roomStackCnt - 1].height / 2) - (roomStack[j].y + roomStack[j].height / 2);
  
-@@ -3351,7 +4663,7 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3351,7 +4664,7 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
                      }
                  }
  
@@ -18487,7 +18491,7 @@ index d84b3a67..344bd3ec 100644
                  done = 1;
              } else {
                  retry++;
-@@ -3363,27 +4675,52 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3363,27 +4676,52 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          }
      }
  
@@ -18549,7 +18553,7 @@ index d84b3a67..344bd3ec 100644
          }
      }
  
-@@ -3391,14 +4728,20 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3391,14 +4729,20 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
          this->buildDummyModel();
      }
  
@@ -18572,7 +18576,7 @@ index d84b3a67..344bd3ec 100644
      // Which key opens the floor's gate.
      switch (selectMapNo) {
          case DUNGEON_DIVINE_BEAST_CAVE:
-@@ -3433,7 +4776,22 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
+@@ -3433,7 +4777,22 @@ void CDungeonMap::buildRandomMap(int room_max, int first_build) {
      }
  
      this->SetUnderLoad();
@@ -18595,7 +18599,7 @@ index d84b3a67..344bd3ec 100644
  }
  
  void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
-@@ -3456,7 +4814,7 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3456,7 +4815,7 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
      this->chest_collision_model = nullptr;
      this->fall_model = nullptr;
  
@@ -18604,7 +18608,7 @@ index d84b3a67..344bd3ec 100644
          this->boxes[i].used = 0;
      }
  
-@@ -3473,14 +4831,14 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3473,14 +4832,14 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
          this->parts[i].initalize();
      }
  
@@ -18621,7 +18625,7 @@ index d84b3a67..344bd3ec 100644
          this->room_seen[i] = 0;
      }
  
-@@ -3490,12 +4848,12 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
+@@ -3490,12 +4849,12 @@ void CDungeonMap::initSubmap(CDataAlloc2<1> *alloc) {
          this->npc[i].draw_num = 0;
      }
  
@@ -18636,7 +18640,7 @@ index d84b3a67..344bd3ec 100644
          this->boxes[j].used = 0;
          this->boxes[j].lid_angle = 0;
          this->boxes[j].trap_no = 0;
-@@ -3534,7 +4892,7 @@ void CDungeonMap::initalize() {
+@@ -3534,7 +4893,7 @@ void CDungeonMap::initalize() {
      this->chest_collision_model = nullptr;
      this->fall_model = nullptr;
  
@@ -18645,7 +18649,7 @@ index d84b3a67..344bd3ec 100644
          this->boxes[i].used = 0;
      }
  
-@@ -3550,14 +4908,14 @@ void CDungeonMap::initalize() {
+@@ -3550,14 +4909,14 @@ void CDungeonMap::initalize() {
          this->parts[i].initalize();
      }
  
@@ -18662,7 +18666,7 @@ index d84b3a67..344bd3ec 100644
          this->room_seen[i] = 0;
      }
  
-@@ -3567,12 +4925,12 @@ void CDungeonMap::initalize() {
+@@ -3567,12 +4926,12 @@ void CDungeonMap::initalize() {
          this->npc[i].draw_num = 0;
      }
  
@@ -18677,7 +18681,7 @@ index d84b3a67..344bd3ec 100644
          this->boxes[j].used = 0;
          this->boxes[j].lid_angle = 0;
          this->boxes[j].trap_no = 0;
-@@ -3593,4 +4951,79 @@ void CDungeonMap::initalize() {
+@@ -3593,4 +4952,79 @@ void CDungeonMap::initalize() {
      this->draw_dist_scale = 4.0f;
  }
  
@@ -28228,10 +28232,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..5627cd06
+index 00000000..6c25cbc0
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,16684 @@
+@@ -0,0 +1,16690 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -28375,6 +28379,7 @@ index 00000000..5627cd06
 +        combined.map_reveal = combined.map_reveal || tuning.map_reveal;
 +        combined.monster_reveal = combined.monster_reveal || tuning.monster_reveal;
 +        combined.map_hidden = combined.map_hidden || tuning.map_hidden;
++        combined.map_window = combined.map_window || tuning.map_window;
 +        combined.status_duration *= tuning.status_duration;
 +        combined.status_immune |= tuning.status_immune;
 +        combined.swap_delay *= tuning.swap_delay;
@@ -36785,6 +36790,7 @@ index 00000000..5627cd06
 +            {"map_reveal", tuning.map_reveal},
 +            {"monster_reveal", tuning.monster_reveal},
 +            {"map_hidden", tuning.map_hidden},
++            {"map_window", tuning.map_window},
 +            {"status_duration", tuning.status_duration},
 +            {"status_immune", StatusImmuneJson(tuning.status_immune)},
 +            {"swap_delay", tuning.swap_delay},
@@ -36813,7 +36819,7 @@ index 00000000..5627cd06
 +    if (owner.empty() || !args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected a tuning object: run_speed, attack_anim_speed, recoil_scale, gauge_refill, thirst_drain, "
 +                       "durability_wear, status_duration (0.25 to 4), swap_delay (0 to 4), invincible_bonus_frames (0 to 120), "
-+                       "map_reveal, monster_reveal, map_hidden, dodge_hop (booleans), status_immune (a list of ailment names), "
++                       "map_reveal, monster_reveal, map_hidden, map_window, dodge_hop (booleans), status_immune (a list of ailment names), "
 +                       "dodge_power (0 or 0.25 to 4), dodge_invincible_frames (0 to 60), dodge_gauge (0 to 100), dodge_run (0 to 200), lightness (boolean), "
 +                       "stamina ({character id = gauge a second, 0 to 600}), extra_shots (0 to 2), shots_pierce (boolean), "
 +                       "reach_scale (0.25 to 4), first_person (boolean: false turns off R2's first-person view), "
@@ -36851,9 +36857,12 @@ index 00000000..5627cd06
 +            tuning.invincible_bonus_frames = static_cast<int>(frames);
 +            continue;
 +        }
-+        if (key == "map_reveal" || key == "monster_reveal" || key == "map_hidden") {
++        if (key == "map_reveal" || key == "monster_reveal" || key == "map_hidden" || key == "map_window") {
 +            if (!value.is_boolean()) return Invalid(key + " must be a boolean");
-+            (key == "map_reveal" ? tuning.map_reveal : (key == "monster_reveal" ? tuning.monster_reveal : tuning.map_hidden)) = value.get<bool>();
++            bool &flag = key == "map_reveal" ? tuning.map_reveal
++                       : key == "monster_reveal" ? tuning.monster_reveal
++                       : key == "map_hidden" ? tuning.map_hidden : tuning.map_window;
++            flag = value.get<bool>();
 +            continue;
 +        }
 +        if (key == "dodge_power") {
@@ -42662,6 +42671,7 @@ index 00000000..5627cd06
 +bool ChroniclePlayerMapReveal() { return g_player_tuning.map_reveal; }
 +bool ChroniclePlayerMonsterReveal() { return g_player_tuning.monster_reveal; }
 +bool ChroniclePlayerMapHidden() { return g_player_tuning.map_hidden; }
++bool ChroniclePlayerMapWindow() { return g_player_tuning.map_window; }
 +
 +// A charged move, by character: Toan's held charge, Xiao's full-gauge shot, Goro's swing held into a second spin,
 +// Ruby's full charge, Osmond's charged shot. Ungaga's attack is a combo with no charge.
@@ -47259,10 +47269,10 @@ index 00000000..a267d5ec
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..f0dc025f
+index 00000000..71f501c1
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3595 @@
+@@ -0,0 +1,3600 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/symlinks.hpp"
 +#include "moonmod/manager_ui.hpp"
@@ -47271,6 +47281,7 @@ index 00000000..f0dc025f
 +
 +#include <algorithm>
 +#include <array>
++#include <chrono>
 +#include <cmath>
 +#include <cstdint>
 +#include <cstdio>
@@ -49524,9 +49535,13 @@ index 00000000..f0dc025f
 +            return {ApiCallStatus::Unsupported, nullptr, reason};
 +        }
 +        if (path == "info.get") {
++            // The calendar day in UTC, so a daily challenge seed is the same for every player that day.
++            const std::chrono::year_month_day today{std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now())};
 +            return {ApiCallStatus::Ok,
 +                    {{"id", config.game_id}, {"name", config.game_name}, {"api_major", config.framework_api},
-+                     {"mod_id", manifest.id}},
++                     {"mod_id", manifest.id},
++                     {"date", {{"year", static_cast<int>(today.year())}, {"month", static_cast<unsigned>(today.month())},
++                               {"day", static_cast<unsigned>(today.day())}}}},
 +                    {}};
 +        }
 +        if (path == "events.list") {
@@ -61324,10 +61339,10 @@ index d0b258b9..83b2ced9 100644
          EXPECT_TRUE(item::ValidId(def->id)) << def->id;
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
-index 00000000..630cfec7
+index 00000000..7b9bdd74
 --- /dev/null
 +++ b/port/src/tests/moonmod_api_test.cpp
-@@ -0,0 +1,2275 @@
+@@ -0,0 +1,2281 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -63534,6 +63549,12 @@ index 00000000..630cfec7
 +    EXPECT_FLOAT_EQ(moonmod::ChroniclePlayerSwapDelay(), 0.0f);
 +    EXPECT_EQ(call("player.tuning_set", "test.a", Json::array({Json{{"swap_delay", 0.5}}})).value["tuning"]["swap_delay"], 0.5);
 +    EXPECT_FALSE(tuning.map_hidden); // test.a replaced its set
++    // The Gauntlet's square map.
++    ASSERT_EQ(call("player.tuning_set", "test.d", Json::array({Json{{"map_window", true}}})).status, ApiCallStatus::Ok);
++    EXPECT_TRUE(moonmod::ChroniclePlayerMapWindow());
++    EXPECT_EQ(call("player.tuning_set", "test.d", Json::array({Json{{"map_window", 1}}})).status, ApiCallStatus::InvalidArgument);
++    ASSERT_EQ(call("player.tuning_set", "test.d", Json::array({Json::object()})).status, ApiCallStatus::Ok);
++    EXPECT_FALSE(moonmod::ChroniclePlayerMapWindow());
 +    for (const Json &bad : {Json{{"status_immune", {"sleep"}}}, Json{{"status_immune", "freeze"}}, Json{{"swap_delay", -1}},
 +                            Json{{"swap_delay", 5}}, Json{{"status_duration", 0}}, Json{{"map_hidden", "yes"}}}) {
 +        EXPECT_EQ(call("player.tuning_set", "test.a", Json::array({bad})).status, ApiCallStatus::InvalidArgument) << bad.dump();

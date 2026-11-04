@@ -10,6 +10,16 @@ drive it and check what comes out.
 
 Python 3.11, no packages needed. `DC2TK=<path to dc2tk.exe>` points at another toolkit build.
 
+## In Blender: the MoonMod add-on
+
+`blender/moonmod_chr_addon.py` puts these tools in Blender's sidebar (N > MoonMod) for a character's `.blend`:
+**Check** (the modelling rules below: one `skin` mesh, chain joints only, at most 4 weights a vertex, the pack's
+picture names and sizes), **Fit Game Model** (`retail`, for a character the game already has, such as Seda),
+**Build Pack** and **Install Pack** (into the mod that registers him). Install it with Edit > Preferences > Add-ons >
+Install from Disk, then set the MoonMod checkout, `dc2tk.exe` and your game data's `dun/mainchara` in its
+preferences. The rules are tested on Opar's and Seda's files (`tools/tests/test_chr_addon.py`, with `pip install
+bpy`).
+
 ## The round trip
 
 ```bash

@@ -16,6 +16,7 @@ When a page says "the Gauntlet does it this way", the code is there to read.
 | Make your first mod and see it run | [Your first mod](FIRST_MOD.md) |
 | Do something specific: a new floor, an NPC, a boss, a game mode, a weapon, a hero | [Cookbook](COOKBOOK.md) |
 | Do something the API can't do yet | [Extending the engine](EXTENDING_THE_ENGINE.md) |
+| Plan for the button-prompt scenes or fishing | [Event battles and fishing](EVENT_BATTLES_AND_FISHING.md) |
 | Check that your mod works, outside and inside the game | [Testing mods](TESTING.md) |
 | Understand how Dark Cloud's own code behaves (units, floors, triggers, saves) | [Dark Cloud engine notes](DARK_CLOUD_NOTES.md) |
 | Look up an exact operation, field or event | [API map](../API.md) |

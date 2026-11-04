@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.roguelike",
   "name": "Dark Genie's Gauntlet (Roguelike)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Jeffiest",
   "description": "A roguelike game mode on the title menu. Dark Genie's Gauntlet has its own title screen and its own progress: Start Run begins a fresh game that belongs to no save file and drops you onto the first floor of a forward-only run through five biomes, three floors and a Warden each. Cursed Gates, fast ABS, one weapon each (a broken one ends the run), an in-run Diorama, drafted allies and Moon Shards for the Norune Eternal unlocks. Needs the MoonFactory engine with title modes.",
   "framework_api": 1,
@@ -30,8 +30,11 @@
     {"id": "preroll_weapons", "name": "Found weapons arrive pre-leveled", "type": "boolean", "default": true},
     {"id": "enforce_draft", "name": "Only drafted allies may fight", "type": "boolean", "default": true},
     {"id": "move_tips", "name": "Move tips: each character's controls when they join a run", "type": "boolean", "default": true},
+    {"id": "square_map", "name": "Square map: the corner map scrolls around you, as in Vigil", "type": "boolean", "default": true, "description": "Off: the game's own corner map, the whole floor at once."},
+    {"id": "map_screen", "name": "Map screen: Select, L3 or M shows the whole floor", "type": "boolean", "default": true, "description": "As far as you've seen it (all of it with a Lamp), with you on it. Triangle puts a waypoint, which the corner map flags too. L1+Select still curses the next floor."},
     {"id": "curse_key", "name": "Cursed Gate toggle key", "type": "choice", "default": "G", "choices": ["G", "H", "U", "F7", "F8", "F9"]},
     {"id": "opar", "name": "Opar joins the roster (in development)", "type": "boolean", "default": false, "description": "A seventh hero for new runs: Opar, the frog mage, with his own staffs, moves and voice. He can be drafted or chosen as the starting character. Without this setting, he joins once his star in Norune Eternal's Allies is bought (it rises when a run beats the Moon Sea Warden). Runs only: he is never written to a save."},
+    {"id": "seda", "name": "Seda joins the roster (needs his pack)", "type": "boolean", "default": false, "description": "An eighth hero for new runs: Seda, the swordsman of four hundred years ago, fighting with Toan's swords. He needs his model, built from art/seda into resources/seda/c08d.chr, and Opar's roster (the Opar setting or his star), since a run's party reaches him only past Opar. Runs only."},
     {"id": "companion", "name": "Companion: a drafted ally fights beside you", "type": "boolean", "default": false, "description": "Needs the Eternal tree's Companion. Off: drafted allies wait on the bench until you switch to them."},
     {"id": "journal_page", "name": "Also show the run on Journal > Character (Start opens the run menu)", "type": "boolean", "default": false}
   ]

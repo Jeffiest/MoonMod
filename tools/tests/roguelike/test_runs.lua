@@ -1344,6 +1344,55 @@ do
         tostring(SO.dungeon) .. ":" .. tostring(SO.floor))
 end
 
+-- 29. The map, as Vigil has it ---------------------------------------------------------------------------------
+print("Scenario 29: the square map and the map screen")
+do
+  local SM = boot({})
+  start_run(SM); run_floor(SM)
+  check(SM.tuning.map_window == true, "the corner map is the square that scrolls around you, by default")
+  SM.input_pressed["curse_pad_back"] = true; SM.tick(1)
+  check(SM.map and SM.map.id == "gauntlet.map" and SM.map.title == "Divine Beast Cave" and SM.map.waypoints == true and
+        SM.map.subtitle:find("^Floor I "), "Select opens the floor's map, with waypoints", SM.map and SM.map.subtitle)
+  local opened = SM.maps_opened
+  SM.input_pressed["map_key"] = true; SM.tick(1)
+  check(SM.maps_opened == opened, "not again while it is open")
+  SM.emit("ui.map_closed", {id = "gauntlet.map"}); SM.input_pressed["map_key"] = true; SM.tick(1)
+  check(SM.maps_opened == opened, "nor by the press that closed it")
+  SM.tick(20); SM.input_pressed["map_key"] = true; SM.tick(1)
+  check(SM.maps_opened == opened + 1, "L3 or M opens it later")
+  SM.emit("ui.map_closed", {id = "gauntlet.map"}); SM.tick(20)
+  SM.input_down["curse_pad_l1"] = true; SM.input_pressed["curse_pad_back"] = true; SM.tick(1); SM.input_down["curse_pad_l1"] = nil
+  check(SM.maps_opened == opened + 1 and SM.storage.run.next_cursed == true, "L1+Select still curses the next floor")
+  local SO = boot({overrides = {square_map = false, map_screen = false}})
+  start_run(SO); run_floor(SO)
+  SO.input_pressed["map_key"] = true; SO.tick(1)
+  check(SO.tuning.map_window == false and not SO.map, "with both settings off: the game's own corner map and no map screen")
+  local SB = boot({storage = {meta = {eternal = {blind = 1}}}})
+  start_run(SB); run_floor(SB)
+  SB.input_pressed["map_key"] = true; SB.tick(1)
+  check(not SB.map and SB.last_toast():find("Blind Halls"), "Blind Halls: no map screen either", SB.last_toast())
+end
+
+-- 30. Seda, the eighth hero (the Seda setting, with his pack): only alongside Opar ------------------------------
+print("Scenario 30: Seda and a party of eight")
+do
+  local SA = boot({overrides = {opar = true, seda = true}, storage = {meta = {eternal = {fullparty = 1}}}})
+  check(SA.overrides["dun/mainchara/c08d.chr"] == "resources/seda/c08d.chr", "his pack is registered from the mod's resources")
+  check(SA.game.characters.register_playable({id = "seda", name = "Seda", pack = "dun/mainchara/c08d.chr"}).character_id == 7,
+        "he is the second playable character past the six (engine index 7), after Opar")
+  SA.open_title_mode(); SA.select("start")
+  check(#SA.party == 8 and SA.party[8] == "seda", "with Opar's roster, Start Run asks for a party of eight", #SA.party)
+  SA.tick(60)
+  local run = SA.storage.run
+  check(run.seda == true and #run.drafted == 8, "and the run keeps him (Full Party drafts all eight)", #run.drafted)
+  run_floor(SA)
+  check(SA.menu_row("party", "seda") ~= nil, "the run menu's Party tab lists him")
+
+  local SB = boot({overrides = {seda = true}})
+  SB.open_title_mode(); SB.select("start"); SB.tick(60)
+  check(#SB.party == 6 and SB.storage.run.seda == false, "without Opar's roster the Seda setting adds no one", #SB.party)
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then
   print("Last toasts:"); for i = math.max(1, #S.toasts - 5), #S.toasts do print("  " .. S.toasts[i]) end

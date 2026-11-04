@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.challenges",
+  "name": "Challenges",
+  "version": "0.3.0",
+  "author": "Jeffiest",
+  "description": "Boss fights worth the name, and challenge modes on the title menu's Challenges row. Story bosses get a name card, an HP bar and two more phases: enraged at half health, desperate near the end. Boss Rush fights every story boss in a row in one sealed arena. The Shaft is an endless descent: monsters grow with every floor, a guardian waits every tenth, and each stratum asks for a pact. Seda's Chronicle is a four-chapter prologue, four hundred years before Dark Cloud.",
+  "framework_api": 1,
+  "games": [
+    "chronicle"
+  ],
+  "entry": "main.lua",
+  "permissions": [
+    "game.read",
+    "game.write",
+    "content.register",
+    "storage.read",
+    "storage.write"
+  ],
+  "settings": [
+    {"id": "phases", "name": "Boss phases (enraged at half health, desperate near the end)", "type": "boolean", "default": true},
+    {"id": "enraged_at", "name": "Enraged below (% health)", "type": "integer", "default": 50, "min": 20, "max": 80, "step": 5},
+    {"id": "desperate_at", "name": "Desperate below (% health)", "type": "integer", "default": 20, "min": 5, "max": 40, "step": 5},
+    {"id": "phase_damage", "name": "Enraged boss damage (%)", "type": "integer", "default": 140, "min": 100, "max": 250, "step": 10},
+    {"id": "boss_bar", "name": "Boss HP bar", "type": "boolean", "default": true},
+    {"id": "boss_card", "name": "Boss name card in the story", "type": "boolean", "default": true},
+    {"id": "rush_party", "name": "Boss Rush party", "type": "choice", "default": "Everyone", "choices": ["Everyone", "Toan alone"]},
+    {"id": "rush_life", "name": "Boss Rush boss life (%)", "type": "integer", "default": 100, "min": 50, "max": 200, "step": 10},
+    {"id": "shaft_party", "name": "The Shaft party", "type": "choice", "default": "Everyone", "choices": ["Everyone", "Toan alone"]}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.randomizer",
+  "name": "Randomizer",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "A new Dark Cloud from one seed: shop stock, weapon stats, monster drops and steals, chest contents and floor layouts, all shuffled. A save keeps the seed it started with. Daily seeds come from the date, so everyone playing that day has the same game; the share code on the Check action lets a friend play yours.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write", "storage.read", "storage.write"],
+  "settings": [
+    {"id": "seed_mode", "name": "Seed for a new save", "type": "choice", "default": "Daily", "choices": ["Daily", "Fixed", "Random"]},
+    {"id": "seed", "name": "Fixed seed (with Seed: Fixed)", "type": "integer", "default": 1, "min": 0, "max": 999999, "step": 1},
+    {"id": "shops", "name": "Shuffle shop stock", "type": "boolean", "default": true},
+    {"id": "weapons", "name": "Shuffle weapon stats", "type": "boolean", "default": true},
+    {"id": "weapon_spread", "name": "Weapon stat spread (%)", "type": "integer", "default": 30, "min": 5, "max": 60, "step": 5},
+    {"id": "drops", "name": "Shuffle monster drops and steals", "type": "boolean", "default": true},
+    {"id": "chests", "name": "Chest items swapped (%)", "type": "integer", "default": 50, "min": 0, "max": 100, "step": 10},
+    {"id": "floors", "name": "Floors from the seed (the same for everyone on a seed)", "type": "boolean", "default": true}
+  ]
+}
