@@ -40,7 +40,9 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
       (scenario 30), his Chronicle, and a story join. **Blocked: his pack (`c08d.chr`) is not built**: that needs
       the DC1 toolkit and a disc's data, which this session lacks. Two commands build it (`art/seda/README.md`); the
       rest is in `docs/SEDA_PLAN.md`.
-- [ ] **9. Living towns.** Villager bounties on dungeon floors, shop stock that follows the story.
+- [x] **9. Living towns.** Villager bounties on dungeon floors, shop stock that follows the story. Built:
+      `mods/moonmod.living-towns` (a daily board of four bounty kinds, a villager by the exit gate who pays, general
+      stores restocked per dungeon reached), 27 headless checks. Needs a playtest.
 
 ## Multipliers
 

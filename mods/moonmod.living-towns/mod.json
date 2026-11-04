@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.living-towns",
+  "name": "Living Towns",
+  "version": "1.0.0",
+  "author": "Jeffiest",
+  "description": "The towns ask things of you after their houses are rebuilt. Each day the villagers post three bounties on the board (hunt in a dungeon, open its chests, go deeper, or bring them something), sized to how far your story has gone. A villager waits by the exit gate on a bounty's floors and pays you there. And the general stores stock better goods as each new dungeon is reached.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"],
+  "settings": [
+    {"id": "bounties", "name": "Bounty board", "type": "boolean", "default": true},
+    {"id": "bounty_count", "name": "Bounties a day", "type": "integer", "default": 3, "min": 1, "max": 3, "step": 1},
+    {"id": "reward", "name": "Bounty rewards (%)", "type": "integer", "default": 100, "min": 25, "max": 300, "step": 25},
+    {"id": "villager", "name": "A villager waits on a bounty's floors", "type": "boolean", "default": true},
+    {"id": "stock", "name": "Stores stock better goods as the story goes on", "type": "boolean", "default": true}
+  ]
+}
