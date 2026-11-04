@@ -11,8 +11,10 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
 - [x] **1. Modern Cloud (quality of life).** Thirst down to off, slower weapon wear, a weapon break guard that warns
       and stops before a weapon breaks, map and monster reveal options, faster character switches, quick item
       keys, auto-repair from Repair Powder. Built: `mods/moonmod.modern-cloud`, 26 headless checks; needs a playtest.
-- [ ] **2. Bosses with phases, and Boss Rush.** Story bosses get a name card, a bottom HP bar and a second phase
-      below half health (faster, harder hits, adds). A Boss Rush title mode fights them in a row.
+- [x] **2. Bosses with phases, and Boss Rush.** Story bosses get a name card, an HP bar and a second phase
+      below half health, a third near the end. A Boss Rush title mode fights them in a row. Built:
+      `mods/moonmod.challenges`, 46 headless checks; needs a playtest, above all the tier numbers. The HP bar is
+      top left: the engine has no bottom bar yet.
 - [ ] **3. Character Paths for the whole party.** The RPG mod's paths for Xiao, Goro, Ruby, Ungaga and Osmond.
 - [ ] **4. Duels and fishing.** An option to skip or simplify duel QTEs; a written survey of the fishing code
       for a later fishing mod.
