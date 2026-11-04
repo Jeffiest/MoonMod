@@ -24,8 +24,10 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
 
 ## Mods
 
-- [ ] **5. Randomizer with daily seeds.** Chest weapons, shop stock, Atla and floor contents shuffled from one
-      seed; a daily seed from the date and a share code.
+- [x] **5. Randomizer with daily seeds.** Chest weapons, shop stock, Atla and floor contents shuffled from one
+      seed; a daily seed from the date and a share code. Built: `mods/moonmod.randomizer` (shops, weapon stats,
+      monster drops, chest items, floor layouts), 26 headless checks. The engine's `info.get` now reports the date.
+      Not shuffled: chest weapons and Atla, which have no API yet. Needs a playtest.
 - [ ] **6. The Shaft reborn.** An endless descent title mode: modifiers every ten floors, floor scaling, records.
 - [ ] **7. Seda's Chronicle.** A prologue title mode, Seda four hundred years before the game.
 - [ ] **8. The eighth hero: Seda.** Seda as a playable character in the Gauntlet and the story, on Opar's pipeline.
