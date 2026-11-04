@@ -93,11 +93,15 @@ local WARDEN_SLOT = 4
 -- character past the six, registered below (characters.register_playable, engine index 6); he is in the roster with
 -- the Opar setting, and a run keeps the roster it started with (run.opar). ROSTER maps the engine's character
 -- numbers; until his staffs (Opar plan phase 4) Opar fights as Toan, so Toan's weapons are his (ROSTER.fights_as).
-local ROSTER = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond", "opar", fights_as = {opar = "toan"}}
+-- Seda (docs/SEDA_PLAN.md) is the second, engine index 7, registered after Opar and only when his pack is in this
+-- mod's resources; he fights as Toan, with Toan's swords. A session's party reaches him only past Opar (a party of
+-- eight), so he comes with the Seda setting only alongside Opar's roster.
+local ROSTER = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond", "opar", "seda", fights_as = {opar = "toan", seda = "toan"}}
 local CHARACTERS = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
-function ROSTER.set(opar)
+function ROSTER.set(opar, seda)
   opar = opar and ROSTER.registered
-  for i = 1, #ROSTER do CHARACTERS[i] = (i <= 6 or opar) and ROSTER[i] or nil end
+  seda = opar and seda and ROSTER.seda_registered
+  for i = 1, #ROSTER do CHARACTERS[i] = (i <= 6 or (i == 7 and opar) or (i == 8 and seda)) and ROSTER[i] or nil end
 end
 local MODE = "gauntlet"
 local HUD_CACHE_IMAGE = "moonmod/roguelike/hud/cache.png" -- resources/hud/cache.png, the Miracle cache chest
@@ -397,7 +401,9 @@ local function node_id(tree, node) return ID .. ":" .. tree .. "." .. node end
 -- Gauntlet floors ---------------------------------------------------------------------------------------
 local run -- the run in progress (loaded from storage further down)
 -- The roster: the run's own while one is in progress, else the Opar setting's.
-function ROSTER.sync() ROSTER.set(run and run.opar == true or (not run and ROSTER.wanted())) end
+function ROSTER.sync()
+  if run then ROSTER.set(run.opar == true, run.seda == true) else ROSTER.set(ROSTER.wanted(), ROSTER.wanted_seda()) end
+end
 -- Each biome has five floors: I, II, III, IV and the Warden, after a Rest floor between biomes (registered first,
 -- so its exit gate leads on to floor I in the same dungeon). A run without Endless Maze skips IV (its gate on
 -- floor III is redirected to the Warden) and counts the Warden as slot 4. A sixth, the Genie's Lair, is the run's
@@ -495,6 +501,7 @@ end
 -- Opar in the roster: the Opar setting, or his star bought (oparstar). A hidden node or sky (`reveal`) is shown once
 -- meta[reveal] is set, or with the Opar setting on.
 function ROSTER.wanted() return setting("opar", false) or eternal("oparstar") > 0 end
+function ROSTER.wanted_seda() return setting("seda", false) end
 local function revealed(key) return key == nil or meta[key] == true or setting("opar", false) end
 local function heat()
   local h = 0
@@ -546,7 +553,7 @@ local function bp(id) return blessed(id) and (eternal("chosen") > 0 and 2 or 1) 
 local function sig(c, n) return run ~= nil and eternal(c .. "_" .. n) > 0 and contains(run.drafted, c) end
 -- The companion fights beside you only with its Eternal unlock and the Companion setting (off by default).
 local function companion_on() return eternal("companion") > 0 and setting("companion", false) end
-local CHAR_NO = {toan = 0, xiao = 1, goro = 2, ruby = 3, ungaga = 4, osmond = 5, opar = 6}
+local CHAR_NO = {toan = 0, xiao = 1, goro = 2, ruby = 3, ungaga = 4, osmond = 5, opar = 6, seda = 7}
 local function cursed(id) return floor and floor.cursed and contains(floor.curses, id) end
 local function plots() return BASE_PLOTS + eternal("well") + (eternal("plots") > 0 and 2 or 0) end
 local function placed_total() local n = 0; for _, id in ipairs(TILE_IDS) do n = n + placed(id) end; return n end
@@ -2217,11 +2224,12 @@ start_run = function()
   end
   local biomes = {}
   for i = 1, math.min(#available, setting("biome_count", 5)) do biomes[i] = available[i] end
-  ROSTER.set(ROSTER.wanted())
+  ROSTER.set(ROSTER.wanted(), ROSTER.wanted_seda())
   local start = contains(CHARACTERS, meta.start_char) and meta.start_char or "toan"
   run = {active = true, phase = "launch", biomes = biomes, pos = 1, slot = 1, depth = 0, next_cursed = false,
          stock = {}, diorama = {}, blessings = {}, drafted = {start}, shards = 0,
-         heirloom_charges = 0, kills = 0, weapons = {}, opar = CHARACTERS[7] ~= nil}
+         heirloom_charges = 0, kills = 0, weapons = {}, opar = CHARACTERS[7] ~= nil,
+         seda = CHARACTERS[8] ~= nil}
   -- Endless Maze: the five-floor biomes, when every one of them registered
   run.maze = eternal("maze") > 0
   WARDEN_SLOT = run.maze and 5 or 4
@@ -3609,6 +3617,12 @@ do
     portrait = "dun/mainchara/c07d_face.png", title = "Moon Sea Frog Mage", fights_as = ROSTER.fights_as.opar, hp = 90,
     defense = 21})
   ROSTER.registered = type(registered) == "table" and registered.character_id == 6
+  -- Seda, once his pack is built (art/seda, tools/chr/build_character.py) and put in resources/seda
+  if ROSTER.registered and call(game.resources.override, {path = "resources/seda/c08d.chr", game_path = "dun/mainchara/c08d.chr"}) then
+    local seda = call(game.characters.register_playable, {id = "seda", name = "Seda", pack = "dun/mainchara/c08d.chr",
+      title = "Swordsman of Old", fights_as = "toan", hp = 110, defense = 30})
+    ROSTER.seda_registered = type(seda) == "table" and seda.character_id == 7
+  end
   -- his staffs (LOOT.STAFFS), only with him: their models and icons (art/opar/make_staff_icons.py) and definitions
   if ROSTER.registered then
     for _, st in ipairs(LOOT.STAFFS) do

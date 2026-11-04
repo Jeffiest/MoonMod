@@ -34,7 +34,12 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
 - [x] **7. Seda's Chronicle.** A prologue title mode, Seda four hundred years before the game. Built: four
       chapters and an epilogue on the Challenges row, on the Shaft's floors and the arena. 93 headless checks for
       the mod. Toan walks in Seda's place until item 8 gives Seda his pack.
-- [ ] **8. The eighth hero: Seda.** Seda as a playable character in the Gauntlet and the story, on Opar's pipeline.
+- [x] **8. The eighth hero: Seda.** Seda as a playable character in the Gauntlet and the story, on Opar's pipeline.
+      Built: his own game model (`c07a`) fitted onto Toan's skeleton by `build_character.py retail` and
+      `make_seda.py --retail` (checked on a test model), his registration and roster place in the Gauntlet
+      (scenario 30), his Chronicle, and a story join. **Blocked: his pack (`c08d.chr`) is not built**: that needs
+      the DC1 toolkit and a disc's data, which this session lacks. Two commands build it (`art/seda/README.md`); the
+      rest is in `docs/SEDA_PLAN.md`.
 - [ ] **9. Living towns.** Villager bounties on dungeon floors, shop stock that follows the story.
 
 ## Multipliers

@@ -7,6 +7,11 @@ start: the template pack renamed (chrtool.derive), exported with its rest at the
        the starting Blender file <art>/<name>.blend made from it (blender/start_character.py), with a blockout body,
        its texture in <art>/textures and the concept picture (<art>/concept.*) as a reference. It will not overwrite
        an existing .blend.
+retail: a character the game already has, as his own model (Seda: pack c07a, from his floor 8 fight). The pack is
+       found in the game data (any *c07a*.chr under it with a skeleton, the largest; or --source), exported with its
+       rest at its bind pose, and <art>/make_<name>.py run with --retail on it, which fits his mesh onto the
+       template's skeleton, keeps his weights and bakes his pictures into the pack's pages (art/seda/make_seda.py).
+       Then build as for any character.
 build: the .blend's "Character" collection exported (blender/export_character.py) and built on the template:
        its meshes replace the template's by frame name, and every template mesh it does not give is removed
        (dc2tk_remove); with the cloth meshes gone, base.cfg's CLOTH and ALLOC_MDT lines are commented out. The
@@ -32,13 +37,15 @@ BLENDER = os.environ.get("BLENDER", "C:/Program Files/Blender Foundation/Blender
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 
 # The characters made this way: name -> (template pack, its shadow, the new pack, its shadow).
-CHARACTERS = {"opar": ("c01d", "c01s", "c07d", "c07s")}
+# RETAIL: the game's own pack a character is made from by `retail` (its stem).
+CHARACTERS = {"opar": ("c01d", "c01s", "c07d", "c07s"), "seda": ("c01d", "c01s", "c08d", "c08s")}
+RETAIL = {"seda": "c07a"}
 
 
 def blender(*args):
     out = subprocess.run([BLENDER, *map(str, args)], capture_output=True, text=True)
     lines = [l for l in out.stdout.splitlines() + out.stderr.splitlines()
-             if l.startswith(("START", "EXPORTED", "Error", "Traceback")) or "Error:" in l]
+             if l.startswith(("START", "EXPORTED", "SEDA", "Error", "Traceback")) or "Error:" in l]
     if out.returncode != 0 or any(l.startswith(("Error", "Traceback")) or "Error:" in l for l in lines):
         raise RuntimeError("blender failed:\n" + "\n".join(out.stdout.splitlines()[-30:] + out.stderr.splitlines()[-30:]))
     return lines
@@ -76,6 +83,45 @@ def start(args):
     os.environ["CHR_PACK"] = pack
     for line in blender("-b", "--factory-startup", "--python", os.path.join(HERE, "blender", "start_character.py"),
                         "--", gltf, os.path.join(art, "textures"), concept, blend):
+        print(line)
+
+
+def find_retail(mainchara, stem):
+    """The game's pack of `stem` with a skeleton (a .bbp member), the largest, anywhere under the data folder."""
+    sys.path.insert(0, os.path.join(HERE, "..", "anim"))
+    from moonanim import pack_members
+    data_root = os.path.normpath(os.path.join(mainchara, "..", ".."))
+    found = []
+    for path in glob.glob(os.path.join(data_root, "**", "*.chr"), recursive=True):
+        if stem.lower() not in os.path.basename(path).lower():
+            continue
+        try:
+            members = pack_members(open(path, "rb").read())
+        except Exception:
+            continue
+        if any(n.lower().endswith(".bbp") for n in members):
+            found.append((os.path.getsize(path), path))
+    if not found:
+        raise SystemExit("no %s pack with a skeleton under %s: name it with --source" % (stem, data_root))
+    for size, path in sorted(found, reverse=True):
+        print("found %s (%d bytes)" % (path, size))
+    return sorted(found, reverse=True)[0][1]
+
+
+def retail(args):
+    art, name = os.path.abspath(args.art), os.path.basename(os.path.abspath(args.art))
+    if name not in RETAIL:
+        raise SystemExit("%s is not made from a game pack (RETAIL)" % name)
+    source = args.source or find_retail(args.mainchara, RETAIL[name])
+    print("his own model:", source)
+    folder = os.path.join(art, "build", "retail")
+    shutil.rmtree(folder, ignore_errors=True)
+    gltf = chrtool.export(source, folder)
+    g = chrtool.Gltf(gltf)
+    chrtool.bind_rest(g, bbp_of(source))
+    g.save()
+    blend = os.path.join(art, name + ".blend")
+    for line in blender("-b", blend, "--python", os.path.join(art, "make_%s.py" % name), "--", "--retail", gltf):
         print(line)
 
 
@@ -173,12 +219,13 @@ def build(args):
 
 def main(argv):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("command", choices=("start", "build"))
+    p.add_argument("command", choices=("start", "retail", "build"))
     p.add_argument("mainchara", help="the game data's dun/mainchara folder")
     p.add_argument("--art", default=os.path.join(ROOT, "art", "opar"))
     p.add_argument("--out")
+    p.add_argument("--source", help="retail: the game pack to make him from, when it can't be found by name")
     args = p.parse_args(argv)
-    start(args) if args.command == "start" else build(args)
+    {"start": start, "retail": retail, "build": build}[args.command](args)
 
 
 if __name__ == "__main__":

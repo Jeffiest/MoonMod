@@ -94,9 +94,9 @@ local function boot(overrides, opts)
       set_warden_room = function(a) only(a, set({"enabled", "lock_in"}), "set_warden_room"); S.warden_room = a.enabled; return a end,
     },
     characters = {
-      register_playable = function(a)
-        assert(a.id == "seda" and a.pack and #a.name <= 10 and a.fights_as == "toan")
-        S.registered_playable = a; return {id = a.id, character_id = 7, count = 2}
+      get = function(a)
+        if a.id == "seda" and S.seda_pack then return {id = "seda", character_id = 7, fights_as = "toan"} end
+        return fail("not_found", "no such character")
       end,
       register = function(a)
         only(a, set({"id", "kind", "name", "template_monster_id"}), "characters.register")
@@ -176,7 +176,8 @@ local function boot(overrides, opts)
       finish = function() S.finished = S.finished + 1; return {} end,
     },
     party = {list = function() local l = {} for i, c in ipairs(S.party) do l[i] = {id = c} end return l end,
-             set_active = function(a) S.active_hero = a.id; return {} end},
+             set_active = function(a) S.active_hero = a.id; return {} end,
+             join = function(a) local was = S.joined; S.joined = a.character; return {character = a.character, joined = true, changed = not was} end},
     resources = {override = function(a)
       assert(a.path and a.game_path)
       if not S.seda_pack then return fail("not_found", "no such package file") end
@@ -199,7 +200,8 @@ local function boot(overrides, opts)
       end,
       tuning_clear = function() S.tuning = nil; return {} end,
     },
-    weapons = {durability_set = function(a) S.mended = a.durability; return {} end},
+    weapons = {durability_set = function(a) S.mended = a.durability; return {} end,
+               give = function(a) S.given_weapon = a; return {equipped = true} end},
     items = {give = function(a) S.given[a.id] = (S.given[a.id] or 0) + a.count; return {} end},
     combat = {register_formula = function(a)
       only(a, set({"id", "operation", "value", "priority"}), "register_formula")
@@ -393,7 +395,7 @@ check(S.title.entries[3].id == "seda" and S.title.entries[3].enabled, "the Chall
 S.emit("game.title.selected", {entry = "seda"})
 check(S.title.title == "SEDA'S CHRONICLE" and S.title.entries[1].id == "seda_start", "its page")
 S.emit("game.title.selected", {entry = "seda_start"})
-check(S.started.floor == S.shaft_floors[1].id and S.started.party_size == 1 and S.registered_playable == nil, "no pack: Toan alone starts in the cave")
+check(S.started.floor == S.shaft_floors[1].id and S.started.party_size == 1, "no Seda: Toan alone starts in the cave")
 S.session = ID; S.emit("game.session.started", {owner = ID}); S.context = "dungeon"
 check(S.cards[#S.cards].kicker == "CHAPTER I" and S.formula.seda_power == 3 and S.max_hp.toan == 220, "Chapter I's card, and a veteran's strength")
 S.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 20})
@@ -451,14 +453,29 @@ check(S.finished == 1, "back to the title")
 S.session = nil; S.emit("game.session.ended", {owner = ID, reason = "ended"})
 check(S.npc == nil and S.exits == nil and S.formula.seda_power == 1 and S.warden_room == false, "everything put back")
 
-print("Seda's Chronicle with Seda's pack")
+print("Seda's Chronicle with Seda registered")
 S = boot()
 S.seda_pack = true
-S.emit("game.title.selected", {entry = "seda"}); S.emit("game.title.selected", {entry = "seda_start"})
-check(S.registered_playable and S.registered_playable.pack == "dun/mainchara/c08d.chr", "Seda registers as the Chronicle starts")
-check(S.started.party_size == 8, "the party reaches his place")
+S.emit("game.title.selected", {entry = "seda"})
+check(S.title.lines[4] == "Seda walks it.", "the page says Seda walks it", S.title.lines[4])
+S.emit("game.title.selected", {entry = "seda_start"})
+check(S.started.party_size == 8, "the party reaches his place (index 7)")
 S.session = ID; S.emit("game.session.started", {owner = ID})
 check(S.active_hero == "seda", "and Seda takes the field")
 
+
+print("Seda joins the story")
+S = boot({}, {storage = {records = {seda_clears = 0}}})
+S.seda_pack = true
+S.emit("ui.action", {id = "seda_join"})
+check(S.joined == nil and S.notices[#S.notices]:find("to its end first"), "not before his Chronicle is seen to its end")
+S = boot({}, {storage = {records = {seda_clears = 1}}})
+S.emit("ui.action", {id = "seda_join"})
+check(S.joined == nil and S.notices[#S.notices]:find("not built"), "nor without his pack")
+S.seda_pack = true
+S.emit("ui.action", {id = "seda_join"})
+check(S.joined == "seda" and S.given_weapon and S.given_weapon.character == "seda", "then he joins, a Dagger in hand")
+S.emit("ui.action", {id = "seda_join"})
+check(S.notices[#S.notices]:find("already"), "once")
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -75,7 +75,6 @@ local bar_shown = false
 local rush = nil       -- the Boss Rush run, while one is going (below)
 local seda = nil       -- Seda's Chronicle, while it is being played (below)
 local seda_generating  -- its floor setup (below)
-local seda_registered  -- Seda's engine index once registered, false if he can't be (below)
 local shaft = nil      -- the Shaft's descent, while one is going (below)
 local shaft_generating -- the Shaft's floor setup (below)
 
@@ -578,11 +577,9 @@ end
 -- floors the other modes already hold (the Shaft's three and the Boss Rush arena), so it takes no floor slot of its
 -- own. Each chapter opens with a card and a page of story, sets a task, and closes with another page.
 --
--- Seda himself is a playable character (characters.register_playable) once his pack is built (docs/SEDA_PLAN.md):
--- `resources/seda/c08d.chr`. Registering takes the next engine index, and the Gauntlet's Opar must keep 6, so Seda
--- registers only when the Chronicle starts, long after every mod has loaded. Until the pack exists, Toan walks in
--- his place.
-local SEDA_PACK = "dun/mainchara/c08d.chr"
+-- Seda himself is a playable character once his pack is built (docs/SEDA_PLAN.md). The Gauntlet registers him, right
+-- after Opar so their engine indices stay 6 and 7 (one mod owns an id), and the Chronicle plays him when he is there.
+-- Until then Toan walks in his place.
 local function seda_floor(dungeon)
   for _, f in ipairs(shaft_floors) do if f.dungeon == dungeon then return f.id end end
 end
@@ -728,17 +725,10 @@ seda_generating = function(e)
   if not c.arena then try(game.world.dungeon_npc_set, {id = "wanderer", model = "gedit/e01/chara/p02a.chr", place = "exit"}) end
 end
 
+-- Seda's engine index when another mod has registered him, else nil.
 local function seda_hero()
-  -- a pack in the mod's resources: register Seda (once a game) and play him
-  if seda_registered == nil then
-    seda_registered = false
-    if try(game.resources.override, {path = "resources/seda/c08d.chr", game_path = SEDA_PACK}) then
-      local r = try(game.characters.register_playable, {id = "seda", name = "Seda", pack = SEDA_PACK, title = "Swordsman of Old",
-                                                         fights_as = "toan", hp = 160, defense = 40})
-      seda_registered = type(r) == "table" and r.character_id or false
-    end
-  end
-  return seda_registered
+  local r = try(game.characters.get, {id = "seda"})
+  return type(r) == "table" and tonumber(r.character_id) or nil
 end
 
 local function start_seda()
@@ -804,6 +794,21 @@ moonmod.on("ui.choice_made", function(e)
   end
 end)
 
+-- Seda in the story: once his Chronicle has been seen to the end, he can join a story party (a Mod Manager action).
+-- He comes with a Dagger in hand, as the story's own joins come with a first weapon.
+try(game.ui.register, {id = "seda_join", label = "Seda Joins the Party",
+    description = "After Seda's Chronicle: Seda joins your story party, fighting with Toan's swords"})
+moonmod.on("ui.action", function(a)
+  if not a or a.id ~= "seda_join" then return end
+  if (records.seda_clears or 0) == 0 then notify("See Seda's Chronicle to its end first (title menu > Challenges)."); return end
+  if session_owner then notify("Seda joins a story game, not a challenge run."); return end
+  if not seda_hero() then notify("Seda isn't registered: his pack is not built yet (docs/SEDA_PLAN.md)."); return end
+  local r, err = try(game.party.join, {character = "seda"})
+  if not r then notify("Seda can't join now: " .. errmsg(err)); return end
+  if r.changed then try(game.weapons.give, {id = "chronicle:weapon:258", character = "seda"}) end
+  notify(r.changed and "Seda joins the party. Four hundred years, and he fights again." or "Seda is already in the party.")
+end)
+
 -- Title pages --------------------------------------------------------------------------------------------------------
 local function best_line()
   if records.best then return string.format("Best time %s, %d clear%s", clock(records.best), records.clears, records.clears == 1 and "" or "s") end
@@ -823,7 +828,7 @@ show = function(name)
     try(game.title.mode_set, {id = MODE, title = "SEDA'S CHRONICLE", subtitle = "Four hundred years before Dark Cloud", root = false,
         lines = {"A swordsman goes down after the Dark Genie.", "Four chapters, from the cave to the Genie's lair.",
                  string.format("Chapters finished: %d of 4%s", records.seda_chapter or 0, (records.seda_clears or 0) > 0 and ", the end seen" or ""),
-                 "Toan walks in Seda's place until Seda's", "model is built (docs/SEDA_PLAN.md)."},
+                 (seda_hero() and "Seda walks it." or "Toan walks in Seda's place until his"), (seda_hero() and "" or "model is built (docs/SEDA_PLAN.md).")},
         entries = {{id = "seda_start", label = "Begin the Chronicle"}}})
   elseif name == "shaft" then
     try(game.title.mode_set, {id = MODE, title = "THE SHAFT", subtitle = "How deep can you go?", root = false,
