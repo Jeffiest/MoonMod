@@ -1,7 +1,7 @@
 -- Challenges: boss fights worth the name, and challenge modes under one title-menu row.
 --
--- Boss phases (story game and Boss Rush): a story boss in sight gets a name card, an HP bar (top left, with the game's
--- other bars) and two more phases. Below `enraged_at` it is enraged: it hits harder, takes a little less, glows red
+-- Boss phases (story game and Boss Rush): a story boss in sight gets a name card, an HP bar (along the bottom with its
+-- name; top left with the game's other bars on an engine without the boss bar) and two more phases. Below `enraged_at` it is enraged: it hits harder, takes a little less, glows red
 -- and grows. Below `desperate_at` it is desperate: harder still, purple. Each phase starts with a burst of smoke and a
 -- notice. Bosses are known by their native model number (entities.query's native_model_id).
 --
@@ -72,6 +72,7 @@ local function other_session() return session_owner ~= nil and session_owner ~= 
 local tracked = {}     -- by entity handle: {model, phase, base, defense, carded}
 local floor_token = nil
 local bar_shown = false
+local boss_bar = true   -- false once the engine has refused render.bar_register's boss flag (an older engine)
 local rush = nil       -- the Boss Rush run, while one is going (below)
 local seda = nil       -- Seda's Chronicle, while it is being played (below)
 local seda_generating  -- its floor setup (below)
@@ -138,7 +139,12 @@ local function watch_bosses()
     end
   end
   if main and setting("boss_bar", true) then
-    try(game.render.bar_register, {id = "boss", label = main.name:upper():sub(1, 24), current = clamp(main.cur, 0, main.max), max = main.max})
+    local bar = {id = "boss", label = main.name:upper():sub(1, 24), current = clamp(main.cur, 0, main.max), max = main.max}
+    if boss_bar then
+      bar.boss = true
+      if not try(game.render.bar_register, bar) then boss_bar, bar.boss = false, nil end
+    end
+    if not boss_bar then try(game.render.bar_register, bar) end
     bar_shown = true
   else
     remove_bar()
@@ -326,6 +332,13 @@ local function rush_tick()
 end
 
 moonmod.on("game.dungeon.warden_room", function(e)
+  -- The Boss Rush arena and the Genie's lair hold nothing but their room: no walk to find it, the player is put in
+  -- the middle of it as it opens, and walking in shuts its doors as before.
+  local arena_floor = (rush and rush.live and not rush.center) or (seda and seda.live and seda.arena and not seda.room)
+  if arena_floor and e and e.state == "open" and type(e.center) == "table" then
+    try(game.dungeons.warp, {x = math.floor((tonumber(e.center.x) or 0) / 160 + 0.5), y = math.floor((tonumber(e.center.z) or 0) / 160 + 0.5)})
+    return
+  end
   if seda and seda.live and e and e.state == "entered" and type(e.center) == "table" and not seda.room then
     seda.room = {x = tonumber(e.center.x) or 0, y = tonumber(e.center.y) or 0, z = tonumber(e.center.z) or 0}
     return
@@ -520,6 +533,7 @@ shaft_generating = function(e)
   shaft.depth = shaft.depth + 1
   shaft.scaled, shaft.toughest, shaft.room, shaft.guardian, shaft.guardian_done = {}, nil, nil, nil, false
   shaft.guardian_floor = shaft.depth % 10 == 0
+  try(game.render.floor_label_set, {text = tostring(math.min(shaft.depth, 999999)), number = clamp(shaft.depth, 1, 99)})
   local swarm = pact_count("swarm")
   try(game.dungeons.set_modifiers, {monsters = math.min(200, 5 * (shaft.stratum - 1) + 40 * swarm),
                                      chests = math.min(200, 50 * pact_count("drought"))})
@@ -564,6 +578,7 @@ local function start_shaft()
 end
 
 local function shaft_cleanup()
+  try(game.render.floor_label_clear)
   try(game.dungeons.set_warden_room, {enabled = false})
   try(game.dungeons.set_modifiers, {})
   try(game.dungeons.set_exits, {})
@@ -611,10 +626,21 @@ local EPILOGUE = {
   {"He will wait in the cave, four hundred years,", "for someone who carries the Atlamillia.", "For a boy from Norune."},
 }
 
+local CARD_WIDTH = 34 -- characters a story card's line holds before it wraps on its own
+local function reflow(lines)
+  local out, line = {}, ""
+  for word in table.concat(lines, " "):gmatch("%S+") do
+    if line ~= "" and #line + 1 + #word > CARD_WIDTH then out[#out + 1], line = line, word
+    else line = line == "" and word or (line .. " " .. word) end
+  end
+  if line ~= "" then out[#out + 1] = line end
+  return out
+end
+
 local function seda_page(title, subtitle, lines, label)
   seda.page = true
   try(game.ui.choice_open, {id = "seda_story", title = title, subtitle = subtitle,
-      options = {{title = label or "Onward", lines = lines}}})
+      options = {{title = label or "Onward", lines = reflow(lines)}}})
 end
 
 local function seda_chapter() return CHAPTERS[seda.chapter] end
@@ -719,6 +745,7 @@ seda_generating = function(e)
   if e.back_floor or e.prebuild then return end
   if seda.opening then seda.opening = false; seda_open_chapter() end
   local c = seda_chapter()
+  seda.arena = c.arena
   try(game.dungeons.set_modifiers, c.arena and {chests = -100} or (c.goal == "chests" and {chests = 60} or {}))
   try(game.dungeons.set_warden_room, {enabled = c.goal == "guardian" or c.goal == "genie", lock_in = true})
   -- a figure by the exit gate tells the chapter's task again
@@ -802,7 +829,7 @@ moonmod.on("ui.action", function(a)
   if not a or a.id ~= "seda_join" then return end
   if (records.seda_clears or 0) == 0 then notify("See Seda's Chronicle to its end first (title menu > Challenges)."); return end
   if session_owner then notify("Seda joins a story game, not a challenge run."); return end
-  if not seda_hero() then notify("Seda isn't registered: his pack is not built yet (docs/SEDA_PLAN.md)."); return end
+  if not seda_hero() then notify("Seda can't join yet: his model isn't installed."); return end
   local r, err = try(game.party.join, {character = "seda"})
   if not r then notify("Seda can't join now: " .. errmsg(err)); return end
   if r.changed then try(game.weapons.give, {id = "chronicle:weapon:258", character = "seda"}) end
@@ -828,7 +855,7 @@ show = function(name)
     try(game.title.mode_set, {id = MODE, title = "SEDA'S CHRONICLE", subtitle = "Four hundred years before Dark Cloud", root = false,
         lines = {"A swordsman goes down after the Dark Genie.", "Four chapters, from the cave to the Genie's lair.",
                  string.format("Chapters finished: %d of 4%s", records.seda_chapter or 0, (records.seda_clears or 0) > 0 and ", the end seen" or ""),
-                 (seda_hero() and "Seda walks it." or "Toan walks in Seda's place until his"), (seda_hero() and "" or "model is built (docs/SEDA_PLAN.md).")},
+                 seda_hero() and "Seda walks it." or "Toan stands in for Seda."},
         entries = {{id = "seda_start", label = "Begin the Chronicle"}}})
   elseif name == "shaft" then
     try(game.title.mode_set, {id = MODE, title = "THE SHAFT", subtitle = "How deep can you go?", root = false,

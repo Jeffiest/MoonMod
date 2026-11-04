@@ -471,7 +471,7 @@ S.emit("ui.action", {id = "seda_join"})
 check(S.joined == nil and S.notices[#S.notices]:find("to its end first"), "not before his Chronicle is seen to its end")
 S = boot({}, {storage = {records = {seda_clears = 1}}})
 S.emit("ui.action", {id = "seda_join"})
-check(S.joined == nil and S.notices[#S.notices]:find("not built"), "nor without his pack")
+check(S.joined == nil and S.notices[#S.notices]:find("isn't installed"), "nor without his pack")
 S.seda_pack = true
 S.emit("ui.action", {id = "seda_join"})
 check(S.joined == "seda" and S.given_weapon and S.given_weapon.character == "seda", "then he joins, a Dagger in hand")
