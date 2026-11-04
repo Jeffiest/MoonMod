@@ -28,6 +28,24 @@ image; nothing from either game is included here.
    section). Lua changes need only a game restart. Native (DLL) plugins must also be marked trusted in the Mod
    Manager before they load.
 
+### Find and install mods
+
+`tools/moonfactory.py` (Python 3.10 or newer, nothing else needed) reads the mod catalogue, which is published with
+every change to the bundled mods as this repository's `mod-index` release:
+
+```
+python tools/moonfactory.py search                       # every mod in the catalogue
+python tools/moonfactory.py search boss                  # those matching words
+python tools/moonfactory.py install moonmod.randomizer --mods <Chronicle>\mods
+python tools/moonfactory.py list --mods <Chronicle>\mods # what is installed, and which have updates
+python tools/moonfactory.py install moonmod.randomizer --mods <Chronicle>\mods --upgrade
+```
+
+`install` brings the mods a mod depends on first, checks each download against the catalogue's checksum, refuses an
+archive with files outside its own folder, and keeps the folder an upgrade replaces as `<id>.previous`. Enable new
+mods in the in-game Mod Manager. Anyone can publish a catalogue of their own mods with `moonfactory index` and share
+its address for `--index`.
+
 ## Use
 
 - **Open the Mod Manager** from **Options > Game > Mod Manager**. On Chronicle it is also the **MODS** entry of the

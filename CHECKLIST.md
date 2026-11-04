@@ -46,5 +46,8 @@ native ABI, porting the Gauntlet and Vigil to Chronicle Two, companion fights an
 
 ## Multipliers
 
-- [ ] **10. Mod browser.** An online index the Mod Manager can read, and a tool that installs from it.
+- [x] **10. Mod browser.** An online index the Mod Manager can read, and a tool that installs from it. Built:
+      `moonfactory index/search/install/list` and the `mod-index` workflow that publishes the catalogue; 10 tests.
+      Not done: browsing inside the game's Mod Manager, which needs network code in the engine (a design decision
+      on what a mod may fetch); the catalogue format is ready for it.
 - [ ] **11. Blender add-on for the chr pipeline.** Export a rigged Blender model straight to a Dark Cloud pack.

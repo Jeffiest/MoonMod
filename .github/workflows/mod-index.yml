@@ -1,0 +1,33 @@
+# Publishes the catalogue of the bundled mods (tools/moonfactory.py index) as the `mod-index` release: a zip of each
+# mod and index.json naming them, with their checksums. `moonfactory search` and `moonfactory install` read it.
+name: mod-index
+
+on:
+  push:
+    branches: [main]
+    paths: ['mods/**', 'tools/moonfactory.py']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the browser
+        run: python3 tools/tests/test_moonfactory_cli.py
+      - name: Build the catalogue
+        run: |
+          python3 tools/moonfactory.py index mods --out dist/mod-index \
+            --base-url "https://github.com/${{ github.repository }}/releases/download/mod-index/"
+      - name: Publish the mod-index release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view mod-index > /dev/null 2>&1; then
+            gh release create mod-index --title "Mod catalogue" --latest=false \
+              --notes "The bundled mods, each as a zip, and index.json naming them. Read by moonfactory search and install."
+          fi
+          gh release upload mod-index dist/mod-index/* --clobber
