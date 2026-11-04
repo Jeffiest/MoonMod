@@ -184,7 +184,24 @@ def volley(rig):
     return ma.bake(keys)
 
 
-ANIMATIONS = {"xiao_triple_shot": triple_shot, "xiao_tumble": tumble, "xiao_hop_shot": hop_shot, "xiao_heavy_shot": heavy_shot,
+def critical(rig):
+    """Vigil's critical (paired with the enemy's crumple), on Toan's timing: in close with the slingshot pressed down
+    on the fallen enemy (6), a shot let go into it (10, the first blow), leaning on it (16), a second at point blank
+    (24, the second blow), rocked back (30), idle (42)."""
+    idle = rig.motion_frame(0)
+    lunge = ((-2.0, ANKLE, 5.6), (2.2, ANKLE, -4.0))
+    knees = ((-0.3, 0, 1), (0.3, 0, 1))
+    press = keypose(rig, AIM, body=dict(pitch=18, drop=2.6, ahead=1.2, yaw=-8), feet=lunge, knees=knees, head=(0, 10))
+    loose = keypose(rig, RELEASE, body=dict(pitch=22, drop=2.8, ahead=1.8, yaw=-4), feet=lunge, knees=knees, head=(0, 12))
+    lean = keypose(rig, AIM, body=dict(pitch=26, drop=3.0, ahead=2.0), feet=lunge, knees=knees, head=(0, 14))
+    again = keypose(rig, RELEASE, body=dict(pitch=24, drop=2.8, ahead=2.0, yaw=6), feet=lunge, knees=knees, head=(0, 12))
+    rocked = keypose(rig, RELEASE, body=dict(pitch=-6, drop=1.6, ahead=-0.4), feet=((-2.4, ANKLE, 1.2), (2.4, ANKLE, -2.8)),
+                     knees=knees, head=(0, -4))
+    return ma.bake([(0, rig.sample(idle), None), (6, press, "inout"), (10, loose, "in"), (16, lean, "out"), (24, again, "in"),
+                    (30, rocked, "out"), (42, rig.sample(idle), "inout")])
+
+
+ANIMATIONS = {"xiao_critical": critical, "xiao_triple_shot": triple_shot, "xiao_tumble": tumble, "xiao_hop_shot": hop_shot, "xiao_heavy_shot": heavy_shot,
               "xiao_volley": volley}
 
 

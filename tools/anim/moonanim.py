@@ -138,7 +138,7 @@ class Rig:
         self.motions = []
         cfg = members.get(cfg_name, b"").decode("shift_jis", errors="replace")
         for line in cfg.splitlines():
-            parts = line.strip().replace(",", " ").split()
+            parts = line.split("//")[0].strip().replace(",", " ").split()
             if len(parts) >= 4 and parts[0] == "KEY":
                 try:
                     self.motions.append((int(parts[1]), int(parts[2]), float(parts[3])))

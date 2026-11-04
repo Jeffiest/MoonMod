@@ -1,5 +1,5 @@
 """Vigil's new monster motions: a dodge roll to each side and a new attack for the Skeleton Soldier (e03a) and the
-Dasher (e06a), built from each monster's own native poses with moonanim's helpers. The game appends them to the
+Dasher (e06a) and the Werewolf (e07a), built from each monster's own native poses with moonanim's helpers. The game appends them to the
 native models through animations.monster_register.
 
 python tools/anim/vigil_monster_moves.py <dun/monstor folder> [anims folder, default mods/moonmod.vigil/resources/anims]
@@ -11,6 +11,14 @@ python tools/anim/vigil_monster_moves.py <dun/monstor folder> [anims folder, def
                blade held out (it hits from frame 12 to 24), and the slash's own follow-through.
   e06a_pounce  The Dasher's pounce: a crouch with the mace raised, a leap (the brain carries it forward), and the mace
                slammed down in front on landing (it hits from frame 14 to 22).
+  e63a_roll_left / e63a_roll_right, e63a_pounce
+               The Dasher's, for the Rash Dasher (the same rig).
+  e03a_crumple / e06a_crumple
+               A critical's target (player.moves_set trigger critical): jolted upright by the blow, doubled over it,
+               sunk low as the blade comes out, held, and back up to idle (44 frames).
+  e07a_roll_left / e07a_roll_right, e07a_rake
+               The Werewolf's rolls (the Skeleton's flat-rig tuck), and its rake: a long leap, the right claw raked
+               down on landing (hits 14-18), then the left claw across (hits 23-27).
 
 The Skeleton's rig is flat (every piece is a child of the root, placed on its own), so its tuck draws the pieces in
 toward the hips; the Dasher's is a chain, so its legs and arms are bent with IK. Each pose is lifted so its lowest
@@ -131,17 +139,21 @@ skel = rig_of("e03a")
 s_idle = skel.sample(10)
 
 
-def skel_tuck(pose, draw=0.55, pitch=40.0):
-    """The flat rig drawn in toward the hips and pitched forward: a ball, as near as rigid pieces make one."""
-    hips = center(skel, pose, "kotsuban")
+def flat_tuck(rig, pose, hips_bone, draw=0.55, pitch=40.0, drop=2.5):
+    """A flat rig drawn in toward the hips and pitched forward: a ball, as near as rigid pieces make one."""
+    hips = center(rig, pose, hips_bone)
     out = dict(pose)
-    for bone in top_bones(skel):
-        if bone == "kotsuban" or (bone, "translation") not in out:
+    for bone in top_bones(rig):
+        if bone == hips_bone or (bone, "translation") not in out:
             continue
         t = out[(bone, "translation")]
         out[(bone, "translation")] = ma._add(hips, ma._scale(ma._sub(t, hips), draw))
-    out = shifted(skel, out, (0.0, -2.5, 0.0))
-    return whole_turn(skel, out, ma.qaxis((1, 0, 0), pitch), center(skel, out, "kotsuban"))
+    out = shifted(rig, out, (0.0, -drop, 0.0))
+    return whole_turn(rig, out, ma.qaxis((1, 0, 0), pitch), center(rig, out, hips_bone))
+
+
+def skel_tuck(pose):
+    return flat_tuck(skel, pose, "kotsuban")
 
 
 s_ball = skel_tuck(skel.sample(105))  # from the guard's crouch, the shield in front
@@ -171,6 +183,23 @@ def skel_whirl():
 
 
 write(skel, "e03a", "e03a_whirl", skel_whirl(), 0.4)
+
+
+def crumple(rig, idle, bent, low, hips, clear=0.0):
+    """A critical's target (player.moves_set trigger critical): jolted upright by the blow (3), doubled over it (10),
+    sunk lower as the blade is wrenched out (18), held there (to 30), and back up to idle (44)."""
+    jolt = whole_turn(rig, idle, ma.qaxis((1, 0, 0), -16), center(rig, idle, hips))
+    keys = [(0, idle), (3, jolt), (10, bent), (18, low), (30, low), (44, idle)]
+    frames = []
+    for (f0, a), (f1, b) in zip(keys, keys[1:]):
+        for f in range(f0, f1):
+            frames.append((f, grounded(rig, ma.blend(a, b, smooth((f - f0) / (f1 - f0))), clear)))
+    frames.append((44, grounded(rig, idle, clear)))
+    return frames
+
+
+write(skel, "e03a", "e03a_crumple", crumple(skel, s_idle, flat_tuck(skel, s_idle, "kotsuban", draw=0.9, pitch=34, drop=1.2),
+                                            flat_tuck(skel, s_idle, "kotsuban", draw=0.75, pitch=44, drop=3.0), "kotsuban"), 0.5)
 
 # --- The Dasher (e06a) ------------------------------------------------------------------------------------------------
 
@@ -238,3 +267,55 @@ def dash_pounce():
 
 
 write(dash, "e06a", "e06a_pounce", dash_pounce(), 0.45)
+write(dash, "e06a", "e06a_crumple", crumple(dash, d_idle, ma.blend(d_idle, d_ball, 0.45), ma.blend(d_idle, d_ball, 0.75), "hip",
+                                            clear=0.0), 0.5)
+
+# The Rash Dasher (e63a) has the Dasher's rig, bone for bone: the same motions, written for its own file.
+dash = rig_of("e63a")
+d_idle = dash.sample(10)
+d_ball = dash_tuck()
+for name, side in (("e63a_roll_left", 1), ("e63a_roll_right", -1)):
+    write(dash, "e63a", name, roll(dash, d_idle, d_ball, "hip", side, clear=2.5), 0.5)
+write(dash, "e63a", "e63a_pounce", dash_pounce(), 0.45)
+
+# --- The Werewolf (e07a) ----------------------------------------------------------------------------------------------
+# A flat rig like the Skeleton's, with the Dasher's bone names. Its native first blow is already a short hop.
+
+wolf = rig_of("e07a")
+w_idle = wolf.sample(10)
+w_ball = flat_tuck(wolf, wolf.sample(250), "hip", draw=0.6, drop=1.5)  # from the guard's crouch, the arms in front
+for name, side in (("e07a_roll_left", 1), ("e07a_roll_right", -1)):
+    write(wolf, "e07a", name, roll(wolf, w_idle, w_ball, "hip", side), 0.5)
+
+
+def wolf_rake():
+    """The Werewolf's rake: crouched by 6, a long leap (peak at 12) with the right claw high, raked down as it lands
+    at 16 (the native first blow's landing), the left claw drawn back by 22 and raked across at 25 (the native
+    second blow), held to 31, idle by 40."""
+    crouch = shifted(wolf, wolf.sample(55), (0.0, -2.0, 0.0))
+    air, slam = wolf.sample(58), wolf.sample(65)
+    back, rake = wolf.sample(78), wolf.sample(80)
+    frames = []
+    for f in range(41):
+        lift = 0.0
+        if f <= 6:
+            pose = ma.blend(w_idle, crouch, smooth(f / 6))
+        elif f <= 12:
+            pose = ma.blend(crouch, air, smooth((f - 6) / 6))
+            lift = 8.0 * math.sin(math.pi / 2 * (f - 6) / 6)
+        elif f <= 16:
+            pose = ma.blend(air, slam, smooth((f - 12) / 4))
+            lift = 8.0 * math.cos(math.pi / 2 * (f - 12) / 4)
+        elif f <= 22:
+            pose = ma.blend(slam, back, smooth((f - 16) / 6))
+        elif f <= 25:
+            pose = ma.blend(back, rake, smooth((f - 22) / 3))
+        elif f <= 31:
+            pose = rake
+        else:
+            pose = ma.blend(rake, w_idle, smooth((f - 31) / 9))
+        frames.append((f, grounded(wolf, pose, lift)))
+    return frames
+
+
+write(wolf, "e07a", "e07a_rake", wolf_rake(), 0.42)

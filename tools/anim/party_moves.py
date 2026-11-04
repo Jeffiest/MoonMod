@@ -10,7 +10,7 @@ lean, drop) and the stance (each foot moved from where it stands at idle). Dista
 scaled by the character's leg length, so one recipe fits a short Goro and a tall Ungaga alike. The evades (a tucked
 roll, a skip back) are posed from the hips and chest with arm and leg IK.
 
-Melee characters (Goro, Ungaga) get nine motions, casters (Ruby, Osmond) five; see RECIPES. Space: Y up, facing +Z,
+Melee characters (Goro, Ungaga) get ten motions, casters (Ruby, Osmond) six; see RECIPES. Space: Y up, facing +Z,
 the character's right -X.
 """
 
@@ -333,11 +333,42 @@ def volley(c):
     return ma.bake(keys)
 
 
+def critical(c):
+    """A critical (Vigil's backstab or riposte, paired with the enemy's crumple), on Toan's timing: the weapon drawn
+    back on the wind-up (6), driven in with a long step (10, the first blow), pushed deeper (16), wrenched up and out
+    on the high frame (24, the second), the follow-through (30), idle (42)."""
+    # The native strike frames already carry the swing's bend (Goro's is the slam's crouch), so the body only leans
+    # a little further into them.
+    s = c.spec
+    step = ((0, 0, 4.0), (0, 0, -3.0))
+    draw = c.key(s["windup"], body=dict(pitch=-4, drop=0.6, ahead=-0.4), feet=SPLIT, knees=KNEES, head=(0, 4))
+    thrust = c.key(s["strike"], body=dict(pitch=8, drop=0.6, ahead=1.2), feet=step, knees=KNEES, head=(0, 6))
+    deeper = c.key(s["strike"], body=dict(pitch=12, drop=1.0, ahead=1.6), feet=step, knees=KNEES, head=(0, 8))
+    wrench = c.key(s["high"], body=dict(pitch=0, drop=0.6, ahead=0.8, yaw=-12), feet=step, knees=KNEES, head=(0, -6))
+    follow = c.key(s["follow"], body=dict(pitch=4, drop=0.6, ahead=0.4, yaw=18), feet=step, knees=KNEES, head=(-10, 2))
+    return ma.bake([(0, c.sample(c.idle), None), (6, draw, "inout"), (10, thrust, "in"), (16, deeper, "out"), (24, wrench, "inout"),
+                    (30, follow, "out"), (42, c.sample(c.idle), "inout")])
+
+
+def critical_cast(c):
+    """A caster's critical, on Toan's timing: in close with the aim pressed down on the fallen enemy (6), the cast let
+    go into it (10, the first blow), leaning on it (16), a second cast at point blank (24, the second blow), rocked
+    back (30), idle (42)."""
+    s = c.spec
+    press = c.key(s["aim"], body=dict(pitch=18, drop=2.6, ahead=1.2, yaw=-8), feet=LUNGE, knees=KNEES)
+    loose = c.key(s["release"], body=dict(pitch=22, drop=2.8, ahead=1.8, yaw=-4), feet=LUNGE, knees=KNEES)
+    lean = c.key(s["aim"], body=dict(pitch=26, drop=3.0, ahead=2.0), feet=LUNGE, knees=KNEES)
+    again = c.key(s["release"], body=dict(pitch=24, drop=2.8, ahead=2.0, yaw=6), feet=LUNGE, knees=KNEES)
+    rocked = c.key(s["release"], body=dict(pitch=-6, drop=1.6, ahead=-0.4), feet=SPLIT, knees=KNEES)
+    return ma.bake([(0, c.sample(c.idle), None), (6, press, "inout"), (10, loose, "in"), (16, lean, "out"), (24, again, "in"),
+                    (30, rocked, "out"), (42, c.sample(c.idle), "inout")])
+
+
 RECIPES = {
     "melee": {"dash": dash, "counter": counter, "roll": roll, "backstep": backstep, "heavy": heavy, "launcher": launcher,
-              "spin_finisher": spin_finisher, "back_slash": back_slash, "roll_slash": roll_slash},
+              "spin_finisher": spin_finisher, "back_slash": back_slash, "roll_slash": roll_slash, "critical": critical},
     "caster": {"rush": rush, "tumble": roll, "hop_shot": lambda c: backstep(c, arms=c.spec["release"]), "heavy_cast": heavy_cast,
-               "volley": volley},
+               "volley": volley, "critical": critical_cast},
 }
 
 

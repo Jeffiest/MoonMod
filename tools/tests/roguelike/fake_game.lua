@@ -479,6 +479,45 @@ function F.new(opts)
       return {charges = deepcopy(S.guards)}
     end,
     invincible = function(a) if not in_dungeon() then return fail("failed", "town") end; return {frames = a.frames} end,
+    -- player.guard_rules_set / gauge_rules_set: one owner each; break_recoil, parry_frames and refill_delay are integers.
+    guard_rules_set = function(a)
+      local ranges = {arc = {0, 360}, cost_base = {0, 100}, cost_per_damage = {0, 10}, chip = {0, 1},
+                      break_recoil = {0, 600, true}, parry_frames = {0, 60, true}}
+      for k, v in pairs(a) do
+        if k == "without_lock" then assert(type(v) == "boolean", "without_lock is a boolean")
+        else
+          local r = assert(ranges[k], "player.guard_rules_set received an unsupported field: " .. k)
+          assert(type(v) == "number" and v >= r[1] and v <= r[2] and (not r[3] or math.type(v) == "integer"), k .. " out of range")
+        end
+      end
+      S.guard_rules = deepcopy(a); return {on = true}
+    end,
+    guard_rules_clear = function() local had = S.guard_rules ~= nil; S.guard_rules = nil; return {cleared = had} end,
+    gauge_rules_set = function(a)
+      local ranges = {hit_refill = {-100, 100}, first_swing_cost = {0, 100}, min_to_swing = {0, 100},
+                      swing_cost_scale = {0, 4}, refill_delay = {0, 600, true}}
+      for k, v in pairs(a) do
+        local r = assert(ranges[k], "player.gauge_rules_set received an unsupported field: " .. k)
+        assert(type(v) == "number" and v >= r[1] and v <= r[2] and (not r[3] or math.type(v) == "integer"), k .. " out of range")
+      end
+      S.gauge_rules = deepcopy(a); return {on = true}
+    end,
+    gauge_rules_clear = function() local had = S.gauge_rules ~= nil; S.gauge_rules = nil; return {cleared = had} end,
+    gauge_get = function()
+      if not in_dungeon() then return fail("failed", "player.gauge_get needs an active dungeon") end
+      return {gauge = S.gauge or 100, max = 100, exhausted = false}
+    end,
+    gauge_set = function(a)
+      assert((a.gauge == nil) ~= (a.add == nil), "give one of gauge or add")
+      if not in_dungeon() then return fail("failed", "player.gauge_set needs an active dungeon") end
+      local previous = S.gauge or 100
+      S.gauge = math.max(0, math.min(100, a.gauge or previous + a.add))
+      return {gauge = S.gauge, previous = previous}
+    end,
+    state = function()
+      if not in_dungeon() then return {active = false} end
+      return {active = true, gauge = S.gauge or 100, guarding = S.guarding or false, locked_on = false}
+    end,
     moves_set = function(a)
       assert(type(a.moves) == "table" and #a.moves <= 160, "moves_set takes up to 160 moves")
       local seen = {}
@@ -756,7 +795,8 @@ function F.new(opts)
   })
   game.party = wrap("party", {
     companion_set = function(a)
-      for k in pairs(a) do assert(k == "character" or k == "stance" or k == "damage_scale" or k == "shot", "companion_set field " .. k) end
+      for k in pairs(a) do assert(k == "character" or k == "stance" or k == "damage_scale" or k == "shot" or k == "hostile", "companion_set field " .. k) end
+      assert(a.hostile == nil or (a.character and a.hostile.hp >= 1 and a.hostile.hp <= 9999 and a.hostile.damage >= 1 and a.hostile.damage <= 999), "companion hostile")
       assert(a.shot == nil or (a.shot.cell >= 0 and a.shot.cell <= 15 and (a.shot.size or 1) >= 0.3 and (a.shot.size or 1) <= 4), "companion shot")
       assert(a.stance == nil or a.stance == "target" or a.stance == "aggressive" or a.stance == "passive", "stance")
       assert(a.damage_scale == nil or (a.damage_scale >= 0 and a.damage_scale <= 10), "damage_scale")

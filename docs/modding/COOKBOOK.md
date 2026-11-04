@@ -217,7 +217,14 @@ Each dungeon is built as one map with a zone per floor, joined by locked gates w
 carries (*Shape a floor as it is built*: `set_zones` with `source_floor` per zone and `exit_floor`). Keep each
 floor's seed (`set_seed`), opened chests (`set_opened_chests`), seen cells (`set_seen`) and opened gates with the save
 and give them back each build, and the map is the same every visit. Shrines (`shrines = true`) are the rest points
-and the fast travel; `sanctuary = true` keeps monsters out of their circle.
+and the fast travel; `sanctuary = true` keeps monsters out of their circle. `descent = 40` puts each zone a step
+below the one before, down a ramp outside its gate, so going deeper reads as going down. Anything a mod places by the
+player's height (a ring of spawns, a burst) should wait off a ramp: `zones_get().ramps` gives their cells.
+
+Messages between players (`messages.post`, `list`, `rate`) need no server: the player points their messages folder at
+one a sync service shares. Put them at a place every save has (a dungeon, floor and shrine, never a cell: each save
+builds its own maps), build them from fixed phrases and show only what parses back into one, and tell the player who
+can read what they leave (`shared` in each reply).
 
 ### 4. Story floors: smoke you walk through
 
@@ -386,6 +393,28 @@ stands it inside the exit gate's room, or in front of the exit stair when the ex
 
 ---
 
+## A hero that hunts you (an invader)
+
+**What:** a party member, drawn dark, who comes at the player with that hero's swings and can be fought and felled.
+
+```lua
+game.party.companion_set({character = "goro", stance = "passive",
+                          hostile = {hp = 200, damage = 20, defense = 0, tint = {r = 40, g = 20, b = 70}}})
+moonmod.on("game.companion.struck", function(e)  -- {character, damage, hp, max_hp, killed}
+  game.render.bar_register({id = "invader", label = "DARK GORO", current = e.hp, max = e.max_hp, boss = true})
+  if e.killed then game.render.bar_remove({id = "invader"}) end
+end)
+```
+
+It is the companion turned round: it closes in, and every third swing is a slower, heavy one. Its blows go into the
+game's own hit list, so the player's guard, a dodge and poise all work on them, and the player's weapon hurts it (less
+`defense`). At no life it falls and goes. It can be the hero the player is. One companion is out at a time, helper or
+invader; `companion_set({})` sends it away. The player can't lock on to it.
+
+**In Vigil:** the *Invaders* block.
+
+---
+
 ## Show things to the player
 
 Everything here is drawn by the engine in the game's own art, so a mod never draws pixels.
@@ -395,6 +424,8 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | A pop-up message | `ui.notify({message, duration_frames, icon?})` | Queued; in a dungeon it uses the game's message window |
 | A line of HUD text | `render.layer_register` | Under the life and water block |
 | A bar (boss HP, a timer) | `render.bar_register({id, label, current, max})` | Remove with `render.bar_remove` |
+| A wider HP bar on the locked target | `render.target_bar_set({on = true})` | Chronicle; a trail shows what a blow took |
+| A meter under the target's bar (poise) | `render.target_meter_set({entity, fill, color?, seconds?})` | Per monster; full flashes; `{entity}` clears |
 | A small icon by the floor plate | `render.hud_icon_set({id, icon or image, blink?})` | Up to six |
 | The floor plate's text ("2-3") | `render.floor_label_set` | `render.floor_label_clear` restores it |
 | A pick of 1-4 cards | `ui.choice_open({id, title, options})` | Pauses play; answer in `ui.choice_made` |
@@ -426,7 +457,19 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | Change a monster's HP, defence, rewards | `entities.set_stats` |
 | Colour, size, a shove | `entities.tint`, `entities.scale_set`, `entities.knockback` |
 | A flash or burst | `effects.burst({kind, position, scale})` |
+| A roll or heavy pressed a little early still comes out | `player.tuning_set({input_buffer = 12})` |
+| Make a monster fire its own projectile at a point | `monsters.call({entity, native = "SET_SHOT", args = {"dcol0", x, y, z}})` |
+| One attack chains into the next (light into heavy and back) | `player.tuning_set({chain_cancel = 6})` |
+| A lock-on camera that keeps the target framed | `player.tuning_set({lock_camera = true})` |
+| Hit-stop, camera shake and rumble when blows land | `combat.feel_set({hit_stop = {light, heavy, critical, hurt}, shake = {light, heavy, hurt}, rumble})`, `combat.feel_clear()` |
+| An attack of your own on the player (after a telegraph) | `combat.strike_player({x, y, z, radius, damage, kind})` |
+| Shut the room the player is in (an ambush), open it again | `dungeons.room_seal({})`, `dungeons.room_release()` |
+| Darken a place | `dungeons.lighting_set({fog = {near, far, r, g, b}, ambient})` |
 | Player speed, i-frames, thirst, wear | `player.tuning_set` |
+| A guard that covers the front, costs stamina, breaks and parries | `player.guard_rules_set` |
+| Hits that drain the gauge, a first swing that costs, a refill delay | `player.gauge_rules_set` |
+| React to the player being hit, blocked, parried or broken | event `game.player.hit` |
+| Read or spend the gauge, see what the player is doing | `player.gauge_get`, `player.gauge_set`, `player.state` |
 | A monster that fights differently | hook `native.monster.run` (`scripts.override`), drive it with `monsters.call` |
 
 Formulas are owned and stack by priority. Register them once, and update them by re-registering the same id with a
@@ -438,8 +481,38 @@ loop) for the kinds you have a brain for, and hand everything else to `game.scri
 where the player is (`GET_POSITION`), whether the player just swung (`GUARD_SEARCH`) and its own motion frame
 (`CHK_MOTION_FRM`), then walks, steps, guards or attacks with `SET_MOVE` and `SET_MOTION`. Vigil's Dashers and
 Skeleton Soldiers take turns with one attack token. `ctx.model` is the floor's slot, not the monster's kind: key brains
-by `entities.query`'s `native_model_id` ([API](../API.md)). To find a monster's motions and where its blows land, play
-each motion number on it and read `CHK_MOTION_FRM`, and watch the player's HP while it swings.
+by `entities.query`'s `native_model_id` ([API](../API.md)). To find where a monster's blows land, read its own script:
+`python tools/stb/stbdis.py data/dun/monstor/<model>.stb --table monster --port <Chronicle>/port` lists its
+`SET_DMG_COL(bone, radius, from, to)` windows, its `SET_GUARD_FRAME(from, to)` span and the motions it plays, and
+`tools/anim/moonanim.py`'s `Rig(...).motions` gives each motion's frame range (`tools/vigil/monster_survey.py` does both). (Or play each motion number on it,
+read `CHK_MOTION_FRM` and watch the player's HP while it swings.)
+
+Poise is the same hook at program 110 (hit): return `{handled = true}` without calling the retail program and the
+monster skips its flinch. The game runs 110 once per blow, so count blows per entity and let the retail flinch run
+once they pass the monster's poise (Vigil's *Poise*). A monster your brain drives carries on mid-swing; a retail one
+still has its program cut by the hit, so it restarts its idle loop without flinching.
+
+### Stamina, guard and parry (Souls rules)
+
+The action gauge is Dark Cloud's stamina bar, and the guard is lock on + R1. Two rule sets turn them into a Souls
+guard and a Souls stamina bar, as Vigil does:
+
+```lua
+game.player.guard_rules_set({arc = 120, cost_base = 10, cost_per_damage = 1.5, chip = 0.15,
+                             break_recoil = 120, parry_frames = 6, without_lock = true})
+game.player.gauge_rules_set({hit_refill = -15, first_swing_cost = 25, min_to_swing = 10, refill_delay = 36})
+
+moonmod.on("game.player.hit", function(e)
+  if e.parried and e.entity then -- the riposte window: stop the attacker and shove it off
+    game.combat.status_add({entity = e.entity, status = "stop", duration_frames = 90})
+  end
+end)
+```
+
+Each rule set has one owner. Clear both (`guard_rules_clear`, `gauge_rules_clear`) when your mod stands aside for
+another's game mode; unloading clears them too. `game.player.hit` fires for every hit, with or without rules, so a
+mod can count hits taken, drop Gilda on death or show a hit direction without changing the guard at all.
+`player.gauge_set({add = n})` refunds or charges gauge for things the game doesn't price (a heal, a switch).
 
 ---
 
@@ -470,8 +543,43 @@ try(game.dungeons.chest_weapons_add, {item_id = staff.id, dungeon_id = 0, floor_
 - `dungeons.chest_weapons_add` belongs to your mod and stays on until you take it back. Add the weapon only while it
   should drop, for example only in the story game, and call `dungeons.chest_weapons_clear()` when it shouldn't.
 - `weapons.style_set` gives one owned weapon a coloured name, a glow and a card. The Gauntlet's rarity tiers use it.
+- `weapons.stat_label_set({attack = "label_attack", endurance = "label_endurance", speed = "label_lightness",
+  magic = "label_magic"})` relabels the weapon cards' stats with your own images (each put at `icons/<stem>.png` by
+  `resources.override`; draw them 52x30). The Status tab then wipes its painted labels and lays yours evenly, one per
+  bar. Use it when your mod changes what a stat means; `{}` brings the game's labels back.
 - `items.give` can return success after adding 0 (a full bag). Check the result's count, or the bag afterwards, when
   it matters.
+- `items.charm_slots_set({count = 1})` opens charm slots on the item page (up to 4 for each character, beside their shield): an
+  amulet there guards that character against its ailment as from a quick slot, without taking one or any bag room. The engine keeps them with the save, and
+  one holding an amulet stays shown with your mod off, so nothing is lost. `items.charm_slots()` reads them. The worn charm shows on the dungeon HUD with its uses left, before your `render.hud_icon_set` icons.
+- `player.tuning_set({dodge_run = 20})` makes L2 a Souls run: hold it to run (draining 20 gauge a second), tap it to
+  dodge as it is let go. Open the Feather's own charm slot with `items.charm_slots_set({count = 1, feather = true})`:
+  the Feather there halves the drain. Vigil
+  opens one.
+- `items.gear_give({kind = "boots", name = "Swift Boots", rarity = 1, value = 180, effects = {run_cost = 16}})` makes
+  a gear piece; `items.gear_equip({uid = piece.uid})` puts it on the active character, and the engine reads its
+  effects (an ailment guard, stamina, lightness, defence, run cost, poise: `effects = {poise = 2}` takes two light
+  hits, or one heavy, without a stagger). Give it `icon = "gear_boots"` and
+  `color = {r = 232, g = 92, b = 76}` to tint one grey icon per piece.
+- `items.gear_page_set({icons = {hat = "gear_hat", tunic = "gear_tunic", gloves = "gear_gloves", boots = "gear_boots"}})`
+  puts the gear on the item page: an Equipment tab on the board holds the bag, and the character card becomes a hero
+  page with his charm slots, his weapon at his hand and four gear slots (five with `pouch = "gear_pouch"` in `icons`;
+  a worn pouch with `effects = {bag = 10}` grows the item bag by 10), each empty one showing its kind's icon
+  blacked out. Pieces move with Cross or the mouse, as items do. `{}` closes it. Vigil opens it while its Gear setting
+  is on.
+- `items.gear_stock_set({shop = 0, goods = {{kind = "hat", name = "Viper Hood", rarity = 1, value = 180,
+  effects = {guard = {poison = 30}}, price = 360}}})` puts a piece on shop 0's counter, beside its own goods, while
+  the Equipment tab is open: Triangle buys it. On the shop's Equipment tab, Triangle sells a piece for its `value`.
+  Bought, it is gone until you stock the shop again; `goods = {}` clears it. Vigil restocks every shop with three
+  pieces each trip home.
+- Add `parts = {toan = {hat = {draw = {"boushi"}, turn = 40}}}` to that call and the hat slot, the hats in the bag and
+  the hat in hand show Toan's own hat from his model on a ground of each piece's `color`, in place of the icon. Add
+  `tilt = 40` to a kind to see its part from the side (a boot) rather than from above, and
+  `bare = {"boushi", "cloth1"}` to take his hat (and its tail) off him whenever no hat is worn. For a part of a bigger
+  mesh, `boots = {draw = {"skin"}, below = {"l_f"}}` shows only what lies under his ankle wraps: his shoes.
+- `player.tuning_set({lightness = true, stamina = {toan = 35, xiao = 120}})` splits the gauge in two: each character
+  refills at their own rate (gauge a second), and the weapon's Speed only sets what a swing costs (a fast weapon
+  cheaper, a slow one dearer, from half to double).
 
 **In the mods:** Opar's staffs (registration, build-up, shops, chests) in `mods/moonmod.opar`; the Gauntlet's *Loot*
 section (rarity). Opar's code may move between the two mods, so follow the API calls rather than particular weapon ids.
@@ -532,6 +640,58 @@ turns as a whole by turning each piece about one point; keep every node above th
 attack's `hits` where the blow lands when the monster stands at arm's length (the hand, not only the weapon's tip), and
 make its damage a factor of the monster's native blow. Vigil gives the Skeleton and the Dasher a roll each way and a new
 attack (`tools/anim/vigil_monster_moves.py`, `MONSTER_MOVES` in its `main.lua`).
+
+**A critical: a backstab or a riposte with a paired motion.** Give the player a move with `trigger = "critical"`
+(`critical = "backstab"` or `"riposte"`) and `pairs`, one per enemy model, naming the enemy's half (a crumple
+registered with `animations.monster_register`). The attack button behind an enemy, or at the one you armed with
+`player.critical_set` after a parry or a stagger, draws him in, turns the enemy and plays both; the enemy's script
+waits it out. Hook `game.player.critical` for the extra damage:
+
+```lua
+game.player.moves_set({moves = {
+  {id = "stab", character = "toan", trigger = "critical", critical = "backstab", animation = "toan_critical",
+   reach = 22, gap = 11, arc = 100, speed = 0.5, invincible = true,
+   pairs = {{model = 1, animation = "e03a_crumple", speed = 0.5}},
+   hits = {{at = 0.57, radius = 8, reach = 9, damage = 1.8, knockback = 0}}}}})
+moonmod.on("game.player.critical", function(e)
+  game.combat.register_formula({id = "critical", operation = "multiply", value = 3, native_model_id = e.native_model_id})
+  -- ...and back to 1 after e.hold ticks
+end)
+```
+
+Author the two halves together: the player's thrust lands where the enemy doubles over, at the same speed.
+
+**A weapon art.** A `trigger = "art"` move plays on R2 while guarding, for the weapons it lists once they reach
+`min_level`: list one per weapon family and the equipped weapon picks its own. Say so on the weapon's card with
+`weapons.style_set{character, slot, details}` (find the slots with `weapons.get("chronicle:weapon:<n>").instances`):
+
+```lua
+{id = "rush", character = "toan", trigger = "art", animation = "toan_lunge", weapons = {258, 259, 260},
+ min_level = 3, gauge = 35, lunge = 4.6, hits = {{at = 0.36, radius = 10, reach = 11, damage = 1.8}}}
+```
+
+**A move your own key starts.** A `trigger = "played"` move has no button of its own: bind a key
+(`game.input.bind`) and start it with `player.move_play`. `game.player.move` gives its `frames`, so a heal or an
+effect can land partway through, and `game.player.hit` says whether a blow got through first. Vigil's flask is this:
+D-pad Down plays each hero's native drinking motion slowly, heals 40% at 65% of it, and spills on a hit; with
+`player.tuning_set{item_heal_lock = 240}` the game's healing items refuse near an enemy, so the flask is the heal in a
+fight.
+
+**A modern lock-on.** `player.tuning_set{lock_flick = true, lock_sight = true, soft_lock = 35}`: a flick of the right
+stick moves the lock to the next enemy that way, the lock drops when a wall hides the target, and a swing that isn't
+locked turns to the nearest enemy within 35 degrees.
+
+**A boss fight's frame.** `ui.boss_card{kicker, name, epithet}` as the boss is first seen, and
+`render.bar_register{id = "boss", label = "DRAN", current, max, boss = true}` each half second for a wide bar along the
+bottom. For a second phase at half life, tint it (`entities.tint`), raise its `damage_scale` (`entities.set_stats`
+returns the `current` one to multiply) and `combat.status_add{status = "haste"}` for faster moves. Vigil's story
+bosses and named elites are this (`mods/moonmod.vigil/main.lua`).
+
+**Shortcuts and illusory walls on a kept floor.** From `game.dungeon.generating`, ask
+`dungeons.set_shortcuts{count = 2, illusory = 1, open = {...}, open_walls = {...}}`. Keep each
+`game.dungeon.door_opened` key item and each `game.dungeon.wall_opened` `wall` number with the floor's seed, and send
+them back as `open` and `open_walls` the next time it is built. Opened doors and struck walls then stay open.
+Vigil's are `tools/anim/vigil_criticals.py` (Toan) and the `crumple` in `vigil_monster_moves.py`.
 
 ---
 

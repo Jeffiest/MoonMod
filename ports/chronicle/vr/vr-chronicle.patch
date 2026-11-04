@@ -1,0 +1,885 @@
+diff --git a/port/include/game/edit.hpp b/port/include/game/edit.hpp
+index 85a4f682..b8fa90ac 100644
+--- a/port/include/game/edit.hpp
++++ b/port/include/game/edit.hpp
+@@ -425,6 +425,9 @@ void EdInitThunderEffect();
+  */
+ void EdThunderEffect(int map, CEditGround *ground);
+ 
++/** VR: the town player's body is not drawn (its shadow is); EdDrawCharacter reads it. */
++extern bool EdVrHidePlayer;
++
+ /**
+  * Draws one editor character with its shadow, cursor and event state.
+  */
+diff --git a/port/include/game/vr_view.hpp b/port/include/game/vr_view.hpp
+new file mode 100644
+index 00000000..d598ed73
+--- /dev/null
++++ b/port/include/game/vr_view.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++
++#include <libvu0.h>
++
++#include "camera.hpp"
++
++namespace dc::game {
++
++/**
++ * @file
++ * The view a VR headset stands in: the player's own eyes.
++ *
++ * For comfort the view never turns unless the player turns: the body keeps its facing while the
++ * game's camera swings about, and changes it only by a snap turn, or by a snap to face whoever a
++ * scene is about. The stick walks where the head looks (VrStickTurn).
++ */
++
++/** Whether the game is playing on a headset. */
++bool VrPlaying();
++
++/** How the view is facing. */
++enum class VrFacing {
++    Body,    /**< The body's own facing: playing and menus. */
++    Subject, /**< Turned once to face what the scene's camera looks at: talks and scenes. */
++    Camera,  /**< The game camera's own place and facing, level: a scene the player is not in. */
++};
++
++/**
++ * Makes the camera matrix and eye of the headset's view, standing at head (the camera's place for
++ * VrFacing::Camera), level. The headset adds the head's own turn on top. Leaves matrix and eye
++ * alone when the camera gives no way to face.
++ */
++void VrEyeView(const CCamera &camera, const float *head, VrFacing facing, sceVu0FMATRIX matrix, float *eye);
++
++/** Marks this frame's view as a film (the opening, a movie, the title): on a headset it plays on the
++ * still cinema screen. Call it each frame the film's view is set. */
++void VrCinema();
++
++/** Turns the body by radians at the next view (positive turns left). */
++void VrSnapTurn(float radians);
++
++/**
++ * The angle to turn the stick by, in radians, so it walks where the head looks: the head's facing
++ * less the facing of the game camera the game walks by.
++ */
++float VrStickTurn();
++
++/**
++ * The angle the game turns the walking stick by: the game camera's (camera_angle, from
++ * CCamera::GetAngleH), or in first person on a headset that made the head's facing, so the stick
++ * walks where the player looks whatever pad it comes from.
++ */
++float VrWalkAngle(float camera_angle);
++
++/**
++ * Snap-turns the body on a flick of the right stick (rx, -1 to 1) straight sideways, once per flick.
++ * Call once a frame where the game reads it for walking; does nothing off a headset.
++ */
++void VrTurnStick(float rx, float ry);
++
++} // namespace dc::game
+diff --git a/port/src/app/presentation.cpp b/port/src/app/presentation.cpp
+index 7f7f0aca..3630f026 100644
+--- a/port/src/app/presentation.cpp
++++ b/port/src/app/presentation.cpp
+@@ -9,9 +9,11 @@
+ #include <format>
+ #include <iterator>
+ #include <mutex>
++#include <optional>
+ #include <thread>
+ 
+ #include "main.hpp"
++#include "gfx/xr.hpp"
+ #include "moonmod/chronicle_adapter.hpp"
+ #include "moonmod/manager_ui.hpp"
+ #include "platform/clock.hpp"
+@@ -244,6 +246,50 @@ bool PresentAsync() {
+     return gfx::ActiveRenderThreadMode() == gfx::RenderThreadMode::Async;
+ }
+ 
++// DC_VR_DEBUG_EYE="x[,y[,z]]": every presented frame shows the world from that far over in the
++// camera's own space (a VR eye's offset), so the per-eye replay can be seen without a headset.
++// It is read once; with it set, frames are display renders even with interpolation off.
++const gfx::EyeView *DebugEye() {
++    static const std::optional<gfx::EyeView> eye = []() -> std::optional<gfx::EyeView> {
++        const char *value = std::getenv("DC_VR_DEBUG_EYE");
++        float       offset[3] = {};
++        if (value == nullptr || std::sscanf(value, "%f,%f,%f", &offset[0], &offset[1], &offset[2]) < 1) {
++            return std::nullopt;
++        }
++        gfx::EyeView view = {};
++        view.view[0] = view.view[5] = view.view[10] = view.view[15] = 1.0f;
++        // The eye stands at +offset, so the world moves the other way.
++        for (int k = 0; k < 3; k++) {
++            view.view[12 + k] = -offset[k];
++        }
++        return view;
++    }();
++    return eye ? &*eye : nullptr;
++}
++
++// One headset frame: the tick replayed for each eye, at the pace xr::BeginFrame waits for. False
++// when the headset is not running, so the window's own presenting goes on as usual.
++bool HeadsetFrame(const gfx::DisplayList &list, const gfx::DisplayList *previous, float alpha) {
++    gfx::xr::Frame frame;
++    if (!gfx::xr::BeginFrame(frame)) {
++        return false;
++    }
++    if (frame.render && frame.cinema) {
++        // A scene through the game's camera: the flat frame, for the still screen.
++        if (gfx::RenderList(list, alpha, {.previous = previous})) {
++            gfx::xr::SubmitCinema(frame);
++        }
++    } else if (frame.render) {
++        for (int eye = 0; eye < 2; eye++) {
++            if (gfx::RenderList(list, alpha, {.previous = previous, .eye = &frame.eyes[eye]})) {
++                gfx::xr::SubmitEye(frame, eye);
++            }
++        }
++    }
++    gfx::xr::EndFrame(frame);
++    return true;
++}
++
+ // Runs only on the worker, using immutable lists and settings published by the game thread.
+ PresentClock::duration PresentRenderIdle(void * /*user*/) {
+     PublishedFrame frame;
+@@ -258,6 +304,24 @@ PresentClock::duration PresentRenderIdle(void * /*user*/) {
+         g_render_serial = frame.serial;
+         g_render_tick_shown = false;
+     }
++    // A headset takes every frame it asks for; the window mirrors each tick once.
++    if (gfx::xr::Enabled()) {
++        const auto  now = PresentClock::now();
++        const float alpha = std::clamp(std::chrono::duration<float>(now - frame.start).count() /
++                                           std::chrono::duration<float>(frame.length).count(),
++                                       0.0f, std::nextafter(1.0f, 0.0f));
++        const bool  shown = HeadsetFrame(*frame.list, frame.settings.interpolation ? frame.previous.get() : nullptr,
++                                         frame.settings.interpolation ? alpha : 1.0f);
++        if (!g_render_tick_shown) {
++            if (frame.overlay ? gfx::RenderList(*frame.overlay, 1.0f, {.present = true, .host = true})
++                              : gfx::PresentCanonical()) {
++                g_render_tick_shown = true;
++            }
++        }
++        if (shown) {
++            return PresentClock::duration::zero();
++        }
++    }
+     if (!frame.settings.interpolation && g_render_tick_shown) {
+         return std::chrono::milliseconds(2);
+     }
+@@ -281,11 +345,15 @@ PresentClock::duration PresentRenderIdle(void * /*user*/) {
+         options.previous = frame.previous.get();
+         options.present = true;
+         options.overlay = frame.overlay.get();
++        options.eye = DebugEye();
+         shown = gfx::RenderList(*frame.list, alpha, options);
+         if (shown) {
+             g_async_frames.fetch_add(1);
+             g_async_seconds.fetch_add(std::chrono::duration<double>(PresentClock::now() - now).count());
+         }
++    } else if (DebugEye() != nullptr) {
++        shown = gfx::RenderList(*frame.list, 1.0f,
++                                {.present = true, .overlay = frame.overlay.get(), .eye = DebugEye()});
+     } else {
+         shown = frame.overlay ? gfx::RenderList(*frame.overlay, 1.0f, {.present = true, .host = true})
+                               : gfx::PresentCanonical();
+@@ -402,7 +470,8 @@ bool DisplayFrame(float alpha, bool present) {
+     PresentClock::time_point start = PresentClock::now();
+     gfx::RenderOptions       options = {.previous = g_previous_list.get(),
+                                         .present = present,
+-                                        .overlay = present ? FpsOverlayList() : nullptr};
++                                        .overlay = present ? FpsOverlayList() : nullptr,
++                                        .eye = DebugEye()};
+     bool                     shown = gfx::RenderList(*g_list, alpha, options);
+     if (shown) {
+         g_stats.display_frames++;
+@@ -415,7 +484,11 @@ bool DisplayFrame(float alpha, bool present) {
+ }
+ 
+ // The canonical image as it is, or a display render of the overlay alone, which starts from it.
++// With a debug eye, the tick redrawn from that eye.
+ bool PresentCanonicalFrame() {
++    if (DebugEye() != nullptr && g_list) {
++        return DisplayFrame(1.0f, true);
++    }
+     const gfx::DisplayList *overlay = FpsOverlayList();
+     bool                    shown = overlay != nullptr ? gfx::RenderList(*overlay, 1.0f, {.present = true, .host = true})
+                                                        : gfx::PresentCanonical();
+@@ -545,6 +618,15 @@ bool GamePresentBetweenTicks(double fraction, std::chrono::steady_clock::time_po
+         return false;
+     }
+     PollFpsToggle();
++    // A headset takes every frame it asks for until the next tick; the window mirrors each tick once.
++    if (HeadsetFrame(*g_list, g_present.interpolation ? g_previous_list.get() : nullptr,
++                     g_present.interpolation ? static_cast<float>(fraction) : 1.0f)) {
++        if (!g_tick_shown) {
++            PresentCanonicalFrame();
++            g_tick_shown = true;
++        }
++        return true;
++    }
+     if (!g_present.interpolation) {
+         if (!g_tick_shown) {
+             PresentCanonicalFrame();
+@@ -632,7 +714,13 @@ std::string GameFpsText() {
+ 
+ // kPreviousFrame outside a frame is the newest main image: the canonical render, or the loading
+ // screen's frame after it. ReadbackFrame would read a display frame, overlay and all.
++// With a debug eye, the tick as that eye sees it, which is what the window shows. It is presented
++// (the frame the window shows anyway) so the readback takes the display image, not the tick's.
+ bool GameScreenshot(std::vector<std::uint8_t> &rgba, std::uint32_t &width, std::uint32_t &height) {
++    if (DebugEye() != nullptr && g_list) {
++        return gfx::RenderList(*g_list, 1.0f, {.present = true, .eye = DebugEye()}) &&
++               gfx::ReadbackFrame(rgba, width, height);
++    }
+     return gfx::ReadbackTexture(gfx::kPreviousFrame, rgba, width, height);
+ }
+ 
+diff --git a/port/src/game/doorway_view.cpp b/port/src/game/doorway_view.cpp
+index d56b5827..c2c6d047 100644
+--- a/port/src/game/doorway_view.cpp
++++ b/port/src/game/doorway_view.cpp
+@@ -9,6 +9,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "gfx/xr.hpp"
+ #include "dungeon.h"
+ #include "frame.hpp"
+ #include "framevu1.hpp"
+@@ -728,6 +729,8 @@ void DoorwayDraw(const float player_position[3], const float *facing) {
+ void DoorwayLive() {
+     g_live_side = nullptr;
+     if (!moonmod::ChronicleQuickPassageOn() || PicturesOn() || moonmod::ChronicleHoldingPicture()) return;
++    // A headset's eyes each see the doorway from elsewhere; the flat picture fits only the game's camera.
++    if (gfx::xr::Running()) return;
+     const bool in_dungeon = IsDungeonMap(MapNo);
+     const int  other = in_dungeon ? g_last_town : g_last_dungeon;
+     if (other < 0) return;
+diff --git a/port/src/game/dun/gameloop.cpp b/port/src/game/dun/gameloop.cpp
+index 91419706..03f80f05 100644
+--- a/port/src/game/dun/gameloop.cpp
++++ b/port/src/game/dun/gameloop.cpp
+@@ -41,6 +41,7 @@
+ #include "gauge_rules.hpp"
+ #include "guard_rules.hpp"
+ #include "gear.hpp"
++#include "vr_view.hpp"
+ #include "dispctrl.hpp"
+ #include "dngmessageman.hpp"
+ #include "dngstatusdata.hpp"
+@@ -2486,6 +2487,19 @@ bool DunDoorwayWall(const float position[3], const float back[3], float wall[3],
+     return true;
+ }
+ 
++// VR: the headset stands at the character's eyes and the body is not drawn, playing, in menus and
++// in scenes, which face what the scene's camera looks at. A scene the player is not in keeps the
++// game's camera.
++bool VrFirstPerson() { return VrPlaying() && !(BtEventMode != 0 && EdEventInfo.player_draw == 0); }
++
++// The camera matrix and eye of the VR first-person view.
++void VrEyeCamera(sceVu0FMATRIX camera, float *eye) {
++    sceVu0FVECTOR head;
++    sceVu0CopyVector(head, CharaMain.pos);
++    head[1] += CharaHeight(UserStatus) - 1.5f;
++    VrEyeView(*NowCamera__3, head, BtEventMode != 0 ? VrFacing::Subject : VrFacing::Body, camera, eye);
++}
++
+ void DunMainDraw() {
+     sceVu0FMATRIX camera;
+     sceVu0FVECTOR eye;
+@@ -2497,6 +2511,11 @@ void DunMainDraw() {
+     EdEventInfo.main_texture_animation = nullptr;
+     NowCamera__3->GetPos(eye);
+     NowCamera__3->GetCameraMatrix(camera);
++    if (VrFirstPerson()) {
++        VrEyeCamera(camera, eye);
++    } else if (VrPlaying()) {
++        VrEyeView(*NowCamera__3, NowCamera__3->pos, VrFacing::Camera, camera, eye); // on the cinema screen
++    }
+     sceVu0UnitMatrix(unit);
+     sceVu0MulMatrix(view, unit, camera);
+     MGSetViewMatrix(view, eye);
+@@ -2588,7 +2607,7 @@ void DunMainDraw() {
+     CullHiddenMonsters();
+     Draw_MainUnitShadow();
+ 
+-    if (BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0) {
++    if (BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0 && !VrFirstPerson()) {
+         Draw_MainUnit();
+     }
+ 
+diff --git a/port/src/game/dun/movechara.cpp b/port/src/game/dun/movechara.cpp
+index 2a5673bb..ae0dc42f 100644
+--- a/port/src/game/dun/movechara.cpp
++++ b/port/src/game/dun/movechara.cpp
+@@ -1,6 +1,7 @@
+ // DunMoveChara, split from dun/gameloop.cpp for size.
+ 
+ #include "mod_atla.hpp"
++#include "vr_view.hpp"
+ #include "dun/gameloop.hpp"
+ 
+ #include <libvu0.h>
+@@ -170,7 +171,7 @@ void DunMoveChara() {
+     }
+ 
+     sceVu0CopyVector(pos, CharaFrame->position);
+-    angle = NowCamera__3->GetAngleH();
++    angle = VrWalkAngle(NowCamera__3->GetAngleH());
+     GameEnv.camera = NowCamera__3;
+     GameEnv.frame = CharaFrame;
+     lx = GamePad.GetLXf();
+@@ -178,6 +179,7 @@ void DunMoveChara() {
+     ly = GamePad.GetLYf();
+     rx = GamePad.GetRXf();
+     ry = GamePad.GetRYf();
++    VrTurnStick(rx, ry);
+     {
+         sceVu0FVECTOR forward = {0.0f, 0.0f, 1.0f, 1.0f};
+         sceVu0FVECTOR rotation;
+diff --git a/port/src/game/dungeonmap.cpp b/port/src/game/dungeonmap.cpp
+index 1b7f1e04..6b28f58d 100644
+--- a/port/src/game/dungeonmap.cpp
++++ b/port/src/game/dungeonmap.cpp
+@@ -36,6 +36,7 @@
+ #include "texture.hpp"
+ #include "textureanime.hpp"
+ #include "userstatus.hpp"
++#include "gfx/xr.hpp"
+ 
+ namespace dc::game {
+ 
+@@ -465,6 +466,10 @@ void CDungeonMap::DrawMap(CCameraFollow *camera, CFrameVu1 * /*player*/) {
+                     if (georama == 5 && cell.parts_no == MAP_PARTS_URA_ROAD) {
+                         facing = 1.0f;
+                     }
++                    // On a headset the head looks every way, not only where the game's camera faces.
++                    if (gfx::xr::Running()) {
++                        facing = 1.0f;
++                    }
+                     if (facing <= facing_limit && !(dist < kCellSize)) {
+                         draw = false;
+                     }
+diff --git a/port/src/game/ebattle.cpp b/port/src/game/ebattle.cpp
+index 3ce50bb1..a6818186 100644
+--- a/port/src/game/ebattle.cpp
++++ b/port/src/game/ebattle.cpp
+@@ -9,6 +9,7 @@
+ #include <numbers>
+ #include <print>
+ 
++#include "vr_view.hpp"
+ #include "camera.hpp"
+ #include "camerafollow.hpp"
+ #include "character.hpp"
+@@ -1407,9 +1408,10 @@ void EdMoveChara() {
+     sceVu0FVECTOR velocity = {0.0f, 0.0f, 0.0f, 0.0f};
+     sceVu0FVECTOR move;
+ 
+-    float angle = camera->GetAngleH();
++    float angle = VrWalkAngle(camera->GetAngleH());
+     float lx = GetLXf();
+     float ly = GetLYf();
++    VrTurnStick(GetRXf(), GetRYf());
+ 
+     if (key_lock != 0 || chara_fishing > ED_FISHING_STAND) {
+         lx = ly = 0.0f;
+diff --git a/port/src/game/edit.cpp b/port/src/game/edit.cpp
+index abbf7497..4b894eed 100644
+--- a/port/src/game/edit.cpp
++++ b/port/src/game/edit.cpp
+@@ -1745,6 +1745,8 @@ bool IsVisible(const CNPCharacter *npc) {
+ 
+ } // namespace
+ 
++bool EdVrHidePlayer = false;
++
+ void EdDrawCharacter(CCharacter *player, int player_draw_mask, int npc_count, CNPCharacter *npcs, int *npc_draw_masks, int draw_shadows, ED_EVENT_INFO *event) {
+     int i;
+ 
+@@ -1794,6 +1796,10 @@ void EdDrawCharacter(CCharacter *player, int player_draw_mask, int npc_count, CN
+         }
+     }
+ 
++    if (EdVrHidePlayer) {
++        player_draw_mask &= ~1;
++    }
++
+     if (draw_shadows != 0) {
+         sceVu0FMATRIX light_direction;
+         sceVu0FMATRIX shadow_direction;
+diff --git a/port/src/game/edit_in.cpp b/port/src/game/edit_in.cpp
+index be08e56b..bfb3e581 100644
+--- a/port/src/game/edit_in.cpp
++++ b/port/src/game/edit_in.cpp
+@@ -15,6 +15,7 @@
+ #include <string>
+ #include <string_view>
+ 
++#include "vr_view.hpp"
+ #include "battlemenu.hpp"
+ #include "boxvu0.hpp"
+ #include "camera.hpp"
+@@ -800,6 +801,21 @@ int EditInLoop() {
+     EdIn_NowCamera->GetCameraMatrix(view);
+     EdIn_NowCamera->GetPos(eye);
+     EdIn_NowCamera->GetDir(dir);
++    // VR: the character's eyes, walking, talking and in scenes (facing what the scene looks at); a
++    // scene the player is not in keeps its camera, level. The game's own first-person view stays.
++    EdVrHidePlayer = false;
++    if (VrPlaying() && EdCheckViewMode() == 0) {
++        const bool scene = GameMode == EdInMode::TALK || GameMode == EdInMode::EVENT;
++        if (GameMode == EdInMode::EVENT && EdEventInfo.player_draw == 0) {
++            VrEyeView(*EdIn_NowCamera, EdIn_NowCamera->pos, VrFacing::Camera, view, eye);
++        } else {
++            sceVu0FVECTOR head;
++            EdIn_Chara->GetPosition(head);
++            head[1] += 14.0f;
++            VrEyeView(*EdIn_NowCamera, head, scene ? VrFacing::Subject : VrFacing::Body, view, eye);
++            EdVrHidePlayer = true;
++        }
++    }
+     MGSetViewMatrix(view, eye);
+ 
+     for (int i = 0; i < part_count; i++) {
+diff --git a/port/src/game/editloop.cpp b/port/src/game/editloop.cpp
+index ce881a8f..9af45862 100644
+--- a/port/src/game/editloop.cpp
++++ b/port/src/game/editloop.cpp
+@@ -60,6 +60,7 @@
+ #include "gamepad.hpp"
+ #include "gameutil.hpp"
+ #include "gfx/gfx.hpp"
++#include "vr_view.hpp"
+ #include "input/camera_zoom.hpp"
+ #include "input/mouse_look.hpp"
+ #include "itemdata.hpp"
+@@ -199,6 +200,27 @@ int g_gate_away = 0;
+ // while the party walks free.
+ bool TownRoadsOn() { return moonmod::ChronicleTownRoads() && MapNo >= 0 && MapNo < TOWN_COUNT; }
+ bool TownRoadAsks() { return TownRoadsOn() && GameMode == ED_MODE_WALK && NextMapNo < 0 && !MoonModChoiceUp(); }
++
++// VR: in a town the headset stands at the character's eyes and the body is not drawn: walking,
++// talking, in menus and in scenes, which face what the scene's camera looks at. The Georama, the
++// game's own first-person view and a scene the player is not in keep the game's camera.
++bool VrTownScene() { return GameMode == ED_MODE_TALK || GameMode == ED_MODE_EVENT; }
++
++bool VrTownFirstPerson() {
++    if (!VrPlaying() || EdCheckViewMode() != 0 || GameMode == ED_MODE_GEORAMA || GameMode == ED_MODE_GEORAMA_MENU_INIT ||
++        GameMode == ED_MODE_GEORAMA_MENU || GameMode == ED_MODE_RETURN_MENU_GEORAMA) {
++        return false;
++    }
++    return !(GameMode == ED_MODE_EVENT && EdEventInfo.player_draw == 0);
++}
++
++// The camera matrix and eye of the VR first-person view in a town.
++void VrTownEyeCamera(sceVu0FMATRIX matrix, float *eye) {
++    sceVu0FVECTOR head;
++    Chara->GetPosition(head);
++    head[1] += 14.0f;
++    VrEyeView(*NowCamera, head, VrTownScene() ? VrFacing::Subject : VrFacing::Body, matrix, eye);
++}
+ CEditArea   *EditArea;
+ CMapParts   *ObjParts;
+ CMapParts   *RiverParts;
+@@ -1980,6 +2002,12 @@ int EditLoop() {
+ 
+     NowCamera->GetCameraMatrix(view);
+     NowCamera->GetPos(eye);
++    if (VrTownFirstPerson()) {
++        VrTownEyeCamera(view, eye);
++    } else if (VrPlaying()) {
++        // Scenes, the Georama and the game's own look-around: on the cinema screen.
++        VrEyeView(*NowCamera, NowCamera->pos, VrFacing::Camera, view, eye);
++    }
+     MGSetViewMatrix(view, eye);
+     DoorwayCamera(); // MoonMod (O2 C2)
+ 
+@@ -2722,6 +2750,7 @@ void EditMainDraw() {
+                 if (EdCheckViewMode() != 0) {
+                     detail = 0;
+                 }
++                EdVrHidePlayer = VrTownFirstPerson(); // the body, not its shadow
+ 
+                 if (GameMode == ED_MODE_DOOR_OPEN) {
+                     marks = nullptr;
+diff --git a/port/src/game/frame.cpp b/port/src/game/frame.cpp
+index 9e7a13fc..4f990521 100644
+--- a/port/src/game/frame.cpp
++++ b/port/src/game/frame.cpp
+@@ -26,6 +26,7 @@
+ #include "renderinfo.hpp"
+ #include "visualvu1.hpp"
+ #include "vu0_ops.hpp"
++#include "gfx/xr.hpp"
+ 
+ void *operator new(size_t size, u_long128 *block) {
+     return dc::game::PlaceDataAllocObject(size, block);
+@@ -875,7 +876,10 @@ int CFrameVu1::DrawVu1(unsigned int *packet, RenderInfo *info) {
+         ShadowMatrix(info->shadow, info->light_direction, info->shadow_point, info->shadow_normal);
+     }
+ 
+-    if (visual && attr.draw_on && attr.cull_enable && render::MGPortOrthographicDepth() == 0.0f) {
++    // On a headset the head looks every way, not only where the game's view faces: nothing is culled
++    // against the game's screen, and everything is drawn clipped, as a frame that never culls.
++    if (visual && attr.draw_on && attr.cull_enable && render::MGPortOrthographicDepth() == 0.0f &&
++        !gfx::xr::Running()) {
+         MulFrameMatrix(screen_matrix, info->view_scaled, matrix);
+         float inv_scale = 1.0f / info->scale[0];
+ 
+diff --git a/port/src/game/title/opening.cpp b/port/src/game/title/opening.cpp
+index b2ceb52b..86d74dfd 100644
+--- a/port/src/game/title/opening.cpp
++++ b/port/src/game/title/opening.cpp
+@@ -1,3 +1,4 @@
++#include "vr_view.hpp"
+ #include "common.h"
+ 
+ #include <libvu0.h>
+@@ -812,6 +813,7 @@ void DrawProcess() {
+     sceVu0UnitMatrix(unit);
+     sceVu0MulMatrix(view, unit, camera);
+ 
++    VrCinema(); // the opening is a film
+     if (CScript__2.scene != OP_SCENE_NORUNE) {
+         MGSetViewMatrix(view, position);
+     } else {
+diff --git a/port/src/game/title/rushmovi.cpp b/port/src/game/title/rushmovi.cpp
+index 2566e976..b339ba2e 100644
+--- a/port/src/game/title/rushmovi.cpp
++++ b/port/src/game/title/rushmovi.cpp
+@@ -1,3 +1,4 @@
++#include "vr_view.hpp"
+ #include "common.h"
+ 
+ #include <libgraph.h>
+@@ -602,6 +603,7 @@ void DrawProcess() {
+ 
+     sceVu0UnitMatrix(unit);
+     sceVu0MulMatrix(view, unit, camera);
++    VrCinema();
+     MGSetViewMatrix(view, position);
+ 
+     switch (CScript.scene) {
+diff --git a/port/src/game/title/titleloop.cpp b/port/src/game/title/titleloop.cpp
+index f2ce62f5..86b93d17 100644
+--- a/port/src/game/title/titleloop.cpp
++++ b/port/src/game/title/titleloop.cpp
+@@ -1,3 +1,4 @@
++#include "vr_view.hpp"
+ #include "common.h"
+ 
+ #include <libgraph.h>
+@@ -850,6 +851,7 @@ int TitleLoop() {
+     FCamera.GetPos(pos);
+     FCamera.Step(1);
+     FCamera.GetCameraMatrix(matrix);
++    VrCinema();
+     MGSetViewMatrix(matrix, pos);
+     Cloud__2.Step();
+     const auto pointer = TakeTitlePointer();
+diff --git a/port/src/game/vr_view.cpp b/port/src/game/vr_view.cpp
+new file mode 100644
+index 00000000..e109879f
+--- /dev/null
++++ b/port/src/game/vr_view.cpp
+@@ -0,0 +1,147 @@
++#include "vr_view.hpp"
++
++#include <atomic>
++#include <algorithm>
++#include <cmath>
++
++#include "gfx/xr.hpp"
++
++namespace dc::game {
++
++namespace {
++
++constexpr float kPi = 3.14159265f;
++// A scene's subject further round than this from where the body faces turns the body again.
++constexpr float kSubjectSnap = 1.0f;
++// One snap turn: 45 degrees.
++constexpr float kSnapTurn = 0.785398f;
++
++// Facings are yaws about the up axis, atan2(x, z) of a world direction; positive turns left.
++bool               g_body_set = false;
++float              g_body_yaw = 0.0f;
++VrFacing           g_last_facing = VrFacing::Body;
++std::atomic<float> g_pending_turn = 0.0f;
++// What the stick turn is made from, kept at each view for the input thread.
++std::atomic<float> g_view_yaw = 0.0f;
++std::atomic<float> g_camera_yaw = 0.0f;
++
++float Wrap(float angle) {
++    while (angle > kPi) angle -= 2.0f * kPi;
++    while (angle < -kPi) angle += 2.0f * kPi;
++    return angle;
++}
++
++// Comfort: the view moving or turning while the head keeps still darkens the edges of sight, the
++// more the faster, up to walking pace (units a frame) or a slow pan (radians a frame). Bigger
++// jumps are cuts and snap turns, which do not unsettle.
++constexpr float kWalkPace = 1.45f;
++constexpr float kPanPace = 0.04f;
++constexpr float kCutDistance = 20.0f;
++constexpr float kCutTurn = 0.5f;
++bool            g_comfort_set = false;
++float           g_last_stand[3] = {};
++float           g_last_yaw = 0.0f;
++
++void Comfort(const float *stand, float yaw) {
++    float strength = 0.0f;
++    if (g_comfort_set) {
++        const float dx = stand[0] - g_last_stand[0];
++        const float dy = stand[1] - g_last_stand[1];
++        const float dz = stand[2] - g_last_stand[2];
++        const float moved = std::sqrt(dx * dx + dy * dy + dz * dz);
++        const float turned = std::fabs(Wrap(yaw - g_last_yaw));
++        if (moved < kCutDistance) {
++            strength = std::max(strength, moved / kWalkPace);
++        }
++        if (turned < kCutTurn) {
++            strength = std::max(strength, turned / kPanPace);
++        }
++    }
++    g_comfort_set = true;
++    std::copy(stand, stand + 3, g_last_stand);
++    g_last_yaw = yaw;
++    gfx::xr::SetVignette(std::min(strength, 1.0f) * 0.8f);
++}
++
++} // namespace
++
++bool VrPlaying() { return gfx::xr::Running(); }
++
++void VrEyeView(const CCamera &camera, const float *head, VrFacing facing, sceVu0FMATRIX matrix, float *eye) {
++    const float look_x = camera.ref[0] - camera.pos[0];
++    const float look_z = camera.ref[2] - camera.pos[2];
++    if (std::sqrt(look_x * look_x + look_z * look_z) < 1e-3f) {
++        return;
++    }
++    const float camera_yaw = std::atan2(look_x, look_z);
++    // Coming back from a scene seen through its camera, the body faces the way that camera did.
++    if (!g_body_set || (g_last_facing == VrFacing::Camera && facing != VrFacing::Camera)) {
++        g_body_yaw = camera_yaw;
++        g_body_set = true;
++    }
++    if (facing == VrFacing::Subject) {
++        // The subject, unless it stands at the player's own feet: then the camera's way.
++        const float to_x = camera.ref[0] - head[0];
++        const float to_z = camera.ref[2] - head[2];
++        const float subject = std::sqrt(to_x * to_x + to_z * to_z) > 8.0f ? std::atan2(to_x, to_z) : camera_yaw;
++        if (g_last_facing != VrFacing::Subject || std::fabs(Wrap(subject - g_body_yaw)) > kSubjectSnap) {
++            g_body_yaw = subject;
++        }
++    }
++    g_body_yaw = Wrap(g_body_yaw + g_pending_turn.exchange(0.0f));
++    g_last_facing = facing;
++
++    const float yaw = facing == VrFacing::Camera ? camera_yaw : g_body_yaw;
++    g_view_yaw = yaw;
++    g_camera_yaw = camera_yaw;
++    // A scene through the game's moving camera plays on a still screen, as the game draws it: a
++    // camera flying about the player's head is what sickens most.
++    gfx::xr::SetCinema(facing == VrFacing::Camera);
++    if (facing == VrFacing::Camera) {
++        gfx::xr::SetVignette(0.0f);
++        g_comfort_set = false;
++        return;
++    }
++    const float *stand = facing == VrFacing::Camera ? camera.pos : head;
++    CCamera      view = camera;
++    view.SetPos(const_cast<float *>(stand));
++    view.SetRef(stand[0] + std::sin(yaw) * 10.0f, stand[1], stand[2] + std::cos(yaw) * 10.0f);
++    view.SetRoll(0.0f);
++    view.GetCameraMatrix(matrix);
++    sceVu0CopyVector(eye, const_cast<float *>(stand));
++    Comfort(stand, yaw);
++}
++
++void VrCinema() {
++    if (VrPlaying()) {
++        gfx::xr::SetCinema(true);
++        gfx::xr::SetVignette(0.0f);
++    }
++}
++
++void VrSnapTurn(float radians) { g_pending_turn = g_pending_turn + radians; }
++
++float VrStickTurn() { return Wrap(g_view_yaw + gfx::xr::HeadYaw() - g_camera_yaw); }
++
++float VrWalkAngle(float camera_angle) {
++    if (!VrPlaying() || g_last_facing == VrFacing::Camera) {
++        return camera_angle;
++    }
++    return camera_angle + VrStickTurn();
++}
++
++void VrTurnStick(float rx, float ry) {
++    static bool flicked = false;
++    if (!VrPlaying()) {
++        flicked = false;
++        return;
++    }
++    if (!flicked && std::fabs(rx) > 0.9f && std::fabs(ry) < 0.35f) {
++        VrSnapTurn(rx > 0.0f ? -kSnapTurn : kSnapTurn);
++        flicked = true;
++    } else if (flicked && std::fabs(rx) < 0.3f && std::fabs(ry) < 0.3f) {
++        flicked = false;
++    }
++}
++
++} // namespace dc::game
+diff --git a/port/src/main.cpp b/port/src/main.cpp
+index 99565a6e..fdc59dc2 100644
+--- a/port/src/main.cpp
++++ b/port/src/main.cpp
+@@ -37,6 +37,7 @@
+ #include "dun/gameloop.hpp"
+ #include "gamemode.hpp"
+ #include "gfx/gfx.hpp"
++#include "gfx/xr.hpp"
+ #include "item/host.hpp"
+ #include "langset.hpp"
+ #include "localize/localize.hpp"
+@@ -56,6 +57,7 @@
+ #include "platform/discord.hpp"
+ #include "platform/display.hpp"
+ #include "platform/firstrun.hpp"
++#include "game/vr_view.hpp"
+ #include "platform/input.hpp"
+ #include "platform/input_script.hpp"
+ #include "platform/paths.hpp"
+@@ -101,6 +103,8 @@ struct Options {
+     const char  *export_gameplay = nullptr;
+     const char  *font = nullptr;
+     const char  *seed_save = nullptr;
++    bool         vr = false;
++    float        vr_scale = 0.0f;
+ #ifdef __SWITCH__
+     bool switch_core_affinity = true;
+ #endif
+@@ -147,6 +151,8 @@ float g_switch_render_scale = 0.0f;
+ #ifndef __SWITCH__
+                  "  --display-per-tick N  headless: also render N interpolated display frames per tick\n"
+ #endif
++                 "  --vr               play in an OpenXR headset (default: DC_VR=1); the window mirrors it\n"
++                 "  --vr-scale N       game units in a metre of the headset's space (default 9)\n"
+                  "  --export-text DIR  write the game's message files to DIR as language JSON (docs/LOCALIZATION.md)\n"
+                  "  --export-gameplay DIR  write the item tables to DIR as gameplay documents, a starting point\n"
+                  "                     for a datapack (docs/ITEM_FRAMEWORK.md)\n"
+@@ -229,6 +235,14 @@ Options ParseOptions(int argc, const char **argv) {
+             options.screenshot_at = value();
+         } else if (arg == "--perf-log") {
+             options.perf_log = true;
++        } else if (arg == "--vr") {
++            options.vr = true;
++        } else if (arg == "--vr-scale") {
++            char *end = nullptr;
++            options.vr_scale = std::strtof(value(), &end);
++            if (end == nullptr || *end != '\0' || !(options.vr_scale > 0.0f)) {
++                Usage(argv[0]);
++            }
+ #ifndef __SWITCH__
+         } else if (arg == "--display-per-tick") {
+             options.display_per_tick = static_cast<int>(number());
+@@ -351,6 +365,46 @@ void BgmTestPump() {
+ 
+ void CaptureListedFrames();
+ 
++// The headset's Touch controllers as pad 0, laid out so one hand plays it all: the stick walks,
++// the trigger attacks and talks (Cross), A or X cancels (Circle), B or Y opens the menu (Triangle),
++// the grip guards and locks on (R1), the stick pressed in is Square, and A with B together, or the
++// left menu button, is Start.
++void HeadsetPad() {
++    const gfx::xr::Controls controls = gfx::xr::ReadControls();
++    if (!controls.active) {
++        InputSetHeadsetPad(nullptr);
++        return;
++    }
++    InputPadState pad;
++    pad.connected = true;
++    const bool start = controls.menu || (controls.lower && controls.upper);
++    if (controls.trigger) pad.buttons |= kInputCross;
++    if (controls.lower && !start) pad.buttons |= kInputCircle;
++    if (controls.upper && !start) pad.buttons |= kInputTriangle;
++    if (controls.grip) pad.buttons |= kInputR1;
++    if (controls.stick) pad.buttons |= kInputSquare;
++    if (start) pad.buttons |= kInputStart;
++    // A flick straight sideways turns the body 45 degrees, once per flick; the stick then walks
++    // nowhere until it comes back to the middle.
++    static bool flicked = false;
++    float       x = controls.stick_x;
++    float       y = controls.stick_y;
++    if (!flicked && std::fabs(x) > 0.9f && std::fabs(y) < 0.35f) {
++        dc::game::VrSnapTurn(x > 0.0f ? -0.785398f : 0.785398f);
++        flicked = true;
++    }
++    if (flicked) {
++        if (std::fabs(x) < 0.3f && std::fabs(y) < 0.3f) {
++            flicked = false;
++        }
++        x = y = 0.0f;
++    }
++    // The game turns the stick to walk where the head looks (VrWalkAngle).
++    pad.left_x = InputStickByte(x);
++    pad.left_y = InputStickByte(-y);
++    InputSetHeadsetPad(&pad);
++}
++
+ void PumpHost() {
+     BgmTestPump();
+     if (!WindowPollEvents()) {
+@@ -372,9 +426,14 @@ void PumpHost() {
+ #ifdef __ANDROID__
+     platform::TouchOverlayPoll();
+ #endif
++    HeadsetPad();
+     InputPoll();
+     InputScriptApply(GameFrameCount());
+     CaptureListedFrames();
++    // Quitting from the headset's own menu quits the game.
++    if (gfx::xr::ExitRequested()) {
++        GameRequestStop();
++    }
+ }
+ 
+ int Screenshot(const char *path);
+@@ -401,7 +460,9 @@ void CaptureListedFrames() {
+         if (pending[n] != frame) continue;
+         std::string path = g_options.screenshot;
+         if (const std::size_t dot = path.rfind('.'); dot != std::string::npos) path.resize(dot);
+-        path += "_" + std::to_string(frame) + ".png";
++        path += "_" + std::to_string(frame);
++        if (gfx::xr::Running()) gfx::xr::CaptureEyes(path);
++        path += ".png";
+         Screenshot(path.c_str());
+         pending.erase(pending.begin() + static_cast<std::ptrdiff_t>(n));
+         return;
+@@ -718,6 +779,12 @@ int Run(int argc, const char **argv) {
+     renderer.render_scale = config.render_scale;
+ #endif
+     renderer.validation = renderer.validation || SettingsEnv("VULKAN_VALIDATION") != nullptr;
++    // A headset, when asked for and found, before the renderer makes its Vulkan objects through it.
++    const char *vr = SettingsEnv("VR");
++    if (!options.headless && (options.vr || (vr != nullptr && std::strcmp(vr, "1") == 0)) &&
++        gfx::xr::Init("Dark Cloud")) {
++        gfx::xr::SetUnitsPerMetre(options.vr_scale > 0.0f ? options.vr_scale : 9.0f);
++    }
+     gfx::RendererInit(WindowHandle(), renderer);
+     GameLoadTraceCheckpoint("renderer_ready");
+     DC_ANDROID_TRACE("Run: renderer initialized");
+@@ -806,6 +873,7 @@ int Run(int argc, const char **argv) {
+     AudioOutputStop();
+     InputShutdown();
+     gfx::RendererShutdown();
++    gfx::xr::Shutdown();
+     WindowShutdown();
+     return status;
+ }

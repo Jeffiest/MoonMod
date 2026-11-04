@@ -591,7 +591,7 @@ During dungeon play a mod can put up three screens of its own, each drawn by the
 plates and lettering, driven by the pad or the mouse, and spread across a wide window:
 
 - `ui.choice_open({id, title, subtitle?, cancel?, cursor?, options = {{title, subtitle?, lines?}, ...}})` pauses the
-  dungeon (as the game's pause does) on 1-4 option cards side by side. A line is a string or `{text, tone}` with tone
+  dungeon (as the game's pause does) on 1-6 option cards side by side. A line is a string or `{text, tone}` with tone
   `good`, `bad`, `dim` or `gold`. Left/right (or L1/R1) move, Cross takes, Circle backs out when `cancel` is set; the
   mouse picks the card under it. The owner gets `ui.choice_made` `{id, index}` (index from 1) or `{id, cancelled =
   true}`. One panel at a time; it waits for play to be free (not mid-chest) before it shows. Notices hold back while it
@@ -660,6 +660,33 @@ is built again from another seed. `darkcloud_tests --gtest_filter=DungeonReach.*
   the player until `dungeons.warden_room_release()`. `dungeons.warden_room_get()` reads `{state = none | sealed |
   open | shut | released, center, size}`. On the rare floor with no space for the room, the room behind the floor's
   native room gate is used, and a floor with neither reports `none`. One mod at a time; unloading it opens the doors.
+- `world.ghost_get()` returns the player's last five seconds on the dungeon floor they are on: `{character, frames}`,
+  `frames` oldest first, every other frame, each `{x, y, z, heading, motion}`. A new floor or another hero starts it
+  again. `world.ghost_play({character, frames})` (1-600 frames, as `ghost_get` gives them) plays them back on that hero's
+  model, pale and see-through, at the speed they were lived, and fades over a second at the end; `{}` stops it. Motions
+  a mod appended to the hero play as standing. Dungeon only; one ghost at a time.
+- **Messages players leave for each other** (`messages.*`, `storage.read`/`storage.write`). There is no server: each
+  message is a small file in the **messages folder**, and a player who points that folder at one a sync service
+  shares (OneDrive, Dropbox, a LAN share) reads the messages of everyone else who does. The folder is the player's
+  choice, never a mod's, and no call takes a path: `DC_MESSAGES_DIR` when set, else the path on the first line of
+  `<save>/moonmod/messages-folder.txt`, else `<save>/moonmod/messages` (the player's own messages only). Each player
+  writes only their own fixed file names there (`<player>-<id>.json`, `<player>.ratings.json`); another player's files
+  are read as untrusted data (at most 2 KB a message, 4000 files a list, links not followed, anything malformed left
+  out). Anyone with the folder can read what is left in it.
+  - `messages.post({place, text})` leaves a message: `place` is 1-64 characters of `a-z 0-9 : _ . -` that the mod
+    names (a spot every player's game has, such as a shrine), `text` 1-120 characters of printable ASCII. Returns `{id,
+    shared}` (`shared`: the folder is one the player chose). A player keeps 300 messages at most.
+  - `messages.list({place})` or `({places = {...}})` (up to 32): the mod's messages there, best rated first, then
+    newest, at most 50: `{messages = {{id, place, text, at, good, poor, mine, rated}, ...}, shared}`. Only messages
+    the same mod left are listed. Show text as text: a mod that builds its messages from fixed phrases (as Vigil does)
+    should show only those that parse back into them.
+  - `messages.rate({id, rating})`: 1 good, -1 poor, 0 takes it back; not one's own.
+  - `messages.remove({id})` takes back one of the player's own.
+- `dungeons.room_seal({})`: shuts the room the player stands in (well inside it, past its edge cells), each doorway
+  closed by a gate facing its corridor, as the Warden room's are; returns `{sealed = true, doors, room = {x, y, w, h}}`
+  in cells, or `{sealed = false}` in a corridor or a room with no doorways. `dungeons.room_release()` opens it again
+  (`{released}`). One shut room at a time; a new floor forgets it. Every room's doorways are recorded as the floor is
+  built, so shortcut doors, illusory walls and the Warden room's own gates are left as they are.
 - `dungeons.set_rest_room({enabled})`: floors built from then on are rest floors: a 6x6 hall with the native healing
   spring against its top wall and a 4x4 antechamber with the back floor's stairs in its top wall, joined by one
   corridor that holds the way in and the exit gate. Nothing else goes on them: no other rooms, pillars, character
@@ -724,8 +751,8 @@ carries them, nil before. A mod registers up to 64. Vigil's rolls and attacks ar
 `player.moves_set({moves = {...}})` gives characters this mod's own attacks, up to 160, replacing the mod's earlier set;
 `player.moves_clear()` takes them back (and unloading does). A move replays a stretch of one of the character's own
 native motions at its own speed and brings its own lunge, spin, hits, bursts, sounds and trail, in place of the native
-action. Mods hear `game.player.move` ({id, owner, character, cancel, variant}) as one starts (`variant` is the number of
-the variant that played, or nil).
+action. Mods hear `game.player.move` ({id, owner, character, cancel, variant, frames}) as one starts (`variant` is the
+number of the variant that played, or nil; `frames` how many steps it runs).
 
 - `id` (1-40 bytes), `character` (one of the six), `trigger`:
   - `run_attack`: the attack button after running for `run_frames` (1-300 game steps, two drawn frames each),
@@ -759,6 +786,21 @@ the variant that played, or nil).
     jump slash comes at 0.5 and the wave at 1.5, a count of 1 being about two seconds held), ahead of the jump slash.
     While Toan has the wave's skill, a charge at `max_charge` or more is left to the wave. His charge flashes orange
     as it reaches `min_charge`.
+  - `art`: R2 while guarding (the guard's own state, locked on or not with `guard_rules` `without_lock`). `weapons`
+    (up to 64 native weapon item numbers, 257 and up; none means any) and `min_level` (1-99, default 1) say which
+    equipped weapon it is for: the first of the character's arts whose list holds the weapon he holds, at that level
+    or higher, plays. Any number sit side by side, another mod's too. Vigil gives each of Toan's blades one.
+  - `played`: no button; only `player.move_play` starts it. Any number of a character's `played` moves sit side by
+    side, another mod's too. Vigil's flask drink is one (each hero's native drinking motion, 28, at half speed).
+  - `critical` with `critical = "backstab"` or `"riposte"`: the attack button at rest, tried ahead of every other
+    trigger. A backstab takes the nearest live enemy within `reach` (4-60, default 24; the lock target first) whose
+    back he stands at, within `arc` degrees of straight behind it (20-180, default 90). A riposte takes the enemy the
+    mod armed with `player.critical_set`, while it is armed and within `reach`. He is drawn in to `gap` (2-40, default
+    12) of it if farther, and faces it; it stops where it is, is turned to him (a riposte) or away (a backstab), any
+    `stop` on it ends, and it plays its half from `pairs` (up to 32 `{model (a native model id), animation (a motion
+    registered on that model with `animations.monster_register`: the mod's id or `"mod:id"`), speed? (0.05-4, default
+    0.5)}`). Its script waits `hold` steps (0-600; 0 is its pair's length at that speed, else the move's), hits and
+    all; its flinch is skipped and its death still plays. An enemy without a pair is held standing.
 - `motion` (native motion number 0-63) or `animation` (a motion registered with `animations.player_register`: the
   mod's own id, or `"mod:id"`), `from`/`to` (the stretch, fractions 0-1), `speed` (0.2-4, motion units a step).
 - `variants` (up to 4, for a move with an `animation`): `{animation, motion, from?, to?}`, another registered motion
@@ -814,6 +856,12 @@ grip. `scale` (0.1-4, default 1) draws the model that much its size (a monster's
 numbers. `player.form_clear()` gives him his own model back. Either fails (try again) while an action or a scene holds
 the model, as a character switch does. A new floor, switching the character in and out, and unloading the mod also end
 it. Opar's Jump Slam turns him into the Opar monster this way, for one slam.
+
+`player.critical_set({entity, frames?})` opens one enemy (a live monster handle) to the mod's `riposte` criticals
+for `frames` steps (1-600, default 120), as after a parry or a stagger; one at a time, a new one replaces it, and a
+critical on it spends it. `player.critical_clear()` closes it. Each critical that starts sends
+**`game.player.critical`** `{id, owner, kind (backstab or riposte), entity, native_model_id?, hold}`: a mod's
+critical damage hangs off it (Vigil raises its blows on that kind of enemy for `hold` ticks with a formula).
 
 `player.move_play({id})` starts one of the mod's own moves (`player.moves_set`) now, whatever its trigger: a
 chained move, such as the move a form makes as soon as it is taken. The move must be the active character's; like
@@ -925,7 +973,33 @@ local result = assert(game.combat.status_add({
 }))
 ```
 
-`combat.status_add` supports `slow` and `stop` for live, revealed Chronicle enemies. The generation-checked handle prevents a delayed hit event from affecting a new enemy that reuses the same slot. Duration is 1–32767 native simulation steps, and an existing timer is only extended. ChronicleTwo does not expose this operation.
+`combat.strike_player({x, y, z, radius = 2..120, damage = 0..9999, kind = "light" | "heavy"})` lays one native hit at
+that point that only the player can be struck by, as a monster's blow would be: the game's own hit test takes it on the
+next frame (the player's defence comes off), so a guard, a parry, a dodge's invincibility and poise all work on it, and
+`game.player.hit` reports it with no `entity`. Light flinches; heavy knocks back. It is for a mod's own attacks (a
+boss's new move after a telegraph, a trap). Dungeon only.
+
+`combat.feel_set({hit_stop = {light, heavy, critical, hurt}, shake = {light, heavy, hurt}, rumble = true})` gives
+blows weight. `hit_stop` values are frames (0-12) the whole floor holds still when one of the player's blows lands
+(`heavy` for a heavy hit or a charged one, `critical` as a critical begins) or when the player is hurt (`hurt` for a
+knockback, half of it for a flinch). It is drawn, not stepped, and a swing that strikes several monsters in one frame
+freezes once. `shake` values (0-10) are the camera shake's strength for the same moments, and `rumble` turns the pad's
+vibration on for landed blows and criticals. Every field is optional and missing ones are 0. One mod's feel is set at
+a time (another mod's call fails until it clears). `combat.feel_clear()` takes it off; unloading the mod does too.
+
+`player.tuning_set` also takes `input_buffer` (0-20 steps): a roll or R2 move (`player.moves_set` dodge, dodge_back,
+heavy, combo_finisher, art) pressed when it can't start, such as late in a swing before its cancel point, mid-roll or in
+a hit-stop, is kept that long and starts at the first step it can. 0 is the game's own (tried on its frame only). `dodge_gauge` (0-100) is what the `dodge_power` shove costs
+of the weapon gauge (refused with less); the shove is only for a character with no dodge move of a mod's. And
+`lock_camera` (boolean): locked on, the camera turns to keep the target straight beyond the player, with 8 degrees of
+slack far off and 30 close up, where the game lets it drift up to 90 degrees off first; locked on to a large monster
+(body radius or half its height past 15 units) the camera may also sit up to 60 units further out, walls still
+pulling it in. And `chain_cancel` (0-30
+steps, 0 off): R2 pressed in an attack's recovery, its last blow that many steps past, cuts into the heavy (a native
+swing, or one of the mod's own attack moves, a heavy among them); attack pressed in a mod attack move's recovery ends it
+so the native combo starts on that press. Several mods asking: the earliest wins.
+
+`combat.status_add` supports `slow`, `stop` and `haste` for live, revealed Chronicle enemies. `haste` is not a native status: while it lasts the enemy's scripted motions and moves play 1.4 times as fast (the inverse of `slow`, and the two multiply), and it ends with the enemy's slot. The generation-checked handle prevents a delayed hit event from affecting a new enemy that reuses the same slot. Duration is 1–32767 native simulation steps, and an existing timer is only extended. ChronicleTwo does not expose this operation.
 
 ### Owned combat damage formulas
 
@@ -963,6 +1037,130 @@ assert(game.items.quick_slot_use({slot = 2})) -- requests a normal native action
 ```
 
 Chronicle reads built-in definitions from its native common-item and item tables. The stable ID is `chronicle:item:<item_no>`; results include the native message and icon indices, sort key, use and kind flags, initial volume, and stacking behavior. `items.give` and `items.remove` use Chronicle's native dungeon inventory routines, accept counts from 1 to 999, and report the actual quantity changed. They require an active save and respect the native item-pack capacity. Chronicle's `items.quick_slots()` returns the three native quick-item assignments as `{slot, item_no, id, count}` records; empty slots have null `item_no`/`id` and a zero count. `items.quick_slot_select({slot = 1..3})` changes the native selected slot only during active dungeon play. `items.quick_slot_use({slot = 1..3})` selects the slot and queues the ordinary native action-button path briefly; item animations, consumption, and effects therefore remain controlled by the game. `items.use` accepts built-in HP and water consumables and the four native single-status cures, plus registered mod HP/water items and status remedies. It defaults to the active character and accepts `character = "active"` or a joined playable character id such as `"xiao"`; the target must be alive and eligible for that effect. It delegates to Chronicle's `ItemUseFunc` and consumes exactly one item after the native routine accepts it.
+
+Chronicle's **charm slots** are each character's own slots on the item page, beside their weapon and shield on the
+character panel, that hold only the four amulets (Anti-Freeze, Anti-Curse, Anti-Goo, Antidote). An amulet in a charm
+slot is out of the bag and takes none of its room. When a hit rolls an ailment, an amulet in the active character's
+charm slots guards against it before the quick slots are looked at, spending a use as the game's own amulets do and
+breaking with the last. On the
+page, Right from the shield reaches them (an empty one shows an amulet blacked out), Cross puts the held amulet in (or picks it up), and Square sends it back
+to the bag. `items.charm_slots_set({count = 0..4, feather = optional boolean})` (`game.write`) opens that many amulet
+slots for every character, and with `feather = true` one more after them that takes only Dran's Feather (an amulet slot
+refuses the Feather and the Feather's slot refuses amulets); none, the default, is the game's own page.
+`items.charm_slots()` returns `{open, feather, characters = {toan = {{slot, kind, item_no, id, uses}}, ...}}` (`kind`
+is `"amulet"` or `"feather"`, `slot` the position on the page) with every character's shown slots: those open, plus any further one still holding an amulet, so an amulet is never out of reach after its mod closes the slots.
+They are not in the save image: the engine keeps them beside it as `charms.json` in the save slot's folder, by character id (a character no mod
+registers now keeps theirs), written
+and read with the save, so they come back with it whether or not the mod is loaded. In a dungeon the active
+character's charms show on the HUD left of the gate-key plate (before any `render.hud_icon_set` icons), each with its
+uses left in the corner, as the item page's slots show them. A worn amulet sells for less: its price times the uses
+left over its full uses, and nothing once it is worn below half of them. Dran's Feather, in its own slot, lightens a
+`dodge_run` run (half the drain), spending a use each tick of running, and shows its time left in seconds; it sells
+for its price whatever is left. A Feather a file keeps in an amulet slot moves to its own on load.
+
+### Chronicle gear
+
+```lua
+local piece = assert(game.items.gear_give({kind = "boots", name = "Swift Boots", rarity = 1, value = 180,
+  effects = {run_cost = 16, guard = {goo = 30}}}))
+game.items.gear_equip({uid = piece.uid})              -- on the active character; or character = "xiao"
+local gear = game.items.gear()                        -- {pieces, bag, bag_max, bag_slots, worn = {toan = {slots, effects}}}
+game.items.gear_unequip({kind = "boots"})             -- back into the bag
+game.items.gear_remove({uid = piece.uid, sell = true}) -- {uid, money}
+game.items.gear_page_set({icons = {hat = "gear_hat", tunic = "gear_tunic", gloves = "gear_gloves", boots = "gear_boots"},
+  parts = {toan = {hat = {draw = {"boushi"}, turn = 40, bare = {"boushi", "cloth1"}},
+                   boots = {draw = {"skin", "l_f", "r_f"}, fit = {"l_f", "footl", "eff7"}, turn = 70, tilt = 15}}}})
+```
+
+Each character wears up to five **gear** pieces, one of each kind: `hat`, `tunic`, `gloves`, `boots` and `pouch`. A mod makes
+each piece with `items.gear_give({kind, name, rarity?, value?, icon?, color?, effects?})` (`game.write`): `name` 1-32 bytes, `rarity`
+0 to 3 (common, fine, rare, unique; the engine only keeps it), `value` the Gilda it sells for (0 to 65535), and
+`effects` any of `guard` (`{freeze, poison, curse, goo = percent}`, 0 to 90 each), `stamina` (gauge a second, 0 to
+120), `lightness` (percent off a swing's cost, 0 to 50), `defence` (0 to 99), `run_cost` (percent off what a
+`dodge_run` drains, 0 to 75), `poise` (points of hits taken without a stagger, 0 to 8) and `bag` (item bag slots, 0 to
+50). `icon` is the stem of an `icons/<stem>.png` a mod provides (as `items.register` takes
+one; without it the piece shows its kind's icon) and `color` `{r, g, b}` (0 to 255 each) tints it, so one grey icon can
+make a red pair of boots and a blue one. It goes into the gear bag, which holds 99 pieces besides those worn, and the
+result is the piece: `{uid, kind, rarity, name, value, effects, worn_by, icon, color}`; a full bag fails. `uid` numbers the piece for good
+(never reused in that save). Pieces are not the game's items and take no room in the item bag.
+
+`items.gear_equip({uid, character?})` puts a piece on (`character` an id or `"active"`, the default), taking it off
+whoever wore it; what was in that slot goes to the bag. `items.gear_unequip({kind, character?})` takes one off into
+the bag (failing when the bag is full or nothing is worn there), and `items.gear_remove({uid, sell?})` takes a piece
+away, worn or not, with `sell = true` adding its value to the wallet (up to the wallet's 65535). `items.gear()`
+(`game.read`) returns every piece, the bag's count and size, and for each character the uid in each slot (or nil) and
+`effects`, what their worn pieces do together.
+
+The engine reads the active character's worn effects where the game decides each thing, added up across the pieces
+and capped: a hit that rolls an ailment first rolls the `guard` chance against it (90% at most) and, if that holds,
+nothing happens and no amulet is spent; `defence` is taken off each hit with the character's own; `stamina` is added
+to the refill (`player.tuning_set` `stamina`, or the game's) on any frame it isn't stopped, halved by Goo (120 at
+most); `lightness` scales every swing's cost (half at most) on top of the tuning's `lightness`; `run_cost` scales the
+run's drain (75% off at most) on top of Dran's Feather; `poise` (8 at most) takes a landed light hit for 1 point and a
+heavy one for 2 with no stagger: the damage and the hurt sound, but no flinch, knockdown or recoil, and the swing or
+dodge under way goes on. A hit past what is left staggers as usual and leaves poise whole for the next; poise is whole
+again 2 seconds (120 frames) after the last hit. A trap, a broken guard or a hit that would empty the life bar always
+staggers. `bag` grows the game's item bag (the one its Pockets grow) by the largest any character wears (50 at most;
+one bag for the party), never past the game's own 100. Taken off, the bag shrinks as far as its items let: items in
+the slots that go move into empty ones, and while it is too full it stays larger, shrinking as it empties. The engine
+remembers what it added (`items.gear()` `bag_slots`), so the size the save's Pockets gave it is left alone; the item
+page and the gear calls bring the bag in line. Gear is kept beside the save as `gear.json`, read and written
+with it; a piece worn by a character no mod registers now stays theirs.
+
+`items.gear_page_set({icons = {hat, tunic, gloves, boots, pouch?}})` (`game.write`) opens the gear page on the game's item
+page, each `icons` entry a stem as `icon` takes (the first four are needed; each kind's empty slot shows its icon blacked
+out). Name `pouch` too and the page has a pouch slot, at the character's hip in the outer column; leave it out and the
+page has four slots, as before. The personal board gets a fourth tab, **Equipment**, holding the bag: Cross picks a piece up and puts it back, the
+trash can throws it away, and the help box names the piece under the cursor with its rarity, price and effects. The
+character card gives way to the **hero page**, a panel in the help windows' frame: the character alone and larger, down
+his left side his charm slots and then his weapon (its attack in the corner, its wear up its edge) and shield, any
+charm slots past the second (and the pouch) in a column further out, the other gear slots down his right side and his HP and water
+across his feet. The help box at the bottom left says what Cross and Square do on the slot under the cursor. Cross with a piece in hand on its kind's slot puts it on, the piece it replaces coming up into the hand; Cross
+on a worn piece takes it into the hand (past a full bag, until it is put down) and Square takes it off to the bag.
+One of the character's weapons picked up from the Weapons tab and dropped on the hand is equipped, with the weapon
+menu's checks (a curse, a no-weapon-change zone, a character out of the party); an Osmond or Ruby in play keeps theirs
+until the weapon menu, which reloads their weapon's effects. The mouse carries pieces as it does items: press on a cell
+or slot, let go on another. `items.gear_page_set({})` closes it all, and `items.gear()` reports `page`.
+
+While the page is open, a native item shop shows the Equipment tab on the player's side too: Triangle on a piece sells
+it for its `value` (the shop's usual "sell it?" question; a wallet at 65535 refuses). Cross can't take a piece onto
+the counter. `items.gear_stock_set({shop, goods})` (`game.write`) stocks a shop (its number, as `shops.*` uses: 0 to
+17 for the game's own) with up to 10 pieces, each as `gear_give` takes it plus `price` (0 to 65535 gilda; its `value`
+when left out). They lie in the shop's empty cells after its own goods, drawn as in the bag, and the help box names the
+one under the cursor with its price. Triangle buys one into the bag (refused past a full bag or a thin wallet); Cross
+can't drag one into a deal. A bought piece is gone from that shop until the mod stocks it again, and `{shop, goods =
+{}}` takes the shop's gear away. Stock is kept for the session only, not in the save; with the page closed no shop
+shows its gear.
+
+`parts` (optional) shows each hero's own clothes in place of the icons: for a character id, each kind names frames of
+that character's menu model, either as a list (1 to 8 names, up to 31 bytes each; a name matches a frame's whole name
+or the part before its `__` flags) or as `{draw = names, fit = names?, bare = names?, below = names?, turn = degrees?, tilt = degrees?}`. The slot
+draws only the `draw` frames, grown and centred until the `fit` frames (all of `draw` when left out) fill it, the model
+turned `turn` degrees (-180 to 180, left positive) and held there, and leant back `tilt` degrees (-90
+to 90, forwards when negative) so a part the menu camera sees from above, such as a boot, shows from the side. A
+piece's `color` fills the ground behind its part and warms the light a little, so the part keeps its own look; an empty
+slot draws its parts dark, except a kind with `bare` frames: the hero isn't wearing them, so its empty slot has the
+kind's icon. This covers the hero page's slots, the Equipment tab's cells and the piece
+in hand, for pieces whose icon is their kind's own; a piece with an icon of its own, a kind with no parts and a hero
+with none keep the icon, as does the page while the model is still loading. The parts are the character's whose page is
+shown. Cloth the model simulates is drawn in a slot as it hangs at rest. `bare` names frames the character's models
+leave out while nothing is worn in that slot, on the hero page and in the world alike (cloth hanging from one of them is
+left out with it): his hat, with no hat on. The hero in the dungeon and on the item page are known by which model they
+are; elsewhere (Toan in town) a model is the character's when its root's name starts as the character's pack does
+(`c01`). A frame that is any model's root, or a character with none named, is drawn as ever, and nothing is left out
+while the page is closed. `below` cuts the slot off a third of the way down the named frames' box (at the joint itself
+for a bone with no mesh of its own, such as an ankle), and fits the slot to the `draw` frames' vertices under that cut instead of `fit`: a part of a bigger mesh
+alone, as his shoes are part of his body (`draw = {"skin"}, below = {"l_f"}`, the shoes under his ankle wraps). Toan's
+are `boushi` (hat) with `cloth1` (its tail, cloth), `cloth2` and `cloth3` (his vest's front and back, cloth) with
+`beruto` (the belt), `l_g` with `l_hand` (the glove's cuff and the hand), `l_f` (his ankle wrap) and `kaban` (the
+satchel at his hip); `r_g`, `r_hand` and `r_f` are the other side's, and `skin` is his body, his shoes and shirt with
+it. With no hat his hair is open at the crown where the hat sat, which a camera from above can catch. The others'
+menu models (`commenu/dungeon/c0Nmodel.pak`): Xiao `l_hand` (her paw), `l_ude` (arm wrap), `l_asi` (leg wrap), `suzu`
+(bell), `skin` (her dress and shoes); Goro `mant` (his bear mantle, cloth), `faces2`, `skin` (the hood is part of it);
+Ruby `cube37` (tiara), `body5` (left hand and cuff), `cube40`/`cube60` (slipper toes), `l_foot`, `skin`; Ungaga `cap`
+(feathered cap), `cloth1`/`cloth2` (sash tails, cloth), `l_udewa_2` with `r_hand4` (a bracer and its hand),
+`kubikaazri` (necklace), `skin`; Osmond `face` (goggles), `l_hand4` (glove), `bag`, `backpack` (his jet pack), `l_foot`,
+`skin`.
 
 ### Chronicle data-only items
 
@@ -1055,6 +1253,15 @@ assert(grant.added and grant.native_item_no == blade.native_item_no)
 ```
 
 Chronicle lists its 120 retail weapons and registered definitions. `weapons.get()` accepts a `chronicle:weapon:<item_no>` ID for retail weapons, a mod-owned stable ID, native item number, or selector object. Results include base stats, caps, elements, monster effectiveness, socket count, experience/build-up metadata, and matching owned instances with equipped state. Each owned instance reports maximum `stats.durability`, live fractional `stats.durability_current`, per-instance `elements`, `vs_monster`, and `flags`. The ownership fields are `nil` without an active save. Registration allocates one of 32 appended native slots (377-408) and persists the stable ID to `moonmod/game-content/chronicle-weapon-slots.json`, so the same mod keeps the same native item number across launches. A definition inherits its template's owner, icon, name message, elements, sockets, experience, and build-up data; it may set `owner`, `stats.attack`, `stats.durability`, `stat_caps.attack`, and `stat_caps.magic`. `owner` may be a registered playable character (`"opar"`): the weapon then belongs to the character he fights as (`owner` reads that one, so the combat code treats it as theirs) and sits in his own row of the weapon page, chests and pickups put it there, and only he can be given it; `weapons.get` reports him as `holder`. `assets` must be empty. The API's `name` is available to Lua, but Chronicle's inventory menus still display the inherited native localized name. `weapons.give({id, character?})` adds one copy through the game's inventory path and assigns it to the compatible character, or to `character` (a joined playable id) when given; a weapon fits its owner, and a registered playable character the weapons of the character he fights as (`fights_as`). `weapons.equip({id, character?, slot?})` equips one owned compatible weapon on a joined character. Chronicle changes the loadout in an active Georama town or dungeon; in a dungeon, equipping the active character's weapon reloads the character and weapon models through the native character-switch routine, and is refused during an attack or other locked action. `weapons.remove({id, character?, slot?})` deletes one owned instance that is not equipped (Chronicle only). The character defaults to the active member; `slot` is required when the character owns multiple copies. Repeating the current selection succeeds with `changed = false`. `weapons.stats_set({id, character?, slot?, attack?, endurance?, speed?, magic?, durability?, elem?, vs_monster?, flags?})` is Chronicle-only and updates exactly one owned native weapon instance. Scalar stats accept integers from 0 to 32767, `elem` takes five values and `vs_monster` takes ten values from 0 to 127, and flags accept a 16-bit value. Specify both `character` and `slot` when the weapon has multiple copies. A durability-maximum update preserves the current durability fraction; element and effectiveness writes update the native saved weapon data. `weapons.durability_set({id, durability, character?, slot?})` sets current durability from zero through that instance's native maximum without changing the maximum. New model/animation identities are not part of this registration path yet.
+
+`weapons.stat_label_set({attack?, endurance?, speed?, magic?})` (`game.write`, Chronicle only) shows a mod's own image
+as a stat's label on the weapon menu's cards, in place of the game's two letters (At, Ed, Sp, Mp): each value is a stem
+as `items.gear_give`'s `icon` takes (icons/<stem>.png, put there with `resources.override`). The card under each
+weapon draws it in the label's 16x12 cell. On the Status tab, whose four labels are painted into it overlapping one
+another, any label set wipes the whole column to plain stone and lays all four again one size, each in a 26x15 box
+centred on its bar: the mod's image, or the game's own label from the card for a stat left out (so set all four for
+one look). Draw a label at 52x30 for a crisp one (it is loaded as 32x32 and stretched back). `{}` gives the game's
+labels back. It changes only the label, not the stat. Vigil sets all four, Speed reading "Lt" under its Lightness rule.
 
 `weapons.definition_set({id, ...fields})` is Chronicle-only and changes the live base definition of one built-in weapon so future native drops and purchases inherit the edited values. It supports attack, endurance, speed, magic, durability, owner, six socket types and socket count, five element values, ten monster-effectiveness values, ABS fields, flags, both build-up masks, attack/magic caps, and chain position. Another mod cannot override a weapon definition already owned by a different mod. Chronicle restores the complete original definition when the owner unloads. Existing weapons in saves keep their saved stats, matching the legacy Expanded Data mod. This operation does not alter localized names, model identities, shop inventories, or daily rotations; Chronicle Two does not expose this operation.
 
@@ -1196,6 +1403,7 @@ Every monster runs a compiled script (`dun/monstor/<name>.stb`), and that script
 one of them on a living monster, as that monster's own script would. `entity` is the generation-checked `entity_id`
 from `game.entities.query`. `native` is a name or an op number. `args` is a list:
 - a number (whole numbers go in as integers, the rest as floats) or a boolean;
+- a string, for a model frame's name (1-31 letters, digits or `_`), such as `SET_SHOT`'s `"dcol0"`: `{"dcol0", x, y, z}` fires the monster's own projectile from that frame at a point;
 - `{out = "int"}` or `{out = "float"}` for a value the native writes back. These come back in order in `out`.
 
 `_RUN_SCRIPT`, `_PUSH_IGLOBAL`/`_POP_IGLOBAL` and `_SET_REFERENCE`/`_DEL_REFERENCE` need a running script, so they are
@@ -1369,12 +1577,13 @@ game.dungeons.set_zones({}) -- floors as the game builds them
 - `shrines = true`: each zone has a **shrine**, a healing spring against the top wall of its shrine room (the first zone's first room, a later zone's gate room), and no room gets a random spring. No monster starts within two and a half cells of the spot in front of a shrine, so a party that rests or arrives there isn't set upon at once (monsters can still walk in).
 - `shrine_heal = false`: those springs refill the water gauge but leave HP alone (a mod whose rest heals, for a price), and Cross pressed in one no longer shows the game's "Recover health and thirst here". The default heals as the game's springs do.
 - `sanctuary = true` (with `shrines`): no monster steps within 400 units (two and a half cells) of the spot in front of any shrine's spring, the circle no monster starts in. One that steps in, chasing or knocked back, is put at the circle's edge. Off by default.
+- `descent` (0-120 units): **height steps**. Each zone lies `descent` below the zone its gate is entered from, and the corridor outside each gate slopes down to it: the nearest straight corridor cell to the gate (along the corridor, round up to three corners, within four cells) becomes a ramp, and the cells between it and the gate lie at the lower height. A gate with no straight corridor near it leaves its zone level with the one before. Walls, chests, atla, trap circles, the spring water, events, the people standing on the floor and the monsters the game sets down all follow the floor; collision, the camera's and the player's both, follows the slopes. The Moon Sea's floors stay level (its water lies at one height). Off (0) by default: the floor is built and drawn exactly as before.
 - `smoke` (a list of 1 to zones - 1): those gates are **smoke gates**: a wall no key opens, drawn as a curtain of pale smoke rising in front of its door, and no monster carries a key for it. Walking up to one is `game.dungeon.smoke_touched`; what lies beyond is the mod's to offer (Vigil puts a story floor of the game's own there and enters it with `dungeons.enter_floor`). A smoke gate listed in `open` is built open, like any other; don't list one in both.
 - The request stays until changed or `{}`; one mod at a time owns it, and unloading that mod clears it. It applies to the main floor only, never the back floor, and never to a rest floor.
 - A layout that can't be split cleanly (a room that lands outside its zone, a corridor that gets round a gate) is built again from another seed, as an uncrossable floor is; a floor that still won't split after the rebuilds is left whole.
 - The keys are the shortcut keys from the Silver Key down (passing over the one the shortcut doors skip), so a floor with zones has fewer shortcut doors. A locked zone gate shows its key's colour. A map of more than eight zones runs out of keys: from the eighth gate on, the six come round again (a key opens the nearest gate it fits, which is the one before the next that takes it).
 
-`dungeons.zones_get()` returns `{zones, rooms, open, smoke, shrines, shrine_heal, source_floors, exit_floor, floor_zones, current, zone_floors, gates = {{zone, x, y, key, key_item, locked, smoke, carrier}, ...}, shrines = {{zone, x, y}, ...}}` (a smoke gate has no `key`): the request, the zones of the floor the player is on (0 on a floor without zones), the zone the player stands in, each gate with the entity id of the monster carrying its key (while it lives and the gate is locked), and each zone's shrine spring (on the floor the player is on; the request's `shrines` is true or false), and `zone_floors`, the floor each zone of that floor stands for (its `source_floor`, or the floor itself). The cell to stand on in front of a spring is `y + 1`.
+`dungeons.zones_get()` returns `{zones, rooms, open, smoke, shrines, shrine_heal, source_floors, exit_floor, floor_zones, current, zone_floors, gates = {{zone, x, y, key, key_item, locked, smoke, carrier}, ...}, shrines = {{zone, x, y}, ...}}` (a smoke gate has no `key`): the request, the zones of the floor the player is on (0 on a floor without zones), the zone the player stands in, each gate with the entity id of the monster carrying its key (while it lives and the gate is locked), and each zone's shrine spring (on the floor the player is on; the request's `shrines` is true or false), and `zone_floors`, the floor each zone of that floor stands for (its `source_floor`, or the floor itself). The cell to stand on in front of a spring is `y + 1`. With height steps on that floor it also has `heights` (each zone's floor height, from zone 0) and `ramps = {{x, y, from, to}, ...}` (each ramp's cell and the heights it runs between: `from` the zone outside the gate, `to` the one inside), and the request's `descent`.
 
 A zone's key is never handed out twice: a floor built again while the player still holds the key (or it lies on the floor) gives no monster or chest another.
 
@@ -1541,10 +1750,17 @@ set. Fields, all validated (a bad field rejects the whole call with `invalid_arg
 | `dodge_power` | 0, or 0.25 to 4 | with a value, L2 throws the player forward (the push an attack lunge uses, so walls stop it); 45-frame cooldown; owners take the strongest |
 | `dodge_invincible_frames` | 0 to 60, integer | invincibility a dodge gives |
 | `dodge_hop` | boolean | the dodge leaves the ground |
+| `dodge_run` | 0 to 200 | with a value, L2 runs as in Souls: held past 12 ticks (0.2 s) with the stick pushed it runs at the dash speed Dran's Feather gave (3.0 a tick against the walk's 1.45, times `run_speed`), draining this much action gauge a second, with no refill while running; an empty gauge walks until L2 is let go. A tap dodges as it is let go (the `dodge` moves and `dodge_power` alike), not on the press. L2 no longer swings the camera behind, and Dran's Feather in a quick slot no longer boosts: it is a charm, and in the Feather's charm slot (`items.charm_slots_set` `feather`) halves the drain, spending a use a tick of running. Owners take the largest |
+| `lightness` | boolean | a weapon's Speed no longer sets the refill (every weapon refills as Speed 60 does); it scales what a swing costs instead, 60 / Speed held between half and double: a Speed 99 weapon swings for 0.61 of the game's cost, a Speed 30 club for double. It covers the game's own combo costs and a mod's attack moves (`moves`); evades (`dodge`, `dodge_back`) cost what they say. Any owner turns it on |
+| `stamina` | {character id = 0 to 600} | that character's own refill, in gauge a second, whatever the weapon: it replaces Speed / 30 and the character's factor (Toan's and Ungaga's quarter, Xiao's and Ruby's half again). A swing frame still refills nothing for Toan and Ungaga, Goo still halves it, Osmond's gun rules still apply, and `gauge_refill` still scales it. 0 leaves the game's. Owners take the largest per character |
 | `extra_shots` | 0 to 2, integer | Xiao's slingshot and Ruby's orbs fire this many more, fanned 8 degrees either side (owners add, capped at 2) |
 | `shots_pierce` | boolean | Ruby's orbs fly on through monsters (walls still stop them) |
 | `first_person` | boolean | `false` turns off R2's first-person view in dungeons |
 | `reach_scale` | 0.25 to 4 | Ungaga's spear hit points sit this much further out from him |
+| `item_heal_lock` | 0 to 400, integer | an HP-healing item (from the item menu or eaten from a quick slot) is refused while a live, revealed enemy is within this distance of the active character (a floor cell is 160); a mod's own `items.use` is not. Owners take the largest |
+| `lock_flick` | boolean | while locked on, a flick of the right stick (from near the middle to three quarters out) moves the lock to the nearest enemy on that side of the target, within lock range. Any owner turns it on |
+| `lock_sight` | boolean | the lock drops (with the refuse sound) after half a second with a wall between the player and the target: a straight line crossing an empty cell of the random floor's map. Any owner turns it on |
+| `soft_lock` | 0 to 90 degrees, integer | not locked on, a swing (a native swing, or a mod move started by the attack button) turns to the nearest live, revealed enemy within 64 units and this many degrees of the way the player faces or the stick points. Owners take the largest; 0 is off |
 
 `player.invincible({frames = 1..600})` sets the active player's native invincibility counter to at least `frames`
 during an active dungeon (it fails in town) and reports the counter and its previous value; it never shortens a
@@ -1554,6 +1770,75 @@ longer run and counts down with the game. All three need `game.write`. Chronicle
 character survives: an animated hit that would take its HP to 0 leaves 1 HP instead, spends a charge, gives 90
 invincible frames and sends `game.player.guarded` `{character, charges}` (the charges left). Without `character` it
 sets all six. Charges are not saved; the result lists every character's.
+
+### The guard, the action gauge and the player's state (Chronicle)
+
+The game's guard (lock on, then hold R1) blocks every hit from every side for nothing, and any hit, blocked or not,
+fills the action gauge to 100. Two owner-scoped rule sets change that. Each has one owner at a time: a second mod's
+set fails until the first clears it or unloads. A set replaces the owner's whole rule set, and fields left out take
+the defaults below. With neither set, hits play exactly as in retail.
+
+```lua
+assert(game.player.guard_rules_set({arc = 120, cost_base = 10, cost_per_damage = 1.5, chip = 0.15,
+                                    break_recoil = 120, parry_frames = 6, without_lock = true}))
+assert(game.player.gauge_rules_set({hit_refill = -15, first_swing_cost = 25, min_to_swing = 10, refill_delay = 36}))
+```
+
+`player.guard_rules_set` (`game.write`):
+
+| Field | Range (default) | Does |
+| --- | --- | --- |
+| `arc` | 0 to 360 degrees (360) | only a hit from within this arc, centred on where the player faces, is blocked; a hit from the side or behind lands in full |
+| `cost_base` | 0 to 100 (0) | gauge a blocked hit costs |
+| `cost_per_damage` | 0 to 10 (0) | gauge a blocked hit costs for each point of its damage (after defence) |
+| `chip` | 0 to 1 (0) | share of a blocked hit's damage that still gets through |
+| `break_recoil` | integer 0 to 600 (0) | recoil frames a guard break leaves; 0 keeps the game's recoil for the hit |
+| `parry_frames` | integer 0 to 60 (0) | a hit within this many frames of R1 is parried: no damage, no cost, heavy hits too, even while the guard is still rising. 0 is no parry |
+| `without_lock` | boolean (false) | R1 guards with no lock-on target; R1 no longer turns the camera while unlocked |
+
+A blocked hit that would cost more than the gauge holds **breaks the guard**: the hit lands in full, the gauge empties,
+and the player is knocked down (a light hit included) for `break_recoil` frames. Outside a parry, a heavy hit is
+still blocked only once the guard is fully up, as in the game. The ailment rolls (poison, curse and the rest) happen
+before the guard, so a guard never stops them. `player.guard_rules_clear()` turns the caller's rules off.
+
+`player.gauge_rules_set` (`game.write`):
+
+| Field | Range (default) | Does |
+| --- | --- | --- |
+| `hit_refill` | -100 to 100 (0) | a hit that lands adds this to the gauge (negative drains) instead of filling it; a block under the game's guard leaves it alone |
+| `first_swing_cost` | 0 to 100 (0) | gauge the first swing of a native combo costs (follow-ups keep their own costs) |
+| `min_to_swing` | 0 to 100 (0) | gauge the first swing needs; below it the attack button does nothing |
+| `swing_cost_scale` | 0 to 4 (1) | scales what the combo's later swings and a mod's attack moves cost, on top of `lightness` and gear |
+| `refill_delay` | integer 0 to 600 (0) | frames the refill waits after the gauge last went down, from any spend: a swing, an evade, a block, a run, a hit |
+
+`player.gauge_rules_clear()` turns the caller's rules off. Both clears return `{cleared, rules}`; unloading the owner
+clears both.
+
+`player.gauge_get()` (`game.read`, dungeon only) returns `{gauge, max = 100, exhausted, guard_rules, gauge_rules}`
+(`exhausted` is Osmond's emptied gun; each rules table is `{on = false}` or the fields in force and their `owner`).
+`player.gauge_set({gauge = 0..100})` or `player.gauge_set({add = -100..100})` (`game.write`, dungeon only, exactly
+one of the two) sets the gauge or adds to it and returns `{gauge, previous}`; use it for refunds, or to charge for
+something the game doesn't.
+
+`player.state()` (`game.read`) is what the active player is doing this frame. Away from a dungeon it is
+`{active = false}`; in one: `{active = true, character, hp, max_hp, action_on, action_no, motion, attacking,
+guarding, guard_held, guard_frames, locked_on, target?, recoil_frames, invincible_frames, running, in_water, gauge,
+exhausted}`. `guard_frames` counts from R1; `target` is the lock-on enemy's entity handle. `action_on`, `action_no`
+and `motion` are the game's own numbers (`action_on` 1 is a swing, 6 the guard; see
+[Dark Cloud engine notes](modding/DARK_CLOUD_NOTES.md)).
+
+Every hit that reaches the player, with or without rules, sends **`game.player.hit`** `{character, entity?, kind,
+damage, incoming, blocked, parried, broke, poised, angle, gauge}`: `kind` is `light`, `heavy`, `trap` or `other`; `damage` is
+what got through (before the player damage formulas and `fatal_guard`), `incoming` the hit's damage after defence;
+`angle` the degrees from the player's facing to the attacker (0 ahead, 180 behind); `gauge` the gauge after the hit;
+`entity` the attacker's handle when a monster landed it; `poised` that it landed but the worn gear's `poise` took the
+stagger. A parry's riposte, a guard break's effect or a death drop
+hang off it.
+
+`player.tuning_set`'s `recoil_scale` and `invincible_bonus_frames` apply to every landed hit; a guard break's
+`break_recoil` replaces the scaled recoil.
+
+Chronicle Two doesn't have these operations or the event yet.
 
 ### The companion (Chronicle)
 
@@ -1571,6 +1856,19 @@ times `damage_scale` (0 to 10), with no damage formulas (Xiao, Ruby and Osmond f
 damage, killed, reward_exp, frame}`. It catches up at once if it falls far behind. A companion can't be the active
 character: switching to it sends it back until the mod names another. Only one mod's companion is out at a time, and
 unloading the mod sends it back.
+
+`hostile = {hp = 1..9999, damage = 1..999, defense = optional 0..999, tint = optional {r, g, b}}` makes it an invader:
+it hunts the player instead (stance is ignored), and may be the active character. Each swing lays a native hit on the
+player in front of it (kind light, every third heavy at x1.5 and slower to come; a ranged hero's shot lands where it
+arrives), so guard rules, dodge invincibility and poise take it, and `game.player.hit` reports it with no `entity`.
+A player weapon hit that reaches its body (a hit that strikes monsters, dealt by no monster) takes `damage - defense`,
+at least 1, and sends **`game.companion.struck`** `{character, damage, hp, max_hp, killed}`. At 0 it plays its down
+motion and goes 1.5 seconds later. `tint` is the colour it is drawn in; it flashes white when hit. `companion_get`
+adds `hostile` and, for an invader, `hp` and `max_hp`. The player's lock-on takes it when it's nearer than the nearest
+monster (the cursor shows over it; its bar is the mod's). Between swings it circles the player on its lock-on strafe;
+it guards or dashes aside from swings started close by (the dash doesn't go through walls); below a third of its life
+it backs off and drinks one of two flasks, healing two fifths, which sends `game.companion.struck` with `damage`
+negative (the heal) and the new `hp`. A hit while it drinks spills the flask.
 
 ### Party queries
 
@@ -2006,8 +2304,10 @@ The common runtime emits `game.tick` from the PC port clock pump and `runtime.lo
 The Tier 2 expansion introduces high-utility gameplay hooks across both games:
 
 - **HUD Overlays (`game.render.*`)**:
-  - `game.render.bar_register({id = "boss_hp", label = "Boss", current = 150, max = 200})`: Registers or updates an owner-scoped HUD progress bar overlay. It accepts only these four fields: `label` is 1-24 overlay characters, `max` is positive, and `current` is in `[0, max]`. Bars share the limit of four with diagnostic overlays and HUD text layers.
+  - `game.render.bar_register({id = "boss_hp", label = "Boss", current = 150, max = 200})`: Registers or updates an owner-scoped HUD progress bar overlay. It accepts only these fields: `label` is 1-24 overlay characters, `max` is positive, `current` is in `[0, max]`, and an optional boolean `boss`. A boss bar is drawn wide along the bottom of the screen in a dark red, its label over it, instead of in the top-left HUD. Bars share the limit of four with diagnostic overlays and HUD text layers.
   - `game.render.bar_remove({id = "boss_hp"})`: Removes an owned HUD progress bar overlay.
+  - `game.render.target_bar_set({on = true})` (Chronicle only): Draws the locked target's HP as a bar half again as wide as the game's thin gauge under its name, framed, with a pale trail behind the red that holds what the last blows took for half a second and then drains away. `{on = false}` gives the game's gauge back. The game's setting that hides the target gauge hides this bar too.
+  - `game.render.target_meter_set({entity, fill = 0..1, color = {r, g, b}?, seconds?})` (Chronicle only): A thin meter under that monster's target bar, shown while it is the locked target and the bar is on (a poise or stagger meter). `color` defaults to gold; a full meter flashes white. It goes after `seconds` (0 to 600) without another set, or stays with 0, the default. `{entity}` alone takes it away. A monster that has gone fails with "that monster is gone", and the meter goes with the monster when another takes its slot.
 
 - **Weapon Mastery & Progression (`game.weapons.*`)**:
   - `game.weapons.abs_get({id = weapon_id, character = optional, slot = optional})`: Reads current ABS (experience points), current level, and ABS required for next level.
@@ -2043,6 +2343,14 @@ Chronicle's `register_item` claims no shop: the goods it adds are kept apart and
     and opens the doorway (`game.dungeon.door_opened` `{key, x, y}`); without it, `game.dungeon.door_locked` `{key, x,
     y}` is sent once while the player stays there. Floors with shortcuts skip the native random locked room, which
     uses the same keys. `game.dungeons.shortcuts_get()` lists the floor's doors `{x, y, key, key_item, locked}`.
+    `open = {216, ...}` (key items, up to 7) builds those doors already open on a floor built again from its seed (a
+    kept floor, with `dungeons.set_seed`). The door's key chest is still placed, so the floor's chest numbers hold. Keep
+    each `game.dungeon.door_opened` key, as Vigil does. Owners' lists are joined, and an owner's list goes when it unloads.
+    `illusory = 0..3` adds that many more doorways of the same kind, each drawn as the room's own plain wall on that
+    side, with no key and no chest (the 7 doors are shared, keyed doors first). The attack button pressed within reach
+    of one, facing it, opens it: `game.dungeon.wall_opened` `{wall, x, y}`, where `wall` is its number on the floor
+    (0 up). `open_walls = {0, ...}` builds those numbers open on a floor built again from its seed. `shortcuts_get`
+    lists an illusory wall as `{x, y, illusory = true, locked}`.
     Test hook: the environment variable `DC_SHORTCUT_VISIT` puts the player in the first door's dead end ten seconds
     into a floor.
   - `game.dungeons.floor_redirect({dungeon_id, floor_id, to_floor_id})` (Chronicle): an exit gate that would lead to

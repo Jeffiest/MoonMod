@@ -59,6 +59,19 @@ per-hit Lua callbacks**.
 | E2 | **`player.gauge_rules_set{hit_refill, first_swing_cost, min_to_swing, swing_cost, refill_delay}`** | The gauge already gates combo follow-ups (needs 20, costs 25), but **a hit refills it to 100** and the first swing is free. Souls needs the opposite on both. | The refill on hit is in `BtCheckDamageProc`. Swing costs are in `charakey.cpp` (`*Key_On` / `*Key_Play`), and regen is in `gameloop.cpp` near the `gauge_refill` scale. |
 | E3 | **`player.gauge_get/set`** and **`player.state()`** (`action_on`, `action_no`, guarding, locked on, recoil and invincible frames) | Refunds on a parry, spending from Lua (switching, items), and HUD and logic that know what the player is doing | `BtActStatus` (`include/game/btactstatus.hpp`) |
 
+**Built 2026-11-03 (not yet played by hand).** E1 is `player.guard_rules_set` / `guard_rules_clear` and the
+`game.player.hit` event; E2 is `player.gauge_rules_set` / `gauge_rules_clear` (the first swing's gate and cost hook
+every character's native attack button, not each `*Key_On`); E3 is `player.gauge_get`, `player.gauge_set` and
+`player.state`. The rules live in `guard_rules.cpp` and `gauge_rules.cpp`, unit-tested. Vigil turns them on with the
+§3 numbers (settings *Souls guard* and *Souls stamina*) and answers a parry with a stop and a shove. Found on the way:
+`player.tuning_set`'s `recoil_scale` and `invincible_bonus_frames` had not been applied since `BtCheckDamageProc`
+moved into `src/game/dun`; they are again, so Vigil's shorter hit stun (and the Gauntlet's and RPG's recoil perks)
+work for the first time since then. Then, in Lua on top of them: **Exhausted** (an empty gauge
+makes swings deal 30% for 1.5 s, with the HUD's blinking stamina badge) and the **riposte** (after a parry, the next
+blow on the parried enemy within 2 s deals ×3; a formula can only name an enemy kind, so it is scoped by
+`native_model_id` and spent on the first blow on that entity). Not done from §3: Exhausted doesn't yet stop evades or
+break the guard beyond what the empty gauge already does.
+
 A per-hit Lua hook (`native.player.hit`, like `native.monster.run`) stays an option if the data rules prove too
 rigid. Data rules are cheaper to run, easier to test, and can't stall a hit on a slow script.
 
@@ -310,6 +323,7 @@ Wear is per hit and warns at 10% and 5%. The rest is as documented in the API.
 | 6 | **Rest floors as bonfires**: resting refills heals and the ember, and you **level up only there** (spend Gilda on the skill tree) | Gilda becomes Souls: currency and XP at risk at once | Rest floor recipe plus `ui.sheet_set`, with spending gated to the rest floor | Lua |
 | 7 | **Fog-gate bosses with a name banner and a bottom HP bar** | The boss walk-in | Warden room plus `ui.boss_card` ("DRAN, THE SCORCHED BEAST"). An HP bar along the bottom of the screen is a small engine addition (`render.bar_register` is top-left only). | Lua, plus a small engine addition |
 | 8 | **Summon signs**: before a Warden, pay to call a party member as an AI companion | Co-op help, offline | `party.companion_set` (PR 15) | Lua |
+|   | *Built 2026-11-03 (not yet played), patrols:* a crowned elite whose family has an enemy brain walks a beat while you are more than 420 units off: a cross of four legs from where it was crowned, back through the middle each time, turning back early at a wall (the brain's own blocked count). Nearer, it fights as the brain does. *Elite patrols* is a setting. Not yet: beats along chosen corridors (no op reads the floor's cells from Lua).
 | 9 | **"YOU DIED"** | The ritual | `ui.boss_card` on defeat, before the game-over fade | Lua |
 | 10 | **No minimap** | Learning the space | `tuning_set{map_hidden = true}`, as a setting | Lua |
 | 11 | **Ailment build-up** instead of a 65% coin flip | Readable status threats | Replace the roll in `BtCheckDamageProc` with a per-ailment meter | engine, medium |
@@ -731,3 +745,316 @@ Today a town-to-cave switch with quick passage shows ~33 black frames while the 
 ### Order
 
 O0 (fixes) → O1 (one dungeon, DBC from Norune, then the rest) → O2 (towns, Norune to Matataki first).
+
+---
+
+## 11. Gear and running (from a talk with SirFancyBacon, 2026-11-01)
+
+**The ideas.** Amulets take one of the three quick slots, so carrying protection costs you a heal. Give them a slot
+of their own. Then replace Dran's Feather with a real run, turn the weapon's Speed into how light the weapon is to
+swing, give each character a Stamina stat, and grow the charm slot into gear (hat, tunic, gloves, boots) with
+rarities and effects such as a chance to shrug off an ailment.
+
+**What the game does now** (read from Chronicle `9418a550` + the patch):
+- The four amulets (Anti-Freeze, Antidote, Anti-Curse, Anti-Goo) already work passively, but only from a quick slot:
+  when a hit rolls an ailment (`gameloop.cpp`, the `hit->flags` checks), `CheckActItemSlot` looks through the three
+  quick slots, and a match blocks the ailment and spends one use (`SpendQuickItem`). The amulet breaks when its uses
+  run out.
+- Dran's Feather is a quick-slot item too: held Square with it selected sets `BtBySpeedFlag`, which doubles the walk
+  (1.45 to 3.0 a frame) and pulses the model blue, spending a use every frame.
+- The action gauge refills by the weapon's Speed / 30 a frame (then per-character factors and `gauge_refill`).
+- The item page draws the quick slots top left (`ActiveItemDraw` at 58,74), the bag board from y 120 on the right
+  (`DrawPersonalBoard` at 340,120) and the trash bottom right, so the upper right above the board is empty.
+
+### G1. The charm slot (built 2026-11-02, not yet played)
+*Built:* `charm_slots.hpp/.cpp` in the engine, `items.charm_slots_set({count})` and `items.charm_slots()`, Vigil's
+*Charm slot* setting (on, one slot). Each character has their own (the user's call: the active character's guards
+when hit), and an amulet in one is out of the bag, taking none of its room. On the item page it sits beside the weapon and the shield (the user's choice, over the
+empty top right), an amulet blacked out while it is empty; Right from the shield reaches it,
+Cross puts an amulet in or picks it up, Square sends it to the bag; anything but an amulet is refused. In a hit, a
+charm slot's amulet guards first, then the quick slots as before. Kept beside the save as `charms.json` (written and
+read with it, like `characters.json`). Checked: unit tests, and headless on Divine Beast Cave (an Antidote Amulet
+moved from the bag into the slot, its card shown). Also (the user's asks): the worn charm shows on the dungeon HUD
+left of the gate-key plate with its uses left in the corner (the item page's slot shows them too; its icon is copied
+into a free 48x48 corner of the HUD sheet with the quick slots'), and an amulet sells for its price times uses left
+over full uses, nothing below half. Checked headless: the HUD icon and its count, the page's count; the price by unit
+test only. Not yet seen: an amulet actually blocking poison in play, or a worn one at a shop. Later:
+a "Charm" label on the page, and more slots from the shrine tree.
+
+- One slot on the item page, in the empty upper right, that takes only charms (the four amulets, and later mod
+  items marked as charms). A charm there works exactly as from a quick slot: it blocks its ailment when a hit rolls
+  one and spends a use. The quick slots keep working as before, so nothing is lost for a player who never uses it.
+- The engine holds the slot count (0 = off, the retail game; Vigil sets 1) and the slots' contents; more slots unlock
+  later (Jeffie: "a way to unlock more slots" for curse plus poison), up to 4, for example from the shrine tree.
+- Saved through the mod: the engine reports and accepts the slots' contents, and Vigil keeps them with the save as it
+  keeps opened chests. If the slots are switched off, whatever is in them goes back into the bag, never lost.
+
+### G2. Running instead of Dran's Feather (built 2026-11-02, not yet played)
+*Built:* `dodge_run.hpp/.cpp` (a tick-by-tick state machine, unit-tested) and `player.tuning_set` `dodge_run` (gauge a
+second, 0 = off); Vigil's *Run cost* setting (20). L2 held 12 ticks with the stick pushed runs at 3.0 a tick (the
+Feather's dash) and drains the gauge, which doesn't refill while running; empty, he walks until L2 is let go. A tap
+dodges on release instead of the press (a fifth of a second later at most). L2 no longer swings the camera behind
+(held, it would chase the run round in circles). Dran's Feather became a charm with a slot of its own (the user's
+call: one slot for amulets, one for the Feather), right of the amulet slots, opened with the run
+(`charm_slots_set` `feather`): halves the drain, a use per tick of running, its seconds on the HUD; the quick-slot
+boost is off while the run is. Checked headless: walk 1.45 vs run 3.0 a
+tick, 20 a second drained, 10 with the Feather, a tap still evading. Not yet felt by hand: the tap's release timing.
+- Hold the dodge button to run (tap L2 rolls, hold runs, as in Souls). Running uses the dash speed (3.0, the
+  Feather's) and drains the action gauge each frame; an empty gauge drops back to a walk.
+- Dran's Feather leaves the run. Turn it into a charm (a lighter step: running drains less) so it stays worth finding.
+
+### G3. Lightness and Stamina
+**Built 2026-11-02.** Engine: `player.tuning_set` `lightness` (the refill reads every weapon as Speed 60; a swing costs
+60 / Speed of the game's, clamped to 0.5..2, the combo's hard-coded costs and a mod's attack moves alike, evades
+unchanged) and `stamina` ({id = gauge a second}, replacing Speed / 30 and the character factor). The rules live in
+gauge_rules.cpp with a test that the untouched refill matches retail for every character, speed and state. Vigil: the
+*Lightness and Stamina* setting (on), Stamina Toan 35, Ungaga 30, Goro 60, Osmond 80, Xiao 120, Ruby 180 a second
+(each one's retail refill with their first weapon, rounded). Checked headless: Toan refills 0.583 a tick and his
+dagger combo costs 21.4 a swing (25 x 60/70). The shrine tree's Endurance speeds every hero's refill 10% a rank.
+**Labels, 2026-11-03:** `weapons.stat_label_set` puts a mod's image where the weapon cards' two-letter labels were.
+The card under each weapon draws it in the label's cell; the Status tab, whose labels are painted into it overlapping
+each other, is wiped to plain stone down the label column (strips of the clear band between Abs. and At) and all four
+are laid again one size, each centred on its bar. Vigil sets all four, in the game's lettering
+(tools/vigil/make_stat_labels.py), Speed reading **Lt** while Lightness is on and Sp otherwise. Checked headless on
+both cards.
+- The weapon's Speed becomes **Lightness**: it no longer sets the refill; it lowers what a swing costs from the gauge.
+  Heavy weapons cost more per swing (backlog idea 14, equip load, comes with it).
+- Each character gets a **Stamina** stat: the refill rate (and, later, the gauge's size). It starts from the
+  character's retail feel (Toan and Ungaga slow, Xiao and Ruby quick) and grows with the shrine tree's Endurance.
+- Engine: a per-character refill base the mod sets, and a swing cost scaled by the weapon's Speed. The weapon card
+  shows Speed as "Lightness" in Vigil (`weapons.style_set`).
+
+### G4. Gear
+**Built 2026-11-02.** Engine: gear.hpp/.cpp, pieces a mod makes (`items.gear_give`) with a kind, name, rarity, value
+and effects, in a bag of 99 beside those worn, one of each kind per character, kept as gear.json beside the save.
+The worn effects are read in the hit (ailment guard rolled before an amulet is spent; defence), the refill
+(`GaugeRefill.gear_stamina`), the swing cost (`ChroniclePlayerSwingCostScale`) and the run drain. Ops `items.gear`,
+`gear_give`, `gear_equip`, `gear_unequip`, `gear_remove` (sell). Vigil: the *Gear* setting (on); a chest holds a piece
+one time in five, a beaten monster one in thirty; rarity common/fine/rare/unique (deeper dungeons lean rarer) gives
+1/2/3/3 effects at 1x to 4x strength (guard 15%, stamina 6, lightness 5%, defence 2, run cost 8% a tier), the first
+always the kind's own (hat guard, tunic defence, gloves lightness, boots run cost); prices 60/180/450/1200. Start in a
+dungeon opens a Gear screen (`ui.run_menu_set`): Worn, Bag, Sell. Checked headless: a piece given, worn and summed
+(defence 10, stamina 30, poison 90%), and the Gear screen drawn. Not done: no gear slots on the game's item page and no
+icons (the run menu shows them); shops don't stock gear; not yet played by hand.
+- Four more slots per character: hat, tunic, gloves, boots. Pieces drop or are sold with a rarity (common, fine,
+  rare, unique) and one to three effects: a chance to negate an ailment, Stamina, Lightness, defence, run cost.
+- The charm slot's engine work is the base: slots with a kind, items that declare a kind, and effects the engine
+  reads where the game does (the ailment roll, the refill, the swing cost). Items and art come after G1-G3 play well.
+
+### G5. The gear on the item page
+**Built 2026-11-03.** Asked for: the character card replaced by the hero alone, HP and water over his feet, a weapon
+dragged to his hand, the charm and Feather slots in a column, and gear as real inventory in a new tab with coloured
+pieces. Engine: `items.gear_page_set({icons})` opens it; pieces carry `icon` and `color`. The board gets a fourth tab,
+Equipment (the bag, its plate pieced from the Items one), with pick-up, put-back and the trash can, and the help box
+names the piece. The hero page: the model 1.1x and centred, a soft shade behind, the charm column, the weapon (attack,
+durability bar) and shield (defence), four gear slots with each empty kind blacked out; Cross swaps a piece in, takes
+one into the hand; Square takes it off. A weapon from the Weapons tab dropped on the hand is equipped with Equip's
+checks (an Osmond or Ruby in play is refused: the weapon effects can only load in the weapon menu). The mouse: the
+hero slots and the fourth tab have hit boxes; drags carry gear as items. Vigil: four greyscale icons
+(tools/vigil/make_gear_icons.py) tinted by each piece's first effect; the Start-screen Gear menu is gone. Checked
+headless: the tab, a hat worn from the bag, a weapon put back on the hand. Selling (2026-11-03, below) is in the
+shops; the mouse drag is untested by script; not yet played by hand.
+
+**Polish, 2026-11-03.** The pieces are the hero's own clothes: `gear_page_set` takes `parts`, frames of each hero's
+menu model per kind, and the engine draws only those, grown to fill the slot, turned and tilted to show them, on a
+ground of the piece's colour (dark when the slot is empty), in the slots, the bag's cells and the hand. Vigil names
+Toan's (`boushi`; his vest `cloth2` and `cloth3`, drawn as it hangs at rest, with the belt `beruto`; `l_g` with
+`l_hand`; his shoes, part of his body `skin`, shown alone below a cut a third of the way down his ankle wrap `l_f`
+(`below`) and seen from the side; his satchel `kaban`). The other five are named too where they have the piece (Xiao's
+paw and shoes, Goro's mantle, Ruby's tiara, hand and slippers, Ungaga's cap, sash and bracer, Osmond's goggles, glove,
+boots and bag; `below` on a bone cuts at the joint), and a kind one has nothing for keeps its icon; the hero on the
+item page and in the dungeon is known by which model is drawn, not by name. With no hat worn he goes bareheaded, with no tunic his vest comes off to the shirt and with no pouch his satchel
+goes (`bare`), in the menu and the world; his gloves and shoes are part of him and stay. Each save dresses him once in
+his own cap, vest and satchel, plain pieces, so he starts out looking himself, and Goro, Ungaga and Osmond in theirs once
+they join; an empty slot whose clothes come off shows the kind's icon.
+
+**Gear in the shops, 2026-11-03.** While the Equipment tab is open, a native item shop has it on the player's side:
+Triangle on a piece sells it for its value through the shop's own "sell it?" question. `items.gear_stock_set({shop,
+goods})` puts up to ten pieces with prices in a shop's empty cells after its own goods, drawn as in the bag, the help
+box naming the one under the cursor and its price; Triangle buys one into the bag (refused past a full bag or a thin
+wallet), and a bought piece is gone until the shop is stocked again. Cross never takes gear onto the counter or into a
+deal. Vigil stocks all eighteen shops with three pieces each trip home from a dungeon, rolled as gear drops are for
+the last dungeon, at twice their value. A shop whose own list is full (Norune's has 20) lays its gear in the board's
+last ten cells. Checked headless in Norune's shop (`DC_SHOP_TEST=<shop>` opens one once the town is up): the pieces
+on the counter with their prices, a buy (1000 to 640 G), a refusal on an empty wallet, and a sale from the
+Equipment tab (640 to 820 G). Not yet played by hand.
+
+**Pouch, 2026-11-03.** A fifth gear kind, `pouch`, in a slot at the hero's hip (the outer column; the page has it only
+when the mod names its icon). Its effect `bag` grows the game's item bag, outside the game's Pocket upgrades: the
+largest pouch anyone in the party wears counts (Vigil: 5 slots a tier, 20 for a unique), up to the game's 100. Taken
+off, the bag shrinks as far as its items let, moving items down from the slots that go; the engine keeps what it added
+in `gear.json` so the Pockets' size stays the save's. The
+hero page sits on a panel in the help windows' frame, his side's column holding the amulet, the Feather, the weapon
+(attack in the corner, wear up its edge) and the shield, the gear opposite, the HP line across his feet with the water
+centred under it, and the help box says what Cross and Square do on each slot.
+
+### Order
+G1 (charm slot) → G2 (run) → G3 (Lightness, Stamina) → G4 (gear) → G5 (gear on the item page). Each gets a playtest
+before the next.
+
+---
+
+## 12. Stretch goals (2026-11-03)
+
+Ideas past the core plan, for once the fighting is right. Most of them read `game.player.hit` or the gauge, so
+**E1-E3 (§2) are still the first thing to build**, before any of these. Engine limits in the way get raised, not
+worked round (*Extending the engine*).
+
+Ranked by how much they would change the game for what they cost. Recommended first: 1-5.
+
+### Fighting
+
+| # | Goal | What the player gets | How | Cost |
+| --- | --- | --- | --- | --- |
+| 1 | **Every family has a brain** | Today only Dashers and Skeleton Soldiers fight like Souls enemies; the rest are retail AI under ×2.5 damage. Every enemy should have a readable wind-up, a commitment and an opening. | Turn the two brains in `main.lua` into a kit: circle, take turns, feint, punish a whiff, guard, rush, as parts a family picks from a table keyed by native model id (as `BRAINS` is now). Then one family a dungeon at a time, fliers and ranged enemies by full takeover (§5's risk). Each gets one new attack motion from `tools/anim`. |<br>*Started 2026-11-03 (not yet played):* the brain was already table-driven, so a family is a `BRAINS` row. Added Master Jacket (0) and the Werewolf (4), both with their native guard; the Werewolf gets rolls and a new rake (`e07a_*`). Blow frames now come straight from each monster's script (`SET_DMG_COL` in `tools/stb/stbdis.py --table monster`), no in-game measuring. Master Jacket's rig is a deep chain with odd bone names, so it has no new motions yet. Same day, every other hand-to-hand family whose motions fit the layout (idle, walk, back, right, left at 0-4, guard at 5-7, attacks at 13/16): the Rash Dasher (the Dasher's rig, so its rolls and pounce too: `e63a_*`), White Fang, Mummy, Captain, Corcea, Curse Dancer, Sunday, Monday, Wednesday, Saturday, Hell Pockle and the four melee card soldiers. A family like another is a copy of its row with its own numbers (`like`/`landing` in main.lua). Left on retail AI: fliers, shooters and casters (Heart, Tuesday, Thursday, Gunny, Alexander, Mask of Prajna...), Friday and Rockanoff (a swing split over three motions), Arthur (attacks at 11/12), the walk-only Statue and Living Armor, the diggers and plants, and the bosses. `tools/vigil/monster_survey.py` prints a family's blows, guard and motions. | Lua, motions; large but even |
+| 2 | **Poise both ways** | Enemies that trade through a light swing instead of flinching every hit; a heavy blow or a riposte breaks them into a stagger you can punish. The player gets poise from tunics, so armour finally means something. | §8 idea 3 for enemies (a poise table, skip the flinch program in the takeover). For the player, a `poise` gear effect read in `BtCheckDamageProc` next to `recoil_scale`: a hit under it doesn't interrupt the swing. A short engine op beside E1. | Lua, engine small |
+|   | *Enemy half built 2026-11-03 (not yet played):* Vigil's `native.monster.run` hook skips program 110 (the flinch) while a monster's poise holds (2 blows, back after 2 s without a hit); the blow past it plays the flinch and a 40-frame `stop`; R2 and the finishers break it at once (`game.player.move`). The engine runs 110 once per blow (`CheckDmg`), so skipping it is safe. A braced family (a brain) carries on mid-swing; any other monster's hit still cuts its program, so it loses the flinch but restarts its idle loop. *Player half built 2026-11-03 (not yet played):* a `poise` gear effect (0-8 points, `gear.hpp`), decided in `ChroniclePlayerHitResolve` by `PoiseTakes` (`guard_rules.hpp`): a landed light hit costs 1, a heavy one 2, poise whole again 120 frames after the last hit; a poised hit keeps its damage but skips the turn, motion change and recoil in `BtCheckDamageProc`, and `game.player.hit` says `poised`. Traps, broken guards and lethal hits always stagger. Tunics carry it as their first effect (1-4 by rarity, *Stalwart*), and only tunics. | | |
+| 3 | **Criticals with their own motions** | Backstab, riposte and the stagger critical play a paired animation, Toan's stab and the enemy's crumple: the one big hit Souls players chase. | §8 idea 4, then a paired-motion op: play a mod motion on the player and one on the target in the same tick, the target held (`combat.status_add{stop}`) and turned to face. Author the pairs for the two braced families first. | engine medium, motions |
+|   | *Built 2026-11-03 (not yet played):* a `critical` trigger for `player.moves_set` (`backstab` behind an enemy within an arc, `riposte` on the enemy `player.critical_set` armed), with `pairs` of monster motions; the engine draws Toan in, turns the target, ends its `stop` (which freezes and greys it, so it can't hold a crumple) and holds its script instead (`ChronicleMonsterHeld` in `monstorunit.cpp`), then sends `game.player.critical`. Vigil arms a riposte on a parry (2 s) and a poise break (the stagger and half a second), and raises the critical's blows on that kind of enemy x3 for the hold (*Critical damage*). Toan's stab is `toan_critical` (`tools/anim/vigil_criticals.py`); the Skeleton and the Dasher crumple (`e03a_crumple`, `e06a_crumple`); other families are held standing. *Criticals* in the settings. | | |
+| 4 | **Weapon arts from attachments** | Dark Cloud's synthesis becomes the build: an attachment or a weapon's build-up unlocks a held-R2 art (a thrust, a spin, a counter stance) that costs gauge. Two players' Daggers stop playing the same. | A table from weapon id or attachment to a `player.moves_set` move, refreshed when the weapon changes. The art shows on the weapon card (`weapons.style_set{details}`). | Lua, motions |
+|   | *Built 2026-11-03 (not yet played), Toan's half:* an `art` trigger for `player.moves_set` (R2 while guarding) with `weapons` (native item numbers) and `min_level`: the equipped weapon (`NowWeaponHave`) picks its art and its build-up unlocks it, so it is the weapon and not an attachment (the game keeps attachments as stats, not a list). Toan's blades fall in three families: the short blades' Piercing Rush (a long lunge, two stabs, 35 gauge), the long swords' Whirlwind (two turns, five hits, 45) and the great swords' Earthsplitter (a slam with an explosion, 50), from level 3 (*Art level*). They reuse his attack motions played their own way; a motion of their own each is the next step. Each blade's card in the weapon menu names its art and when it unlocks (`weapons.style_set` `details`). The other heroes have none yet. | | |
+| 5 | **The flask** | Healing as a decision: a refillable flask (charges grown by shards found in the dungeon) drunk with a slow motion you can be punished in, refilled at a shrine. No item-menu heals in combat (§8 idea 2). | A mod item in a quick slot with uses the shrine resets; drinking is a move with a drink motion; the pause menu's item use locked while `in_combat`. Shards are rare chest drops, one a zone at most, kept with the save. | Lua, engine small |
+|   | *Built 2026-11-03 (not yet played):* not a quick-slot item after all. The game's quick-slot drink freezes every monster while you drink (`CMonUnitHold` in `movechara.cpp`), and a mod item can't be quick-used, so the flask is Vigil's own: charges kept with the save, a HUD line (`Flask 2/3`), D-pad Down (free in the dungeon) or a key. A drink is a `played` move (a new trigger, only `player.move_play` starts it) on each hero's native drinking motion (28) at half speed; it heals 40% of max HP at 65% of the drink (`frames` on `game.player.move`), and a hit that lands first spills it, the charge spent. Refilled at a shrine's rest and in town. A Flask Shard (15% of chests, one a floor, up to 7) adds a charge for good. `item_heal_lock` (a `tuning_set` key) makes HP-healing items refuse within 240 of a live enemy, in the item menu (`ItemUseFunc`) and from a quick slot (`checkItemUsed`), instead of an `in_combat` test (which is true on any floor with a monster left). Water and cures still work. | | |
+| 6 | **Lock-on that feels modern** | Flick the right stick to switch target; the lock drops past a distance or behind a wall; a soft lock turns a swing toward the nearest enemy without locking. | Engine: the target choice in `movechara.cpp` takes a direction; a `tuning_set` key for the drop distance. | engine small |
+|   | *Built 2026-11-03 (not yet played):* three `tuning_set` keys. `lock_flick`: in the dungeon loop (`MoonModLockOnExtras`, `gameloop.cpp`), a flick of the right stick moves the lock to the nearest enemy on that side of the target, read against the camera. `lock_sight`: the lock drops after half a second with a wall between (a straight line over an empty map cell, sampled every 40 units). The game already drops it past its own lock range. `soft_lock` (35 degrees in Vigil): not locked, a native swing or a mod move turns to the nearest enemy within 64 units and that arc. All three are settings. | | |
+
+### Enemies and bosses
+
+| # | Goal | What the player gets | How | Cost |
+| --- | --- | --- | --- | --- |
+| 7 | **Story bosses with a second phase** | Dran, Master Utan, the Ice Queen and the rest keep their arenas but turn at half life: a roar, a new tint, faster moves, one new attack each. A name banner, and an HP bar along the bottom of the screen. | The Wardens already fight with their native casts (`arena_slot`, `script_int_set`); a takeover on top of each boss's cast for phase two, `ui.boss_card` on entry, a bottom-of-screen boss bar (the small addition §8 idea 7 named). One boss at a time, Dran first. | Lua, engine small, motions |
+|   | *Built 2026-11-03 (not yet played):* in Lua, keyed by native model (Dran 78 to the dark Dark Genie 106). On first sight there is a `ui.boss_card` with the boss's epithet, and a new `render.bar_register{boss = true}` bar along the bottom of the screen. At half life the boss roars (a burst and a word), turns red, rises to x1.3 damage, and gains `combat.status_add` haste, a new engine status that plays its scripted motions and moves 1.4 times as fast. The phase stays until the fight ends. Not yet: a new attack for each boss (that needs boss motions and a takeover of each cast). | | |
+|   | *Built 2026-11-03 (not yet played), the new move:* in its second phase each boss casts a move of its own every six seconds: marks glint where it will land (a `guard` burst, again halfway), and 45 frames later the blow falls on each (`combat.strike_player`, a new engine op: one native hit only the player can be struck by, so guard, parry, dodge and poise take it, and stepping off the mark beats it). Dran breathes fire in a line to you, Utan stamps a ring around himself, the Ice Queen calls frost under you and beside you, the King's Curse rains curses in a square, Joe leaps onto you, and the Genie sweeps a beam. Each is a share of your life. *Boss moves* is a setting. Built 2026-11-04 for Dran: his fire breath has a motion of his own (`c12a_rear`, from `tools/anim/vigil_boss_moves.py`): he rears up with his wings spread as the marks glint, and slams his head down on the line as they fall, his script held meanwhile. Utan, the Ice Queen, Joe and the Genie got theirs the same day, and then the King's Curse (his coffin rises with its doors flung open and slams down shut, `c15a_curse`; out of it, he flings his arms down, `c15b_curse`) and the Genie's final form (his own charge held, then his own firing pose, `c23a_beam`: his rig is IK chains skinned to one mesh, so it only reorders his native poses).
+| 8 | **Named elites** | A few fixed foes on the kept map, in the same place every visit, tinted and scaled, with a title card and a unique drop: the Souls "knight in the corridor". Some patrol between zones. | `characters.spawn` at chosen cells of the kept seed, `entities.set_stats` and `entities.scale_set`, gone for good once beaten (kept like opened chests). A patrol is a brain with waypoints. | Lua |
+|   | *Built 2026-11-03 (not yet played):* one elite on each floor or zone of a kept map. It is the first ordinary monster seen there, crowned on its second sighting so floor scaling goes first. It gets a name from the floor's key (the same name every visit), a gold tint, x3 life (a setting), x1.5 damage and x5 reward, a bar of its own, and a "walks this floor" line. When it falls, it drops the best of four gear rolls (one more per NG+ cycle) and stays down for good, kept with the floor's seed (`d:f:zone:elite`). Not yet: chosen cells and patrols, since `characters.spawn` at kept cells needs the spawn table. | | |
+| 9 | **Ambushes and traps by theme** | Rooms that shut behind you until the pack is dead, enemies dropping from above, poison pools in the Moon Sea, a dark Gallery of Time where only a lantern charm shows the way. | Room seals exist (the Warden room's): a `set_zones` room flag for ambush rooms. Darkness as a per-zone `draw_dist_scale`; the lantern a charm whose effect is read where the draw distance is set. | Lua, engine small |
+|   | *Built 2026-11-03 (not yet played), the ambush:* about one zone in three of a kept map (picked by its key) springs a moment after you walk in. Three of the floor's own monsters (`characters.spawn` of a variant registered on the native template already loaded) drop in around you in a cloud of dust. A sprung ambush is kept with the floor, and NG+ forgets it. Not yet: rooms that shut (a `set_zones` room flag), poison pools and the dark Gallery (no draw-distance API yet). | | |
+|   | *Built 2026-11-03 (not yet played), rooms that shut, darkness and miasma:* `dungeons.room_seal` (new: every room's doorways and the gate for each are recorded as a floor is built) shuts the room you stand in when an ambush springs, until the pack is dead (90 s at most). In the Gallery of Time a zone whose shrine isn't lit is dark (`lighting_set` fog at 40-360, a dim ambient); lighting its shrine lifts it. In the Moon Sea one cell in eleven of a kept map holds a foul mist (picked by the floor's key and the cell): it puffs nearby and poisons you while you stand in it. *Ambush rooms*, *Darkness* and *Miasma* are settings. Not yet: enemies dropping from above, a lantern charm. *Both built 2026-11-04: ambushers fall from above (`physics.velocity_set` each tick, checked headless), and the Gallery's first lit shrine gives the Shrine Lantern (a pouch that widens the dark to a ring of warm light round you).*
+| 10 | **Invaders** | Now and then a dark copy of a party member, Goro or Xiao in black, hunts you through a zone with a hero's moves. | A hero model spawned as an enemy, driven by the mod-move runner behind a brain. The biggest engine piece here (`characters.spawn` takes only monster templates today). Worth it once 1 and 3 exist. | engine large |
+|   | *Built 2026-11-03 (not yet played):* `party.companion_set{hostile = {hp, damage, defense, tint}}` turns the companion round. In `companion_moonmod.cpp` it closes in on the player and swings (every third a slower heavy one at x1.5). Each blow is a native hit in the game's collision list aimed at the player (`NowColData->Set`, mask 1), so guard rules, parries, dodge invincibility and poise all take it. The player's weapon hits (`FindMonsterHit` on its body, from no monster) hurt it, sending `game.companion.struck`. At 0 it falls (down motion) and goes. It draws in its tint and flashes white when hit. In Vigil, about one zone in five of a kept map (never an ambush zone) sends a dark copy of another joined hero a moment after you walk in, with a boss bar. Its life is 1.4x yours and a blow a sixth of it, both more on each NG+ cycle. Felled, it pays 300 Gilda a cycle and the best of several gear rolls, and its zone stays clear (`:invader`). *Invaders* is a setting. Not yet: lock-on to it, dodges and guards of its own, a hero's full move set (it has the first swing). | | |
+
+### The world
+
+| # | Goal | What the player gets | How | Cost |
+| --- | --- | --- | --- | --- |
+| 11 | **Shortcuts that open from one side, and drops** | The Souls loop: push deep, open a door from the far side, and you're back by the shrine you left. Ledges you can drop down but not climb. | §8 idea 5 on the one-map dungeons: `set_shortcuts` with the key on the far side, chosen so the loop lands near a shrine. A one-way drop is a height step the generator places between two zones. | Lua, engine medium |
+|   | *Built 2026-11-03 (not yet played), the shortcuts:* each floor of a kept map asks for two shortcut doors. Each is a dead end's second doorway, locked from the far side, with its key in a chest there. A door once opened is built open on later visits: `set_shortcuts` gained `open`, a list of key items, and Vigil keeps `d:f:doors` from `game.dungeon.door_opened`. On a region, zone gates take most of the keys, so its floors get fewer shortcut doors. Not yet: placing a loop so it lands by a shrine, and one-way drops (a height step between zones). | | |
+|   | *Built 2026-11-03 (not yet played), the drops, in Lua:* beside about one locked zone gate in three of a kept map (picked by the floor's key and the zone) is a ledge. Reaching the gate without its key offers *Drop down* (`ui.choice_open`): a `dungeons.warp` with the escape light to the zone beyond, by its shrine, for a tenth of your life (never the last of it). The gate stays locked behind you, so it is one way until you find the key or travel by a shrine. *Ledges* is a setting.
+|   | *Built 2026-11-04 (checked headless, not yet played), real height steps:* `set_zones` takes `descent` (0-120). Each zone of a zoned floor lies that far below the zone before, and the nearest straight corridor cell outside each gate (within four cells, round up to three corners) becomes a ramp down to it. The engine raises every cell's part to its zone's height and shears a ramp's part along its slope, for drawing and for collision (the player's, the camera's, the monsters'). Chests, atla, trap circles, the spring water, heal zones, events, the floor's people and the monsters the game sets down all follow the floor. Divine Beast Cave's fall-into-the-river check is measured from the floor, so a lower zone isn't a fall. Vigil asks for 40 (setting *Each zone a step lower*), and an ambush waits until you're off a ramp, so its ring stays level. Checked headless on a Divine Beast Cave floor: zones at 0, -40 and -80; Toan stands on a ramp, walks down it and back up, the floor's height following his x along the slope, with no damage. Two fixes this took: a part frame is shared by many cells, so a sheared one is put back after each use, and `CFrame::GetInverseMatrix` now inverts a sheared matrix properly (the game's own only inverts rotations). Not yet: the ledges still drop by a warp (a real drop needs a zone that is lower than the gate's ledge with no ramp, a later step). | | |
+| 12 | **Illusory walls** | Hit a wall that looks like every other wall and it fades, opening a hidden room with something worth the paranoia. | A wall part the generator places on a dead end, with a hit box; a blow opens it and it stays open (kept like gates). | engine medium |
+|   | *Built 2026-11-03 (not yet played; how the wall part looks over a doorway is unchecked):* `set_shortcuts{illusory = 1}` plans one more shortcut a floor. Its doorway in the dead end is drawn as the room's plain wall on that side (the door part less 4, its direction kept), with no key or chest. The attack button pressed within reach of it, facing it, puts the doorway back (`ChronicleWallStruck` at the swing in `movechara.cpp`) and sends `game.dungeon.wall_opened`. Vigil keeps it open (`d:f:walls`, sent back as `open_walls`), and what lies behind is a piece of gear, the best of several rolls. | | |
+| 13 | **Georama as a Souls hub** | Townsfolk met in the dungeon (lost, cursed, trapped behind an elite) come home to the town you rebuilt: a smith who reinforces and repairs, a trader with rarer gear, someone whose quests send you back down. Rebuilding the town grows the hub. | Rescues are dungeon NPCs (`dungeon_npc_set`) kept with the save; at home they're residents with new lines (`text.set`) and shop lists. Ties Dark Cloud's best idea to Souls' hub. | Lua, writing |
+|   | *Built 2026-11-03 (not yet played):* three townsfolk, each held by a named elite. The first elite to fall in Divine Beast Cave frees Gorm the smith, in Wise Owl Forest Ysolde the trader, in the Shipwreck Old Harl the seeker (`world.dungeon_npc_set` beside you; walking up sends them home, kept with the save as `hub`). In town, D-pad Up or H calls the folk you saved (`ui.choice_open{town = true}`): the smith gives +3 attack and a full mend for 500 Gilda, the trader the best of several gear rolls for 400, the seeker a hunt of three named elites for 800. Not yet: their own models and town lines (they wear a villager's), stock that grows with the town. *Your town as a hub* is a setting. | | |
+|   | *Built 2026-11-03 (not yet played), their own looks and lines:* each wears a villager of the town nearest the dungeon that held them (Gorm Norune's `p05a`, Ysolde Matataki's `p24a`, Harl Queens' `p36a`; `p02a` if one won't load), and one of them speaks a line of their own over the town panel, a different one each visit. Ysolde's stock grows with the deepest dungeon you have rested in.
+| 14 | **Where you died** | The map screen marks your last deaths, and a bloodstain at the fall spot plays the last seconds before you fell as a ghost. | Marks: a list kept with the save, drawn by `ui.map_open`. The ghost: a ring buffer of positions and motion ids replayed on a translucent copy of the hero. | Lua; the ghost engine medium |
+|   | *Built 2026-11-03 (not yet played), the marks:* a knockout shows a "YOU DIED" card (`ui.boss_card`, a setting), and the save keeps the last eight deaths (`deaths`, newest first). The map marks each one, one mark a cell, beside the pile of what you lost. Not yet: the ghost replaying your last seconds (a ring buffer of positions and motions replayed on a translucent hero needs an engine copy of the hero). | | |
+|   | *Built 2026-11-03 (not yet played), the ghost, in Lua:* the last five seconds before you fell (a point every 10 frames) are kept with the save. Come back within reach of the spot and a wisp (`heal` sparkles) walks the path, ending in a puff where you went down, once each time you return. *Your ghost* is a setting. Not yet: a translucent copy of the hero playing its motions (the companion slot could carry it, but the invader uses it).
+|   | *Built 2026-11-03 (not yet played), the hero's ghost:* `ghost_moonmod.cpp` keeps the player's place, heading and motion every other frame on a dungeon floor (five seconds), read by `world.ghost_get`. `world.ghost_play{character, frames}` loads the hero's pack into arenas of its own (texture block 0x63) and walks the frames again, pale blue and see-through (ambient alpha 56), fading over a second at the end. Motions a mod appended play as standing. Vigil keeps the record at death with the save and plays it when you come back to the spot, falling back to the wisp.
+
+### Long runs
+
+| # | Goal | What the player gets | How | Cost |
+| --- | --- | --- | --- | --- |
+| 15 | **NG+** | After Dark Genie, a new cycle: new seeds for every map, monsters a band higher, elites in new places, gear and the tree kept, a few rewards found only on a second cycle. | A cycle number kept with the save; floor scaling's base rises with it; seeds rerolled. §8 idea 13. | Lua |
+|   | *Built 2026-11-03 (not yet played):* the dark Dark Genie's death (model 106) readies a cycle. At a shrine, Leave then offers Next cycle. Beginning it forgets every kept map, chest list, shrine, elite and rest point, and keeps the tree, levels and gear. Each cycle past the first multiplies floor scaling's life by 1 + 0.5c, damage by 1 + 0.25c (the cap rises with it) and reward by 1 + 0.5c. Not yet: rewards found only on a second cycle. | | |
+| 16 | **Vigil Trial** | A title mode to fight any boss or elite with a chosen build, for practice and for tuning balance (§6, question 1). | The Gauntlet's title mode and Warden room with Vigil's rules on. | Lua |
+|   | *Built 2026-11-03 (not yet played):* Vigil's own title mode, the second mod mode beside the Gauntlet. Pick one of the five story bosses and a hero, then Begin. The session (`session.start`) starts on an empty floor Vigil registers in Divine Beast Cave (`source_floor` 12, no monsters). The party gets each hero's strongest weapon under a cap for that boss's place in the story, and the max HP for it. Three seconds in, the boss comes out in front of you with its cast (`characters.spawn` with `arena_slot`, `hit_share` so any hero can hurt it). The story-boss card, bar and second phase follow. A win is timed, the best time per boss is kept (`moonmod.storage`), and the session ends back at the title. Not yet: the Dark Genie (his two forms need the Gauntlet's cast choreography), elites, and a build picker beyond the hero. | | |
+|   | *Built 2026-11-03 (not yet played):* the Dark Genie's elemental form (106, with its eight helpers) is the sixth Trial, at a sixth tier (attack cap 170, 760 HP). The title page cycles the boss on one entry (a page holds seven). Not yet: elites in the Trial. *Built 2026-11-04: six named elites, one for each place in the story, each of a family with an enemy brain: gold, half again the bite, a bar of their own and a best time each.*
+| 17 | **Messages, online** | Short notes left on the floor for others on the same seed ("illusory wall ahead"), rated by readers. | Through DC_Web and a small server; offline, a set of written notes as lore. Last, and only if the web build takes off. | large, outside the engine |
+|   | *Built 2026-11-03 (not yet played), the offline half:* the first time you reach a shrine, a note is scratched beside it: a warning, a tip or a line of lore, written for each dungeon and picked by the shrine's key, so it is the same note every time. It is kept as read with the floor, and NG+ forgets it. Not yet: notes players leave for each other, which needs DC_Web and a server. | | |
+|   | *Built 2026-11-04 (checked in tests, not yet played), the online half, with no server:* the engine's `messages.*` keep each message as a small file in a messages folder. A player who points it at a folder a sync service shares (OneDrive, Dropbox, a LAN share) trades messages with everyone else who does, so no hosting is needed. The folder is the player's choice, never a mod's, and each player writes only their own files; others' are read as untrusted data with caps. At a shrine, a fifth card, Messages: leave one built from six phrases and fifteen words ("Beware a mimic"), read others' best rated first and rate them, or take one back. Reaching a shrine, the best rated one comes up. Messages are kept by dungeon, floor and shrine, not cell, so they match across saves whose maps differ. Vigil shows only text that parses back into its phrases. Engine tests (two players sharing a folder, hostile files), Vigil tests. A DC_Web server could later carry the same files. | | |
+
+### Order
+E1-E3 → 1 (brains) with 2 (poise) → 3 (criticals) → 5 (flask) → 4 (weapon arts) → 7 (bosses, Dran first) → the
+world (11, 13) → the rest as appetite allows. Each gets a playtest before the next, as before.
+
+## 13. Where Vigil stands, and what a modern feel still needs (2026-11-03)
+
+After §12, Vigil has most of the systems a Souls-like is judged by:
+- **The player's side:** a stamina gauge that gates everything; rolls and backsteps with invincibility; guard, parry and riposte; poise on both sides; backstabs and ripostes; weapon arts; a slow flask that spills on a hit; a lock-on that switches by flick, drops behind walls, and a soft lock.
+- **The enemies' side:** enemy brains for 19 melee families, story bosses with a second phase, named elites, ambushes, and invaders (a dark copy of a party member that hunts you with native hits).
+- **The world:** a kept, connected world with shrines, shortcuts that stay open, illusory walls, deaths marked on the map, notes, NG+, and a town that grows into a hub (a smith, a trader and a seeker you rescue from named elites).
+- **Practice:** the Vigil Trial, a title mode to fight any story boss with a chosen hero, armed for that point in the story, with best times kept.
+
+**None of §12 has been played by hand yet.** Every piece passes its headless tests (Vigil 494 checks, the engine suite), but feel can only be judged with a pad. **The next step should be a playtest of §12, before more features.**
+
+Measured against the modern bar, from the action games people now hold up (Elden Ring, Sekiro, Lies of P, Nioh), these gaps matter most, most important first:
+
+1. **Hit feel.** *Built: `combat.feel_set` (hit-stop, camera shake, rumble); Vigil sets light 3, heavy 6, critical 10 and hurt 5 frames, shake on heavy blows and on being hurt, and rumble (setting *Hit feel*, test section 40).*
+   - Before it, a blow landed with a spark and a number, and that was most of why DC1 combat read as light.
+   - The freeze is in `GameLoop` (the floor is drawn, not stepped), started from the monsters' hit check on the player's blows, the player's hurt in the dungeon loop, and the critical's start.
+2. **Input buffering and cancel windows.** *Built: `player.tuning_set` `input_buffer`; Vigil keeps a refused roll or R2 for 12 steps (setting *Input buffer*, test section 41). Evades already cancel a swing's recovery (`cancel_after`); and `chain_cancel` (built 2026-11-04, setting *Chain attacks*) lets R2 in a swing's recovery, 6 steps past its blow, cut into the heavy, and attack in a heavy's recovery cut back into the combo.*
+   - Player moves start only on the frame the button is read; nothing is buffered.
+   - Modern games keep the last press for about 10-15 frames, so a roll pressed late in a swing's recovery comes out at the first cancel frame instead of being lost.
+   - Add a buffer in the move runner (`ChroniclePlayerMoveOn*`) and explicit `cancel` windows on moves (roll-cancel, chain-cancel).
+3. **Bosses that change how they fight, not just their numbers.** *Built (2026-11-04): each story boss's second-phase move has a motion of its own (`tools/anim/vigil_boss_moves.py`), played as its marks glint with the boss's script held meanwhile: Dran rears up and slams his head down along the line, Utan springs with his arms up and stamps, the Ice Queen leans back and thrusts her arms down, Joe goes up with his axe and brings it down on you, the Genie winds round and sweeps across, the King's Curse's coffin rises with its doors open and slams shut, and the Genie's final form holds his charge and fires. The fog gate already stands: with Vigil World each boss floor (Dran's 15 and the rest) is a small zone behind a smoke gate you walk up to and go through, and the zone before it has a shrine; reaching a shrine makes it the one you wake at, so a death behind the smoke wakes you a short walk from it. Not yet played: none of the eight motions has been seen in a running game.*
+   - Phase two is a tint, a speed-up and more damage. A Souls boss's second phase brings new attacks and a new rhythm.
+   - It needs per-boss motions and a takeover of each cast's script for phase two (the §12 goal 7 remainder), Dran first.
+   - Also missing: a fog gate in front of each boss, with a shrine near it, so a retry is a short walk.
+4. **Telegraphs.** *Built: a string's opening blow glints with a soft ping a beat before it lands; a family's own new attack flashes red with a crack (setting *Telegraphs*, test section 42).*
+   - Brains wind up, feint and punish, but a wind-up has no cue of its own: no glint, no sound, no colour.
+   - Each brain's attack could fire a small cue at wind-up (`effects.burst` "guard" at the weapon plus a sound). Unblockable or grab attacks could get a red one, as Sekiro does.
+5. **The other five heroes.** *Correction: every hero already rolls or tumbles and backsteps on L2 (Vigil's EVADES, from `party_moves.py` and `xiao_moves.py`). Built now: the engine's shove dodge, Vigil's fallback when the motions are missing, is never given to a hero with a roll (`ChroniclePlayerHasDodgeMove`) and costs the gauge a roll does (`dodge_gauge`), so an empty gauge refuses L2 for everyone. Built too: the Gauntlet's sets for them (19 moves, setting *Party attacks*, test section 1). Goro and Ungaga get a heavy, a finisher after two blows and after three, a guard counter and a roll attack; Xiao, Ruby and Osmond a heavy shot and two volleys. Their criticals too (a backstab and a riposte each, `ATTACKS.party_criticals`): until each has a stab of its own, the hero's strongest close blow at point blank (Goro's and Ungaga's guard counter, the casters' heavy shot) against the enemy's crumple. Built 2026-11-04: each has a critical of its own on Toan's timing (`party_moves.py` `critical` and `critical_cast`, `xiao_moves.py` `critical`): Goro slams down from his crouch, Ungaga drives the spear in, and the three casters press in and shoot twice at point blank. Their weapon arts too (2026-11-04): Goro's Earthquake, Ungaga's Spear Storm, Xiao's Stone Rain, Ruby's Inferno and Osmond's Barrage, each on all of that hero's weapons, from their own moves played their own way, and named on the weapon cards.*
+   - Evades, the heavy, finishers, criticals and arts are Toan's own.
+   - Xiao, Goro, Ruby, Ungaga and Osmond fight as DC1 had them, so switching heroes switches genres.
+   - Each needs at least an evade, a heavy and a critical (motions through `tools/anim`).
+6. **The camera.** *Built in part: `lock_camera` keeps the target framed (setting *Lock-on camera*); the game's own camera already pulls in at walls (`DungeonZoomApply`). Pulling out for a large target is built too (2026-11-04): locked on to a big monster or boss, the camera may sit up to 60 units further back.* DC1's camera trails behind. A modern lock-on camera keeps both the player and the target framed, and pulls in when a wall is near. This is an engine piece in the dungeon camera.
+7. **Ranged and casting enemies.** *Built for 40 shooting families (nine of the early dungeons', 25 later ones and six fliers, which keep their height); the three casters with a second spell alternate the two (`SET_SHOT2`): they keep their distance (back off inside 70, close in past 190), step aside, and fire their own projectile (`SET_SHOT` through `monsters.call`, which now takes a frame name) a beat after a glint; two never fire together (setting *Shooters*, test section 43). Fixed 2026-11-04: 18 rows were keyed by the wrong model (the later families' file numbers had been taken for model ids), which handed Dran, Master Utan and the King's Curse to the shooter brain; each is now keyed by the model that uses its file. Still to do: the shooting families whose walk motion couldn't be read from their scripts.*
+8. **Readable HUD.** The locked target needs an HP bar and a poise or stagger meter (Sekiro's posture bar is the modern reference). Elites have bars, but ordinary foes show nothing.
+   *Built 2026-11-03 (not yet seen on screen):* `render.target_bar_set` puts a bar half again as wide as the game's gauge under the locked target's name, with a damage trail, and `render.target_meter_set` a meter under it; Vigil fills it from enemy poise (a third a light blow, full and flashing at the break, gone two seconds after the last hit). *Target bar* setting. Engine test and Vigil tests pass; a headless lock-on kept the bat off screen, so the look waits on the hand playtest.
+9. **Invaders that fight like players.** *Built in part: an invader with a blade weighs each swing you start close by and raises the hero's own guard about two times in five, blocking it with a clang (`companion_moonmod.cpp`). It also dashes aside out of a swing's line (about three in ten, five for a ranged one), untouchable while it goes, and comes straight back in. Its dash picks an open side and stops at walls; between swings it circles you on the hero's own lock-on strafe; below a third of its life it backs off and drinks one of two flasks (two fifths back; hit it mid-drink to spill it); and your lock-on takes it when it's the nearest. Built 2026-11-04.* The invader closes in and swings, with a heavy every third. A real one would roll away from your swing, guard, punish your flask and back off to heal. Lock-on doesn't reach it yet, which a duel needs most. Both are engine work in `companion_moonmod.cpp` and the lock-on loop.
+10. **Left over from §12.** Built since the first pass: a telegraphed new move for each boss (on `combat.strike_player`), rooms that shut on an ambush (`dungeons.room_seal`), darkness and miasma, the hero's ghost (`world.ghost_play`), one-way drops by ledges, the Dark Genie in the Trial, elite patrols, and the townsfolk's own looks and lines. Every §12 goal now has a built version. What's left is depth, not missing goals:
+    - Motions of the bosses' own for their new moves. *Built 2026-11-04 for five of them (see the last re-evaluation).*
+    - ~~Drops as real height steps in the generator~~: built 2026-11-04 (see below). ~~Enemies dropping from above, a lantern charm, elites in the Trial~~: built 2026-11-04. Ambushers start 70 above the floor and fall, faster each tick and never past the floor (`physics.velocity_set` each tick: left alone, a monster off the floor only eases down over seconds, and a speed of its own carries it through; checked headless, 70 units in 23 ticks, landing at the floor), setting *Ambushers drop from above*. The Gallery's first lit shrine gives the Shrine Lantern, a pouch that, worn by anyone in the party, turns the dark into a wide ring of warm light (setting *The Shrine Lantern*). Six named elites (Garrow, a Skeleton Soldier, to Sable, a Club) join the Trial's list, one for each place in the story (the later dungeons' Sunday and Club checked headless: they spawn on a Divine Beast Cave floor and take their set life).
+    - ~~Online messages (goal 17) beyond the offline notes~~: built 2026-11-04 through a shared messages folder, no server (see item 17).
+    - **A hand playtest of all of §12.** Every piece is checked headless (Vigil 494 checks, the engine suite), none with a pad.
+### Order
+
+1. Playtest §12.
+2. Hit feel (1) and buffering (2), since both are engine small.
+3. Telegraphs (4).
+4. Dran's real second phase and a fog gate (3).
+5. The other heroes' evade, heavy and critical (5).
+6. The camera (6).
+7. Invaders that dodge and can be locked onto (9).
+8. Then the §12 leftovers (10). Use the Trial for every balance pass above: it starts any boss fight in a few seconds.
+
+### Re-evaluation after the feel pass (2026-11-03, later)
+
+Built since the list above: hit feel (1), input buffering (2), telegraphs (4), a lock-on camera that keeps the target framed (6, in part), shooters that keep their distance (7, nine families), and the locked target's bar and poise meter (8, by S1). Of the eight gaps, the ones about how a blow *feels* (weight, responsiveness, readability, framing) now all have a built version. What is left is content, not plumbing:
+
+- **The other five heroes (5).** They roll, and now have heavies and finishers too (the Gauntlet's sets). Their criticals reuse a close blow; stabs of their own are motion work in `tools/anim`, as `vigil_criticals.py` made Toan's.
+- **Bosses with a real second phase (3).** The new moves fall while the boss's own body keeps fighting as before. They need motions of the boss's own and a fog gate with a shrine before it.
+- **Invaders that duel (9).** They guard and dash aside now; they still need lock-on, engine work in `companion_moonmod.cpp` and the lock-on loop.
+- **Depth on what's built:** a chain-cancel from one attack into the next, and the camera pulling out to fit a large target.
+
+The order stands, with one change: **a hand playtest is now more urgent than any of these.** Hit-stop, buffering windows and telegraph lead times are numbers that only a pad can tune, and every one of them is a setting so it can be tuned without a build. Play Divine Beast Cave floors 1-4 and the Dran Trial with the README's hand tests, and note which settings felt wrong and by how much. Then build the other heroes.
+
+### Re-evaluation after the stretch goals (2026-11-04)
+
+Every gap the 2026-11-03 re-evaluation listed now has a built version, checked headless (the engine suite; Vigil 507 checks):
+
+- **The other five heroes (5).** Each has its own critical motion, on Toan's timing, played paired with the enemy's crumple.
+- **Bosses with a real second phase (3).** Five bosses (Dran, Utan, the Ice Queen, Joe, the Genie) wind up and strike in motions of their own, their scripts held meanwhile. The smoke gate before each boss floor, with a shrine in the zone before it, is the fog gate.
+- **Invaders that duel (9).** An invader circles you between swings on the hero's lock-on strafe. It guards, and dashes aside to whichever side has no wall. Low on life it backs off and drinks: two flasks, and a hit spills one. Your lock-on takes it.
+- **Depth.** `chain_cancel` takes a landed blow into the heavy and the heavy back into the combo, and the camera pulls out for a large target.
+- **A bug found on the way.** 18 shooter rows were keyed by file number instead of model id. That gave Dran, Utan and the King's Curse the shooter brain in place of their boss scripts, and pointed other rows at the wrong families. Fixed.
+
+What a modern feel still lacks, in order of how much it would change play:
+
+1. **Tuning by hand.** Hit-stop, buffer and chain windows, telegraph lead times, invader timings and the new boss motions are all numbers only a pad can judge. S1 viewed the boss motions in the editor (two were fixed after); nothing else has been played. This is now the only blocker to calling the feel done.
+2. ~~Weapon arts for the other heroes~~ (built the same day), and ~~the King's Curse's and the Genie's final form's own motions~~ (built the same day: `c15a_curse`, `c15b_curse`, `c23a_beam`).
+3. **Height in the dungeon.** *Built 2026-11-04:* each zone lies a step below the one before, down a ramp the engine shears from a straight corridor part (`set_zones` `descent`; checked headless). The ledges are still one-way warps; a real fall would need a zone below a ledge with no ramp, a later step.
+4. **Online messages.** *Built 2026-11-04 with no server:* `messages.*` through a messages folder players share by any sync service; Vigil's Messages card at each shrine. A DC_Web server is optional, not needed.
+
+Built after this list was written (still 2026-11-04; Vigil 521 checks): weapon arts for Goro, Ungaga, Xiao, Ruby and Osmond; the King's Curse's coffin, the King's Curse himself and the Genie's final form each with a motion of their own (all eight boss motions now); ambushers that fall from above (checked headless); the Shrine Lantern; six named elites in the Trial (the later dungeons' ones checked headless).
+
+**Where the project stands (2026-11-04).** Every §12 and §13 goal has a built version, and the combat loop has the pieces a modern action game is judged by:
+- **Readable enemies.** Brains with feints, guards and side steps; wind-ups held a beat; criticals, poise and a posture bar on the locked target.
+- **Bosses that change how they fight.** Each of the eight story-boss bodies has a telegraphed move of its own in its second phase.
+- **A player kit with depth.** Buffering, chain cancels, ripostes, guard and exhaustion, weapon arts for all six heroes, flasks.
+- **A world that rewards learning.** Kept maps, shrines, shortcuts, ambushes, elites, darkness, the lantern, ghosts and NG+.
+
+Height in the floor itself is now built: each zone lies a step below the one before, down a ramp outside its gate (item 3; checked headless, not yet played). Players' messages to each other are built too, with no server: they travel through a messages folder the players share by any sync service (item 4; checked in tests, not yet played).
+
+The order now: the hand playtest (the README's hand tests, then the Trial against each boss and elite). Its notes feed one tuning pass on the numbers in item 1. Nothing built is waiting on a decision; a hosted server for messages (DC_Web) is optional now.

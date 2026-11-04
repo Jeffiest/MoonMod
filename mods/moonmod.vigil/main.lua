@@ -15,12 +15,16 @@
 --   * Character switches take longer (swap_delay), and enemies can't hand you the "Stamina" ailment, which in this
 --     game is a power-up (status_immune).
 --
--- What S1 can't do yet, and the engine work that brings it (VIGIL_PLAN.md section 2): guard only in front, charge the
--- gauge for blocked hits, break the guard, parry (E1); stop a hit refilling the gauge to full, make the first swing
--- cost (E2); read the gauge (E3).
+--   * The guard covers the front only, costs gauge for each blocked hit, lets a little through, breaks when the gauge
+--     can't pay, parries in its first frames, and works without a lock-on (player.guard_rules_set, E1). A hit that
+--     lands drains the gauge instead of filling it, the first swing needs and costs gauge, and the refill waits a
+--     moment after a spend (player.gauge_rules_set, E2). game.player.hit tells Vigil of parries and breaks.
 --
 -- Vigil sits out other mods' game modes (Dark Genie's Gauntlet), as the Cookbook's "Share the game with other mods"
 -- describes: no moves, no tuning, formulas back to x1, until the session ends.
+
+-- This chunk is near Lua's limit of 200 locals. Put a new feature's helpers and state in a do ... end block, and
+-- forward-declare (one local line) only what code outside it calls, as the gear and the riposte blocks do.
 
 local ID = "moonmod.vigil"
 
@@ -177,6 +181,146 @@ local ATTACKS = {
     cues = {{at = 0.1, sound = "voice"}, {at = 0.3, sound = "swing_heavy", trail = "wide"}}},
 }
 
+-- Criticals (§12, stretch goal 3): the attack button at an enemy's back stabs it (a backstab), and so does the attack
+-- button at an enemy you parried or whose poise you broke (a riposte, armed with player.critical_set). Toan is drawn
+-- in and plays toan_critical; the enemy plays its own crumple (MONSTER_MOVES crumple, the pairs below) and its script
+-- waits it out. The blows land at x critical (the setting) on that kind of enemy while it lasts.
+ATTACKS.critical = {anim = "toan_critical", moves = {}, pairs = {}} -- pairs: filled from MONSTER_MOVES, below
+for _, kind in ipairs({"backstab", "riposte"}) do
+  ATTACKS.critical.moves[#ATTACKS.critical.moves + 1] = {anim = "toan_critical", id = "vigil_toan_" .. kind, trigger = "critical",
+    critical = kind, reach = kind == "riposte" and 26 or 22, gap = 11, arc = 100, speed = 0.5, invincible = true,
+    cooldown = 30,
+    hits = {{at = 0.24, radius = 8, reach = 9, damage = 1.2, knockback = 0},
+            {at = 0.57, radius = 8, reach = 9, damage = 1.8, knockback = 0, burst = "sparks", burst_scale = 1.5}},
+    cues = {{at = 0.05, sound = "voice"}, {at = 0.2, sound = "swing_heavy", trail = "slam"}, {at = 0.55, sound = "shout"}}}
+end
+
+-- Weapon arts (§12, stretch goal 4): R2 while guarding (R1) plays the equipped weapon's art, once the weapon has been
+-- built up to the Art level (a setting). Toan's blades fall in three families: the short blades lunge and stab twice,
+-- the long swords spin, the great swords split the ground. Each is one of his attack motions played its own way, at a
+-- gauge cost. The weapon's card in the menu says which art it has and when it unlocks (Weapon arts, below).
+ATTACKS.arts = {
+  {anim = "toan_lunge", id = "vigil_toan_art_rush", name = "Piercing Rush", line = "A long lunge that stabs twice.",
+    weapons = {258, 259, 260, 262, 265, 266, 278, 283, 290, 291, 293},
+    trigger = "art", speed = 0.85, lunge = 4.6, lunge_decay = 0.18, gauge = 35, cooldown = 30,
+    hits = {{at = 0.36, radius = 10, reach = 11, damage = 1.8, knockback = 4},
+            {at = 0.5, radius = 10, reach = 13, damage = 1.4, knockback = 3, burst = "sparks"}},
+    cues = {{at = 0.1, sound = "shout"}, {at = 0.3, sound = "swing", trail = "heavy"}}},
+  {anim = "toan_finisher_3", id = "vigil_toan_art_whirl", name = "Whirlwind", line = "Two turns with the blade out, then a cut.",
+    weapons = {261, 263, 267, 268, 270, 271, 272, 273, 274, 276, 279, 280, 281, 282, 285, 287, 292, 294, 295, 296, 297, 298},
+    trigger = "art", speed = 0.9, spin = 2, spin_from = 0.2, spin_to = 0.5, gauge = 45, cooldown = 36,
+    hits = {{at = 0.24, radius = 17, reach = 0, damage = 1.0}, {at = 0.32, radius = 17, reach = 0, damage = 1.0},
+            {at = 0.4, radius = 17, reach = 0, damage = 1.0}, {at = 0.48, radius = 17, reach = 0, damage = 1.0},
+            {at = 0.59, radius = 12, reach = 9, damage = 2.2, knockback = 6, heavy = true, burst = "sparks", burst_scale = 1.5}},
+    cues = {{at = 0.05, sound = "shout_2"}, {at = 0.22, sound = "swing", trail = "wide"}, {at = 0.55, sound = "shout", trail = "heavy"}}},
+  {anim = "toan_heavy", id = "vigil_toan_art_split", name = "Earthsplitter", line = "A slam that bursts the ground around it.",
+    weapons = {264, 269, 275, 284, 286, 288, 289},
+    trigger = "art", speed = 0.75, lunge = 0.8, lunge_decay = 0.15, gauge = 50, cooldown = 40, wear = 2,
+    hits = {{at = 0.43, radius = 18, reach = 8, damage = 3.4, knockback = 8, heavy = true, burst = "explosion", burst_scale = 1.2}},
+    cues = {{at = 0.05, sound = "voice_3"}, {at = 0.36, sound = "swing_heavy", trail = "slam"}}},
+}
+
+-- The other heroes' attacks (§13, item 5): the Gauntlet's sets (mods/moonmod.roguelike, melee_set and caster_set),
+-- their motions copied into resources/anims. Goro and Ungaga get a heavy, a finisher after two blows and after three,
+-- a counter from the guard and an attack out of a roll; Xiao, Ruby and Osmond a charged heavy shot and two volleys.
+-- Each move whose motion doesn't register is left out on its own.
+do
+  local function melee(who, reach, power)
+    local function d(x) return x * power end
+    return {
+      {anim = who .. "_heavy", character = who, trigger = "heavy", speed = 0.9, lunge = 1.2, lunge_decay = 0.15, cooldown = 30, wear = 1.5,
+        hits = {{at = 0.43, radius = 11, reach = 8 * reach, damage = d(2.4), knockback = 5, heavy = true, burst = "impact", burst_scale = 1.5}},
+        cues = {{at = 0.05, sound = "voice"}, {at = 0.36, sound = "swing_heavy", trail = "slam"}}},
+      {anim = who .. "_launcher", character = who, trigger = "combo_finisher", chain = 2, speed = 1.1, lunge = 1.0, lunge_decay = 0.15,
+        cooldown = 20, hits = {{at = 0.29, radius = 10, reach = 6 * reach, height = 8, damage = d(1.6), knockback = 6, heavy = true},
+                               {at = 0.4, radius = 10, reach = 5 * reach, height = 14, damage = d(0.8), knockback = 2}},
+        cues = {{at = 0.1, sound = "voice_2"}, {at = 0.25, sound = "swing", trail = "wide"}}},
+      {anim = who .. "_spin_finisher", character = who, trigger = "combo_finisher", chain = 3, speed = 1.0, spin = 1, spin_from = 0.24,
+        spin_to = 0.44, cooldown = 30,
+        hits = {{at = 0.28, radius = 15, reach = 0, damage = d(0.9)}, {at = 0.36, radius = 15, reach = 0, damage = d(0.9)},
+                {at = 0.44, radius = 15, reach = 0, damage = d(0.9)},
+                {at = 0.59, radius = 11, reach = 9 * reach, damage = d(2.0), knockback = 5, heavy = true, burst = "sparks", burst_scale = 1.5}},
+        cues = {{at = 0.05, sound = "shout"}, {at = 0.25, sound = "swing", trail = "heavy"}, {at = 0.55, sound = "shout_2", trail = "wide"}}},
+      {anim = who .. "_counter", character = who, trigger = "guard_attack", speed = 1.0, invincible = true, cooldown = 20,
+        hits = {{at = 0.33, radius = 10, reach = 6 * reach, height = 8, damage = d(1.8), knockback = 4, heavy = true}},
+        cues = {{at = 0.1, sound = "voice"}, {at = 0.3, sound = "swing_heavy", trail = "wide"}}},
+      {anim = who .. "_roll_slash", character = who, trigger = "evade_attack", speed = 1.0, lunge = 2.0, lunge_decay = 0.15, cooldown = 20,
+        hits = {{at = 0.32, radius = 11, reach = 8 * reach, height = 6, damage = d(1.6), knockback = 4}},
+        cues = {{at = 0.05, sound = "voice_2"}, {at = 0.25, sound = "swing", trail = "wide"}}},
+    }
+  end
+  -- Xiao's finishers take no gauge (her shots have just spent it); her heavy and the others' casts take their gauge.
+  local function caster(who, gauge, heavy, fan)
+    return {
+      {anim = heavy, id = "vigil_" .. who .. "_heavy", character = who, trigger = "heavy", speed = 0.9, gauge = gauge, cooldown = 30,
+        hits = {{at = 0.53, shot = true, damage = 2.6, speed = 7}}, cues = {{at = 0.05, sound = "voice"}, {at = 0.5, sound = "shout"}}},
+      {anim = fan, id = "vigil_" .. who .. "_fan", character = who, trigger = "combo_finisher", chain = 2, from = 0.15, speed = 1.0,
+        cooldown = 24, hits = {{at = 0.31, shot = true, count = 5, spread = 14, damage = 0.7}}, cues = {{at = 0.05, sound = "voice_2"}}},
+      {anim = who .. "_volley", character = who, trigger = "combo_finisher", chain = 3, speed = 1.0, cooldown = 30,
+        hits = {{at = 0.23, shot = true, count = 3, spread = 12, damage = 0.7}, {at = 0.42, shot = true, count = 3, spread = 12, damage = 0.7},
+                {at = 0.62, shot = true, count = 3, spread = 12, damage = 0.7}}, cues = {{at = 0.05, sound = "shout"}}},
+    }
+  end
+  ATTACKS.party = {}
+  for _, set in ipairs({melee("goro", 0.9, 1.1), melee("ungaga", 1.3, 1.0), caster("xiao", 100, "xiao_heavy_shot", "xiao_triple_shot"),
+                        caster("ruby", 100, "ruby_heavy_cast", "ruby_rush"), caster("osmond", 50, "osmond_heavy_cast", "osmond_rush")}) do
+    for _, attack in ipairs(set) do ATTACKS.party[#ATTACKS.party + 1] = attack end
+  end
+  ATTACKS.party_criticals = {}
+  -- Each hero's own critical (tools/anim/party_moves.py and xiao_moves.py), on Toan's timing: driven in at 0.24, the
+  -- second blow at 0.57 (a caster's a cast into the fallen enemy, then another at point blank).
+  for _, c in ipairs({{"goro"}, {"ungaga"}, {"xiao", true}, {"ruby", true}, {"osmond", true}}) do
+    for _, kind in ipairs({"backstab", "riposte"}) do
+      local function blow(at, damage)
+        return c[2] and {at = at, shot = true, damage = damage, speed = 7, burst = at > 0.5 and "sparks" or nil}
+                     or {at = at, radius = 8, reach = 9, damage = damage, knockback = 0, burst = at > 0.5 and "sparks" or nil,
+                         burst_scale = at > 0.5 and 1.5 or nil}
+      end
+      ATTACKS.party_criticals[#ATTACKS.party_criticals + 1] = {anim = c[1] .. "_critical", id = "vigil_" .. c[1] .. "_" .. kind,
+        character = c[1], trigger = "critical", critical = kind, reach = kind == "riposte" and 26 or 22, gap = 11, arc = 100,
+        speed = 0.5, invincible = true, cooldown = 30, hits = {blow(0.24, 1.2), blow(0.57, 1.8)},
+        cues = {{at = 0.05, sound = "voice"}, {at = 0.2, sound = "swing_heavy"}, {at = 0.55, sound = "shout"}}}
+    end
+  end
+  -- Their weapon arts (§12 goal 4 for the party): one each, on every weapon of theirs, from their own moves played
+  -- their own way. Weapons by item number, the broken and unused ones left out.
+  local function span(a, b, gap) local out = {} for i = a, b do if i ~= gap then out[#out + 1] = i end end return out end
+  for _, art in ipairs({
+    {anim = "goro_heavy", character = "goro", id = "vigil_goro_art_quake", name = "Earthquake",
+      line = "A slow slam that shakes the ground all around.", weapons = span(315, 329, 326),
+      speed = 0.7, lunge = 0.6, lunge_decay = 0.15, gauge = 50, cooldown = 40, wear = 2,
+      hits = {{at = 0.43, radius = 22, reach = 8, damage = 3.6, knockback = 9, heavy = true, burst = "explosion", burst_scale = 1.4}},
+      cues = {{at = 0.05, sound = "voice_3"}, {at = 0.36, sound = "swing_heavy", trail = "slam"}}},
+    {anim = "ungaga_spin_finisher", character = "ungaga", id = "vigil_ungaga_art_storm", name = "Spear Storm",
+      line = "Two turns with the spear out, then a thrust.", weapons = span(348, 360, 358),
+      speed = 0.9, spin = 2, spin_from = 0.2, spin_to = 0.5, gauge = 45, cooldown = 36,
+      hits = {{at = 0.24, radius = 19, reach = 0, damage = 1.0}, {at = 0.32, radius = 19, reach = 0, damage = 1.0},
+              {at = 0.4, radius = 19, reach = 0, damage = 1.0}, {at = 0.48, radius = 19, reach = 0, damage = 1.0},
+              {at = 0.59, radius = 12, reach = 12, damage = 2.2, knockback = 6, heavy = true, burst = "sparks", burst_scale = 1.5}},
+      cues = {{at = 0.05, sound = "shout_2"}, {at = 0.22, sound = "swing", trail = "wide"}, {at = 0.55, sound = "shout", trail = "heavy"}}},
+    {anim = "xiao_volley", character = "xiao", id = "vigil_xiao_art_rain", name = "Stone Rain",
+      line = "Three wide fans of stones.", weapons = span(300, 313),
+      speed = 1.1, gauge = 40, cooldown = 30,
+      hits = {{at = 0.23, shot = true, count = 5, spread = 20, damage = 0.8}, {at = 0.42, shot = true, count = 5, spread = 20, damage = 0.8},
+              {at = 0.62, shot = true, count = 5, spread = 20, damage = 0.8}},
+      cues = {{at = 0.05, sound = "shout"}}},
+    {anim = "ruby_heavy_cast", character = "ruby", id = "vigil_ruby_art_inferno", name = "Inferno",
+      line = "One great orb, slow to draw, that bursts where it lands.", weapons = span(332, 345, 342),
+      speed = 0.75, gauge = 50, cooldown = 40,
+      hits = {{at = 0.53, shot = true, damage = 4.2, speed = 6, burst = "explosion"}},
+      cues = {{at = 0.05, sound = "voice_3"}, {at = 0.5, sound = "shout"}}},
+    {anim = "osmond_volley", character = "osmond", id = "vigil_osmond_art_barrage", name = "Barrage",
+      line = "Three quick bursts of fire.", weapons = span(364, 375),
+      speed = 1.3, gauge = 40, cooldown = 30,
+      hits = {{at = 0.23, shot = true, count = 4, spread = 10, damage = 0.9}, {at = 0.42, shot = true, count = 4, spread = 10, damage = 0.9},
+              {at = 0.62, shot = true, count = 4, spread = 10, damage = 0.9}},
+      cues = {{at = 0.05, sound = "shout"}}},
+  }) do
+    art.trigger = "art"
+    ATTACKS.arts[#ATTACKS.arts + 1] = art
+  end
+end
+
 local armed -- nil: not tried yet; otherwise whether every attack motion registered
 local function register_attacks()
   if armed ~= nil then return armed end
@@ -190,7 +334,7 @@ end
 local function attack_move(attack)
   local move = {id = "vigil_" .. attack.anim, character = "toan", animation = attack.anim, blend_in = BLEND_IN.attack}
   for k, v in pairs(attack) do
-    if k ~= "anim" then move[k] = v end
+    if k ~= "anim" and k ~= "ok" then move[k] = v end
   end
   return move
 end
@@ -206,6 +350,53 @@ local function moves(evades, attacks)
   end
   if attacks then
     for _, attack in ipairs(ATTACKS) do list[#list + 1] = attack_move(attack) end
+    if setting("party_attacks", true) then
+      for _, attack in ipairs(ATTACKS.party) do
+        if attack.ok == nil then attack.ok = register(attack.anim) end
+        if attack.ok then list[#list + 1] = attack_move(attack) end
+      end
+    end
+    local c = ATTACKS.critical
+    if setting("criticals", true) then
+      if c.ok == nil then c.ok = register(c.anim) end
+      if c.ok then
+        for _, move in ipairs(c.moves) do
+          move = attack_move(move)
+          move.pairs = c.pairs
+          list[#list + 1] = move
+        end
+      end
+      if setting("party_attacks", true) then
+        for _, crit in ipairs(ATTACKS.party_criticals) do
+          if crit.ok == nil then crit.ok = register(crit.anim) end
+          if crit.ok then
+            local move = attack_move(crit)
+            move.pairs = c.pairs
+            list[#list + 1] = move
+          end
+        end
+      end
+    end
+    if setting("arts", true) then
+      for _, art in ipairs(ATTACKS.arts) do
+        -- the party's arts play their Party attacks motions, so they come with them
+        local party = art.character ~= nil and art.character ~= "toan"
+        if party and art.ok == nil then art.ok = register(art.anim) end
+        if not party or (art.ok and setting("party_attacks", true)) then
+          local move = attack_move(art)
+          move.name, move.line = nil, nil
+          move.min_level = clamp(setting("art_level", 3), 1, 99)
+          list[#list + 1] = move
+        end
+      end
+    end
+  end
+  -- The flask's drink (Flask, below): each hero's own drinking motion, slowed, started only by player.move_play.
+  if setting("flask", true) then
+    for _, who in ipairs(ORDER) do
+      list[#list + 1] = {id = "vigil_" .. who .. "_flask", character = who, trigger = "played", motion = 28, speed = 0.5,
+                         blend_in = 4, cooldown = 0}
+    end
   end
   return list
 end
@@ -262,7 +453,133 @@ local BRAINS = {
       {motion = 16, from = 75, speed = 0.42, hold = 81, track_to = 82, lunge = 0.5, done = 95, next = 1},
     },
   },
+  -- From here on the blow frames are the damage windows the monster's own script sets (SET_DMG_COL, read with
+  -- tools/stb/stbdis.py), and the guard is its SET_GUARD_FRAME span.
+  -- Master Jacket shares the Skeleton's motion layout: blows at 62-64 of attack_1 and 77-79 of attack_2 (75-95), so
+  -- attack_2 lands at once and only follows a first blow. Guard frames 100-117.
+  [0] = { -- Master Jacket (e01a)
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.35, sidestep = 0.5,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.4},
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 24, reach = 16, rush = 0.3, feint = 0.25,
+    attacks = {
+      {motion = 13, from = 50, speed = 0.42, hold = 60, track_to = 61, lunge = 0.5, done = 70, next = 2},
+      {motion = 16, from = 75, speed = 0.42, hold = 75, track_to = 76, lunge = 0.4, done = 95, next = 1},
+    },
+  },
+  -- The Werewolf: a hopping right swipe at 60-65 of attack_1 (50-70), the left claw at 80-81 of attack_2 (70-90).
+  -- Guard frames 244-263 (motions 5-7).
+  [4] = { -- the Werewolf (e07a)
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.5, sidestep = 0.5,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.35},
+    walk_speed = 0.6, press_speed = 0.9, step_speed = 0.6, ring = 28, reach = 19, rush = 0.45, feint = 0.2,
+    attacks = {
+      {motion = 13, from = 50, speed = 0.36, hold = 57, track_to = 59, lunge = 0.6, done = 70, next = 2},
+      {motion = 16, from = 70, speed = 0.36, hold = 76, track_to = 78, lunge = 0.4, done = 90, next = 1},
+    },
+  },
+  -- The Mummy has the Skeleton's layout and guard (100-117); attack_1 (360-385) lands at 372, attack_2 (320-350) at 330.
+  [44] = { -- the Mummy (e50a)
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.2, sidestep = 0.4,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.3},
+    walk_speed = 0.4, press_speed = 0.6, step_speed = 0.4, ring = 24, reach = 16, rush = 0.15, feint = 0.1,
+    attacks = {
+      {motion = 13, from = 360, speed = 0.36, hold = 369, track_to = 371, lunge = 0.4, done = 385, next = 2},
+      {motion = 16, from = 320, speed = 0.36, hold = 327, track_to = 329, lunge = 0.4, done = 350, next = 1},
+    },
+  },
+  -- The Captain and Corcea: attack_1 (60-81) lands at 69, attack_2 (90-106) at 93. The Captain guards (180-190).
+  [23] = { -- the Captain (e27a)
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.35, sidestep = 0.5,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.4},
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 24, reach = 16, rush = 0.3, feint = 0.2,
+    attacks = {
+      {motion = 13, from = 60, speed = 0.36, hold = 66, track_to = 68, lunge = 0.5, done = 81, next = 2},
+      {motion = 16, from = 90, speed = 0.36, hold = 91, track_to = 92, lunge = 0.4, done = 106, next = 1},
+    },
+  },
+  -- The Curse Dancer: quick on its feet. attack_1 (240-262) lands at 249, attack_2 (270-293) at 280; guard 160-174.
+  [46] = { -- the Curse Dancer (e52a)
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.6, sidestep = 0.7,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.3},
+    walk_speed = 0.55, press_speed = 0.85, step_speed = 0.6, ring = 26, reach = 17, rush = 0.35, feint = 0.3,
+    attacks = {
+      {motion = 13, from = 240, speed = 0.3, hold = 246, track_to = 248, lunge = 0.5, done = 262, next = 2},
+      {motion = 16, from = 270, speed = 0.3, hold = 277, track_to = 279, lunge = 0.5, done = 293, next = 1},
+    },
+  },
+  -- The days of the week (Sunday to Saturday) share one layout: attack_1 from 255, attack_2 from 280-290, which lands
+  -- at once and so only follows a first blow. Sunday and Monday guard (120-137). Tuesday and Thursday shoot, Friday's
+  -- swing is split over three motions: they keep their own scripts.
+  [10] = { -- Sunday (e14a): lands at 262 and 285
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.35, sidestep = 0.5,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.4},
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 26, reach = 18, rush = 0.3, feint = 0.2,
+    attacks = {
+      {motion = 13, from = 255, speed = 0.36, hold = 259, track_to = 261, lunge = 0.5, done = 280, next = 2},
+      {motion = 16, from = 285, speed = 0.36, hold = 285, track_to = 286, lunge = 0.4, done = 297, next = 1},
+    },
+  },
+  [11] = { -- Monday (e15a): lands at 259 and 280
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.35, sidestep = 0.5,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.4},
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 26, reach = 18, rush = 0.3, feint = 0.2,
+    attacks = {
+      {motion = 13, from = 255, speed = 0.36, hold = 257, track_to = 258, lunge = 0.5, done = 270, next = 2},
+      {motion = 16, from = 280, speed = 0.36, hold = 280, track_to = 281, lunge = 0.4, done = 292, next = 1},
+    },
+  },
+  [13] = { -- Wednesday (e17a): one blow, at 267
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.4, sidestep = 0.5,
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 26, reach = 18, rush = 0.3, feint = 0.25,
+    attacks = {
+      {motion = 13, from = 255, speed = 0.36, hold = 264, track_to = 266, lunge = 0.5, done = 280},
+    },
+  },
+  [16] = { -- Saturday (e20a): lands at 265 (both hands) and 290
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.4, sidestep = 0.5,
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 26, reach = 18, rush = 0.35, feint = 0.2,
+    attacks = {
+      {motion = 13, from = 255, speed = 0.36, hold = 262, track_to = 264, lunge = 0.5, done = 280, next = 2},
+      {motion = 16, from = 290, speed = 0.36, hold = 290, track_to = 291, lunge = 0.4, done = 302, next = 1},
+    },
+  },
+  -- The card soldiers (Club, Diamond, Spade, Joker; the Heart shoots, so keeps its script): one swing over 270-305
+  -- and a guard over 120-142, on the days' layout.
+  [39] = { -- Club (e45a): lands at 284
+    idle = 0, walk = 1, back = 2, right = 3, left = 4, dodge_chance = 0.35, sidestep = 0.5,
+    guard = {up = 5, hold = 6, down = 7, chance = 0.45},
+    walk_speed = 0.5, press_speed = 0.75, step_speed = 0.5, ring = 26, reach = 18, rush = 0.3, feint = 0.2,
+    attacks = {{motion = 13, from = 270, speed = 0.36, hold = 281, track_to = 283, lunge = 0.5, done = 305}},
+  },
 }
+
+do -- Families that fight like another: a copy of its row (attacks too: the brain adds a family's own motions to them)
+  -- with its own numbers over it.
+  local function like(model, over)
+    local t = {}
+    for k, v in pairs(BRAINS[model]) do t[k] = v end
+    t.attacks = {}
+    for n, a in ipairs(BRAINS[model].attacks) do
+      t.attacks[n] = {}
+      for k, v in pairs(a) do t.attacks[n][k] = v end
+    end
+    for k, v in pairs(over or {}) do t[k] = v end
+    return t
+  end
+  local function landing(row, n, at) -- attack n's blow moved to frame at
+    local a = row.attacks[n]
+    a.hold, a.track_to = at - 3, at - 1
+    return row
+  end
+  BRAINS[55] = like(3, {walk_speed = 0.65, press_speed = 0.95, rush = 0.5}) -- the Rash Dasher (e63a): the Dasher's rig
+  -- White Fang (e56a): the Werewolf's layout; blows at 62-64 and 80-84, guard 240-265
+  BRAINS[48] = landing(landing(like(4, {dodge_chance = 0.55, rush = 0.5}), 1, 62), 2, 80)
+  BRAINS[24] = like(23, {guard = false}) -- Corcea (e28a): the Captain's layout, no guard
+  BRAINS[54] = landing(like(16), 1, 264) -- Hell Pockle (e62a): Saturday's layout, lands at 264 and 290
+  BRAINS[40] = landing(like(39), 1, 283)                          -- Diamond (e46a)
+  BRAINS[41] = landing(like(39, {reach = 20}), 1, 281)            -- Spade (e47a): the longest reach
+  BRAINS[42] = landing(like(39, {feint = 0.35}), 1, 280)          -- Joker (e48a)
+end
 
 local hook_frame = 0 -- the monster hook's latest frame
 
@@ -271,26 +588,44 @@ local hook_frame = 0 -- the monster hook's latest frame
 -- from its first; its hits take the kind of the monster's first native blow, times damage.
 local MONSTER_MOVES = {
   [3] = { -- the Dasher's pounce: the mace up by 6, a leap, the mace slammed down in front on landing (16)
-    roll_left = "e06a_roll_left", roll_right = "e06a_roll_right", roll_chance = 0.6,
+    roll_left = "e06a_roll_left", roll_right = "e06a_roll_right", roll_chance = 0.6, crumple = "e06a_crumple",
     attack = {id = "e06a_pounce", speed = 0.45, hold = 5, track_to = 7, lunge = 1.3, chance = 0.3,
               -- the mace's head lands 21 out and the hand 13: one sphere each, so it catches you close or far
               hits = {{bone = "dcol0", radius = 5, from = 14, to = 22, damage = 1.2},
                       {bone = "r_hand", radius = 5, from = 15, to = 22, damage = 1.2}}},
   },
   [1] = { -- the Skeleton's whirl: the knife drawn back by 7, one full turn with the blade out (10-24)
-    roll_left = "e03a_roll_left", roll_right = "e03a_roll_right", roll_chance = 0.4,
+    roll_left = "e03a_roll_left", roll_right = "e03a_roll_right", roll_chance = 0.4, crumple = "e03a_crumple",
     attack = {id = "e03a_whirl", speed = 0.4, hold = 6, track_to = 9, lunge = 0.45, chance = 0.3,
               hits = {{bone = "dcol0", radius = 5, from = 12, to = 24, damage = 1.0},
                       {bone = "hand_r", radius = 4, from = 12, to = 24, damage = 1.0}}},
   },
+  [55] = { -- the Rash Dasher: the Dasher's moves on its own file (the same rig)
+    roll_left = "e63a_roll_left", roll_right = "e63a_roll_right", roll_chance = 0.6,
+    attack = {id = "e63a_pounce", speed = 0.5, hold = 5, track_to = 7, lunge = 1.4, chance = 0.35,
+              hits = {{bone = "dcol0", radius = 5, from = 14, to = 22, damage = 1.2},
+                      {bone = "r_hand", radius = 5, from = 15, to = 22, damage = 1.2}}},
+  },
+  [4] = { -- the Werewolf's rake: a long leap, the right claw raked down on landing (16), then the left across (25)
+    roll_left = "e07a_roll_left", roll_right = "e07a_roll_right", roll_chance = 0.5,
+    attack = {id = "e07a_rake", speed = 0.42, hold = 5, track_to = 9, lunge = 1.4, chance = 0.3,
+              hits = {{bone = "r_hand", radius = 6, from = 14, to = 18, damage = 1.1},
+                      {bone = "l_hand", radius = 6, from = 23, to = 27, damage = 0.9}}},
+  },
 }
+
+-- A crumple is the enemy's half of a critical: doubled over from the blade and back up, 44 frames at half speed.
+for model, m in pairs(MONSTER_MOVES) do
+  if m.crumple then ATTACKS.critical.pairs[#ATTACKS.critical.pairs + 1] = {model = model, animation = m.crumple, speed = 0.5} end
+end
+table.sort(ATTACKS.critical.pairs, function(a, b) return a.model < b.model end)
 
 local monster_moves_registered = false
 local function register_monster_moves()
   if monster_moves_registered then return end
   monster_moves_registered = true
   for model, m in pairs(MONSTER_MOVES) do
-    for _, id in ipairs({m.roll_left, m.roll_right}) do
+    for _, id in ipairs({m.roll_left, m.roll_right, m.crumple}) do
       local ok, err = call(game.animations.monster_register, {id = id, model = model, file = "resources/anims/" .. id .. ".json"})
       if not ok then moonmod.log("warn", "monster motion " .. id .. ": " .. message(err)) end
     end
@@ -329,7 +664,7 @@ local minds = {}   -- entity -> what that monster is doing
 local kinds = {}   -- entity -> its BRAINS entry, or false
 local turn = nil   -- {entity, at}: the monster whose turn it is to attack
 local rolled = nil -- the hook's frame when the player last started an evade
-local brain_on = false
+local brain_on, brain_hooked = false, false
 
 local function native(entity, name, args)
   local ok, r = pcall(game.monsters.call, {entity = entity, native = name, args = args})
@@ -389,7 +724,7 @@ local function strike(entity, mind, kind, n, quick, chained)
   if n == 1 and not chained and kind.special and math.random() < kind.special.chance then n = kind.special.n end
   local a = kind.attacks[n]
   halt(entity)
-  mind.attack, mind.lunged, mind.flashed, mind.caught = n, false, false, false
+  mind.attack, mind.lunged, mind.flashed, mind.caught, mind.cued = n, false, false, false, false
   mind.chain = chained and (mind.chain or 1) + 1 or 1
   -- A delayed swing now and then: the wind-up freezes for a beat to catch a roll thrown on reflex.
   mind.hold = not quick and math.random() < 0.3 and math.random(14, 30) or 0
@@ -460,6 +795,25 @@ local function think(ctx, kind)
   end
   mind.walking = false
 
+  -- A named elite on patrol (Named elites, below, sets mind.beat): until you come near, it walks its beat, turning
+  -- back at a wall.
+  if mind.beat and dist > 420 and mind.state ~= "attack" then
+    mind.leg = mind.leg or 1
+    local goal = mind.beat[mind.leg]
+    if (me[1] - goal[1]) ^ 2 + (me[3] - goal[3]) ^ 2 < 144 or mind.blocked > 30 then
+      mind.leg, mind.blocked = mind.leg % #mind.beat + 1, 0
+      goal = mind.beat[mind.leg]
+    end
+    face(e, goal, 0.2)
+    play(e, mind, kind.walk)
+    go(e, goal, kind.walk_speed)
+    mind.walking = true
+    return
+  end
+
+  -- A family that shoots (Ranged and casting enemies, below) keeps its distance and fires.
+  if kind.ranged then return kind.ranged.think(ctx, kind, mind, me, you, dist, ux, uz, dt) end
+
   if mind.state == "attack" then
     local a = kind.attacks[mind.attack]
     local o = native(e, "CHK_MOTION_FRM", {I, F}) or {}
@@ -467,6 +821,19 @@ local function think(ctx, kind)
     local started = mind.t > 4 and o[2] ~= nil and o[2] >= a.from and o[2] <= a.done
     local done, frame = started and o[1] == 1, started and o[2] or a.from
     if frame < a.track_to then face(e, you, 0.2) end
+    -- The telegraph (§13, item 4): a string's opening blow glints at the top of its wind-up, a beat before it lands,
+    -- with a soft ping. The family's own new attack (the whirl, the pounce, the rake) flashes red with a crack instead:
+    -- a blow to roll from, not to trade with. Blows later in a string come without one.
+    if not mind.cued and started and mind.chain == 1 and frame >= math.max(a.from + 1, a.hold - 5) then
+      mind.cued = true
+      if setting("telegraphs", true) then
+        local red = kind.special ~= nil and mind.attack == kind.special.n
+        try(game.effects.burst, {kind = "guard", position = {x = me[1] + ux * 10, y = me[2] + 22, z = me[3] + uz * 10},
+                                 scale = red and 1.3 or 0.7})
+        try(game.audio and game.audio.se_play, {se = red and 616 or 370, volume = red and 100 or 64})
+        if red then native(e, "STATUS_SET_PALLET", {255, 40, 40, 1, 0.12}) end
+      end
+    end
     -- The player rolled before the blow: hold the wind-up and turn with the roll until it is spent, then swing.
     if rolled and not mind.caught and not mind.lunged and ctx.frame - rolled < 16 then
       mind.caught = true
@@ -683,9 +1050,21 @@ local function kind_of(entity)
   return kinds[entity]
 end
 
+local poise_hit -- Poise, below: true while the hit monster's poise holds and it shrugs the blow off
+
 local function brain_hook(ctx)
   if type(ctx) == "table" and ctx.frame then hook_frame = ctx.frame end
+  -- A hit inside the monster's poise skips the retail flinch: it carries on with what it was doing.
+  if type(ctx) == "table" and ctx.program_no == 110 and poise_hit and poise_hit(ctx.entity) then return {handled = true} end
+  -- A story boss playing a move of its own (Story bosses, below) is held off its script, a hit's flinch too, until
+  -- the move is done.
+  local held = type(ctx) == "table" and minds[ctx.entity]
+  if held and held.boss_until and ctx.program_no ~= 120 then
+    if hook_frame < held.boss_until then return {handled = true} end
+    minds[ctx.entity] = nil
+  end
   local kind = brain_on and type(ctx) == "table" and kind_of(ctx.entity)
+  if kind and kind.ranged and not setting("shooters", true) then kind = false end
   if kind then
     resolve_moves(kind, kind.model)
     if ctx.program_no == 100 then
@@ -705,26 +1084,69 @@ local function brain_hook(ctx)
   return game.scripts.call({id = "native.monster.run"})
 end
 
-local function set_brain(on)
-  if on == brain_on then return true end
+-- The hook serves the brain and Poise; it stays while either wants it (hook: Poise wants it).
+local function set_brain(on, hook)
+  hook = on or hook == true
+  if on == brain_on and hook == (brain_on or brain_hooked) then return true end
   minds, kinds, turn = {}, {}, nil
   local scripts = type(game.scripts) == "table" and game.scripts or {}
-  if on then
-    register_monster_moves()
+  if on then register_monster_moves() end
+  if hook then
     local ok, err = call(scripts.override, {id = "native.monster.run"}, brain_hook)
-    if not ok then moonmod.log("warn", "enemy brain: " .. message(err)) return false end
+    if not ok then moonmod.log("warn", "enemy brain: " .. message(err)) brain_hooked = false return false end
   else
     try(scripts.override, {id = "native.monster.run", enabled = false})
   end
-  brain_on = on
+  brain_on, brain_hooked = on, hook
   return true
 end
 
 -- Applying the rules ----------------------------------------------------------------------------------------------
 local in_sandbox = false
+
+-- Poise (§12, stretch goal 2): a monster shrugs off the first blows of a flurry instead of flinching at each, so it
+-- can trade with you; the blow past its poise breaks it into the retail flinch and a short stagger. Poise comes back
+-- after two seconds without a hit. A heavy blow or a combo finisher breaks it at once.
+do
+  local poise, heavy_until = {}, -1
+  local HEAVY = {vigil_toan_heavy = true, vigil_toan_finisher_2 = true, vigil_toan_finisher_3 = true}
+
+  poise_hit = function(entity)
+    local need = setting("poise", 2)
+    if in_sandbox or need <= 0 or entity == nil then return false end
+    local p = poise[entity]
+    if not p or hook_frame - p.last > 120 then p = {hits = 0}; poise[entity] = p end
+    p.last = hook_frame
+    p.hits = (hook_frame <= heavy_until) and need + 1 or p.hits + 1
+    -- The target bar's meter fills with each blow it shrugs off, and flashes full through the stagger.
+    local meter = setting("target_bar", true) and game.render and game.render.target_meter_set
+    local stagger = setting("stagger", 40)
+    if p.hits <= need then
+      try(meter, {entity = entity, fill = p.hits / (need + 1), seconds = 2})
+      return true
+    end
+    try(meter, {entity = entity, fill = 1, seconds = stagger / 60 + 0.5})
+    poise[entity] = nil
+    if stagger > 0 then try(game.combat.status_add, {entity = entity, status = "stop", duration_frames = stagger}) end
+    -- Open to a critical while it reels, and a moment after.
+    if setting("criticals", true) then try(game.player.critical_set, {entity = entity, frames = stagger + 30}) end
+    return false
+  end
+
+  moonmod.on("game.player.move", function(e)
+    if type(e) == "table" and HEAVY[e.id] then heavy_until = hook_frame + 60 end
+  end)
+  moonmod.on("game.world.location_changed", function() poise = {} end)
+end
 local guarding = false
 local applied = {} -- what the last apply() asked for, for the Mod Manager's "Check" action
 local TREE = {vigour = 0, endurance = 0, guard = 0} -- the shrine tree's ranks in this save (Levelling, below)
+
+-- Stamina (§11 G3): each character's own gauge refill, a second, in place of the weapon's Speed. They start where the
+-- game has them with their first weapon (Speed / 30 a tick, times a quarter for Toan and Ungaga and half again for
+-- Xiao and Ruby): Toan and Ungaga slow, Xiao and Ruby quick. The shrine tree's Endurance and the refill setting
+-- scale them, as gauge_refill.
+local STAMINA = {toan = 35, xiao = 120, goro = 60, ruby = 180, ungaga = 30, osmond = 80}
 
 local function tuning()
   local refill = setting("gauge_refill", 100) / 100 * (1 + 0.1 * TREE.endurance)
@@ -737,11 +1159,43 @@ local function tuning()
   -- Send a field only when it says something: an empty Lua table reaches the engine as a JSON object.
   if setting("no_power_up", true) then t.status_immune = {"stamina"} end
   if setting("no_minimap", false) then t.map_hidden = true end
-  if setting("evades", true) and animated == false then
-    -- Without the evade motions L2 still dodges: the engine's own shove dodge, untouchable for a moment, free of gauge.
+  -- Hold L2 to run (§11 G2): the dash speed, draining the gauge; a tap evades as it is let go. Dran's Feather in the
+  -- charm slot halves the drain. 0 leaves L2 as a press-to-evade.
+  local run = setting("run_cost", 20)
+  if run > 0 then t.dodge_run = run end
+  -- Lightness (§11 G3): the weapon's Speed no longer sets the refill; it scales what a swing costs, a light weapon
+  -- down to half, a heavy one up to double. Evades cost what they say.
+  if setting("lightness", true) then
+    t.lightness = true
+    t.stamina = STAMINA
+  end
+  if setting("evades", true) then
+    -- A hero without a roll of his own (his evade motions missing) still dodges on L2: the engine's shove dodge with a hop, untouchable for a moment, for the gauge a roll
+    -- costs (refused with less). A hero with a roll never gets it, so his refused roll stays refused.
     t.dodge_power = 1
     t.dodge_invincible_frames = 14
+    local cost = clamp(setting("evade_cost", 35), 0, 100)
+    if cost > 0 then t.dodge_gauge = math.floor(cost) end
+    if animated ~= false then t.dodge_hop = true end
   end
+  -- No healing items with an enemy near: the flask (below) is the heal in a fight.
+  local lock = setting("flask", true) and clamp(setting("heal_lock", 240), 0, 400) or 0
+  if lock > 0 then t.item_heal_lock = lock end
+  -- Lock-on (§12, stretch goal 6): flick the right stick to move the lock, lose it behind a wall, and a soft turn of
+  -- a swing toward the nearest enemy ahead when not locked.
+  if setting("lock_flick", true) then t.lock_flick = true end
+  if setting("lock_sight", true) then t.lock_sight = true end
+  local soft = clamp(setting("soft_lock", 35), 0, 90)
+  if soft > 0 then t.soft_lock = soft end
+  -- Input buffering (§13, item 2): a roll or R2 pressed a little early (late in a swing, mid-roll, in a hit-stop)
+  -- comes out at the first step it can instead of being lost.
+  local buffer = clamp(setting("input_buffer", 12), 0, 20)
+  if buffer > 0 then t.input_buffer = math.floor(buffer) end
+  -- Chaining (§13, item 2): R2 in a swing's recovery, its blow landed, cuts into the heavy; attack in a heavy's
+  -- recovery cuts back into the combo.
+  if setting("chain_cancel", true) then t.chain_cancel = 6 end
+  -- The lock-on camera (§13, item 6) keeps the target framed beyond you instead of letting it drift to the edge.
+  if setting("lock_camera", true) then t.lock_camera = true end
   return t
 end
 
@@ -752,6 +1206,66 @@ local function apply_tuning()
   applied.tuning = t
 end
 
+-- The guard and the gauge (E1, E2): a guard that covers only the front, costs gauge for each blocked hit, lets some
+-- damage through and breaks when the gauge can't pay; a parry in the first frames of the guard; guarding without a
+-- lock-on. A hit that lands drains the gauge instead of filling it, the first swing costs and needs gauge, and the
+-- refill waits a moment after any spend.
+local function apply_rules()
+  if setting("guard_rules", true) then
+    local rules = {
+      arc = clamp(setting("guard_arc", 120), 0, 360),
+      cost_base = clamp(setting("guard_cost", 10), 0, 100),
+      cost_per_damage = clamp(setting("guard_cost_per_damage", 150) / 100, 0, 10),
+      chip = clamp(setting("guard_chip", 15) / 100, 0, 1),
+      break_recoil = 120,
+      parry_frames = clamp(setting("parry_frames", 6), 0, 60),
+      without_lock = setting("guard_without_lock", true),
+    }
+    local ok, err = call(game.player.guard_rules_set, rules)
+    applied.guard_rules = ok and "on" or ("refused: " .. message(err))
+  else
+    try(game.player.guard_rules_clear)
+    applied.guard_rules = "off"
+  end
+  if setting("gauge_rules", true) then
+    local rules = {
+      hit_refill = -clamp(setting("hit_drain", 15), 0, 100),
+      first_swing_cost = clamp(setting("first_swing_cost", 25), 0, 100),
+      min_to_swing = clamp(setting("min_to_swing", 10), 0, 100),
+      refill_delay = clamp(setting("refill_delay", 36), 0, 600),
+    }
+    local ok, err = call(game.player.gauge_rules_set, rules)
+    applied.gauge_rules = ok and "on" or ("refused: " .. message(err))
+  else
+    try(game.player.gauge_rules_clear)
+    applied.gauge_rules = "off"
+  end
+end
+
+local arm_riposte, end_moments -- the riposte and Exhausted, below (they need in_dungeon)
+
+-- A parry stops the attacker for a moment and shoves it back, a guard break throws sparks. The Counter (guard +
+-- attack) is the riposte that follows.
+moonmod.on("game.player.hit", function(e)
+  if in_sandbox or type(e) ~= "table" or not (e.parried or e.broke) then return end
+  local p = try(game.player.get)
+  local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+  if at then
+    try(game.effects.burst, {kind = e.parried and "guard" or "sparks", position = {x = at.x, y = (at.y or 0) + 10, z = at.z},
+                             scale = e.parried and 1.5 or 1})
+  end
+  if not (e.parried and e.entity) then return end
+  try(game.combat.status_add, {entity = e.entity, status = "stop", duration_frames = 90})
+  local m = try(game.entities.get, e.entity)
+  local from = type(m) == "table" and type(m.position) == "table" and m.position or nil
+  if at and from then
+    try(game.entities.knockback, {entity = e.entity, direction = {x = from.x - at.x, z = from.z - at.z}, speed = 6})
+  end
+  arm_riposte(e.entity, type(m) == "table" and m.native_model_id or nil)
+  if setting("criticals", true) then try(game.player.critical_set, {entity = e.entity, frames = 120}) end
+end)
+
+
 local function apply()
   if in_sandbox then return end
   local ok, err = call(game.combat.register_player_formula,
@@ -761,7 +1275,7 @@ local function apply()
 
   local evades = setting("evades", true) and register_motions()
   local attacks = setting("toan_attacks", true) and register_attacks()
-  if evades or attacks then
+  if evades or attacks or setting("flask", true) then
     local set, set_err = call(game.player.moves_set, {moves = moves(evades, attacks)})
     if not set then
       moonmod.log("warn", "moves: " .. message(set_err))
@@ -774,18 +1288,43 @@ local function apply()
   applied.evades = evades and "on" or (setting("evades", true) and "tuning dodge (motions missing)" or "off")
   applied.toan_attacks = attacks and "on" or (setting("toan_attacks", true) and "motions missing" or "off")
   local brain = setting("enemy_brain", true)
-  applied.enemy_brain = (set_brain(brain) and brain) and "on" or (brain and "refused" or "off")
+  applied.enemy_brain = (set_brain(brain, setting("poise", 2) > 0) and brain) and "on" or (brain and "refused" or "off")
+
+  -- The charm slot, beside the shield on the item page: an amulet there guards against its ailment without taking a
+  -- quick slot. While L2 runs, Dran's Feather has a slot of its own after it, to lighten the run.
+  local charms = setting("charm_slot", true) and 1 or 0
+  local feather = setting("run_cost", 20) > 0
+  local charmed, charm_err = call(game.items.charm_slots_set, {count = charms, feather = feather})
+  applied.charm_slot = charmed and (charms > 0 and "on" or "off") or ("refused: " .. message(charm_err))
+  applied.feather_slot = charmed and feather
+
+  -- Hit feel (§13, item 1): a landed blow holds the whole floor still for a few frames (more for a heavy or charged one,
+  -- most for a critical), the camera shakes on heavy blows and hurts, and the pad rumbles.
+  if setting("hit_feel", true) then
+    local feel = call(game.combat.feel_set, {hit_stop = {light = 3, heavy = 6, critical = 10, hurt = 5},
+                                              shake = {light = 0, heavy = 3, hurt = 4}, rumble = true})
+    applied.hit_feel = feel and "on" or "refused"
+  else
+    try(game.combat.feel_clear)
+    applied.hit_feel = "off"
+  end
 
   bind_guard()
   guarding = guard_held()
   apply_tuning()
+  apply_rules()
 end
 
 local function stand_down()
   try(game.player.moves_clear)
   try(game.player.tuning_clear)
+  try(game.player.guard_rules_clear)
+  try(game.player.gauge_rules_clear)
+  try(game.combat.feel_clear)
+  end_moments()
   set_brain(false)
   try(game.combat.register_player_formula, {id = "enemy-damage", operation = "multiply", value = 1})
+  try(game.items.charm_slots_set, {count = 0}) -- a charm already in it stays shown, so it can be taken out
   guarding = false
   applied = {stood_down = true}
 end
@@ -800,7 +1339,11 @@ end
 local function tips()
   if not setting("tips", true) or moonmod.storage.get("told") then return end
   moonmod.storage.set("told", true)
-  toast("Vigil: L2 rolls, or backsteps with the stick at rest. Each costs weapon gauge.")
+  if setting("run_cost", 20) > 0 then
+    toast("Vigil: tap L2 to roll, or backstep with the stick at rest; hold it to run. Both cost weapon gauge.")
+  else
+    toast("Vigil: L2 rolls, or backsteps with the stick at rest. Each costs weapon gauge.")
+  end
   if setting("toan_attacks", true) then
     toast("Vigil: Toan's R2 is a heavy blow, or a finisher partway through his combo. Locked on, attack toward or away.")
   end
@@ -834,7 +1377,7 @@ local function floor_seeds()
 end
 
 local function kept_floor(e)
-  return not in_sandbox and type(e) == "table" and not e.back_floor and type(e.dungeon_id) == "number" and
+  return not in_sandbox and not floors.trial and type(e) == "table" and not e.back_floor and type(e.dungeon_id) == "number" and
          e.dungeon_id ~= DEMON_SHAFT and type(e.floor_id) == "number" and setting("same_floors", true)
 end
 
@@ -945,7 +1488,7 @@ local function region_grew(old, new)
   return a ~= nil and c ~= nil and a == c and n == m and tonumber(b) < tonumber(d)
 end
 
-local PLACE_LISTS = {"", ":chests", ":back", ":gates", ":shrines", ":map", ":waypoint", ":shape"}
+local PLACE_LISTS = {"", ":chests", ":back", ":gates", ":shrines", ":map", ":waypoint", ":shape", ":doors", ":walls"}
 local function forget_place(seeds, k)
   for _, list in ipairs(PLACE_LISTS) do seeds[k .. list] = nil end
 end
@@ -1004,6 +1547,8 @@ local function ask_zones(e, seeds, k)
       -- Come in by one of its later floors (the entrance's floor list): start at that floor's zone.
       if e.floor_id ~= r[1] and not entering then try(game.dungeons.set_arrival, {zone = e.floor_id - r[1], teleport = true}) end
     end
+    -- Height steps: each zone lies a step below the one before, down a ramp outside its gate.
+    if setting("height_steps", true) then request.descent = 40 end
     zones_asked = try(game.dungeons.set_zones, request) ~= nil
     if zones_asked then try(game.dungeons.set_exits, {town = "shrines"}) end
   elseif zones_asked then
@@ -1186,6 +1731,9 @@ local function go_to_shrine(sh, here_floor)
   end
 end
 
+-- Set further down (the main chunk is at Lua's 200-local cap, so they share one): flask_refill, the flask full again
+-- (Flask); cycle_now and next_cycle, the save's cycle and beginning the next (NG+); elite_gear, a named elite's drop.
+local later = {}
 local function heal_party()
   local members = try(game.party and game.party.list)
   local healed = false
@@ -1202,6 +1750,7 @@ local function rest()
   -- The floor built again from its seed, chests and gates as you left them, the monsters back.
   entering = true
   try(game.dungeons.enter_floor, {floor_id = shrine_at.floor_id, x = shrine_at.x, y = shrine_at.y + 1, teleport = true})
+  if later.flask_refill then later.flask_refill() end
   toast("Vigil: you rest, healed and cured. The monsters return.", 240)
 end
 
@@ -1342,6 +1891,11 @@ local function open_shrine_panel()
     {title = "Leave", lines = {"Back to town.", {text = "Return by its shrines.", tone = "dim"}}},
     {title = "Level up", lines = {string.format("Level %d.", level_now()), {text = string.format("Next: %d Gilda.", level_cost()), tone = "gold"}}},
   }
+  -- NG+ (below): with a cycle ready, Leave asks whether to leave or begin it (a panel holds four cards).
+  if floor_seeds().cycle_ready then options[3].lines[2] = {text = "Or begin the next cycle.", tone = "gold"} end
+  -- Messages (below): a fifth card, while they're on.
+  local card = later.messages_card and later.messages_card()
+  if card then options[#options + 1] = card end
   try(game.ui.choice_open, {id = "vigil.shrine", title = "Shrine", subtitle = shrine_name(shrine_at), cancel = true, cursor = 4, options = options})
 end
 
@@ -1378,6 +1932,222 @@ moonmod.on("game.world.location_changed", function(e)
   if type(e) == "table" then in_dungeon = e.context == "dungeon" end
 end)
 moonmod.on("game.dungeon.resumed", function() in_dungeon = true end)
+
+-- The riposte and Exhausted (§3) are damage formulas Vigil keeps at x1 and raises for a moment. A formula can't name
+-- one enemy, so the riposte names the parried enemy's kind and is spent on the first blow that lands on it.
+do
+  local riposte = nil   -- {entity, until_tick} while the riposte is armed
+  local exhausted = nil -- the tick Exhausted ends, while it lasts
+  local ticks = 0
+
+  local function formula(id, value, model)
+    local def = {id = id, operation = "multiply", value = value}
+    if value ~= 1 and math.type(model) == "integer" then def.native_model_id = model end
+    try(game.combat.register_formula, def)
+  end
+
+  arm_riposte = function(entity, model)
+    local value = setting("riposte", 300) / 100
+    if value == 1 then return end
+    riposte = {entity = entity, until_tick = ticks + 120}
+    formula("riposte", value, model)
+  end
+
+  local function end_riposte()
+    if riposte then riposte = nil; formula("riposte", 1) end
+  end
+
+  local function end_exhausted()
+    if exhausted then
+      exhausted = nil
+      formula("exhausted", 1)
+      try(game.render.hud_icon_remove, {id = "exhausted"})
+    end
+  end
+
+  moonmod.on("game.enemy_hit", function(e)
+    if riposte and type(e) == "table" and e.entity == riposte.entity then end_riposte() end
+  end)
+
+  -- A critical (Criticals, above): its blows land at x critical on the enemy's kind for as long as it is held, in
+  -- place of the riposte's.
+  local critical = nil -- the tick the critical's formula ends, while it lasts
+  local function end_critical()
+    if critical then critical = nil; formula("critical", 1) end
+  end
+  moonmod.on("game.player.critical", function(e)
+    if in_sandbox or type(e) ~= "table" or type(e.id) ~= "string" or e.id:sub(1, 11) ~= "vigil_toan_" then return end
+    end_riposte()
+    local value = setting("critical", 300) / 100
+    if value == 1 then return end
+    critical = ticks + (math.type(e.hold) == "integer" and e.hold or 90)
+    formula("critical", value, e.native_model_id)
+  end)
+
+  moonmod.on("game.tick", function()
+    ticks = ticks + 1
+    if riposte and ticks >= riposte.until_tick then end_riposte() end
+    if exhausted and ticks >= exhausted then end_exhausted() end
+    if critical and ticks >= critical then end_critical() end
+    if in_sandbox or not in_dungeon or exhausted or setting("exhausted", 30) >= 100 then return end
+    local g = try(game.player.gauge_get)
+    if type(g) ~= "table" or type(g.gauge) ~= "number" or g.gauge >= 0.5 then return end
+    exhausted = ticks + 90
+    formula("exhausted", setting("exhausted", 30) / 100)
+    try(game.render.hud_icon_set, {id = "exhausted", icon = "stamina", blink = true})
+  end)
+
+  end_moments = function() end_riposte(); end_exhausted(); end_critical(); try(game.player.critical_clear) end
+end
+
+-- The flask (§12, stretch goal 5): healing as a decision. D-pad Down (or the Flask key) drinks, each hero with their
+-- own drinking motion played slowly; it heals a share of max HP late in the drink, and a hit that gets through first
+-- spills it, the charge spent. Charges come back at a shrine's rest and in town; a Flask Shard, one at most a floor
+-- from a chest, adds one for good. Healing items (the item menu's, a quick slot's) refuse with an enemy near, so the
+-- flask is the heal in a fight (player.tuning_set item_heal_lock). The flask is kept with the save ("flask").
+do
+  local SHARDS_MAX, SHARD_CHANCE, HEAL_AT = 7, 0.15, 0.65
+  local bound, held, ticks = nil, false, 0
+  local drinking = nil -- {who, at} from the drink's start, the tick it heals at once its frames are known
+
+  local function save_key()
+    local slot = try(game.save.slot_id)
+    return type(slot) == "table" and slot.slot_id and ("flask:" .. slot.slot_id .. ":" .. tostring(slot.slot_generation)) or nil
+  end
+  local function state()
+    local key = save_key()
+    local s = key and try(game.save.get, key)
+    if type(s) ~= "table" then s = {} end
+    s.shards = math.type(s.shards) == "integer" and s.shards or 0
+    s.taken = type(s.taken) == "table" and s.taken or {}
+    return s, key
+  end
+  local function most(s) return clamp(setting("flask_charges", 3), 1, 10) + s.shards end
+  local function charges(s) return math.type(s.charges) == "integer" and math.min(s.charges, most(s)) or most(s) end
+  local function store(s, key) if key then try(game.save.set, key, s) end end
+
+  local function show(s)
+    if in_sandbox or not (setting("flask", true) and in_dungeon) then try(game.render.layer_remove, {id = "flask"}) return end
+    try(game.render.layer_register, {id = "flask", text = string.format("Flask %d/%d", charges(s), most(s))})
+  end
+
+  later.flask_refill = function()
+    local s, key = state()
+    s.charges = most(s)
+    store(s, key)
+    show(s)
+  end
+
+  local function drink()
+    local p = try(game.player.get)
+    if type(p) ~= "table" or type(p.character) ~= "string" then return end
+    local s, key = state()
+    local left = charges(s)
+    if left <= 0 then toast("Vigil: the flask is empty. Rest at a shrine to fill it.", 150) return end
+    if not try(game.player.move_play, {id = "vigil_" .. p.character .. "_flask"}) then return end
+    s.charges = left - 1
+    store(s, key)
+    show(s)
+    drinking = {who = p.character}
+  end
+
+  moonmod.on("game.player.move", function(e)
+    if drinking and type(e) == "table" and e.id == "vigil_" .. drinking.who .. "_flask" then
+      drinking.at = ticks + math.floor((math.type(e.frames) == "integer" and e.frames or 60) * HEAL_AT)
+    end
+  end)
+
+  -- A hit that lands (not blocked, parried or taken on poise) spills the drink.
+  moonmod.on("game.player.hit", function(e)
+    if drinking and type(e) == "table" and not (e.blocked or e.parried or e.poised) then
+      drinking = nil
+      toast("Vigil: the flask spilled.", 90)
+    end
+  end)
+
+  moonmod.on("game.tick", function()
+    ticks = ticks + 1
+    if in_sandbox or not setting("flask", true) then return end
+    if drinking and drinking.at and ticks >= drinking.at then
+      local p = try(game.player.get)
+      local most_hp = type(p) == "table" and math.type(p.max_hp) == "integer" and p.max_hp or 0
+      local amount = math.max(1, math.floor(most_hp * clamp(setting("flask_heal", 40), 10, 100) / 100 + 0.5))
+      try(game.player.heal, {amount = math.min(amount, 32767), character = drinking.who})
+      local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+      if at then try(game.effects.burst, {kind = "heal", position = {x = at.x, y = (at.y or 0) + 10, z = at.z}}) end
+      drinking = nil
+    end
+    local signature = "Gamepad:dpdown+" .. setting("flask_key", "None")
+    if bound ~= signature then
+      try(game.input.unbind, {id = "flask"})
+      local keys = {"Gamepad:dpdown"}
+      if setting("flask_key", "None") ~= "None" then keys[2] = setting("flask_key", "None") end
+      local ok, err = call(game.input.bind, {id = "flask", keys = keys})
+      bound = ok and signature or nil
+      if not ok then moonmod.log("warn", "flask binding: " .. message(err)) end
+    end
+    local press = in_dungeon and try(game.input.state, {id = "flask"})
+    local down = type(press) == "table" and press.down == true
+    if down and not held and not drinking then drink() end
+    held = down
+  end)
+
+  -- A Flask Shard: now and then in a chest, one at most a floor, kept with the save.
+  moonmod.on("game.chest.opened", function(e)
+    if in_sandbox or not setting("flask", true) or type(e) ~= "table" or type(e.dungeon_id) ~= "number" then return end
+    local s, key = state()
+    local place = tostring(e.dungeon_id) .. ":" .. tostring(e.floor_id)
+    if s.shards >= SHARDS_MAX or s.taken[place] or math.random() >= SHARD_CHANCE then return end
+    s.taken[place] = true
+    s.shards = s.shards + 1
+    s.charges = charges(s) + 1
+    store(s, key)
+    show(s)
+    toast(string.format("Vigil: a Flask Shard. The flask holds %d now.", most(s)), 240)
+  end)
+
+  moonmod.on("game.world.location_changed", function(e)
+    if type(e) ~= "table" then return end
+    drinking = nil
+    if e.context == "town" then later.flask_refill() else show((state())) end
+  end)
+end
+
+-- Weapon arts (above): each weapon that has an art (Toan's, and with Party attacks the others') says so on its card in
+-- the weapon menu, with the level
+-- it unlocks at. Done again on each new place and when a weapon levels up; Arts off takes the cards away.
+do
+  local function cards()
+    if in_sandbox or type(game.weapons) ~= "table" then return end
+    try(game.weapons.style_clear, {})
+    if not setting("arts", true) then return end
+    local need = clamp(setting("art_level", 3), 1, 99)
+    for _, art in ipairs(ATTACKS.arts) do
+      local gauge, who = art.gauge, art.character or "toan"
+      local shown = who == "toan" and setting("toan_attacks", true) or who ~= "toan" and setting("party_attacks", true)
+      for _, item_no in ipairs(shown and art.weapons or {}) do
+        local w = try(game.weapons.get, "chronicle:weapon:" .. item_no)
+        for _, owned in ipairs(type(w) == "table" and type(w.instances) == "table" and w.instances or {}) do
+          if owned.character == who and math.type(owned.slot) == "integer" then
+            local level = math.type(owned.level) == "integer" and owned.level or 1
+            try(game.weapons.style_set, {character = who, slot = owned.slot, details = {
+              {text = "Art: " .. art.name, color = {236, 200, 120}},
+              art.line,
+              string.format("Guard (R1) + R2. Costs %d gauge.", gauge),
+              level >= need and {text = "Ready.", color = {140, 220, 140}}
+                or {text = string.format("Unlocks at level %d (now %d).", need, level), color = {200, 160, 160}},
+            }})
+          end
+        end
+      end
+    end
+  end
+  moonmod.on("game.world.location_changed", cards)
+  moonmod.on("game.weapon.upgraded", cards)
+  moonmod.on("settings.changed", function(e)
+    if type(e) == "table" and (e.id == "arts" or e.id == "art_level" or e.id == "toan_attacks" or e.id == "party_attacks") then cards() end
+  end)
+end
 
 local function king_key(dungeon_id, floor_id) return "king:" .. tostring(dungeon_id) .. ":" .. tostring(floor_id) end
 local function held_key(dungeon_id) return "king_held:" .. tostring(dungeon_id) end
@@ -1531,13 +2301,23 @@ moonmod.on("ui.choice_made", function(e)
     elseif e.index == 2 then
       if #lit_shrines(shrine_at.dungeon_id) < 2 then toast("Vigil: no other shrine is lit yet.", 180) return end
       open_travel_map(shrine_at)
+    elseif e.index == 3 and floor_seeds().cycle_ready then
+      try(game.ui.choice_open, {id = "vigil.cycle", title = "Leave", subtitle = shrine_name(shrine_at), cancel = true, cursor = 1, options = {
+        {title = "Leave", lines = {"Back to town.", {text = "The cycle waits.", tone = "dim"}}},
+        {title = "Next cycle", lines = {"Every map made new, all in them stronger.", {text = "Your levels, tree and gear stay.", tone = "gold"}}}}})
     elseif e.index == 3 then
       local town = SHRINE_TOWNS[shrine_at.dungeon_id]
       keep_map()
       if town then try(game.world and game.world.transition, {id = "chronicle:location:" .. town}) end
     elseif e.index == 4 then
       open_tree()
+    elseif e.index == 5 and later.messages_open then
+      later.messages_open()
     end
+  elseif e.id == "vigil.cycle" and (e.index == 1 or (later.next_cycle and later.next_cycle())) then
+    local town = SHRINE_TOWNS[shrine_at.dungeon_id]
+    if e.index == 1 then keep_map() end
+    if town then try(game.world and game.world.transition, {id = "chronicle:location:" .. town}) end
   end
 end)
 
@@ -1646,6 +2426,15 @@ moonmod.on("game.dungeon.defeated", function(e)
   local lost = type(e.gilda) == "number" and e.gilda - e.gilda // 2 or 0
   local p = try(game.player.get)
   local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+  -- Where you died (§12, stretch goal 14): the card, and the last eight deaths kept with the save for the map.
+  if setting("you_died", true) then try(game.ui.boss_card, {name = "YOU DIED", frames = 150}) end
+  if at and floor_now and floor_now.dungeon_id == e.dungeon_id and zoned_floor(floor_now) then
+    local deaths = type(seeds.deaths) == "table" and seeds.deaths or {}
+    table.insert(deaths, 1, {key = place_key(floor_now.dungeon_id, floor_now.floor_id), x = math.floor(at.x / 160 + 0.5),
+                             y = math.floor(at.z / 160 + 0.5)})
+    for i = #deaths, 9, -1 do deaths[i] = nil end
+    seeds.deaths = deaths
+  end
   if at and floor_now and floor_now.dungeon_id == e.dungeon_id and zoned_floor(floor_now) then
     local w = type(p.weapon) == "table" and p.weapon or nil
     local abs = 0
@@ -1852,6 +2641,15 @@ local function waypoint_mark(marks, seeds, k)
   local w = seeds[k .. ":waypoint"]
   if type(w) == "table" and type(w.x) == "number" then marks[#marks + 1] = {x = w.x, y = w.y, kind = "waypoint", label = "Waypoint"} end
   local f = seeds.fallen
+  local seen = {} -- one mark a cell, the newest death's
+  if type(f) == "table" and f.key == k then seen[tostring(f.x) .. ":" .. tostring(f.y)] = true end
+  for i, d in ipairs(type(seeds.deaths) == "table" and seeds.deaths or {}) do
+    local cell = type(d) == "table" and tostring(d.x) .. ":" .. tostring(d.y)
+    if cell and d.key == k and type(d.x) == "number" and not seen[cell] then
+      seen[cell] = true
+      marks[#marks + 1] = {x = d.x, y = d.y, kind = "mark", label = i == 1 and "You fell here last" or "You fell here before"}
+    end
+  end
   if type(f) == "table" and f.key == k and type(f.x) == "number" then
     local abs = type(f.abs) == "table" and f.abs.amount or 0
     marks[#marks + 1] = {x = f.x, y = f.y, kind = "mark", label = abs > 0 and string.format("Where you fell (%d Gilda, %d ABS)", f.gilda or 0, abs)
@@ -2081,7 +2879,9 @@ local function zone_scaling(dungeon_id, floor_id, zone, attack)
   local player = 1 + math.max(0, (attack or 0) - (WEAPON_START[dungeon_id] or 10))
   local level = math.max(base, player - setting("scaling_gap", 2))
   local over = level - base
-  return {level = level, base = base, hp = 1 + 0.12 * over + 0.1 * zone, damage = math.min(2, 1 + 0.06 * over), reward = 1 + 0.05 * over}
+  local c = later.cycle_now and later.cycle_now() or 0 -- NG+ (below): each cycle past the first, half again as hardy, and so on
+  return {level = level, base = base, hp = (1 + 0.12 * over + 0.1 * zone) * (1 + 0.5 * c),
+          damage = math.min(2 + 0.5 * c, (1 + 0.06 * over) * (1 + 0.25 * c)), reward = (1 + 0.05 * over) * (1 + 0.5 * c)}
 end
 
 local function scale_monsters()
@@ -2126,6 +2926,1539 @@ moonmod.on("game.dungeon.town_refused", function(e)
   toast("Vigil: the way back to town is through a shrine.", 240)
 end)
 
+-- Story bosses (§12, stretch goal 7): Dran and the bosses after him keep their own arenas and casts, but each has an
+-- entrance card, a bar of its own along the bottom of the screen, and a second phase at half life: a roar (a burst and
+-- a word), a red tint, its moves 40% faster (combat.status_add haste) and its blows 30% harder. Keyed by native model.
+do
+  local BOSSES = {
+    [78] = {name = "Dran", epithet = "Lord of the Divine Beast Cave"},
+    [79] = {name = "Master Utan", epithet = "Elder of the Wise Owl Forest"},
+    [80] = {name = "Ice Queen", epithet = "Mistress of the Shipwreck"},
+    [81] = {name = "King's Curse", epithet = "The Sun and Moon Temple's Shadow"},
+    [83] = {name = "Minotaur Joe", epithet = "Brute of the Moon Sea"},
+    [84] = {name = "Dark Genie", epithet = "The Wish-Granter's Shadow"},
+    [106] = {name = "Dark Genie", epithet = "Darkness Unbound"},
+  }
+  local fights = {} -- entity -> {model, max, phase, refresh, move_at, told}
+  local clock, shown = 0, false
+
+  -- Each boss's new move in its second phase, every six seconds or so: marks glint where it will land (the telegraph),
+  -- and three quarters of a second later the blow falls there (combat.strike_player: a guard, a parry or a dodge's
+  -- invincibility take it, and stepping off the mark beats it). `marks` lays the marks out from the boss (b) toward the
+  -- player (p); `share` is the blow's share of the player's life, `stagger` frames between marks. `motion` is a move's
+  -- body: a motion of the boss's own (tools/anim/vigil_boss_moves.py) it plays as the marks glint, its script held
+  -- meanwhile; its blow lands with the marks.
+  local function along(b, p, steps, spacing)
+    local dx, dz = p.x - b.x, p.z - b.z
+    local d = math.max(1, math.sqrt(dx * dx + dz * dz))
+    local out = {}
+    for i = 1, steps do out[i] = {x = b.x + dx / d * spacing * i, y = p.y, z = b.z + dz / d * spacing * i} end
+    return out
+  end
+  local MOVES = {
+    [78] = {word = "breathes fire", share = 0.18, kind = "heavy", radius = 26, stagger = 8, land = "explosion",
+            marks = function(b, p) return along(b, p, 4, 40) end,
+            -- rears up with his wings spread (the telegraph), and slams his head down on the line at 28
+            motion = {id = "c12a_rear", speed = 0.6}},
+    [79] = {word = "stamps the earth", share = 0.14, kind = "light", radius = 34, stagger = 0, land = "smoke",
+            marks = function(b, p)
+              local out = {}
+              for i = 0, 5 do out[#out + 1] = {x = b.x + 60 * math.cos(i * math.pi / 3), y = p.y, z = b.z + 60 * math.sin(i * math.pi / 3)} end
+              return out
+            end,
+            motion = {id = "c14a_stamp", speed = 0.6}}, -- both arms flung up as he springs, then down on the floor
+    [80] = {word = "calls the frost", share = 0.15, kind = "light", radius = 30, stagger = 12, land = "impact",
+            marks = function(_, p) return {{x = p.x, y = p.y, z = p.z}, {x = p.x + 40, y = p.y, z = p.z}, {x = p.x - 40, y = p.y, z = p.z}} end,
+            motion = {id = "c13a_frost", speed = 0.6}}, -- her arms raised as she leans back, then thrust down
+    [81] = {word = "rains curses", share = 0.12, kind = "light", radius = 24, stagger = 6, land = "impact",
+            marks = function(_, p)
+              return {{x = p.x, y = p.y, z = p.z}, {x = p.x + 50, y = p.y, z = p.z + 50}, {x = p.x - 50, y = p.y, z = p.z + 50},
+                      {x = p.x + 50, y = p.y, z = p.z - 50}, {x = p.x - 50, y = p.y, z = p.z - 50}}
+            end,
+            motion = {id = "c15a_curse", speed = 0.6}}, -- the coffin up with its doors flung open, then slammed shut
+    [83] = {word = "leaps", share = 0.22, kind = "heavy", radius = 42, stagger = 0, land = "explosion",
+            marks = function(_, p) return {{x = p.x, y = p.y, z = p.z}} end,
+            motion = {id = "c16a_leap", speed = 0.6}}, -- up with his axe high, then down with it on you
+    [84] = {word = "sweeps a beam", share = 0.2, kind = "heavy", radius = 26, stagger = 5, land = "explosion",
+            marks = function(b, p) return along(b, p, 6, 40) end,
+            motion = {id = "c17a_sweep", speed = 0.6}}, -- his arms raised and wound round, then swept across
+  }
+  -- the King's Curse out of his coffin (c15b) and the Genie's final form (c23a) are other models: the same moves, with
+  -- bodies of their own (his arms flung down; the Genie's own charge and firing poses)
+  MOVES[82] = setmetatable({motion = {id = "c15b_curse", speed = 0.6}}, {__index = MOVES[81]})
+  MOVES[106] = setmetatable({motion = {id = "c23a_beam", speed = 0.6}}, {__index = MOVES[84]})
+  local falling = {} -- {at, pos, radius, damage, kind, land}
+
+  local function cast_move(fight, boss_at, entity)
+    local move = MOVES[fight.model]
+    local p = try(game.player.get)
+    local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+    if not move or not at or not boss_at then return end
+    local body = move.motion
+    if body and entity then
+      if not body.n then
+        local listed = try(game.animations.monster_list)
+        for _, r in ipairs(type(listed) == "table" and listed.motions or {}) do
+          if r.id == body.id and r.model == fight.model and r.motion then body.n, body.length = r.motion, r.length end
+        end
+      end
+      if body.n then
+        native(entity, "SET_MOVE_CANSEL")
+        native(entity, "SET_MOTION_CHANGE_STEP", {0.25})
+        native(entity, "SET_MOTION", {body.n, body.speed, 6})
+        minds[entity] = {boss_until = hook_frame + math.ceil((body.length or 56) / body.speed)}
+      end
+    end
+    local most = type(p.max_hp) == "number" and p.max_hp or 100
+    local damage = math.max(4, math.floor(most * move.share + 0.5))
+    for i, mark in ipairs(move.marks(boss_at, at)) do
+      try(game.effects.burst, {kind = "guard", position = {x = mark.x, y = mark.y + 4, z = mark.z}, scale = 1.6})
+      falling[#falling + 1] = {at = clock + 45 + (i - 1) * move.stagger, glint = clock + 22, pos = mark, radius = move.radius,
+                               damage = damage, kind = move.kind, land = move.land}
+    end
+    if not fight.told then
+      fight.told = true
+      toast(string.format("Vigil: %s %s! Watch for the glint.", BOSSES[fight.model].name, move.word), 200)
+    end
+  end
+
+  local function enrage(entity, fight, at)
+    fight.phase = 2
+    local b = BOSSES[fight.model]
+    if at then try(game.effects.burst, {kind = "explosion", position = {x = at.x, y = (at.y or 0) + 20, z = at.z}, scale = 1.6}) end
+    toast(string.format("Vigil: %s rages!", b.name), 180)
+    local now = try(game.entities.set_stats, {entity = entity})
+    local before = type(now) == "table" and type(now.current) == "table" and tonumber(now.current.damage_scale) or 1
+    try(game.entities.set_stats, {entity = entity, damage_scale = clamp(before * 1.3, 0, 10)})
+  end
+
+  local function sustain(entity)
+    try(game.entities.tint, {entity = entity, color = {r = 220, g = 60, b = 40}, frames = 3600})
+    try(game.combat.status_add, {entity = entity, status = "haste", duration_frames = 3600})
+  end
+
+  local function clear()
+    fights, shown, falling = {}, false, {}
+    try(game.render.bar_remove, {id = "boss"})
+  end
+
+  -- The marks: a second glint halfway, then the blow.
+  moonmod.on("game.tick", function()
+    if #falling == 0 then return end
+    local keep = {}
+    for _, f in ipairs(falling) do
+      if f.glint and clock >= f.glint then
+        f.glint = nil
+        try(game.effects.burst, {kind = "guard", position = {x = f.pos.x, y = f.pos.y + 4, z = f.pos.z}, scale = 1.2})
+      end
+      if clock >= f.at then
+        try(game.effects.burst, {kind = f.land, position = {x = f.pos.x, y = f.pos.y + 6, z = f.pos.z}, scale = 1.3})
+        try(game.combat.strike_player, {x = f.pos.x, y = f.pos.y + 6, z = f.pos.z, radius = f.radius, damage = f.damage, kind = f.kind})
+      else
+        keep[#keep + 1] = f
+      end
+    end
+    falling = keep
+  end)
+
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    -- The bosses' own motions are appended to their models from the next floor that loads one.
+    if not MOVES[78].motion.registered then
+      for model, move in pairs(MOVES) do
+        if move.motion and not move.motion.registered then
+          move.motion.registered = true
+          local ok, err = call(game.animations.monster_register,
+                               {id = move.motion.id, model = model, file = "resources/anims/" .. move.motion.id .. ".json"})
+          if not ok then moonmod.log("warn", "boss motion " .. move.motion.id .. ": " .. message(err)) end
+        end
+      end
+    end
+    if in_sandbox or not in_dungeon or clock % 15 ~= 0 or not setting("boss_phase", true) then return end
+    local q = try(game.entities.query, {type = "monster"})
+    if type(q) ~= "table" or type(q.entities) ~= "table" then return end
+    local current, most, name = 0, 0, nil
+    for _, m in ipairs(q.entities) do
+      local b = m.native_model_id and BOSSES[m.native_model_id]
+      local id = m.entity_id
+      local health = type(m.health) == "table" and m.health or {}
+      if b and id and m.revealed and type(health.current) == "number" and type(health.maximum) == "number" then
+        local fight = fights[id]
+        if not fight then
+          fight = {model = m.native_model_id, phase = 1, refresh = 0}
+          fights[id] = fight
+          if not shown then
+            shown = true
+            try(game.ui.boss_card, {kicker = "A STORY BOSS", name = b.name, epithet = b.epithet, frames = 170})
+          end
+        end
+        if fight.phase == 1 and health.current <= health.maximum / 2 then
+          enrage(id, fight, type(m.position) == "table" and m.position or nil)
+        end
+        if fight.phase == 2 and clock >= fight.refresh then
+          fight.refresh = clock + 1800
+          sustain(id)
+        end
+        if fight.phase == 2 and setting("boss_moves", true) then
+          if not fight.move_at then
+            fight.move_at = clock + 120
+          elseif clock >= fight.move_at then
+            fight.move_at = clock + 360
+            cast_move(fight, type(m.position) == "table" and m.position or nil, id)
+          end
+        end
+        current, most, name = current + health.current, most + health.maximum, name or b.name
+      end
+    end
+    if name and most > 0 then
+      try(game.render.bar_register, {id = "boss", label = name:upper():sub(1, 24), current = math.max(0, math.min(current, most)),
+                                     max = most, boss = true})
+    elseif shown then
+      clear()
+    end
+  end)
+  moonmod.on("game.world.location_changed", clear)
+end
+
+-- Named elites (§12, stretch goal 8): each floor of a dungeon (and each zone of a region) has one named foe, picked from
+-- its ordinary monsters the first time they are seen: gold, three times the life, half again the bite, five times the
+-- reward, its name over a bar of its own, and a piece of gear (Fine or better) when it falls. A floor's elite falls once:
+-- the save keeps it, so a cleared floor's elite stays down when the floor is built again.
+do
+  local TITLES = {"the Unbowed", "the Gravewalker", "the Hollow", "Who Waits", "the Last Watch", "of the Long Night",
+                  "the Oathless", "the Ashen", "Bone-Crowned", "the Wanderer", "the Patient", "Moon-Eater"}
+  local NAMES = {"Garrow", "Velka", "Oskar", "Kestrel", "Morwen", "Aldric", "Mirel", "Tobben", "Sable", "Corwen", "Ilse", "Dunmor"}
+  local STORY_BOSS = {[78] = true, [79] = true, [80] = true, [81] = true, [82] = true, [83] = true, [84] = true, [106] = true}
+  local elite, slain_key, sighted, clock = nil, nil, nil, 0 -- elite: {entity, name, max}
+
+  local function elite_on() return setting("elites", true) and not in_sandbox end
+
+  local function floor_key()
+    if not floor_now then return nil end
+    local z = try(game.dungeons.zones_get)
+    local zone = type(z) == "table" and type(z.current) == "number" and z.current or 0
+    return string.format("%s:%d:elite", place_key(floor_now.dungeon_id, floor_now.floor_id), zone)
+  end
+
+  -- The same name for the same floor every time it is built.
+  local function name_for(key)
+    local h = 0
+    for i = 1, #key do h = (h * 31 + key:byte(i)) % 1000003 end
+    return NAMES[h % #NAMES + 1] .. " " .. TITLES[(h // #NAMES) % #TITLES + 1]
+  end
+
+  local function drop_bar()
+    try(game.render.bar_remove, {id = "elite"})
+  end
+
+  local function crown(m, key)
+    local id = m.entity_id
+    local health = type(m.health) == "table" and m.health or {}
+    local combat = type(m.combat) == "table" and m.combat or {}
+    local mult = setting("elite_strength", 300) / 100
+    local now = try(game.entities.set_stats, {entity = id})
+    local before = type(now) == "table" and type(now.current) == "table" and tonumber(now.current.damage_scale) or 1
+    local stats = {entity = id, damage_scale = clamp(before * 1.5, 0, 10)}
+    if type(health.maximum) == "number" then stats.max_hp = math.max(1, math.min(1000000, math.floor(health.maximum * mult + 0.5))) end
+    if type(combat.reward_exp) == "number" then stats.reward_exp = math.min(32767, combat.reward_exp * 5) end
+    if type(combat.reward_money) == "number" then stats.reward_money = combat.reward_money * 5 end
+    try(game.entities.set_stats, stats)
+    try(game.entities.tint, {entity = id, color = {r = 255, g = 200, b = 60}, frames = 36000})
+    elite = {entity = id, name = name_for(key), key = key}
+    local c = type(m.position) == "table" and m.position or nil
+    if c then
+      local function at(dx, dz) return {c.x + dx, c.y or 0, c.z + dz} end
+      local mid = at(0, 0)
+      elite.beat = {at(220, 0), mid, at(0, 220), mid, at(-220, 0), mid, at(0, -220), mid}
+    end
+    toast(string.format("Vigil: %s walks this floor.", elite.name), 240)
+  end
+
+  moonmod.on("game.dungeon.generated", function(e)
+    if type(e) == "table" and e.back_floor then return end
+    elite, slain_key, sighted = nil, nil, nil
+    drop_bar()
+  end)
+  moonmod.on("game.dungeon.zone_entered", function()
+    elite, slain_key, sighted = nil, nil, nil
+    drop_bar()
+  end)
+
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if clock % 40 ~= 0 or not in_dungeon or not elite_on() then return end
+    local q = try(game.entities.query, {type = "monster"})
+    if type(q) ~= "table" or type(q.entities) ~= "table" then return end
+    -- Its beat: a cross of four legs from where it was crowned, back through the middle each time (Enemies that fight
+    -- like it, above, walks it while the player is far off). Only families with a brain walk one.
+    if elite and elite.beat and setting("elite_patrols", true) then
+      local mind = minds[elite.entity]
+      if mind and not mind.beat then mind.beat = elite.beat end
+    end
+    if not elite then
+      local key = floor_key()
+      if not key or key == slain_key then return end
+      if floor_seeds()[key] == true then slain_key = key return end
+      for _, m in ipairs(q.entities) do
+        local normal = type(m.definition) ~= "table" or m.definition.kind == 0
+        if m.entity_id and m.revealed and normal and m.character == nil and not STORY_BOSS[m.native_model_id] then
+          -- The second time it is seen, after floor scaling (every 30 frames) has scaled it.
+          if sighted == m.entity_id then
+            crown(m, key)
+          else
+            sighted = m.entity_id
+          end
+          break
+        end
+      end
+      if not elite then return end
+    end
+    for _, m in ipairs(q.entities) do
+      if m.entity_id == elite.entity then
+        local health = type(m.health) == "table" and m.health or {}
+        if m.revealed and type(health.current) == "number" and type(health.maximum) == "number" and health.maximum > 0 then
+          try(game.render.bar_register, {id = "elite", label = elite.name:upper():sub(1, 24),
+                                         current = clamp(health.current, 0, health.maximum), max = health.maximum})
+        end
+        return
+      end
+    end
+  end)
+
+  moonmod.on("game.enemy_defeated", function(e)
+    if not elite or type(e) ~= "table" or e.entity ~= elite.entity then return end
+    local seeds = floor_seeds()
+    seeds[elite.key] = true
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    slain_key = elite.key
+    toast(string.format("Vigil: %s has fallen.", elite.name), 240)
+    if later.elite_gear then later.elite_gear(floor_now and floor_now.dungeon_id, elite.name) end
+    if later.elite_fell then later.elite_fell(elite) end -- Georama as a hub, below
+    elite = nil
+    drop_bar()
+  end)
+end
+
+-- NG+ (§12, stretch goal 15): the Dark Genie's fall readies a new cycle, begun by praying at any shrine. Every kept map
+-- is forgotten (new seeds, new chests, new elites, shrines to light again), while the tree, the gear and the levels
+-- stay. Each cycle past the first makes monsters half again as hardy, a quarter again as hard-hitting, and pays half
+-- again as much (zone_scaling reads later.cycle_now), and an elite's drop is rolled once more for each cycle.
+later.cycle_now = function()
+  local c = floor_seeds().cycle
+  return type(c) == "number" and c or 0
+end
+do
+  moonmod.on("game.enemy_defeated", function(e)
+    if in_sandbox or type(e) ~= "table" or e.native_model_id ~= 106 or not setting("ng_plus", true) then return end
+    local seeds = floor_seeds()
+    if seeds.cycle_ready then return end
+    seeds.cycle_ready = true
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast("Vigil: the Dark Genie is gone. Pray at any shrine to begin the next cycle.", 420)
+  end)
+
+  later.next_cycle = function()
+    local seeds = floor_seeds()
+    if not seeds.cycle_ready then return false end
+    local places = {}
+    for k in pairs(seeds) do
+      if type(k) == "string" and (k:match("^%d+:%d+$") or k:match(":elite$") or k:match(":ambush$") or k:match(":note$") or k:match("^rest:")) then places[#places + 1] = k end
+    end
+    for _, k in ipairs(places) do
+      if k:match("^%d+:%d+$") then forget_place(seeds, k) else seeds[k] = nil end
+    end
+    seeds.cycle, seeds.cycle_ready = later.cycle_now() + 1, nil
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast(string.format("Vigil: cycle %d begins. Every map is new, and all in them stronger.", seeds.cycle + 1), 420)
+    return true
+  end
+end
+
+-- Ambushes (§12, stretch goal 9): about one zone in three of a kept map is an ambush, chosen by its key. A moment
+-- after you walk into it, monsters of the floor drop in around you in a cloud of dust: from above, landing in a puff. A
+-- sprung ambush is kept with the floor, so it doesn't happen twice.
+do
+  local STORY_BOSS = {[78] = true, [79] = true, [80] = true, [81] = true, [82] = true, [83] = true, [84] = true, [106] = true}
+  local DROP = 70 -- how far above the floor they start
+  local armed, clock, variants = nil, 0, {}
+  local dropping = {} -- {handle, at, t}: a monster falling, `t` ticks in
+  local shut -- {pack = {handle = true}, left, until}: the room shut on a sprung ambush, until the pack is dead
+
+  local function release(word)
+    if not shut then return end
+    shut = nil
+    try(game.dungeons.room_release)
+    if word then toast(word, 150) end
+  end
+
+  local function variant(model)
+    if variants[model] then return variants[model] end
+    local r = try(game.characters.register, {id = "ambush-" .. model, kind = "enemy", name = "Ambusher", template_monster_id = model})
+    variants[model] = r and r.id or (ID .. ":ambush-" .. model)
+    return variants[model]
+  end
+
+  local function spring()
+    local p = try(game.player.get)
+    local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+    -- On or beside a ramp (height steps) the ring around the player isn't level: it waits until they are off it.
+    local zg = at and try(game.dungeons.zones_get)
+    for _, r in ipairs(type(zg) == "table" and type(zg.ramps) == "table" and zg.ramps or {}) do
+      if math.abs(160 * r.x - at.x) <= 240 and math.abs(160 * r.y - at.z) <= 240 then armed.at = clock + 30 return end
+    end
+    local key = armed.key
+    armed = nil
+    local q = try(game.entities.query, {type = "monster"})
+    if type(q) ~= "table" or type(q.entities) ~= "table" or not at then return end
+    local models = {}
+    for _, m in ipairs(q.entities) do
+      if m.native_model_id and not STORY_BOSS[m.native_model_id] and m.character == nil then models[#models + 1] = m.native_model_id end
+    end
+    if #models == 0 then return end
+    local n, spawned, pack = clamp(setting("ambush_size", 3), 1, 6), 0, {}
+    for i = 1, n do
+      local a = (i / n) * 2 * math.pi + 0.4
+      local there = {x = at.x + 70 * math.cos(a), y = at.y, z = at.z + 70 * math.sin(a)}
+      local drop = setting("ambush_drops", true)
+      local s = try(game.characters.spawn, {character = variant(models[(i - 1) % #models + 1]),
+                                            position = drop and {x = there.x, y = there.y + DROP, z = there.z} or there})
+      if s then
+        spawned = spawned + 1
+        local handle = type(s) == "table" and (s.entity_handle or s.id)
+        if handle then pack[handle] = true end
+        if drop and handle then
+          dropping[#dropping + 1] = {handle = handle, at = there, t = -3 * i}
+        else
+          try(game.effects.burst, {kind = "smoke", position = {x = there.x, y = there.y + 10, z = there.z}, scale = 1.4})
+        end
+      end
+    end
+    if spawned == 0 then return end
+    -- The room shuts behind you until the pack is dead (a minute and a half at most, should one get stuck in a wall).
+    local sealed = setting("ambush_rooms", true) and try(game.dungeons.room_seal, {})
+    if type(sealed) == "table" and sealed.sealed then
+      local left = 0
+      for _ in pairs(pack) do left = left + 1 end
+      shut = {pack = pack, left = left, ["until"] = clock + 5400}
+      toast("Vigil: an ambush! The way is shut.", 150)
+    else
+      toast("Vigil: an ambush!", 150)
+    end
+    local seeds = floor_seeds()
+    seeds[key] = true
+    if floors.key then try(game.save.set, floors.key, seeds) end
+  end
+
+  moonmod.on("game.dungeon.zone_entered", function(e)
+    armed = nil
+    if in_sandbox or type(e) ~= "table" or type(e.zone) ~= "number" or e.previous == -1 or not floor_now or not zoned_floor(floor_now) or
+       not setting("ambushes", true) then
+      return
+    end
+    local key = string.format("%s:%d:ambush", place_key(floor_now.dungeon_id, floor_now.floor_id), e.zone)
+    if floor_seeds()[key] then return end
+    local h = 0
+    for i = 1, #key do h = (h * 31 + key:byte(i)) % 1000003 end
+    if h % 3 == 0 then armed = {key = key, at = clock + 90} end
+  end)
+  moonmod.on("game.dungeon.generated", function() armed, shut, dropping = nil, nil, {} end)
+  moonmod.on("game.enemy_defeated", function(e)
+    if not shut or type(e) ~= "table" or not shut.pack[e.entity] then return end
+    shut.pack[e.entity] = nil
+    shut.left = shut.left - 1
+    if shut.left <= 0 then release("Vigil: the way opens.") end
+  end)
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if armed and clock >= armed.at then spring() end
+    if shut and clock >= shut["until"] then release("Vigil: the way opens.") end
+    -- Falling: left alone, a monster off the floor only eases down over seconds, and a speed of its own carries it
+    -- through the floor. So each tick it falls faster (0.3 a tick more: 70 units in about 23 ticks), never past the
+    -- floor, and once down it stops in a puff of dust and its own script walks it from there.
+    if #dropping > 0 then
+      local q = try(game.entities.query, {type = "monster"})
+      local y = {}
+      for _, m in ipairs(type(q) == "table" and type(q.entities) == "table" and q.entities or {}) do
+        if m.entity_id and type(m.position) == "table" then y[m.entity_id] = m.position.y end
+      end
+      for i = #dropping, 1, -1 do
+        local d = dropping[i]
+        d.t = d.t + 1
+        local above = y[d.handle] and (y[d.handle] - d.at.y)
+        if d.t > 0 and (not above or above <= 0.5 or d.t > 90) then
+          table.remove(dropping, i)
+          if above then try(game.physics.velocity_set, {entity = d.handle, velocity = {x = 0, y = 0, z = 0}}) end
+          try(game.effects.burst, {kind = "smoke", position = {x = d.at.x, y = d.at.y + 4, z = d.at.z}, scale = 1.6})
+        elseif d.t > 0 then
+          try(game.physics.velocity_set, {entity = d.handle, velocity = {x = 0, y = -math.min(0.5 + 0.3 * d.t, above), z = 0}})
+        else
+          try(game.physics.velocity_set, {entity = d.handle, velocity = {x = 0, y = 0, z = 0}}) -- held a beat, in turn
+        end
+      end
+    end
+  end)
+end
+
+-- Messages, offline (§12, stretch goal 17): the first time you reach a shrine, a note left by someone who came before
+-- is scratched beside it: a warning, a tip or a line of lore, the same at that shrine every time. The online half
+-- (notes players leave for each other) waits for DC_Web.
+do
+  local NOTES = {
+    [0] = {"Dran's breath can be outrun. His tail can't.", "Guard first. Swing second. Live third.",
+           "The Fairy King lies about nothing. He just leaves things out.", "Try rolling through, not away.",
+           "A named one walks these halls. Don't fight it tired."},
+    [1] = {"The trees here listen. Walk softly.", "Master Utan hits hardest when he's standing still.",
+           "Poise breaks on the third blow. Count.", "Turn back? No. Rest first."},
+    [2] = {"Salt water rusts more than blades.", "She freezes what she cannot break. Keep moving.",
+           "Behind you. Always behind you.", "The flask spills if you drink in reach."},
+    [3] = {"The curse is patient. Be more patient.", "Light the shrine. Then decide.", "Ambush ahead. Or not. Who knows."},
+    [4] = {"The Minotaur charges straight. Step aside.", "Stone remembers the sea.", "Heavy blows break guards."},
+    [5] = {"Time loops here. So will you.", "The Genie keeps his promises. That's the problem.", "Don't rest. Don't stop."},
+  }
+  moonmod.on("game.dungeon.shrine_reached", function(e)
+    if in_sandbox or type(e) ~= "table" or type(e.zone) ~= "number" or not floor_now or not zoned_floor(floor_now) or
+       not setting("notes", true) then
+      return
+    end
+    local key = string.format("%s:%d:note", place_key(floor_now.dungeon_id, floor_now.floor_id), e.zone)
+    local seeds = floor_seeds()
+    if seeds[key] then return end
+    local list = NOTES[floor_now.dungeon_id] or NOTES[0]
+    local h = 0
+    for i = 1, #key do h = (h * 31 + key:byte(i)) % 1000003 end
+    seeds[key] = true
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast("A note, scratched beside the spring: \"" .. list[h % #list + 1] .. "\"", 360)
+  end)
+end
+
+-- Messages, online (§12, stretch goal 17): players leave each other short messages at a shrine, built from a phrase
+-- and a word, and rate the ones they read. They travel through the messages folder (messages.*): a player who points
+-- it at a folder a sync service shares reads their friends' messages at the same shrines, whatever their maps look
+-- like. Only a message that is one of these phrases with one of these words is ever shown.
+do
+  local PHRASES = {"%s ahead", "Beware %s", "Try %s", "Could this be %s?", "%s, at last", "No %s here"}
+  local WORDS = {"an ambush", "a named one", "a locked gate", "a ledge", "the dark", "treasure", "a shortcut", "rolling",
+                 "guarding", "the flask", "patience", "a strong foe", "an easy way", "a mimic", "rest"}
+  local function say(phrase, word)
+    local text = phrase:format(word)
+    return text:sub(1, 1):upper() .. text:sub(2)
+  end
+  local shown = {}
+  for _, phrase in ipairs(PHRASES) do
+    for _, word in ipairs(WORDS) do shown[say(phrase, word)] = true end
+  end
+  local PAGE = 5
+  local menu, phrase_at, word_page, reading = {}, nil, 1, nil
+  local pending, clock = nil, 0
+
+  -- The shrine the panel is open at, as a place every player's map has: its dungeon and floor (a region's zone is
+  -- its floor), never the cell, since each save builds its own maps.
+  local function place()
+    if not shrine_at then return nil end
+    if shrine_at.label then return string.format("vigil:d%d:f%d:shrine", shrine_at.dungeon_id, shrine_at.label) end
+    return string.format("vigil:d%d:f%dz%d:shrine", shrine_at.dungeon_id, shrine_at.floor_id, shrine_at.zone)
+  end
+
+  -- The messages at the shrine Vigil would show: its own phrases only, and none rated well under water.
+  local function here()
+    local p = place()
+    local r = p and try((game.messages or {}).list, {place = p})
+    local list, others, mine = {}, 0, 0
+    for _, m in ipairs(type(r) == "table" and type(r.messages) == "table" and r.messages or {}) do
+      if type(m) == "table" and shown[m.text] and (m.mine or (m.good or 0) - (m.poor or 0) > -3) then
+        list[#list + 1] = m
+        if m.mine then mine = mine + 1 else others = others + 1 end
+      end
+    end
+    return list, others, mine, type(r) == "table" and r.shared
+  end
+
+  later.messages_card = function()
+    if not setting("messages", true) or not place() then return nil end
+    local _, others, mine = here()
+    return {title = "Messages", lines = {
+      others > 0 and string.format("%d left here by others.", others) or {text = "None left here by others.", tone = "dim"},
+      mine > 0 and {text = string.format("%d of yours.", mine), tone = "gold"} or "Leave one for whoever comes."}}
+  end
+
+  local function open_words()
+    local options, first = {}, (word_page - 1) * PAGE
+    for i = first + 1, math.min(first + PAGE, #WORDS) do
+      options[#options + 1] = {title = say(PHRASES[phrase_at], WORDS[i])}
+    end
+    if #WORDS > PAGE then options[#options + 1] = {title = "More", lines = {{text = "Other words.", tone = "dim"}}} end
+    try(game.ui.choice_open, {id = "vigil.msg_word", title = "Leave a message", subtitle = "Pick a word.", cancel = true, options = options})
+  end
+
+  local function open_reading()
+    local m = reading and reading.list[reading.i]
+    if not m then reading = nil return end
+    local good = {string.format("%d found it good.", m.good or 0)}
+    if m.rated == 1 then good[2] = {text = "You rated it good.", tone = "gold"} end
+    local poor = {string.format("%d found it poor.", m.poor or 0)}
+    if m.rated == -1 then poor[2] = {text = "You rated it poor.", tone = "gold"} end
+    try(game.ui.choice_open, {id = "vigil.msg_read", title = "\"" .. m.text .. "\"", cancel = true,
+      subtitle = string.format("Message %d of %d", reading.i, #reading.list), options = {
+        {title = "Good", lines = good}, {title = "Poor", lines = poor},
+        {title = reading.i < #reading.list and "Next" or "Done"}}})
+  end
+
+  later.messages_open = function()
+    local _, others, mine, shared = here()
+    menu = {}
+    local options = {{title = "Leave one", lines = {"A phrase and a word, left by this spring."}}}
+    menu[1] = "leave"
+    if others > 0 then
+      options[#options + 1] = {title = "Read", lines = {string.format("%d here, best rated first.", others), "Rate each good or poor."}}
+      menu[#options] = "read"
+    end
+    if mine > 0 then
+      options[#options + 1] = {title = "Take back", lines = {string.format("Yours here: %d.", mine), {text = "The newest goes.", tone = "dim"}}}
+      menu[#options] = "take"
+    end
+    try(game.ui.choice_open, {id = "vigil.msg_menu", title = "Messages", cancel = true, options = options,
+      subtitle = shared and "Seen by anyone who shares your messages folder." or "Kept in your save until you choose a shared folder."})
+  end
+
+  moonmod.on("ui.choice_made", function(e)
+    if type(e) ~= "table" or e.cancelled or type(e.index) ~= "number" or type(e.id) ~= "string" or not e.id:find("^vigil%.msg_") then return end
+    if e.id == "vigil.msg_menu" then
+      local what = menu[e.index]
+      if what == "leave" then
+        local options = {}
+        for i, phrase in ipairs(PHRASES) do options[i] = {title = say(phrase, "...")} end
+        try(game.ui.choice_open, {id = "vigil.msg_phrase", title = "Leave a message", subtitle = "Pick a phrase.", cancel = true, options = options})
+      elseif what == "read" then
+        reading = {list = {}, i = 1}
+        for _, m in ipairs((here())) do if not m.mine then reading.list[#reading.list + 1] = m end end
+        open_reading()
+      elseif what == "take" then
+        local newest = nil
+        for _, m in ipairs((here())) do if m.mine and (not newest or (m.at or 0) > (newest.at or 0)) then newest = m end end
+        if newest and try((game.messages or {}).remove, {id = newest.id}) then toast("Vigil: your message \"" .. newest.text .. "\" is taken back.", 240) end
+      end
+    elseif e.id == "vigil.msg_phrase" and PHRASES[e.index] then
+      phrase_at, word_page = e.index, 1
+      open_words()
+    elseif e.id == "vigil.msg_word" and phrase_at then
+      local i = (word_page - 1) * PAGE + e.index
+      if e.index > PAGE or i > #WORDS then
+        word_page = word_page % math.ceil(#WORDS / PAGE) + 1
+        open_words()
+        return
+      end
+      local text, p = say(PHRASES[phrase_at], WORDS[i]), place()
+      local r = p and try((game.messages or {}).post, {place = p, text = text})
+      if type(r) == "table" then
+        toast("Vigil: \"" .. text .. "\" is left by the spring. " .. (r.shared and "Anyone who shares your messages folder can read it."
+              or "It stays in your save until you choose a shared messages folder."), 360)
+      end
+    elseif e.id == "vigil.msg_read" and reading then
+      local m = reading.list[reading.i]
+      if e.index <= 2 and m then
+        local rating = e.index == 1 and 1 or -1
+        if m.rated == rating then rating = 0 end -- the same again takes it back
+        if try((game.messages or {}).rate, {id = m.id, rating = rating}) then
+          if m.rated == 1 then m.good = (m.good or 1) - 1 elseif m.rated == -1 then m.poor = (m.poor or 1) - 1 end
+          if rating == 1 then m.good = (m.good or 0) + 1 elseif rating == -1 then m.poor = (m.poor or 0) + 1 end
+          m.rated = rating
+        end
+      end
+      reading.i = reading.i + 1
+      open_reading()
+    end
+  end)
+
+  -- Reaching a shrine, the best rated message there from someone else comes up after any note scratched beside it.
+  moonmod.on("game.dungeon.shrine_reached", function(e)
+    if in_sandbox or type(e) ~= "table" or not setting("messages", true) or not shrine_at or shrine_at.zone ~= e.zone then return end
+    pending = clock + 400
+  end)
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if not pending or clock < pending then return end
+    pending = nil
+    for _, m in ipairs((here())) do
+      if not m.mine then
+        toast(string.format("A message by the spring: \"%s\"%s", m.text,
+              (m.good or 0) > 0 and string.format(" (%d found it good)", m.good) or ""), 300)
+        return
+      end
+    end
+  end)
+end
+
+-- Shortcuts (§12, stretch goal 11): each floor of a kept map has two shortcut doors (dungeons.set_shortcuts), locked
+-- from the far side of a dead end, the key in a chest there. A door once opened is built open on later visits
+-- ("d:f:doors", the key items), the way zone gates are, so the long way round is walked once.
+do
+  local here = nil -- the place the floor being built is kept under, while shortcuts are on
+  moonmod.on("game.dungeon.generating", function(e)
+    here = nil
+    if in_sandbox or type(e) ~= "table" or e.back_floor or not setting("shortcuts", true) or not zoned_floor(e) then
+      try(game.dungeons.set_shortcuts, {count = 0})
+      return
+    end
+    here = place_key(e.dungeon_id, e.floor_id)
+    local seeds = floor_seeds()
+    local open, walls = seeds[here .. ":doors"], seeds[here .. ":walls"]
+    -- Illusory walls (§12, stretch goal 12): one more shortcut a floor, drawn as a plain wall a blow opens.
+    local illusory = setting("illusory_walls", true) and 1 or nil
+    try(game.dungeons.set_shortcuts, {count = 2, open = type(open) == "table" and #open > 0 and open or nil, illusory = illusory,
+                                      open_walls = illusory and type(walls) == "table" and #walls > 0 and walls or nil})
+  end)
+  moonmod.on("game.dungeon.wall_opened", function(e)
+    if not here or type(e) ~= "table" or math.type(e.wall) ~= "integer" then return end
+    local seeds = floor_seeds()
+    local list = type(seeds[here .. ":walls"]) == "table" and seeds[here .. ":walls"] or {}
+    for _, n in ipairs(list) do if n == e.wall then return end end
+    list[#list + 1] = e.wall
+    seeds[here .. ":walls"] = list
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast("Vigil: the wall was never there.", 200)
+    if later.elite_gear then later.elite_gear(floor_now and floor_now.dungeon_id, "Behind it, someone") end
+  end)
+  moonmod.on("game.dungeon.door_opened", function(e)
+    local item = here and type(e) == "table" and tonumber(tostring(e.key):match("(%d+)$"))
+    if not item then return end
+    local seeds = floor_seeds()
+    local list = type(seeds[here .. ":doors"]) == "table" and seeds[here .. ":doors"] or {}
+    for _, k in ipairs(list) do if k == item then return end end
+    list[#list + 1] = item
+    seeds[here .. ":doors"] = list
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast("Vigil: a shortcut opens. The way back is shorter now.", 200)
+  end)
+end
+
+-- Vigil Trial (§12, stretch goal 16): a title mode to fight any story boss with Vigil's rules, for practice and for
+-- tuning. Pick a boss (Dran to the Dark Genie) and a hero; the session starts on an empty floor of Divine Beast Cave (registered below, no
+-- monsters of its own), the party armed and toughened for that boss's place in the story, and the boss comes out
+-- in front of you with its cast, its card, its bar and its second phase (Story bosses, above). Best times are kept.
+do
+  local MODE = "vigil_trial"
+  local TRIALS = {
+    {key = "dran", model = 78, name = "Dran", grounded = true, life = 737, scale = 0.65, tier = 1},
+    {key = "utan", model = 79, name = "Master Utan", life = 2065, tier = 2},
+    {key = "queen", model = 80, name = "Ice Queen", life = 2065, tier = 3, cast = {101, 76, 102, 103, 92, 104, 104, 104}},
+    {key = "curse", model = 81, name = "King's Curse", life = 5899, tier = 4, cast = {82}},
+    {key = "joe", model = 83, name = "Minotaur Joe", life = 5899, tier = 5, cast = {91, 91, 91}},
+    -- The Dark Genie's elemental form with all its helpers (shades, pillars, shockwaves and beam), as the Gauntlet's
+    -- finale brings it.
+    {key = "genie", model = 106, name = "Dark Genie", life = 7500, tier = 6, cast = {105, 105, 107, 107, 108, 108, 109, 110}},
+    -- Named elites, one for each place in the story, each of a family with an enemy brain (Enemies that fight, above):
+    -- gold, half again the bite, the life of a crowned one of its dungeon, and a bar of its own.
+    {key = "garrow", model = 1, name = "Garrow the Unbowed", elite = "Skeleton Soldier", life = 360, tier = 1},
+    {key = "velka", model = 4, name = "Velka Moon-Eater", elite = "Werewolf", life = 900, tier = 2},
+    {key = "oskar", model = 23, name = "Oskar the Oathless", elite = "Captain", life = 1500, tier = 3},
+    {key = "morwen", model = 44, name = "Morwen the Hollow", elite = "Mummy", life = 2600, tier = 4},
+    {key = "aldric", model = 10, name = "Aldric Who Waits", elite = "Sunday", life = 3600, tier = 5},
+    {key = "sable", model = 39, name = "Sable the Last Watch", elite = "Club", life = 4800, tier = 6},
+  }
+  local HEROES = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
+  local HERO_NAMES = {toan = "Toan", xiao = "Xiao", goro = "Goro", ruby = "Ruby", ungaga = "Ungaga", osmond = "Osmond"}
+  -- A weapon's base attack at most, and max HP, for each place in the story.
+  local ATTACK_CAP = {28, 48, 70, 95, 130, 170}
+  local HP = {120, 220, 330, 450, 600, 760}
+  local arena -- the trial floor's stable id, once registered
+  local pick = {boss = 1, hero = 1}
+  local fight -- {trial, entered, boss, started} while a trial runs
+  local best = {}
+
+  local reg = game.dungeons and try(game.dungeons.register, {id = "vigil-trial", name = "Vigil Trial", dungeon = 0,
+                                          floors = {{id = "arena", name = "Trial Arena", source_floor = 12, enemies = {}}}})
+  if type(reg) ~= "table" and game.dungeons then reg = try(game.dungeons.get, "vigil-trial") end
+  if type(reg) == "table" and type(reg.floors) == "table" and type(reg.floors[1]) == "table" then arena = reg.floors[1].id end
+  local kept = moonmod.storage and try(moonmod.storage.get, "trial_best")
+  if type(kept) == "table" then best = kept end
+
+  local function seconds(frames) return string.format("%d:%02d", frames // 3600, (frames // 60) % 60) end
+
+  local function page()
+    -- The boss and the hero each cycle on Cross (a page holds seven entries, and there are more bosses than that leaves).
+    local t = TRIALS[pick.boss]
+    local b = best[t.key]
+    local entries = {{id = "boss", label = (t.elite and "Elite: " or "Boss: ") .. t.name .. (b and ("  (best " .. seconds(b) .. ")") or "")}}
+    entries[#entries + 1] = {id = "hero", label = "Hero: " .. HERO_NAMES[HEROES[pick.hero]]}
+    entries[#entries + 1] = {id = "start", label = "Begin the Trial", enabled = arena ~= nil}
+    return {id = MODE, label = "Vigil Trial", title = "VIGIL TRIAL", subtitle = "Any story boss, with Vigil's rules.",
+            hint = "", root = true, entries = entries,
+            lines = {"Pick a boss or a named elite and a hero, then begin.", "The party is armed for the foe's place in the story.",
+                     arena and "" or "The arena floor could not be registered."}}
+  end
+  if setting("trial", true) and game.title then try(game.title.mode_register, page()) end
+
+  moonmod.on("game.title.selected", function(e)
+    if type(e) ~= "table" or e.mode ~= MODE or e.entry == "back" then return end
+    if e.entry == "boss" then pick.boss = pick.boss % #TRIALS + 1
+    elseif e.entry == "hero" then pick.hero = pick.hero % #HEROES + 1
+    elseif e.entry == "start" and arena then
+      fight = {trial = TRIALS[pick.boss], hero = HEROES[pick.hero]}
+      floors.trial = true
+      if not call(game.session and game.session.start, {floor = arena, party_size = 6, character = fight.hero}) then
+        fight, floors.trial = nil, nil
+        toast("Vigil: the Trial could not start.", 200)
+      end
+      return
+    end
+    local p = page()
+    p.cursor = (tonumber(e.index) or 0)
+    if game.title then try(game.title.mode_set, {id = MODE, entries = p.entries, cursor = p.cursor}) end
+  end)
+
+  -- Arm the party for the boss's place: each hero's strongest weapon under the cap, and the life for it.
+  local function arm(tier)
+    local list = try(game.weapons.list)
+    for _, who in ipairs(HEROES) do
+      local top, top_attack
+      for _, w in ipairs(type(list) == "table" and list or {}) do
+        local a = type(w) == "table" and type(w.stats) == "table" and tonumber(w.stats.attack)
+        if a and w.owner == who and not w.mod_owned and a <= ATTACK_CAP[tier] and (not top_attack or a > top_attack) then
+          top, top_attack = w.id, a
+        end
+      end
+      if top then
+        local given = call(game.weapons.give, {id = top, character = who})
+        if given then try(game.weapons.equip, {id = top, character = who, slot = given.slot}) end
+      end
+      try(game.player.set, {max_hp = HP[tier], character = who})
+      try(game.player.set, {hp = HP[tier], character = who})
+    end
+  end
+
+  local variants = {}
+  local function variant(model)
+    if variants[model] then return variants[model] end
+    local r = try(game.characters.register, {id = "trial-" .. model, kind = "enemy", name = "Trial", template_monster_id = model})
+    variants[model] = r and r.id or (ID .. ":trial-" .. model)
+    return variants[model]
+  end
+
+  local function bring(t)
+    local p = try(game.player.get)
+    local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+    if not at then return false end
+    local h = type(p.heading) == "number" and p.heading or 0
+    local there = {x = at.x + 140 * math.sin(h), y = at.y, z = at.z + 140 * math.cos(h)}
+    if t.elite then
+      local s = call(game.characters.spawn, {character = variant(t.model), position = there})
+      local handle = type(s) == "table" and (s.entity_handle or s.id)
+      if not handle then return false end
+      try(game.entities.set_stats, {entity = handle, max_hp = t.life, hp = t.life, damage_scale = 1.5, hit_share = true})
+      try(game.entities.tint, {entity = handle, color = {r = 255, g = 200, b = 60}, frames = 36000})
+      toast(string.format("Vigil Trial: %s, a %s, comes for you.", t.name, t.elite), 200)
+      fight.boss = handle
+      return true
+    end
+    local s = call(game.characters.spawn, {character = variant(t.model), position = there, arena_origin = there, arena_slot = 0,
+                                           grounded = t.grounded})
+    local handle = type(s) == "table" and (s.entity_handle or s.id)
+    if not handle then return false end
+    try(game.entities.set_stats, {entity = handle, max_hp = t.life, hp = t.life, hit_share = true})
+    if t.scale then try(game.entities.scale_set, {entity = handle, scale = t.scale}) end
+    for n, model in ipairs(t.cast or {}) do
+      local c = call(game.characters.spawn, {character = variant(model), position = there, arena_origin = there, arena_slot = n,
+                                             grounded = t.grounded})
+      local ch = type(c) == "table" and (c.entity_handle or c.id)
+      if ch then try(game.entities.set_stats, {entity = ch, hit_share = true}) end
+    end
+    fight.boss = handle
+    return true
+  end
+
+  local clock = 0
+  moonmod.on("game.session.started", function(e)
+    if not fight or type(e) ~= "table" or e.owner ~= ID then fight, floors.trial = nil, nil return end
+    fight.entered = nil
+  end)
+  moonmod.on("game.session.ended", function(e)
+    if fight and type(e) == "table" and e.reason == "defeat" then toast("Vigil: the Trial is lost.", 200) end
+    if fight and fight.trial.elite then try(game.render.bar_remove, {id = "elite"}) end
+    fight, floors.trial = nil, nil
+    if setting("trial", true) and game.title then try(game.title.mode_register, page()) end
+  end)
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if not fight or not in_dungeon then return end
+    if not fight.entered then
+      fight.entered = clock
+      arm(fight.trial.tier)
+      toast(string.format("Vigil Trial: %s. Ready yourself.", fight.trial.name), 180)
+    elseif not fight.boss and clock - fight.entered >= 180 and clock % 30 == 0 then
+      if bring(fight.trial) then fight.started = clock end
+    elseif fight.boss and fight.trial.elite and not fight.won and clock % 15 == 0 then
+      -- An elite has no story boss's bar: its own, by name, as a crowned one's.
+      local q = try(game.entities.query, {type = "monster"})
+      for _, m in ipairs(type(q) == "table" and type(q.entities) == "table" and q.entities or {}) do
+        local health = type(m.health) == "table" and m.health or {}
+        if m.entity_id == fight.boss and type(health.current) == "number" and type(health.maximum) == "number" and health.maximum > 0 then
+          try(game.render.bar_register, {id = "elite", label = fight.trial.name:upper():sub(1, 24),
+                                         current = clamp(health.current, 0, health.maximum), max = health.maximum})
+        end
+      end
+    end
+  end)
+  moonmod.on("game.enemy_defeated", function(e)
+    if not fight or not fight.boss or type(e) ~= "table" or e.entity ~= fight.boss then return end
+    local t, took = fight.trial, clock - (fight.started or clock)
+    local record = not best[t.key] or took < best[t.key]
+    if record then
+      best[t.key] = took
+      if moonmod.storage then try(moonmod.storage.set, "trial_best", best) end
+    end
+    toast(string.format("Vigil Trial: %s falls in %s%s.", t.name, seconds(took), record and ", a best time" or ""), 300)
+    if t.elite then try(game.render.bar_remove, {id = "elite"}) end
+    fight.won = clock
+  end)
+  moonmod.on("game.tick", function()
+    if fight and fight.won and clock - fight.won >= 300 then
+      fight.won = nil
+      try(game.session and game.session.finish)
+    end
+  end)
+end
+
+-- Georama as a hub (§12, stretch goal 13): three townsfolk are held in the dungeons, each by a named elite. The first
+-- elite to fall in Divine Beast Cave frees Gorm the smith, in Wise Owl Forest Ysolde the trader, in the Shipwreck
+-- Old Harl the seeker; each stands beside you, and walking up to them sends them home. In town, D-pad Up (or H)
+-- calls the folk you saved: the smith reinforces your weapon, the trader sells gear, the seeker sets a hunt for named
+-- elites and pays for it. Kept with the save ("hub").
+do
+  local FOLK = {
+    -- Each wears a villager of the town nearest the dungeon that held them (Norune, Matataki, Queens).
+    [0] = {id = "smith", name = "Gorm the smith", model = "gedit/e01/chara/p05a.chr",
+           lines = {"\"Steel remembers every blow. So should you.\"", "\"Bring me Gilda and I'll bring you an edge.\"",
+                    "\"That cave nearly had me. Didn't have you.\""}},
+    [1] = {id = "trader", name = "Ysolde the trader", model = "gedit/e02/chara/p24a.chr",
+           lines = {"\"I find things. Dead men don't need boots.\"", "\"The deeper you go, the better I trade.\"",
+                    "\"Owls watched me for nine days in that forest.\""}},
+    [2] = {id = "seeker", name = "Old Harl the seeker", model = "gedit/e03/chara/p36a.chr",
+           lines = {"\"Names are carved on the deep ones. I collect names.\"", "\"The sea gave me back. It wants something for it.\"",
+                    "\"Three more, and I'll sleep tonight.\""}},
+  }
+  local FALLBACK_MODEL = "gedit/e01/chara/p02a.chr"
+  local visits = 0
+  local REINFORCE, WARES, HUNT, BOUNTY = 500, 400, 3, 800
+  local waiting -- the folk standing on this floor, waiting to be walked up to
+  local in_town, bound = false, false
+
+  local function hub()
+    local seeds = floor_seeds()
+    if type(seeds.hub) ~= "table" then seeds.hub = {rescued = {}} end
+    if type(seeds.hub.rescued) ~= "table" then seeds.hub.rescued = {} end
+    return seeds.hub, seeds
+  end
+  local function keep(seeds) if floors.key then try(game.save.set, floors.key, seeds) end end
+  local function hub_on() return setting("hub", true) and not in_sandbox and not floors.trial end
+
+  -- A named elite fell (Named elites, above): its dungeon's folk come out, and the seeker's hunt counts it.
+  later.elite_fell = function()
+    if not hub_on() or not floor_now then return end
+    local h, seeds = hub()
+    if type(h.quest) == "table" and not h.quest.done then
+      h.quest.have = math.min(h.quest.need, (h.quest.have or 0) + 1)
+      if h.quest.have >= h.quest.need then toast("Vigil: the hunt is done. Old Harl will pay you in town.", 240) end
+    end
+    local folk = FOLK[floor_now.dungeon_id]
+    if folk and not h.rescued[folk.id] and not waiting then
+      if try(game.world.dungeon_npc_set, {id = folk.id, model = folk.model, place = "player"}) or
+         try(game.world.dungeon_npc_set, {id = folk.id, model = FALLBACK_MODEL, place = "player"}) then
+        waiting = folk
+        toast(string.format("Vigil: %s was held here. Walk up to them.", folk.name), 300)
+      end
+    end
+    keep(seeds)
+  end
+
+  moonmod.on("game.dungeon_npc.near", function(e)
+    if not waiting or type(e) ~= "table" or e.id ~= waiting.id then return end
+    local h, seeds = hub()
+    h.rescued[waiting.id] = true
+    keep(seeds)
+    toast(string.format("%s: \"I'll go home. Find me in town, D-pad Up.\"", waiting.name), 300)
+    try(game.world.dungeon_npc_clear)
+    waiting = nil
+  end)
+  moonmod.on("game.dungeon.generated", function() waiting = nil end)
+
+  local function cards()
+    local h = hub()
+    local options, ids = {}, {}
+    if h.rescued.smith then
+      options[#options + 1] = {title = "Gorm", lines = {"Reinforce your weapon:", "+3 attack, mended.", {text = REINFORCE .. " Gilda", tone = "gold"}}}
+      ids[#ids + 1] = "smith"
+    end
+    if h.rescued.trader then
+      options[#options + 1] = {title = "Ysolde", lines = {"A piece of gear,", "the best of several.", {text = WARES .. " Gilda", tone = "gold"}}}
+      ids[#ids + 1] = "trader"
+    end
+    if h.rescued.seeker then
+      local q = h.quest
+      local line = not q and {"A hunt: fell " .. HUNT .. " named", "foes, for " .. BOUNTY .. " Gilda."}
+                   or (q.have or 0) >= q.need and {"The hunt is done.", {text = "Take " .. BOUNTY .. " Gilda.", tone = "good"}}
+                   or {"The hunt: " .. (q.have or 0) .. " of " .. q.need, {text = "named foes felled.", tone = "dim"}}
+      options[#options + 1] = {title = "Old Harl", lines = line}
+      ids[#ids + 1] = "seeker"
+    end
+    return options, ids
+  end
+
+  local shown_ids
+  local function open_hub()
+    local options, ids = cards()
+    if #options == 0 then toast("Vigil: nobody you've saved lives here yet.", 180) return end
+    shown_ids = ids
+    -- One of the folk speaks up, a different line each visit.
+    visits = visits + 1
+    local speaker
+    for _, f in pairs(FOLK) do if f.id == ids[(visits - 1) % #ids + 1] then speaker = f end end
+    local line = speaker and speaker.lines[(visits - 1) // #ids % #speaker.lines + 1] or "The folk you saved"
+    try(game.ui.choice_open, {id = "vigil.hub", title = "Your town", subtitle = line, cancel = true, town = true,
+                              options = options})
+  end
+
+  local function serve(what)
+    local h, seeds = hub()
+    if what == "smith" then
+      local p = try(game.player.get)
+      local w = type(p) == "table" and type(p.weapon) == "table" and p.weapon or nil
+      if not w then return end
+      if not call(game.economy.spend, {amount = REINFORCE}) then toast("Vigil: Gorm wants " .. REINFORCE .. " Gilda.", 200) return end
+      try(game.weapons.stats_set, {id = w.id, character = p.character, slot = w.slot, attack = math.min(32767, (w.attack or 0) + 3)})
+      if type(w.durability_max) == "number" then
+        try(game.weapons.durability_set, {id = w.id, character = p.character, slot = w.slot, durability = w.durability_max})
+      end
+      toast("Gorm: \"There. It'll bite deeper now.\"", 220)
+    elseif what == "trader" then
+      if not call(game.economy.spend, {amount = WARES}) then toast("Vigil: Ysolde wants " .. WARES .. " Gilda.", 200) return end
+      -- Her stock grows with how far down you have been: she trades in the deepest dungeon's gear you have reached.
+      local deepest = 0
+      for d = 0, 6 do if (floor_seeds()["rest:" .. d]) then deepest = d end end
+      if later.elite_gear then later.elite_gear(math.max(deepest, floor_now and floor_now.dungeon_id or 0), "Ysolde sold you") end
+    elseif what == "seeker" then
+      local q = h.quest
+      if not q or q.done then
+        h.quest = {need = HUNT, have = 0}
+        toast("Old Harl: \"Fell " .. HUNT .. " of the named ones below. I'll pay.\"", 240)
+      elseif (q.have or 0) >= q.need then
+        try(game.economy.add, {amount = BOUNTY})
+        h.quest = nil
+        toast("Old Harl: \"As promised.\" (" .. BOUNTY .. " Gilda)", 220)
+      else
+        toast(string.format("Old Harl: \"%d more.\"", q.need - (q.have or 0)), 180)
+      end
+      keep(seeds)
+    end
+  end
+
+  moonmod.on("ui.choice_made", function(e)
+    if type(e) ~= "table" or e.id ~= "vigil.hub" or e.cancelled or not shown_ids then return end
+    local what = shown_ids[tonumber(e.index) or 0]
+    if what then serve(what) end
+  end)
+
+  moonmod.on("game.world.location_changed", function(e)
+    in_town = type(e) == "table" and e.context == "town"
+    if not in_town or not hub_on() then return end
+    if not bound then
+      bound = true
+      try(game.input.bind, {id = "hub", keys = {"Gamepad:dpup", "H"}})
+    end
+    local h = hub()
+    if next(h.rescued) then toast("Vigil: D-pad Up calls the folk you saved.", 200) end
+  end)
+  moonmod.on("game.tick", function()
+    if not in_town or not hub_on() then return end
+    local press = try(game.input.consume, {id = "hub"})
+    if type(press) == "table" and press.pressed then open_hub() end
+  end)
+end
+
+-- Invaders (§12, stretch goal 10): now and then a dark copy of a party member hunts you through a zone. About one
+-- zone in five of a kept map (none an ambush's) holds one, picked by its key: a moment after you walk in, it steps out
+-- ahead of you in black, with a bar of its own. It is the engine's companion made hostile (party.companion_set
+-- hostile): its blows are the game's own hits on you, so guard, dodge and poise all work on it, and your weapon hurts
+-- it. Felled, it drops the best of several gear rolls and Gilda, and that zone stays clear (kept with the floor).
+-- Leave the floor and it goes.
+do
+  local HEROES = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
+  local NAMES = {toan = "Toan", xiao = "Xiao", goro = "Goro", ruby = "Ruby", ungaga = "Ungaga", osmond = "Osmond"}
+  local armed, out, clock = nil, nil, 0
+
+  local function joined_heroes(active)
+    local members = try(game.party and game.party.list)
+    local list = {}
+    for _, m in ipairs(type(members) == "table" and (members.members or members) or {}) do
+      if type(m) == "table" and NAMES[m.id] and m.id ~= active and m.joined ~= false then list[#list + 1] = m.id end
+    end
+    return list
+  end
+
+  local function leave()
+    if not out then return end
+    out = nil
+    try(game.party.companion_set, {})
+    try(game.render.bar_remove, {id = "invader"})
+  end
+
+  local function bar(hp, most)
+    try(game.render.bar_register, {id = "invader", label = out.name:upper():sub(1, 24), current = math.max(0, hp), max = most, boss = true})
+  end
+
+  local function invade()
+    local a = armed
+    armed = nil
+    local p = try(game.player.get)
+    if type(p) ~= "table" or type(p.max_hp) ~= "number" then return end
+    local others = joined_heroes(p.character)
+    local h = a.hash
+    local who = #others > 0 and others[h % #others + 1] or p.character
+    if not NAMES[who] then who = HEROES[h % #HEROES + 1] end
+    -- As tough as a named elite for your life, a blow worth a sixth of it; more on each NG+ cycle.
+    local cycle = later.cycle_now and later.cycle_now() or 0
+    local most = math.floor(p.max_hp * 1.4 * (1 + 0.5 * cycle))
+    local blow = math.max(4, math.floor(p.max_hp / 6 * (1 + 0.25 * cycle)))
+    local ok = call(game.party.companion_set, {character = who, stance = "passive",
+                                               hostile = {hp = most, damage = blow, tint = {r = 40, g = 20, b = 70}}})
+    if not ok then return end
+    out = {key = a.key, name = "Dark " .. NAMES[who], max = most}
+    bar(most, most)
+    toast(string.format("Vigil: %s has invaded!", out.name), 240)
+  end
+
+  moonmod.on("game.companion.struck", function(e)
+    if not out or type(e) ~= "table" then return end
+    bar(tonumber(e.hp) or 0, tonumber(e.max_hp) or out.max)
+    if not e.killed then return end
+    local seeds = floor_seeds()
+    seeds[out.key] = true
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast(string.format("Vigil: %s is driven out.", out.name), 240)
+    local bounty = 300 * (1 + (later.cycle_now and later.cycle_now() or 0))
+    try(game.economy.add, {amount = bounty})
+    if later.elite_gear then later.elite_gear(floor_now and floor_now.dungeon_id or 1, out.name .. " left") end
+    out = nil
+    try(game.render.bar_remove, {id = "invader"})
+  end)
+
+  moonmod.on("game.dungeon.zone_entered", function(e)
+    armed = nil
+    if out or in_sandbox or floors.trial or type(e) ~= "table" or type(e.zone) ~= "number" or e.previous == -1 or not floor_now or
+       not zoned_floor(floor_now) or not setting("invaders", true) then
+      return
+    end
+    local key = string.format("%s:%d:invader", place_key(floor_now.dungeon_id, floor_now.floor_id), e.zone)
+    if floor_seeds()[key] then return end
+    -- The same hash the ambushes use, so a zone is one or the other.
+    local akey = string.format("%s:%d:ambush", place_key(floor_now.dungeon_id, floor_now.floor_id), e.zone)
+    local h, g = 0, 0
+    for i = 1, #akey do h = (h * 31 + akey:byte(i)) % 1000003 end
+    for i = 1, #key do g = (g * 31 + key:byte(i)) % 1000003 end
+    if h % 3 ~= 0 and g % 5 == 0 then armed = {key = key, at = clock + 150, hash = g} end
+  end)
+  moonmod.on("game.dungeon.generating", function() armed = nil leave() end)
+  moonmod.on("game.world.location_changed", function(e)
+    if type(e) == "table" and e.context ~= "dungeon" then armed = nil leave() end
+  end)
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if armed and clock >= armed.at then invade() end
+  end)
+end
+
+-- Darkness and miasma (§12, stretch goal 9): the dungeons' own hazards. In the Gallery of Time a zone whose shrine
+-- isn't lit lies in darkness: the fog closes in and little shows past a few steps. Light its shrine and the dark lifts
+-- there for good. In the Moon Sea some cells of a kept map hold a foul mist (the same cells every visit): it puffs
+-- where you can see it, and standing in it poisons you. The first shrine lit in the Gallery gives a Shrine Lantern, a
+-- pouch: while anyone in the party wears it, the dark there is a ring of warm light some way round you, not a few steps.
+do
+  local DARK_DUNGEON, FOUL_DUNGEON = 5, 4
+  local LANTERN = "Shrine Lantern"
+  local base, dark, clock, warned = nil, false, 0, false
+
+  local function lantern_worn()
+    if not setting("lantern", true) then return false end
+    local gear = try(game.items.gear)
+    if type(gear) ~= "table" or type(gear.pieces) ~= "table" or type(gear.worn) ~= "table" then return false end
+    local named = {}
+    for _, p in ipairs(gear.pieces) do if p.name == LANTERN then named[p.uid] = true end end
+    for _, w in pairs(gear.worn) do
+      if type(w) == "table" and type(w.slots) == "table" and w.slots.pouch and named[w.slots.pouch] then return true end
+    end
+    return false
+  end
+
+  -- Once a save: the lantern, the first time a Gallery shrine's light lifts the dark.
+  local function give_lantern()
+    if not setting("lantern", true) or not setting("gear", true) then return end
+    local slot = try(game.save.slot_id)
+    local key = type(slot) == "table" and slot.slot_id and ("lantern:" .. slot.slot_id .. ":" .. tostring(slot.slot_generation)) or nil
+    if not key or try(game.save.get, key) then return end
+    local piece = call(game.items.gear_give, {kind = "pouch", name = LANTERN, rarity = 3, value = 600, icon = "gear_pouch",
+                                              effects = {bag = 10}, color = {r = 255, g = 196, b = 96}})
+    if piece then
+      try(game.save.set, key, true)
+      toast("Vigil: the shrine's flame catches in an old lantern. Wear it as a pouch to see in the dark.", 260)
+    end
+  end
+
+  local function zone_lit(zone)
+    if not floor_now then return false end
+    local seeds = floor_seeds()
+    for _, sh in ipairs(type(seeds[place_key(floor_now.dungeon_id, floor_now.floor_id) .. ":shrines"]) == "table" and
+                        seeds[place_key(floor_now.dungeon_id, floor_now.floor_id) .. ":shrines"] or {}) do
+      if type(sh) == "table" and sh.zone == zone then return true end
+    end
+    return false
+  end
+
+  local function restore()
+    if not dark then return end
+    dark = false
+    if type(base) == "table" and type(base.front) == "table" then
+      local f = base.front
+      try(game.dungeons.lighting_set, {side = "front", fog = f.fog, background = f.background, ambient = f.ambient,
+                                       view_scale = base.view_scale})
+    end
+  end
+
+  local function darken()
+    local lit = lantern_worn()
+    if dark == (lit and "lantern" or true) then return end
+    dark = lit and "lantern" or true
+    if lit then
+      try(game.dungeons.lighting_set, {side = "front", fog = {near = 160, far = 820, r = 24, g = 16, b = 8},
+                                       background = {r = 0, g = 0, b = 0}, ambient = {r = 92, g = 80, b = 64}})
+    else
+      try(game.dungeons.lighting_set, {side = "front", fog = {near = 40, far = 360, r = 4, g = 4, b = 10},
+                                       background = {r = 0, g = 0, b = 0}, ambient = {r = 40, g = 40, b = 56}})
+    end
+  end
+
+  local function check_dark()
+    if in_sandbox or floors.trial or not floor_now or floor_now.dungeon_id ~= DARK_DUNGEON or not zoned_floor(floor_now) or
+       not setting("darkness", true) then
+      restore()
+      return
+    end
+    local z = try(game.dungeons.zones_get)
+    local zone = type(z) == "table" and tonumber(z.current) or 0
+    if zone_lit(zone) then
+      if dark then
+        toast("Vigil: the shrine's light holds back the dark.", 180)
+        give_lantern()
+      end
+      restore()
+    else
+      if not dark then toast("Vigil: darkness. Light this zone's shrine to lift it.", 200) end
+      darken()
+    end
+  end
+
+  -- A foul cell: picked from the floor's key and the cell, so the same cells every visit.
+  local function foul(key, cx, cy)
+    local h = 7
+    local s = key .. ":" .. cx .. ":" .. cy
+    for i = 1, #s do h = (h * 31 + s:byte(i)) % 1000003 end
+    return h % 11 == 0
+  end
+
+  moonmod.on("game.dungeon.generated", function()
+    dark, warned = false, false
+    base = try(game.dungeons.lighting_get)
+  end)
+  moonmod.on("game.dungeon.zone_entered", function() check_dark() end)
+  moonmod.on("game.world.location_changed", function(e)
+    if type(e) == "table" and e.context ~= "dungeon" then dark = false end
+  end)
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if clock % 60 == 0 and floor_now and floor_now.dungeon_id == DARK_DUNGEON then check_dark() end
+    if clock % 30 ~= 0 or in_sandbox or floors.trial or not floor_now or floor_now.dungeon_id ~= FOUL_DUNGEON or
+       not zoned_floor(floor_now) or not setting("miasma", true) then
+      return
+    end
+    local p = try(game.player.get)
+    local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+    if not at then return end
+    local key = place_key(floor_now.dungeon_id, floor_now.floor_id)
+    local cx, cy = math.floor(at.x / 160 + 0.5), math.floor(at.z / 160 + 0.5)
+    if clock % 90 == 0 then
+      for dy = -1, 1 do
+        for dx = -1, 1 do
+          if foul(key, cx + dx, cy + dy) then
+            try(game.effects.burst, {kind = "smoke", position = {x = 160 * (cx + dx), y = at.y + 4, z = 160 * (cy + dy)}, scale = 2.2})
+          end
+        end
+      end
+    end
+    if foul(key, cx, cy) then
+      if not warned then
+        warned = true
+        toast("Vigil: the mist here is foul. Don't linger in it.", 200)
+      end
+      try(game.player.status_add, {status = "poison"})
+    end
+  end)
+end
+
+-- The death ghost (§12, stretch goal 14): the last five seconds before you fell are kept with the save. Come back near
+-- where you fell and your ghost walks them again: the hero, pale and see-through, doing what you did (world.ghost_play),
+-- or, without the engine's record, a wisp of light that ends in a puff where you went down. A warning of what got you,
+-- each time you come back to the spot.
+do
+  local STEP, KEEP = 10, 30
+  local trail, clock, playing, near = {}, 0, nil, false
+
+  moonmod.on("game.dungeon.generated", function() trail, playing, near = {}, nil, false end)
+
+  moonmod.on("game.dungeon.defeated", function(e)
+    if in_sandbox or not setting("ghost", true) or type(e) ~= "table" or not floor_now or e.dungeon_id ~= floor_now.dungeon_id or
+       not zoned_floor(floor_now) or #trail < 3 then
+      return
+    end
+    local seeds = floor_seeds()
+    seeds.ghost = {key = place_key(floor_now.dungeon_id, floor_now.floor_id), path = trail}
+    -- The engine's own record of those seconds (world.ghost_get): the hero's place and motion every other frame, so the
+    -- ghost can be the hero, pale and see-through, doing what you did.
+    local kept = try(game.world.ghost_get)
+    if type(kept) == "table" and type(kept.character) == "string" and type(kept.frames) == "table" and #kept.frames > 0 then
+      seeds.ghost.hero = {character = kept.character, frames = kept.frames}
+    end
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    trail = {}
+  end)
+
+  moonmod.on("game.tick", function()
+    clock = clock + 1
+    if clock % STEP ~= 0 or in_sandbox or floors.trial or not in_dungeon or not floor_now or not setting("ghost", true) then return end
+    local p = try(game.player.get)
+    local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
+    if not at then return end
+    trail[#trail + 1] = {x = math.floor(at.x), y = math.floor(at.y), z = math.floor(at.z)}
+    if #trail > KEEP then table.remove(trail, 1) end
+
+    local g = floor_seeds().ghost
+    if type(g) ~= "table" or type(g.path) ~= "table" or #g.path == 0 or g.key ~= place_key(floor_now.dungeon_id, floor_now.floor_id) then
+      return
+    end
+    if playing then
+      local point = g.path[playing]
+      if point then
+        local last = playing == #g.path
+        try(game.effects.burst, {kind = last and "smoke" or "heal", position = {x = point.x, y = point.y + 8, z = point.z},
+                                 scale = last and 1.6 or 0.8})
+      end
+      playing = playing < #g.path and playing + 1 or nil
+      return
+    end
+    local fell = g.path[#g.path]
+    local d = math.sqrt((at.x - fell.x) ^ 2 + (at.z - fell.z) ^ 2)
+    if d < 240 and not near then
+      near, playing = true, 1
+      -- The hero's ghost when the engine kept one; the wisp of light otherwise.
+      if type(g.hero) == "table" and try(game.world.ghost_play, {character = g.hero.character, frames = g.hero.frames}) then
+        playing = nil
+      end
+      toast("Vigil: your ghost walks its last steps.", 160)
+    elseif d > 600 then
+      near = false
+    end
+  end)
+end
+
+-- One-way drops (§12, stretch goal 11): beside about one locked zone gate in three of a kept map there is a ledge.
+-- Reach the gate without its key and you may drop down past it, into the zone beyond by its shrine, for a share of
+-- your life. There is no climbing back: the gate stays locked behind you until you find its key or travel by a
+-- shrine. DC1's floors are flat, so the drop is a fall through the dark (a warp with the escape item's light), not a
+-- height step.
+do
+  local offered -- the gate a drop is on offer at: {zone, x, y}
+
+  local function has_ledge(zone)
+    if not floor_now then return false end
+    local key = string.format("%s:%d:drop", place_key(floor_now.dungeon_id, floor_now.floor_id), zone)
+    local h = 0
+    for i = 1, #key do h = (h * 31 + key:byte(i)) % 1000003 end
+    return h % 3 == 0
+  end
+
+  moonmod.on("game.dungeon.zone_gate_locked", function(e)
+    offered = nil
+    if in_sandbox or floors.trial or type(e) ~= "table" or type(e.zone) ~= "number" or not floor_now or not zoned_floor(floor_now) or
+       not setting("drops", true) or not has_ledge(e.zone) then
+      return
+    end
+    local z = try(game.dungeons.zones_get)
+    local below
+    for _, sh in ipairs(type(z) == "table" and type(z.shrines) == "table" and z.shrines or {}) do
+      if type(sh) == "table" and sh.zone == e.zone then below = sh end
+    end
+    if not below then return end
+    offered = {zone = e.zone, x = below.x, y = below.y + 1}
+    try(game.ui.choice_open, {id = "vigil.drop", title = "A ledge", subtitle = "Beside the gate the floor falls away into the dark.",
+                              cancel = true, options = {
+      {title = "Drop down", lines = {"Past the gate, by", "the next shrine.", {text = "No climbing back.", tone = "bad"}}},
+      {title = "Stay", lines = {"Find the key."}},
+    }})
+  end)
+
+  moonmod.on("ui.choice_made", function(e)
+    if type(e) ~= "table" or e.id ~= "vigil.drop" or not offered then return end
+    local at = offered
+    offered = nil
+    if e.cancelled or e.index ~= 1 then return end
+    if not try(game.dungeons.warp, {x = at.x, y = at.y, teleport = true}) then return end
+    local p = try(game.player.get)
+    local most = type(p) == "table" and type(p.max_hp) == "number" and p.max_hp or 0
+    local hp = type(p) == "table" and type(p.hp) == "number" and p.hp or 0
+    -- The fall takes a tenth of your life, but never the last of it.
+    local fall = math.min(math.floor(most / 10), hp - 1)
+    if fall > 0 then try(game.player.damage, {amount = fall, character = "active"}) end
+    toast("Vigil: you drop into the dark, and land hard. The way back is shut.", 220)
+  end)
+  moonmod.on("game.dungeon.generated", function() offered = nil end)
+end
+
+-- Ranged and casting enemies (§13, item 7): a family that shoots keeps its distance instead of standing to fire as
+-- the game had it. Too close, it backs off; too far, it comes in; in between it steps aside now and then. Every couple
+-- of seconds it stops, turns to you, glints (the telegraph) and a beat later plays its shot and fires its own
+-- projectile at where you stand (SET_SHOT from its own frame, as its script does), then waits to fire again. Two
+-- shooters never fire in the same moment. Each row is {shot motion, the frame it fires from, motion speed, walk}.
+-- Idle is motion 0 and walking 1 for every row (the shot frames and motions from each family's .stb, read with
+-- tools/stb/stbdis.py). Rows are keyed by native model id (MonstorTable's index in monstorunit.cpp), and the comment
+-- names that model's file: past the early dungeons the two differ, and a story boss (Dran is 78) must never get a row.
+do
+  local SHOOTERS = {
+    [5] = {motion = 16, from = "dcol0", speed = 0.30},  -- e08a
+    [7] = {motion = 15, from = "dcol1", speed = 0.25},  -- e10a
+    [9] = {motion = 16, from = "dcol0", speed = 0.20},  -- e12a
+    [12] = {motion = 13, from = "dcol0", speed = 0.20}, -- e16a
+    [20] = {motion = 14, from = "dcol1", speed = 0.25, walk = 2}, -- e24a
+    [21] = {motion = 13, from = "dcol0", speed = 0.25, walk = 2}, -- e25a
+    [25] = {motion = 15, from = "dcol2", speed = 0.25}, -- e30a
+    [26] = {motion = 13, from = "dcol1", speed = 0.30, second = {motion = 16, from = "dcol2", speed = 0.25}}, -- e31a
+    [28] = {motion = 15, from = "dcol2", speed = 0.25}, -- e33a
+    -- The later dungeons' shooters (each family's walk read from the motion its script moves in).
+    [14] = {motion = 13, from = "dcol0", speed = 0.25},  -- e18a
+    [51] = {motion = 13, from = "dcol1", speed = 0.28},  -- e59a
+    [56] = {motion = 15, from = "dcol2", speed = 0.25},  -- e64a
+    [57] = {motion = 15, from = "dcol2", speed = 0.25},  -- e65a
+    [58] = {motion = 16, from = "dcol0", speed = 0.20},  -- e66a
+    [64] = {motion = 14, from = "dcol1", speed = 0.25, walk = 2}, -- e72a
+    [65] = {motion = 13, from = "dcol1", speed = 0.28},  -- e73a
+    [66] = {motion = 13, from = "dcol1", speed = 0.28},  -- e74a
+    [67] = {motion = 16, from = "dcol01", speed = 0.28, walk = 2}, -- e75a
+    [77] = {motion = 16, from = "dcol2", speed = 0.25, walk = 2, second = {motion = 13, from = "bcol0", speed = 0.30}}, -- e86a
+    [94] = {motion = 15, from = "dcol2", speed = 0.25},  -- e90a
+    [95] = {motion = 15, from = "dcol2", speed = 0.25},  -- e91a
+    [98] = {motion = 13, from = "dcol1", speed = 0.25},  -- e104a
+    [112] = {motion = 16, from = "dcol2", speed = 0.25},  -- e108a
+    [115] = {motion = 15, from = "dcol2", speed = 0.25},  -- e127a
+    [116] = {motion = 15, from = "dcol1", speed = 0.25},  -- e128a
+    [127] = {motion = 15, from = "dcol2", speed = 0.25}, -- e137a
+    [133] = {motion = 16, from = "dcol1", speed = 0.25, walk = 2, second = {motion = 16, from = "dcol1", speed = 0.25}}, -- e116a
+    [135] = {motion = 15, from = "dcol2", speed = 0.25}, -- e141a
+    [136] = {motion = 16, from = "dcol01", speed = 0.28, walk = 2}, -- e142a
+    [137] = {motion = 14, from = "dcol1", speed = 0.25, walk = 2}, -- e143a
+    [144] = {motion = 16, from = "dcol0", speed = 0.25, walk = 2}, -- e118a
+    [150] = {motion = 13, from = "dcol0", speed = 0.25, walk = 2}, -- e154a
+    [151] = {motion = 14, from = "dcol1", speed = 0.25, walk = 2}, -- e155a
+    [161] = {motion = 15, from = "dcol2", speed = 0.25}, -- e163a
+    -- Fliers: they keep their height (every move goes to a point at their own), and shoot down at you.
+    [17] = {motion = 12, from = "dcol0", speed = 0.25},  -- e21a
+    [18] = {motion = 12, from = "dcol0", speed = 0.25},  -- e22a
+    [36] = {motion = 16, from = "dcol2", speed = 0.20},  -- e42a
+    [45] = {motion = 16, from = "dcol2", speed = 0.20},  -- e51a
+    [126] = {motion = 12, from = "dcol0", speed = 0.25}, -- e136a
+    [160] = {motion = 16, from = "dcol2", speed = 0.20}, -- e162a
+  }
+  local NEAR, FAR, RANGE = 70, 190, 260
+  local last_shot = -1000
+
+  local function shooter_think(ctx, kind, mind, me, you, dist, ux, uz, dt)
+    local e, r = ctx.entity, kind.ranged
+    if mind.state == "aim" then
+      halt(e)
+      face(e, you, 0.4)
+      if mind.t >= 18 then
+        -- The second shot's own motion, when the next shot is the second one.
+        local second = r.second and ((mind.shots or 0) + 1) % 2 == 0
+        play(e, mind, second and r.second.motion or r.motion, second and r.second.speed or r.speed, true)
+        to(mind, "shoot")
+      end
+      return
+    end
+    if mind.state == "shoot" then
+      if not mind.fired and mind.t >= 6 then
+        mind.fired = true
+        last_shot = ctx.frame
+        -- A family with a second shot (SET_SHOT2, a caster's other spell) alternates the two.
+        mind.shots = (mind.shots or 0) + 1
+        local second = r.second and mind.shots % 2 == 0
+        native(e, second and "SET_SHOT2" or "SET_SHOT", {second and r.second.from or r.from, you[1], you[2] + 7.4, you[3]})
+      end
+      if mind.t >= 50 then
+        play(e, mind, kind.idle)
+        mind.reload, mind.step_until, mind.aside = math.random(100, 170), nil, nil
+        to(mind, "keep")
+      end
+      return
+    end
+    if mind.state ~= "keep" then
+      mind.reload, mind.step_until, mind.aside = mind.reload or math.random(40, 90), nil, nil
+      to(mind, "keep")
+    end
+    mind.reload = mind.reload - dt
+    if mind.reload <= 0 and dist <= RANGE and dist >= 20 and ctx.frame - last_shot > 40 then
+      halt(e)
+      play(e, mind, kind.idle)
+      mind.fired = false
+      to(mind, "aim")
+      if setting("telegraphs", true) then
+        try(game.effects.burst, {kind = "guard", position = {x = me[1] + ux * 10, y = me[2] + 22, z = me[3] + uz * 10}, scale = 0.7})
+        try(game.audio and game.audio.se_play, {se = 370, volume = 64})
+      end
+      return
+    end
+    local at
+    if dist < NEAR then
+      at = {me[1] - ux * 30, me[2], me[3] - uz * 30} -- back off
+      local clear = native(e, "CHK_MOVE_INFO", {at[1], at[2], at[3], I})
+      if clear and clear[1] == 0 then at = nil end
+    elseif dist > FAR then
+      at = way(e, me, ux, uz)
+    elseif mind.t >= (mind.step_until or 0) then
+      -- A step aside, then a beat standing.
+      mind.side = mind.side or 1
+      if math.random() < 0.4 then mind.side = -mind.side end
+      mind.aside = {me[1] - uz * mind.side * 40, me[2], me[3] + ux * mind.side * 40}
+      local clear = native(e, "CHK_MOVE_INFO", {mind.aside[1], mind.aside[2], mind.aside[3], I})
+      if clear and clear[1] == 0 then mind.aside = nil end
+      mind.step_until = mind.t + math.random(60, 120)
+      mind.aside_until = mind.t + 30
+    end
+    if not at and mind.aside and mind.t < (mind.aside_until or 0) then at = mind.aside end
+    if at then
+      play(e, mind, kind.walk)
+      face(e, at, 0.2)
+      go(e, at, kind.walk_speed)
+      mind.walking = true
+    else
+      mind.aside = nil
+      halt(e)
+      play(e, mind, kind.idle)
+      face(e, you, 0.2)
+    end
+  end
+
+  for model, r in pairs(SHOOTERS) do
+    r.think = shooter_think
+    BRAINS[model] = BRAINS[model] or {idle = 0, walk = r.walk or 1, walk_speed = 0.5, ranged = r}
+  end
+end
+
 -- Events ----------------------------------------------------------------------------------------------------------
 moonmod.on("game.tick", function()
   if in_sandbox then return end
@@ -2163,14 +4496,260 @@ moonmod.on("game.session.started", function(e)
 end)
 moonmod.on("game.session.ended", function() set_sandbox(false) end)
 
+-- Gear (VIGIL_PLAN.md section 11, G4 and G5) -----------------------------------------------------------------------
+-- Hats, tunics, gloves, boots and pouches, each character wearing one of each (items.gear*: the engine keeps them beside
+-- the save and reads their effects where the game decides). Pieces turn up in chests and, now and then, on a monster you
+-- beat, with a rarity that sets how many effects they have and how strong: a chance to shrug off an ailment, stamina,
+-- lightness (cheaper swings), defence, a cheaper run, on a tunic poise (hits taken without a stagger) and on a pouch
+-- room in the item bag (the largest pouch anyone in the party wears counts, on top of the game's Pockets). They live in
+-- the item page's Equipment tab (items.gear_page_set), each piece its kind's icon in the colour of what it does best.
+local apply_gear -- called again at Start
+do
+  local GEAR_KINDS = {"hat", "tunic", "gloves", "boots", "pouch"}
+  -- Each hero's own clothes in the slots, by the frames of their menu model, turned to show them best. Toan: the tunic
+  -- is his vest (front and back, as the model hangs it) with the belt, the gloves the cuff with the hand, the boot seen
+  -- from the side: his shoes are part of his body, so the boot slot draws that, cut off a third of the way down his
+  -- ankle wrap and fitted to what is left, the shoes alone. The others the same way where they have the piece: Xiao's
+  -- paw and her shoes under her leg wraps, Goro's bear mantle, Ruby's tiara, hand and slippers, Ungaga's feathered cap,
+  -- sash and bracer, Osmond's goggles, glove, boots (under his ankle joint) and bag. A kind a hero has nothing for keeps
+  -- the drawn icon. With no hat on Toan goes bareheaded (the hat and its tail left out), and with no tunic his vest comes
+  -- off to the shirt; nobody has bare hands or feet, so those stay. His pouch is the satchel at his hip, gone while he
+  -- wears none; Goro's mantle, Ungaga's cap and sash and Osmond's bag come off the same way.
+  local GEAR_PARTS = {
+    toan = {hat = {draw = {"boushi"}, turn = 40, bare = {"boushi", "cloth1"}},
+            tunic = {draw = {"cloth2", "cloth3", "beruto"}, bare = {"cloth2", "cloth3"}},
+            gloves = {draw = {"l_g", "l_hand"}, turn = 40},
+            boots = {draw = {"skin"}, below = {"l_f"}, turn = 63, tilt = 10},
+            pouch = {draw = {"kaban"}, turn = 77, bare = {"kaban"}}},
+    xiao = {gloves = {draw = {"l_hand"}},
+            boots = {draw = {"skin"}, below = {"l_asi"}, turn = 63, tilt = 10}},
+    goro = {tunic = {draw = {"mant"}, turn = 150, bare = {"mant"}}},
+    ruby = {hat = {draw = {"cube37"}, turn = 20},
+            gloves = {draw = {"body5"}, turn = 40},
+            boots = {draw = {"skin", "cube40", "cube60"}, below = {"cube40"}, turn = 63, tilt = 10}},
+    ungaga = {hat = {draw = {"cap"}, turn = 40, bare = {"cap"}},
+              tunic = {draw = {"cloth1", "cloth2"}, turn = 20, bare = {"cloth1", "cloth2"}},
+              gloves = {draw = {"r_hand4", "l_udewa_2"}, turn = 40}},
+    osmond = {hat = {draw = {"face"}, turn = 30},
+              gloves = {draw = {"l_hand4"}, turn = 40},
+              boots = {draw = {"skin"}, below = {"l_foot"}, turn = 63, tilt = 10},
+              pouch = {draw = {"bag"}, turn = 77, bare = {"bag"}}},
+  }
+  local GEAR_BASES = {hat = {"Cap", "Hood", "Helm"}, tunic = {"Tunic", "Vest", "Mail"},
+                      gloves = {"Gloves", "Bracers", "Gauntlets"}, boots = {"Sandals", "Boots", "Greaves"},
+                      pouch = {"Pouch", "Satchel", "Pack"}}
+  -- Each kind's first effect, so a piece's kind says something about it; the rest are drawn from them all.
+  -- A tunic's is poise, which only a tunic has: hits taken without a stagger (light 1 point, heavy 2). A pouch's is bag,
+  -- which only a pouch has: 5 more item slots a tier, 20 for a unique.
+  local GEAR_SIGNATURE = {hat = "guard", tunic = "poise", gloves = "lightness", boots = "run_cost", pouch = "bag"}
+  local GEAR_EFFECTS = {"guard", "stamina", "lightness", "defence", "run_cost"}
+  local AILMENTS = {"freeze", "poison", "curse", "goo"}
+  local GEAR_PREFIX = {freeze = "Warm", poison = "Viper's", curse = "Blessed", goo = "Clean",
+                       stamina = "Tireless", lightness = "Nimble", defence = "Sturdy", run_cost = "Swift", poise = "Stalwart",
+                       bag = "Roomy"}
+  -- A piece is tinted by its first effect: you can tell a poison hood from a curse hood at a glance.
+  local GEAR_COLOR = {freeze = {r = 140, g = 210, b = 255}, poison = {r = 110, g = 196, b = 90}, curse = {r = 170, g = 124, b = 220},
+                      goo = {r = 196, g = 160, b = 92}, stamina = {r = 244, g = 160, b = 64}, lightness = {r = 244, g = 222, b = 110},
+                      defence = {r = 176, g = 188, b = 204}, run_cost = {r = 232, g = 92, b = 76},
+                      poise = {r = 206, g = 146, b = 92}, bag = {r = 196, g = 150, b = 104}}
+  -- Common, fine, rare, unique: effects on a piece, what each is worth at that tier, and the piece's price.
+  local RARITY = {
+    {name = "Common", effects = 1, value = 60},
+    {name = "Fine", effects = 2, value = 180},
+    {name = "Rare", effects = 3, value = 450},
+    {name = "Unique", effects = 3, value = 1200},
+  }
+  local GEAR_STRENGTH = {guard = 15, stamina = 6, lightness = 5, defence = 2, run_cost = 8, poise = 1, bag = 5}
+  local GEAR_CHEST_CHANCE, GEAR_KILL_CHANCE = 0.2, 0.03
+
+  local function gear_on() return setting("gear", true) and not in_sandbox end
+
+  -- A rarity from 1 to 4: deeper dungeons lean rarer.
+  local function roll_rarity(dungeon_id)
+    local r = math.random(100) + 4 * (tonumber(dungeon_id) or 0)
+    if r > 98 then return 4 elseif r > 86 then return 3 elseif r > 58 then return 2 end
+    return 1
+  end
+
+  local function roll_gear(dungeon_id)
+    local kind = GEAR_KINDS[math.random(#GEAR_KINDS)]
+    local tier = roll_rarity(dungeon_id)
+    local effects, picked = {}, {}
+    local first
+    for i = 1, RARITY[tier].effects do
+      local e = i == 1 and GEAR_SIGNATURE[kind] or nil
+      while not e or picked[e] do e = GEAR_EFFECTS[math.random(#GEAR_EFFECTS)] end
+      picked[e] = true
+      local amount = GEAR_STRENGTH[e] * tier
+      if e == "guard" then
+        local ailment = AILMENTS[math.random(#AILMENTS)]
+        effects.guard = {[ailment] = amount}
+        first = first or ailment
+      else
+        effects[e] = amount
+        first = first or e
+      end
+    end
+    local bases = GEAR_BASES[kind]
+    return {kind = kind, rarity = tier - 1, value = RARITY[tier].value, effects = effects, icon = "gear_" .. kind,
+            color = GEAR_COLOR[first], name = GEAR_PREFIX[first] .. " " .. bases[math.min(tier, #bases)]}
+  end
+
+  -- The icons, once, and the Equipment tab while gear is on.
+  local gear_icons, gear_page = false, false
+  apply_gear = function()
+    -- The locked enemy's wider bar, its poise under it (the poise block, above).
+    local bar = setting("target_bar", true) and not in_sandbox
+    if bar ~= later.target_bar then
+      if call(game.render and game.render.target_bar_set, {on = bar}) then later.target_bar = bar end
+    end
+    -- The weapon cards' stat labels, redrawn one size and evenly spaced on the Status tab (tools/vigil/make_stat_labels.py);
+    -- under Lightness (§11 G3) a weapon's Speed sets what a swing costs, so it reads Lt.
+    local labels = game.weapons and game.weapons.stat_label_set
+    local speed = in_sandbox and "" or (setting("lightness", true) and "lightness" or "speed")
+    if speed ~= later.stat_labels then
+      if speed == "" then
+        try(labels, {})
+      else
+        local set = {}
+        for _, stat in ipairs({"attack", "endurance", speed, "magic"}) do
+          try(game.resources.override, {path = "resources/label_" .. stat .. ".png", game_path = "icons/label_" .. stat .. ".png"})
+          set[stat == "lightness" and "speed" or stat] = "label_" .. stat
+        end
+        if not call(labels, set) then speed = nil end
+      end
+      later.stat_labels = speed
+    end
+    if gear_on() then
+      if not gear_icons then
+        for _, kind in ipairs(GEAR_KINDS) do
+          try(game.resources.override, {path = "resources/gear_" .. kind .. ".png", game_path = "icons/gear_" .. kind .. ".png"})
+        end
+        gear_icons = true
+      end
+      local ok, err = call(game.items.gear_page_set, {icons = {hat = "gear_hat", tunic = "gear_tunic", gloves = "gear_gloves", boots = "gear_boots",
+                                                               pouch = "gear_pouch"},
+                                                      parts = GEAR_PARTS})
+      gear_page = ok ~= nil
+      if not ok then moonmod.log("warn", "gear page: " .. message(err)) end
+    elseif gear_page then
+      try(game.items.gear_page_set, {})
+      gear_page = false
+    end
+  end
+
+  local function give_gear(dungeon_id, where)
+    if not gear_on() then return end
+    local piece = roll_gear(dungeon_id)
+    local made, err = call(game.items.gear_give, piece)
+    if not made then
+      if err and err.code ~= "unsupported" then toast("Vigil: " .. message(err)) end
+      return
+    end
+    toast(string.format("%s: %s (%s %s). It's in the Equipment tab.", where, piece.name, RARITY[piece.rarity + 1].name:lower(), piece.kind))
+  end
+
+  -- A named elite's drop (Named elites, below): always a piece, the best of a few rolls.
+  later.elite_gear = function(dungeon_id, who)
+    if not gear_on() then return end
+    local piece = roll_gear(dungeon_id)
+    for _ = 1, 3 + (later.cycle_now and later.cycle_now() or 0) do
+      local other = roll_gear(dungeon_id)
+      if other.rarity > piece.rarity then piece = other end
+    end
+    local made, err = call(game.items.gear_give, piece)
+    if not made then
+      if err and err.code ~= "unsupported" then toast("Vigil: " .. message(err)) end
+      return
+    end
+    toast(string.format("%s dropped %s (%s %s). It's in the Equipment tab.", who, piece.name, RARITY[piece.rarity + 1].name:lower(), piece.kind))
+  end
+
+  moonmod.on("game.chest.opened", function(e)
+    if type(e) ~= "table" or type(e.chest) ~= "number" then return end
+    if math.random() < GEAR_CHEST_CHANCE then give_gear(e.dungeon_id or (floor_now and floor_now.dungeon_id), "In the chest") end
+  end)
+
+  moonmod.on("game.enemy_defeated", function(e)
+    if type(e) ~= "table" or e.attacker == nil then return end
+    if math.random() < GEAR_KILL_CHANCE then give_gear(floor_now and floor_now.dungeon_id, "Dropped") end
+  end)
+
+  -- Each trip home every town shop puts out a few pieces beside its own goods, at twice what a piece sells for, rolled
+  -- as deep as the last dungeon. What's bought stays gone until the next trip; a piece sells on the Equipment tab.
+  moonmod.on("game.world.location_changed", function(e)
+    if not gear_on() or type(e) ~= "table" or e.context ~= "town" then return end
+    if later.shops_stocked and not (type(e.previous) == "table" and e.previous.context == "dungeon") then return end
+    for shop = 0, 17 do
+      local goods = {}
+      for i = 1, 3 do
+        goods[i] = roll_gear(floor_now and floor_now.dungeon_id)
+        goods[i].price = goods[i].value * 2
+      end
+      if not call(game.items.gear_stock_set, {shop = shop, goods = goods}) then return end
+    end
+    later.shops_stocked = true
+  end)
+
+  -- Each hero's own clothes that come off (bare, above), worn from the start: an empty slot takes them off, so each save
+  -- dresses each hero once, the first time they are in the party, in plain pieces with nothing to them. A slot already
+  -- filled keeps what is worn.
+  moonmod.on("game.world.location_changed", function()
+    local STARTER_CLOTHES = {
+      toan = {{kind = "hat", name = "Toan's Cap", color = {r = 120, g = 170, b = 80}},
+              {kind = "tunic", name = "Toan's Vest", color = {r = 236, g = 140, b = 56}},
+              {kind = "pouch", name = "Toan's Satchel", color = {r = 176, g = 120, b = 72}}},
+      goro = {{kind = "tunic", name = "Goro's Mantle", color = {r = 120, g = 92, b = 64}}},
+      ungaga = {{kind = "hat", name = "Ungaga's Cap", color = {r = 150, g = 150, b = 80}},
+                {kind = "tunic", name = "Ungaga's Sash", color = {r = 214, g = 84, b = 48}}},
+      osmond = {{kind = "pouch", name = "Osmond's Bag", color = {r = 160, g = 104, b = 60}}},
+    }
+    local STARTER_ORDER = {"toan", "goro", "ungaga", "osmond"}
+    if not gear_on() then return end
+    local gear = try(game.items.gear)
+    if type(gear) ~= "table" or type(gear.pieces) ~= "table" then return end
+    local slot = try(game.save.slot_id)
+    local key = type(slot) == "table" and slot.slot_id and ("dressed:" .. slot.slot_id .. ":" .. tostring(slot.slot_generation)) or nil
+    -- Toan's are kept by kind (a save dressed before the satchel came, true, had the cap and vest); the others' by
+    -- "hero:kind".
+    local given = key and try(game.save.get, key)
+    given = given == true and {hat = true, tunic = true} or (type(given) == "table" and given or {})
+    local joined = {toan = true}
+    local members = try(game.party and game.party.list)
+    for _, m in ipairs(type(members) == "table" and (members.members or members) or {}) do
+      if type(m) == "table" and type(m.id) == "string" then joined[m.id] = true end
+    end
+    local had, changed = {}, false
+    for _, p in ipairs(gear.pieces) do had[p.name] = true end
+    for _, hero in ipairs(STARTER_ORDER) do
+      local worn = (type(gear.worn) == "table" and type(gear.worn[hero]) == "table" and gear.worn[hero].slots) or {}
+      for _, s in ipairs(joined[hero] and STARTER_CLOTHES[hero] or {}) do
+        local mark = hero == "toan" and s.kind or (hero .. ":" .. s.kind)
+        if not given[mark] and not had[s.name] and worn[s.kind] == nil then
+          local piece = call(game.items.gear_give, {kind = s.kind, name = s.name, rarity = 0, value = 20, icon = "gear_" .. s.kind, color = s.color})
+          if piece then try(game.items.gear_equip, {uid = piece.uid, character = hero}) end
+        end
+        changed = changed or not given[mark]
+        given[mark] = true
+      end
+    end
+    if key and changed then try(game.save.set, key, given) end
+  end)
+
+  moonmod.on("settings.changed", function() apply_gear() end)
+  moonmod.on("game.session.started", function() apply_gear() end)
+  moonmod.on("game.session.ended", function() apply_gear() end)
+end
+
 -- Mod Manager: what Vigil has asked the engine for right now.
 try(game.ui.register, {id = "check", label = "Check", description = "Show what Vigil has set right now."})
 moonmod.on("ui.action", function(action)
   if type(action) ~= "table" or action.id ~= "check" then return end
   if in_sandbox then toast("Vigil sits out this game mode.") return end
   local t = applied.tuning or {}
-  toast(string.format("Vigil: evades %s, Toan's attacks %s, enemy brain %s, enemy damage x%.2f, recoil x%.2f, gauge refill x%.2f%s",
-    tostring(applied.evades), tostring(applied.toan_attacks), tostring(applied.enemy_brain), applied.enemy_damage or 1, t.recoil_scale or 1, t.gauge_refill or 1,
+  toast(string.format("Vigil: evades %s, Toan's attacks %s, enemy brain %s, guard rules %s, gauge rules %s, enemy damage x%.2f, recoil x%.2f, gauge refill x%.2f%s",
+    tostring(applied.evades), tostring(applied.toan_attacks), tostring(applied.enemy_brain), tostring(applied.guard_rules),
+    tostring(applied.gauge_rules), applied.enemy_damage or 1, t.recoil_scale or 1, t.gauge_refill or 1,
     guarding and " (guarding)" or ""))
 end)
 
@@ -2178,6 +4757,7 @@ end)
 local session = try(game.session.get)
 in_sandbox = type(session) == "table" and session.kind == "sandbox" and session.owner ~= ID
 if in_sandbox then stand_down() else apply() end
+apply_gear()
 
 local mod = {}
 function mod.on_load() moonmod.log("info", ID .. " ready" .. (in_sandbox and " (sitting out a game mode)" or "")) end
