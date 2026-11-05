@@ -1058,3 +1058,89 @@ Built after this list was written (still 2026-11-04; Vigil 521 checks): weapon a
 Height in the floor itself is now built: each zone lies a step below the one before, down a ramp outside its gate (item 3; checked headless, not yet played). Players' messages to each other are built too, with no server: they travel through a messages folder the players share by any sync service (item 4; checked in tests, not yet played).
 
 The order now: the hand playtest (the README's hand tests, then the Trial against each boss and elite). Its notes feed one tuning pass on the numbers in item 1. Nothing built is waiting on a decision; a hosted server for messages (DC_Web) is optional now.
+
+## 14. Crossovers with the Gauntlet (2026-11-04)
+
+The user asked to carry ideas each way: the Gauntlet's rarities and a costlier, wider upgrade system into Vigil, and
+into the Gauntlet a continuous dungeon whose areas come from several dungeons at once ("all 6 dungeons together").
+
+### X1. Weapon rarity in Vigil (built 2026-11-04, checked in tests, not yet played)
+
+A weapon found in a dungeon (a chest or a pickup, and now and then a named elite's drop) rolls the Gauntlet's five
+tiers, Common, Uncommon, Rare, Epic and Legendary, in its colours. Its stats grow once by the tier (x1 to x1.8), its
+name and swing trail take the tier's colour, and Rare and better carry the Gauntlet's touches (Vampire, Poison, Goo,
+Frost, Thunder Chain, Echo, Ember Burst, Gravity Well, Quake, Reaper, Gilded, Thorns, Frenzy). Epic and Legendary get
+a name of their own, and a Legendary can turn out to be the hero's own legendary with its signature (Toan's Moonfang,
+Xiao's Ninefold, and on). Deeper dungeons and later cycles lean rarer; an elite's weapon is Rare or better. The rolls
+are kept with the save ("loot" in the floors table), follow a weapon the menu moves to another slot, and share the
+weapon card with its art. Weapons bought in town stay plain. Setting *Weapon rarity*. Test section 44.
+
+Next for X1: gear (hats, tunics, gloves, boots, pouches) on the same five tiers and colours. Gear's tier names and
+colours are drawn by the engine (battlemenu.cpp `kRarity`, 4 tiers), so that step is S1's file and goes through S1.
+
+### X2. The Vigil sky: a costlier upgrade system (built 2026-11-04, checked in tests and headless, not yet played)
+
+Built: the engine's `ui.sky_open` (the title mode's sky drawn over a paused dungeon; checked headless in the real
+game), Vigil's sky of seven constellations (the Shrine Flame; Vigour, Endurance and Guard, the old tree's three skills,
+ranks kept; Arms: Keen Edge, Heavy Hand, Keystones Bloodletter and Last Light; Fortune: Keen Eye, Gilded Path,
+Keystone Fortune's Favour; Flask: Deep Flask, Healing Draught), Embers (1 a named elite, 2 a story boss once a cycle,
+3 a new cycle), and gear and weapons on the same five rarities (gear gained Epic; old saves' legendaries stay
+legendary). Not yet: Wanderer, Hunter and the heroes' Signature skies; Keystones that need another switched off.
+The plan as it was:
+
+Vigil's shrine tree has three skills (Vigour, Endurance, Guard) bought with Gilda. The Gauntlet's Norune Eternal is a
+sky of 126 nodes in constellations, with paths, Keystones and a rare currency. Vigil gets its own sky in that shape:
+
+- **Where:** at a shrine, the Level up card opens the sky in-game. The sky page is the title mode's renderer
+  (`title.mode_set({sky})`); the engine needs an in-game way to open it (`ui.sky_open`, drawn over a paused dungeon,
+  Cross to buy, Circle to close, `game.ui.sky_selected`).
+- **Constellations:** the three skills become trunks, so a save keeps its ranks. Around them: **Arms** (damage,
+  criticals, art cost, a weapon's touches stronger), **Fortune** (the rarity roll leans rarer, Gilda found, an elite's
+  extra drop: this is where X1 and X2 meet), **Flask** (charges, heal, drink speed), **Wanderer** (run cost, roll
+  reach, fall damage), **Hunter** (poise damage, posture on the locked target, elites' bars), and a Signature sky for
+  each hero.
+- **Costs:** Gilda for nodes, rising with level as now but steeper (Souls levels). Keystones and the deepest nodes
+  also take **Embers**, a rare currency from named elites, story bosses and NG+ cycles (as Genie Sigils are in the
+  Gauntlet). Keystones change rules (two on at once), not just numbers.
+
+### X3. The Gauntlet's Confluence: one dungeon made of all of them (built 2026-11-04, checked in tests and headless, not yet played)
+
+Built: the engine's part banks (`dungeons.set_zones` `source_dungeon`: up to six other dungeons' main floor packs load
+beside the map's own, each with its own ground-texture block; a cell of such a zone draws, collides, lights its
+torches and shows its water with that dungeon's corridors, rooms, pillars and spring; the zone has that dungeon's
+monsters), banks reloaded at the floor's build when a mod asks in `game.dungeon.generating`, and the Gauntlet's
+Confluence: every floor before a Warden is three dungeons (the floor's own, then the next ones; floor II one further
+along), joined by locked gates, each zone a step lower, its own spring (the user's ask: each dungeon its own shrine),
+the dungeon named at each gate. Checked headless in a real Gauntlet run (1-1: Divine Beast Cave, Wise Owl Forest,
+the Shipwreck). Since then (same day, the user's ask): each zone lit with its own dungeon's lights, ambient, fog and
+background (recorded from the bank's map file, eased in as the player crosses a gate), and one map per biome (the
+Gauntlet's `one_map`: floors I-III are the zones of floor I's map, each gate the next floor, the last exit gate to the
+Warden; checked headless: the run reached 1-3 on one map, the HUD reading it). Then the whole run as one map (the
+user's ask): 25 zones (biome floors, a Warden's hall, a Rest stop, the next biome, the Lair). Engine: zones up to 30;
+per-zone `quiet`, `heal` and `arena`; `vaults = false`; `dungeons.zone_gate_open`; gate keys that come round again
+past the seventh gate handed out per zone; monster kinds per map 48 to 128; projectile effects 5 to 32 (with a bounds
+check); FRAME_OBJ_ANIM_MAX 512; mid-floor model loads wait out the teleport/escape light, whose model shares the read
+buffer. Checked headless: the 25-zone map builds with all five other dungeons' parts; walking into the first hall shut
+it and Dran came out; his defeat opened the way on; the run went on to the Rest stop and 2-1 on the same map.
+The plan as it was:
+
+A Gauntlet run where the whole run is one continuous map: Divine Beast Cave's rooms run into Wise Owl Forest's, then
+the Shipwreck's, the Sun and Moon Temple's, the Moon Sea's and the Gallery's, zone after zone, each a step lower than
+the last (height steps), with no loading between them. A Warden room stands where two dungeons meet.
+
+The engine research (2026-11-04) found it feasible:
+- Part numbers mean the same kind of piece in every dungeon (the `MapPartsNo` enum), so a cell can take its part from
+  another dungeon's table without the generator changing.
+- **E1, part banks:** `BtMapJumpLoad` loads each extra dungeon's floor pack into a bank of its own
+  (`bank_parts[k][72]`), and `set_zones` takes a `source_dungeon` per zone. One accessor, `CellPart(map, x, y)`, picks
+  the bank by the cell's zone for draw, collision, camera, water and fire (about 20 call sites on generated maps).
+  Gates, stairs, events and NPC parts stay in the floor's own bank, so doors line up.
+- **E2, textures:** each bank's ground textures go in a texture block of their own instead of block 3. Names that
+  repeat across dungeons are the main risk (textures are looked up by name), so the bank load renames on collision.
+- **E3, light:** fog, ambient and light swapped per zone while drawing, as `DrawMap` already does for the Diorama.
+- **E4, monsters:** `MoonModLoadZoneMonsters` reads a zone's `source_dungeon` layout, so each area has its own
+  dungeon's monsters.
+- **The Gauntlet side:** a Confluence choice on the run menu builds one map of 6 x 3 zones, each a dungeon's floor,
+  with the Wardens at the joins; the sky, music and minimap stay the first dungeon's.
+
+Order: X1 (done) → X2 → X3, each with a hand test before the next.

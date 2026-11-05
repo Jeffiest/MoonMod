@@ -362,6 +362,17 @@ function F.new(opts)
       local id = "chronicle:item:" .. (S.gate_key or 194)
       return {active = S.back, available = true, gate_key = {id = id, native_item_no = S.gate_key or 194, held = (S.items[id] or 0) > 0, count = S.items[id] or 0}}
     end,
+    room_seal = function()
+      if S.sealed_room then return fail("failed", "a room is already shut") end
+      S.sealed_room = true
+      return {sealed = true, doors = 1, room = {x = 10, y = 10, w = 6, h = 6}}
+    end,
+    room_release = function() local was = S.sealed_room == true; S.sealed_room = nil; return {released = was} end,
+    zone_gate_open = function(a)
+      S.gates_opened = S.gates_opened or {}
+      S.gates_opened[#S.gates_opened + 1] = a.zone
+      return {opened = true}
+    end,
     warden_room_release = function()
       if not S.warden_room then return fail("failed", "not sealing") end
       S.warden_room_state = "released"; S.warden_released = (S.warden_released or 0) + 1
@@ -382,6 +393,26 @@ function F.new(opts)
       for k in pairs(a) do assert(k == "unique" or k == "rare" or k == "large_chests", "set_weapon_drops field " .. k) end
       S.weapon_drops = next(a) and deepcopy(a) or nil
       return {unique = a.unique == true, rare = a.rare or 0, large_chests = a.large_chests or 12}
+    end,
+    set_zones = function(a)
+      local fields = {zones = 1, open = 1, shrines = 1, exit_floor = 1, smoke = 1, shrine_heal = 1, sanctuary = 1, descent = 1, vaults = 1}
+      for k in pairs(a) do assert(fields[k], "set_zones field " .. k) end
+      if next(a) == nil then S.zones = nil; return {zones = 0} end
+      if S.zones_owner_other then return fail("failed", "another mod already lays floors out in zones") end
+      assert(type(a.zones) == "table" and #a.zones >= 2 and #a.zones <= 30, "set_zones 2-30 zones")
+      for _, z in ipairs(a.zones) do
+        for k in pairs(z) do
+          assert(k == "rooms" or k == "source_floor" or k == "source_dungeon" or k == "quiet" or k == "heal" or k == "arena", "set_zones zone field " .. k)
+        end
+        assert(math.type(z.rooms) == "integer" and z.rooms >= 2 and z.rooms <= 12, "set_zones rooms 2-12")
+        assert(z.source_dungeon == nil or (math.type(z.source_dungeon) == "integer" and z.source_dungeon >= 0 and z.source_dungeon <= 6), "set_zones source_dungeon 0-6")
+        assert(z.source_floor == nil or (math.type(z.source_floor) == "integer" and z.source_floor >= 0 and z.source_floor <= 99), "set_zones source_floor 0-99")
+      end
+      assert(a.descent == nil or (math.type(a.descent) == "integer" and a.descent >= 0 and a.descent <= 120), "set_zones descent 0-120")
+      assert(a.shrines == nil or type(a.shrines) == "boolean", "set_zones shrines")
+      assert(a.shrine_heal == nil or type(a.shrine_heal) == "boolean", "set_zones shrine_heal")
+      S.zones = deepcopy(a)
+      return {zones = #a.zones}
     end,
     set_shortcuts = function(a)
       assert(math.type(a.count) == "integer" and a.count >= 0 and a.count <= 7, "set_shortcuts count 0-7")
@@ -1171,6 +1202,7 @@ function F.new(opts)
   function S.exit_gate()
     local to = S.floor + 1
     to = (S.redirects or {})[S.dungeon .. ":" .. to] or to
+    if S.zones and S.zones.exit_floor then to = S.zones.exit_floor end
     S.enter(S.dungeon, to)
   end
   -- A chest hands `character` a weapon: it lands in a free slot and the engine reports the pickup.

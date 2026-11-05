@@ -26,7 +26,7 @@ local function check(cond, label, extra)
   else failed = failed + 1; print("  FAIL " .. label .. (extra and ("  [" .. tostring(extra) .. "]") or "")) end
 end
 -- The scenarios walk each biome's own floors; shuffled floors have a scenario of their own.
-local function settings(over) local s = F.deepcopy(defaults); s.floor_shuffle = false; s.boss_wardens = 0; s.loot_rarity = false; s.genie_finale = false; for k, v in pairs(over or {}) do s[k] = v end; return s end
+local function settings(over) local s = F.deepcopy(defaults); s.floor_shuffle = false; s.boss_wardens = 0; s.loot_rarity = false; s.genie_finale = false; s.confluence = false; s.one_map = false; s.one_map_run = false; for k, v in pairs(over or {}) do s[k] = v end; return s end
 local function boot(opts)
   opts = opts or {}
   opts.settings = settings(opts.overrides)
@@ -1391,6 +1391,93 @@ do
   local SB = boot({overrides = {seda = true}})
   SB.open_title_mode(); SB.select("start"); SB.tick(60)
   check(#SB.party == 6 and SB.storage.run.seda == false, "without Opar's roster the Seda setting adds no one", #SB.party)
+end
+
+print("Scenario 31: the Confluence")
+do
+  S = boot({overrides = {confluence = true}})
+  start_run(S)
+  run_floor(S)
+  local z = S.zones
+  check(z and #z.zones == 3 and z.zones[1].source_dungeon == nil, "floor I runs through three dungeons, starting in its own")
+  check(z and z.zones[2].source_dungeon == 1 and z.zones[2].source_floor == 2 and z.zones[3].source_dungeon == 2,
+    "past the first gate Wise Owl Forest (its floor-I monsters), then the Shipwreck")
+  check(z and z.shrines == true and z.shrine_heal == false and z.descent == 40, "each zone has its dungeon's spring, a step lower")
+  check(S.shortcuts == 0, "no shortcut doors past the gates")
+  S.emit("game.dungeon.zone_entered", {zone = 1, previous = 0, zones = 3})
+  check(S.toasts[#S.toasts]:find("Wise Owl Forest", 1, true), "walking through the gate names the dungeon")
+  S.exit_gate(); run_floor(S)
+  z = S.zones
+  check(z and z.zones[2].source_dungeon == 2 and z.zones[2].source_floor == 5 and z.zones[3].source_dungeon == 3,
+    "floor II starts further along: the Shipwreck, then the Temple")
+  S.exit_gate(); run_floor(S)
+  S.exit_gate(); run_floor(S)
+  check(S.zones == nil, "the Warden's floor stays one dungeon")
+end
+
+print("Scenario 32: one map per biome")
+do
+  S = boot({overrides = {confluence = true, one_map = true, one_map_run = false, floor_shuffle = true}})
+  start_run(S)
+  run_floor(S)
+  local z = S.zones
+  local run = S.storage.run
+  check(run.joined == true and run.plan == nil, "a run with one map per biome has no shuffled floors")
+  check(z and #z.zones == 3 and z.zones[1].source_dungeon == nil and z.zones[2].source_dungeon == 1 and z.zones[3].source_dungeon == 2,
+    "floor I's map holds floors I-III: Divine Beast Cave, Wise Owl Forest, the Shipwreck")
+  check(z and z.zones[2].source_floor == 5 and z.zones[3].source_floor == 11, "each zone has its dungeon's monsters for that floor", z and (tostring(z.zones[2].source_floor) .. "," .. tostring(z.zones[3].source_floor)))
+  check(z and z.exit_floor ~= nil and z.open == nil, "the map's exit gate leads to the Warden's floor; every gate locked")
+  local depth = run.depth
+  S.emit("game.dungeon.zone_entered", {zone = 1, previous = 0, zones = 3}); S.tick(2)
+  run = S.storage.run
+  check(run.slot == 2 and run.depth == depth + 1, "walking through the first gate is floor II", run.slot)
+  local named = false; for _, t in ipairs(S.toasts) do if t:find("Wise Owl Forest 1-2", 1, true) then named = true end end
+  check(named, "named for its dungeon")
+  S.emit("game.dungeon.zone_entered", {zone = 0, previous = 1, zones = 3}); S.tick(2)
+  check(S.storage.run.slot == 2, "walking back does not undo a floor")
+  S.emit("game.dungeon.zone_entered", {zone = 2, previous = 1, zones = 3}); S.tick(2)
+  check(S.storage.run.slot == 3 and not S.storage.run.suspended, "the last zone is floor III")
+  -- a Vault and back: the map comes back with the passed gates open, the run still on floor III
+  S.enter(S.dungeon, S.floor, true); S.tick(20)
+  S.enter(S.dungeon, S.floor, false); S.tick(20)
+  check(S.storage.run.slot == 3 and not S.storage.run.suspended, "back from a Vault, still floor III", S.storage.run.slot)
+  check(S.zones and S.zones.open and #S.zones.open == 2, "its gates stand open on the way back")
+  S.exit_gate(); run_floor(S)
+  check(S.storage.run.slot == 4 and not S.storage.run.suspended and S.zones == nil, "the exit gate leads to the Warden's floor, one dungeon",
+    S.storage.run.slot)
+end
+
+print("Scenario 33: the whole run on one map")
+do
+  S = boot({overrides = {confluence = true, one_map = true, one_map_run = true, genie_finale = true}})
+  start_run(S)
+  run_floor(S)
+  local z = S.zones
+  local run = S.storage.run
+  check(run.whole == true and z and #z.zones == 25, "five biomes, four Rest stops and the Lair: 25 zones", z and #z.zones)
+  check(z and z.vaults == false and z.zones[4].arena and z.zones[4].quiet and z.zones[5].heal and z.zones[25].arena,
+    "a Warden's hall, a Rest stop with a spring that heals, the Lair last")
+  check(z and z.smoke and z.smoke[1] == 4 and z.open and z.open[1] == 5, "the hall's way on is shut; the Rest stop's stands open")
+  local function walk(zone) S.emit("game.dungeon.zone_entered", {zone = zone, previous = zone - 1, zones = 25}); S.tick(3) end
+  walk(1); walk(2)
+  check(S.storage.run.slot == 3 and S.storage.run.pos == 1, "gate by gate: floor 1-3", S.storage.run.slot)
+  walk(3)
+  run = S.storage.run
+  check(run.slot == 4 and not run.suspended, "the fourth zone is the Warden's hall", run.slot)
+  S.reveal_all(); S.tick(30)
+  check(S.sealed_room == true and #(S.spawned or {}) > 0, "walking into the hall shuts its doors and the Warden comes out", #(S.spawned or {}))
+  for _, w in ipairs(S.spawned or {}) do if w.alive then S.kill(w) end end
+  S.tick(2); S.tick(350)
+  check(S.sealed_room == nil and S.gates_opened and S.gates_opened[1] == 4, "the Warden falls: the hall opens, then its way on",
+    S.gates_opened and S.gates_opened[1])
+  check(S.storage.run.awaiting == 2 and not S.storage.run.suspended, "the next biome awaits, on the same map")
+  walk(4)
+  run = S.storage.run
+  check(run.slot == 0 and run.pos == 2 and not run.suspended, "the Rest stop before the second biome", run.slot .. "/" .. run.pos)
+  walk(5)
+  run = S.storage.run
+  check(run.slot == 1 and run.pos == 2 and not run.suspended, "through it: the second biome's floor I", run.slot .. "/" .. run.pos)
+  check(S.zones and #S.zones.zones == 25, "still the same map")
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

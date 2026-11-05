@@ -96,6 +96,25 @@ his eye to your blows. Beating him wins the run (+12 Moon Shards).
 - **Character doors and jumps**: only drafted characters' own doors and jump spots appear on a floor.
 - **Shuffled floors**: the run starts in Divine Beast Cave, but every later floor before a Warden is in a dungeon drawn
   at random (a setting).
+- **The Confluence**: a floor before a Warden runs through three dungeons (two to four, a setting). It starts in the
+  floor's own dungeon; unlock a gate and the rooms past it are the next dungeon's (the biomes' order, then the Gallery of
+  Time), with its own spring and its own monsters at the floor's depth, each zone a step lower. Floor II starts one
+  dungeon further along than floor I, and so on. Walking through a gate names the dungeon you are in. A monster in each
+  zone carries the next gate's key; there are no shortcut doors on these floors. The Rest floor, the Wardens and the Lair
+  stay one dungeon. *The Confluence* is a setting, on by default. Each dungeon's stretch is lit with its own light and
+  fog, changing over as you walk through the gate.
+- **One map per biome**: with the Confluence on, a biome's floors before its Warden are one map. Floor I is the
+  biome's own dungeon; unlock its gate and floor II is the next dungeon's rooms on the same map, then floor III; the
+  floor number, depth and floor rewards move on as you walk through each gate. The last zone's exit gate leads to the
+  Warden. A Vault and back finds the passed gates open. It takes the place of shuffled floors. *One map per biome* is a
+  setting, on by default.
+- **One map for the whole run**: with One map per biome on, the whole run is one map of 25 zones. Each biome's floors
+  come first, then its Warden's hall, a 6x6 arena of the biome's own dungeon with no other monsters. Walking in shuts
+  the doors, and the Warden comes out (a stand-in boss of that dungeon when no monster gave it a shape). Its way on is
+  a smoke gate that opens when it falls. Next comes a Rest stop in the next biome's dungeon: a spring that heals, and
+  Gaffer. Then the next biome, and the Genie's Lair at the very end. The run's floor number, depth, rewards and the
+  Warden's prize go on as they do floor to floor. There are no Vaults, Cursed Path or floor sweeps on this map.
+  *One map for the whole run* is a setting, on by default.
 
 ### No save file
 

@@ -134,7 +134,8 @@ end)
 | `dungeons.set_modifiers({rooms, monsters, chests, chest_value})` | Percent changes; `chests = -100` is none |
 | `dungeons.set_layout` / `set_population` | Floor size and monster/chest density per room |
 | `dungeons.set_seed({seed})` | Build the floor from a seed you kept (`game.dungeon.generated` reports each floor's `floor_seed`): the same floor every visit |
-| `dungeons.set_zones({zones = {{rooms = 5}, {rooms = 5}}, open})` | One map in 2-24 zones joined by locked gates; a monster in each zone carries the next gate's key; `dungeons.zones_get()` reports gates, carriers and the player's zone |
+| `dungeons.set_zones({zones = {..., {rooms = 2, arena = true, quiet = true}, ...}, smoke = {n + 1}, vaults = false})` + `dungeons.room_seal` + `dungeons.zone_gate_open({zone = n + 1})` | A boss hall inside a zoned map: walking in shuts it, your boss spawns at the room's middle, and its death opens the smoke gate on (the Gauntlet's whole run on one map) |
+| `dungeons.set_zones({zones = {{rooms = 5}, {rooms = 5}}, open})` | One map in 2-30 zones joined by locked gates; a monster in each zone carries the next gate's key; `dungeons.zones_get()` reports gates, carriers and the player's zone |
 | `dungeons.set_zones({..., smoke = {3}})` + `game.dungeon.smoke_touched` | A smoke gate no key opens; walking up to it is your cue to offer what lies beyond (Vigil: a story floor of the game's own, by `dungeons.enter_floor`) |
 | `dungeons.drop_gilda({x, y, z, amount})` | A pile of Gilda on the floor (a death drop, a reward), shown on the corner map, taken by walking up to it |
 | `dungeons.set_zones({..., shrines = true})` + `game.dungeon.shrine_reached` | A healing-spring shrine in each zone, and an event when the player walks up to one (open a `ui.choice_open` panel there); `shrine_heal = false` keeps its water from healing HP |
@@ -430,6 +431,7 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | The floor plate's text ("2-3") | `render.floor_label_set` | `render.floor_label_clear` restores it |
 | A pick of 1-4 cards | `ui.choice_open({id, title, options})` | Pauses play; answer in `ui.choice_made` |
 | A map with marks | `ui.map_open({id, title, marks, cells?})` | The floor or a kept map (`dungeons.map_snapshot`), in a dungeon or a town; answer in `ui.map_choice` / `ui.map_waypoint` |
+| An upgrade sky in a dungeon | `ui.sky_open({id, title, sky})` | The title mode's node sky over the paused dungeon; answer `ui.sky_selected` by opening it again with the new states |
 | A menu in place of the pause | `ui.run_menu_set({title, tabs})` | Rows send `ui.run_menu_action` |
 | A boss entrance | `ui.boss_card({name, kicker, epithet, frames})` | |
 | A page in the Journal | `ui.sheet_set` / `ui.sheet_open` | Journal > Character, with a skill tree |
