@@ -21061,7 +21061,7 @@ index ab6e06df..bec950bd 100644
      return std::ranges::any_of(active, [](s32 puff_active) { return puff_active != 0; }) ? 1 : 0;
  }
 diff --git a/port/src/game/itemdata.cpp b/port/src/game/itemdata.cpp
-index 4bb056ff..3e70166f 100644
+index 4bb056ff..13337958 100644
 --- a/port/src/game/itemdata.cpp
 +++ b/port/src/game/itemdata.cpp
 @@ -1,4 +1,5 @@
@@ -21093,6 +21093,15 @@ index 4bb056ff..3e70166f 100644
  int           FrameObjAnimCnt;
  int           VERSION_VOL;
  float         run_speed = 1.0f;
+@@ -376,7 +381,7 @@ int TEIGIAnalyz(char *path) {
+ 
+     while (pos < teigiFileSize) {
+         pos = skipSpace(text, pos);
+-        const auto *const command = std::ranges::find_if(TEIGI_TABLE, [&](const TeigiCommand &entry) { return StartsWith(&text[pos], entry.name); });
++        const auto command = std::ranges::find_if(TEIGI_TABLE, [&](const TeigiCommand &entry) { return StartsWith(&text[pos], entry.name); });
+ 
+         if (command == TEIGI_TABLE.end()) {
+             std::printf("TAG SyntaxError!! >>%s\n", &text[pos]);
 @@ -516,6 +521,11 @@ void TEIGIImgLoad(u_int *pack, CDataAlloc2<1> *arena) {
      }
  }
@@ -22576,7 +22585,7 @@ index d2017022..3399e138 100644
  }
  
 diff --git a/port/src/game/menu_misc.cpp b/port/src/game/menu_misc.cpp
-index 6f58f09f..4ca8e04f 100644
+index 6f58f09f..1521522f 100644
 --- a/port/src/game/menu_misc.cpp
 +++ b/port/src/game/menu_misc.cpp
 @@ -2,6 +2,7 @@
@@ -22597,7 +22606,16 @@ index 6f58f09f..4ca8e04f 100644
  
  namespace dc::game {
  
-@@ -106,6 +110,8 @@ u_long128 *MenuWeaponModelBuildBuffer;
+@@ -55,8 +59,6 @@ int MenuWeaponModelInfo[10][2];
+ 
+ namespace {
+ 
+-// Defined straight after MenuWeaponModelInfo: InitMenuWeaponModelReference clears twelve entries
+-// of that ten-entry table, and the two extra land here.
+ float MenuCharaOldAmbient[4];
+ 
+ constexpr std::array<int, 6> defWeapon = {ITEM_WEAPON_DAGGER_BROKEN, ITEM_WEAPON_WOODENSLINGSHOT_BROKEN, ITEM_WEAPON_MALLET_BROKEN, ITEM_WEAPON_GOLD_RING_BROKEN, ITEM_WEAPON_FIGHTING_STICK_BROKEN, ITEM_WEAPON_MACHINE_GUN_BROKEN};
+@@ -106,6 +108,8 @@ u_long128 *MenuWeaponModelBuildBuffer;
  int NowGetGameFlagForBtlMenu(int game_flag) {
      switch (game_flag) {
          case MENU_MOVE_DUNGEON_ESCAPE:
@@ -22606,7 +22624,7 @@ index 6f58f09f..4ca8e04f 100644
              break;
          case MENU_MOVE_WORLD_MAP_DIRECT:
          case MENU_MOVE_WORLD_MAP:
-@@ -189,6 +195,12 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
+@@ -189,6 +193,12 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
          return 0;
      }
  
@@ -22619,7 +22637,7 @@ index 6f58f09f..4ca8e04f 100644
      if ((data->kind_flags & ITEMKINDF_CONSUMABLE) && target == ITEM_USE_ON_CHARA) {
          if (item_no != ITEM_MELLOW_BANANA) {
              if ((data->use_flags & ITEMUSE_HEAL_HP) && 0 < now_hp && now_hp < max_hp) {
-@@ -275,7 +287,8 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
+@@ -275,7 +285,8 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
                      case ITEM_FRUIT_OF_EDEN: {
                          s16 limit[6] = {0xAA, 0x8C, 0xAA, 0x8C, 0xB4, 0xA0};
  
@@ -22629,7 +22647,7 @@ index 6f58f09f..4ca8e04f 100644
                              used = 0;
                          } else {
                              status->max_hp[chara] = max_hp + (&data->vol)[value_no];
-@@ -585,7 +598,7 @@ int StartReadWepMDS(u_long128 *buffer, int chara) {
+@@ -585,11 +596,13 @@ int StartReadWepMDS(u_long128 *buffer, int chara) {
      constexpr std::array<std::string_view, 6> names = {"kgetoan", "kgesyao", "kgegoro", "kgeruby", "kgeunga", "kgeozu"};
      int                                       size = 0;
  
@@ -22638,7 +22656,13 @@ index 6f58f09f..4ca8e04f 100644
      WeaponRead_Buf = MenuCalcBufAlignment(buffer);
      StartReadBG();
  
-@@ -597,7 +610,7 @@ int StartReadWepMDS(u_long128 *buffer, int chara) {
++    // A file that can't be read leaves its slot empty, and EnterWeaponModel then shows no weapon models: say which.
+     if (LoadFileBG(path.data(), buffer, &size) == 0) {
++        std::println("weapon menu: can't read {}", path);
+         return 0;
+     }
+ 
+@@ -597,9 +610,10 @@ int StartReadWepMDS(u_long128 *buffer, int chara) {
      buffer = MenuCalcBufAlignment(buffer);
      std::array<char, 64> lang_dir{};
      GetPathReadDifferntLang(lang_dir.data());
@@ -22646,8 +22670,11 @@ index 6f58f09f..4ca8e04f 100644
 +    std::string image = std::format("{}{}2.img", lang_dir.data(), names[CombatChara(chara)]);
  
      if (LoadFileBG(image.data(), buffer, &size) == 0) {
++        std::println("weapon menu: can't read {}", image);
          return 0;
-@@ -614,13 +627,69 @@ int StartReadWepMDS(u_long128 *buffer, int chara) {
+     }
+ 
+@@ -614,13 +628,69 @@ int StartReadWepMDS(u_long128 *buffer, int chara) {
  
  namespace {
  
@@ -22719,7 +22746,7 @@ index 6f58f09f..4ca8e04f 100644
  void InitMenuWeaponModelData() {
      memset(MenuWeaponModelData, 0, sizeof(MenuWeaponModelData));
      weapon_model_files.fill(nullptr);
-@@ -631,10 +700,18 @@ int *GetMenuWeaponModelInfo(int index) {
+@@ -631,10 +701,18 @@ int *GetMenuWeaponModelInfo(int index) {
  }
  
  std::pair<std::string, std::string> WeaponNames(int chara, int weapon_index) {
@@ -22738,7 +22765,19 @@ index 6f58f09f..4ca8e04f 100644
      std::string number = std::to_string(weapon_index);
      if (weapon_index < 10) {
          number.insert(0, "0");
-@@ -663,7 +740,10 @@ int GetMenuWeaponModelFrameNo(int index) {
+@@ -646,7 +724,10 @@ std::pair<std::string, std::string> WeaponNames(int chara, int weapon_index) {
+ } // namespace
+ 
+ void InitMenuWeaponModelReference() {
+-    for (int i = 0; i < 12; i++) {
++    // Retail cleared twelve entries of this ten-entry table, and the two extra landed on whatever the linker put
++    // after it. On the web that was MenuWeaponModelBuildBuffer, which became 0xffffffff, and the weapon menu built
++    // its models there: "memory access out of bounds" as it opened. Every reader stops at ten.
++    for (int i = 0; i < static_cast<int>(std::size(MenuWeaponModelInfo)); i++) {
+         int *entry = GetMenuWeaponModelInfo(i);
+         entry[0] = -1;
+         entry[1] = -1;
+@@ -663,13 +744,25 @@ int GetMenuWeaponModelFrameNo(int index) {
      return MenuWeaponModelInfo[index][0];
  }
  
@@ -22750,7 +22789,32 @@ index 6f58f09f..4ca8e04f 100644
      if (chara < 0 || chara >= 6) {
          return 1;
      }
-@@ -716,6 +796,8 @@ int EnterWeaponModel(int chara, int texture_block, [[maybe_unused]] int weapon_s
+     BG_READ_INFO                             *pack = GetReadBGFile(0);
+     BG_READ_INFO                             *shadow = GetReadBGFile(1);
+     BG_READ_INFO                             *effect = GetReadBGFile(2);
++    // StartReadWepMDS read these; a file it couldn't read leaves its slot empty. Without the weapon pack there are
++    // no models to build, and the menu draws the weapons without them. Retail went on regardless: a crash on the
++    // PC, and on the web, where reading through a null pointer doesn't trap, a build into a junk address.
++    if (pack == nullptr) {
++        std::println("weapon menu: the weapon models weren't read; showing the weapons without them");
++        InitMenuWeaponModelReference();
++        MenuWeaponModelBuildBuffer = nullptr;
++        return 1;
++    }
+     const int                                 weapon_max = std::clamp<int>(MenuCharaWeaponMax[chara], 0, static_cast<int>(std::size(weapon_model_files)));
+     constexpr std::array<std::string_view, 6> names = {"c01", "c04", "c06", "c05", "c10", "c18"};
+     std::vector<int>                          order(static_cast<std::size_t>(weapon_max));
+@@ -684,7 +777,8 @@ int EnterWeaponModel(int chara, int texture_block, [[maybe_unused]] int weapon_s
+             texture[2] = {.name = nullptr, .block_no = 0, .mipmap = 0};
+             texture[0].block_no = MenuShadowReadBlock;
+             texture[1].block_no = MenuShadowReadBlock;
+-            texture[1].name = reinterpret_cast<char *>(shadow->buffer);
++            // Without the shadow image the list ends at the frame.
++            texture[1].name = shadow != nullptr ? reinterpret_cast<char *>(shadow->buffer) : nullptr;
+             TexManager.DeleteTextureBlock(MenuShadowReadBlock);
+             TexManager.CleanUpTextureList();
+             TexManager.LoadTextureBlockEX(-1, texture.get());
+@@ -716,17 +810,21 @@ int EnterWeaponModel(int chara, int texture_block, [[maybe_unused]] int weapon_s
                  }
              }
  
@@ -22759,7 +22823,13 @@ index 6f58f09f..4ca8e04f 100644
              u_long128 *build = nullptr;
  
              if (effect != nullptr) {
-@@ -726,7 +808,7 @@ int EnterWeaponModel(int chara, int texture_block, [[maybe_unused]] int weapon_s
+                 SetWepEffectMenuReadBuf(effect->buffer);
+                 build = effect->buffer + 0x2D01;
+-            } else {
++            } else if (shadow != nullptr) {
+                 build = shadow->buffer + (shadow->size >> 4) + 1;
++            } else {
++                build = MenuCalcBufAlignment(pack->buffer + (pack->size >> 4) + 1);
              }
  
              MenuWeaponModelBuildBuffer = build;
@@ -22768,7 +22838,7 @@ index 6f58f09f..4ca8e04f 100644
              break;
          }
          default:
-@@ -737,7 +819,7 @@ int EnterWeaponModel(int chara, int texture_block, [[maybe_unused]] int weapon_s
+@@ -737,7 +835,7 @@ int EnterWeaponModel(int chara, int texture_block, [[maybe_unused]] int weapon_s
  }
  
  void WeaponModelBuildFunc(int chara, int texture_block) {
@@ -22777,7 +22847,18 @@ index 6f58f09f..4ca8e04f 100644
          return;
      }
      std::println("weapon model build func start");
-@@ -826,7 +908,7 @@ void WeaponModelBuildFunc(int chara, int texture_block) {
+@@ -750,6 +848,10 @@ void WeaponModelBuildFunc(int chara, int texture_block) {
+     TexManager.CleanUpTextureList();
+     TexManager.LoadTextureBlockEX(-1, textures.data());
+     printf("modelbuildbuffer = %p\n", MenuWeaponModelBuildBuffer);
++    if (MenuWeaponModelBuildBuffer == nullptr) {
++        // EnterWeaponModel had no models to build (the weapon pack wasn't read).
++        return;
++    }
+     MenuExCashBuffer.base = reinterpret_cast<u_char *>(MenuWeaponModelBuildBuffer);
+     MenuExCashBuffer.limit = 0xEC00;
+     MenuExCashBuffer.used = 0;
+@@ -826,7 +928,7 @@ void WeaponModelBuildFunc(int chara, int texture_block) {
  }
  
  int DngWeaponEquipModelBuild(int chara, int texture_block, [[maybe_unused]] u_long128 *read_buffer) {
@@ -22786,7 +22867,7 @@ index 6f58f09f..4ca8e04f 100644
          return 0;
      }
      TexManager.DeleteTextureBlock(texture_block);
-@@ -986,6 +1068,29 @@ int StartLoadCharaMDS(u_long128 *buffer, int chara, int read_no) {
+@@ -986,6 +1088,29 @@ int StartLoadCharaMDS(u_long128 *buffer, int chara, int read_no) {
      return 0;
  }
  
@@ -22816,7 +22897,7 @@ index 6f58f09f..4ca8e04f 100644
  void MenuCharaMDSBuild2(int chara, int texture_block) {
      int size = 0;
  
-@@ -998,17 +1103,22 @@ void MenuCharaMDSBuild2(int chara, int texture_block) {
+@@ -998,17 +1123,22 @@ void MenuCharaMDSBuild2(int chara, int texture_block) {
      textures[0].block_no = texture_block;
      textures[1].block_no = texture_block;
      BG_READ_INFO *file = GetReadBGFile(CharaFileBGReadNo);
@@ -22842,7 +22923,7 @@ index 6f58f09f..4ca8e04f 100644
      MenuExCashBuffer.used = 0;
      MenuCharaFrame.LoadPackData(pack, config_name.data(), &MenuExCashBuffer, &MenuExCashBuffer, nullptr);
      CFrameAttr attr;
-@@ -1020,25 +1130,9 @@ void MenuCharaMDSBuild2(int chara, int texture_block) {
+@@ -1020,25 +1150,9 @@ void MenuCharaMDSBuild2(int chara, int texture_block) {
          MenuCharaFrame.frame->SetAttr(attr, 1, 4);
      }
  
@@ -22870,7 +22951,7 @@ index 6f58f09f..4ca8e04f 100644
      MenuCharaFrame.Step();
  
      if (chara == 0) {
-@@ -1050,6 +1144,10 @@ void MenuCharaMDSBuild2(int chara, int texture_block) {
+@@ -1050,6 +1164,10 @@ void MenuCharaMDSBuild2(int chara, int texture_block) {
  namespace {
  
  std::string GetCharaChangeReadCharaFilePath(int chara_no) {
@@ -22881,7 +22962,7 @@ index 6f58f09f..4ca8e04f 100644
      return std::format("{}{}{}", readFilePath, charaFile[chara_no], ".chr");
  }
  
-@@ -1086,7 +1184,7 @@ int CharaChangeInitToGL(u_long128 *buffer, int chara) {
+@@ -1086,7 +1204,7 @@ int CharaChangeInitToGL(u_long128 *buffer, int chara) {
      menud2wepReadBuf = menud1wepReadBuf + (size >> 4) + 1;
      menud2wepReadBuf = MenuCalcBufAlignment(menud2wepReadBuf);
      WEAPON_HAVE *equipped = &UserStatus->chara_weapons[chara][UserStatus->equipped_weapon_slot[chara]];
@@ -22890,7 +22971,7 @@ index 6f58f09f..4ca8e04f 100644
  
      if (kind < 0) {
          kind = 0;
-@@ -1125,7 +1223,7 @@ void CharaChangeInitToGL2(int load_icon) {
+@@ -1125,7 +1243,7 @@ void CharaChangeInitToGL2(int load_icon) {
      MenuVoiceLoadPtr = MenuWepIconCharaChangePtr;
      MenuVoiceLoadPtr = MenuCalcBufAlignment(MenuVoiceLoadPtr);
  
@@ -22899,7 +22980,7 @@ index 6f58f09f..4ca8e04f 100644
          printf("*** voice read err \n");
      }
  }
-@@ -1449,7 +1547,8 @@ int CheckItemThrow(int *items, int *values) {
+@@ -1449,7 +1567,8 @@ int CheckItemThrow(int *items, int *values) {
          }
      }
  
@@ -22909,7 +22990,7 @@ index 6f58f09f..4ca8e04f 100644
          int item_no = weapons[10].item_no;
  
          if (item_no >= ITEM_WEAPON_START) {
-@@ -1764,7 +1863,7 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
+@@ -1764,7 +1883,7 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
                      int chara = UserStatus->cur_chara;
                      EquipWeaponFrame(&DefaultWeapon, chara, CharaMainHandViewFlag);
  
@@ -69195,10 +69276,10 @@ index 00000000..251f45c0
 +}
 diff --git a/port/src/tests/moonmod_item_registration_test.cpp b/port/src/tests/moonmod_item_registration_test.cpp
 new file mode 100644
-index 00000000..d3d0d74f
+index 00000000..d44a37a0
 --- /dev/null
 +++ b/port/src/tests/moonmod_item_registration_test.cpp
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,334 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -69206,6 +69287,7 @@ index 00000000..d3d0d74f
 +#include <filesystem>
 +#include <fstream>
 +#include <memory>
++#include <random>
 +#include <string>
 +#include <string_view>
 +#include <vector>
@@ -69225,10 +69307,13 @@ index 00000000..d3d0d74f
 +
 +namespace fs = std::filesystem;
 +
++// The clock alone named two tests' roots alike when ctest started them at once on Windows, and each found the
++// other's mod; a random number keeps them apart.
 +struct TempRoot {
 +    fs::path path = fs::temp_directory_path() /
 +                    ("moonmod-chronicle-item-e2e-" +
-+                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
++                     std::to_string(std::random_device{}()));
 +    ~TempRoot() {
 +        std::error_code ignored;
 +        fs::remove_all(path, ignored);
