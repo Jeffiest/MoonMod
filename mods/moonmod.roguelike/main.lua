@@ -703,7 +703,9 @@ end
 local function hud_state()
   if not (run and run.phase == "active" and floor) or run.suspended then return nil end
   -- Digits: the game font's capital I reads as a lower-case l.
-  local s = {label = floor.rest and "Rest" or (run.slot < WARDEN_SLOT and (run.pos .. "-" .. run.slot) or nil), icons = {}}
+  local s = {label = floor.rest and "Rest" or (floor.lair and run.whole) and "Lair" or (run.slot < WARDEN_SLOT and (run.pos .. "-" .. run.slot) or
+             -- a Warden floor keeps the game's own Boss plate; a hall on the run's map is no boss floor of the game's
+             (run.whole and "Boss" or nil)), icons = {}}
   if floor.cursed then
     s.icons[#s.icons + 1] = {id = "curse", icon = "curse"}
     s.icons[#s.icons + 1] = {id = "cache", image = HUD_CACHE_IMAGE}
@@ -1301,9 +1303,10 @@ do
     meta.start_legend[c] = meta.start_legend[c] ~= legend.key and legend.key or nil
   end
 
-  -- A felled Warden leaves a weapon, Rare or better, for one of the drafted characters.
-  local RANGES = {toan = {258, 272}, xiao = {300, 311}, goro = {315, 325}, ruby = {332, 340}, ungaga = {348, 357}, osmond = {364, 368},
-                  opar = {258, 272}}
+  -- A felled Warden leaves a weapon, Rare or better, for one of the drafted characters (each range past the first
+  -- weapon's "[broken]" form; Osmond's Launchers have no durability of their own, so his guns only).
+  local RANGES = {toan = {259, 272}, xiao = {301, 311}, goro = {316, 325}, ruby = {333, 340}, ungaga = {349, 357}, osmond = {365, 366},
+                  opar = {259, 272}}
   function LOOT.warden_drop()
     if not (run and LOOT.found) then return end
     local c = pick(run.drafted)
@@ -2234,9 +2237,15 @@ start_run = function()
   run.maze = eternal("maze") > 0
   WARDEN_SLOT = run.maze and 5 or 4
   set_redirects(run.maze)
+  -- One map per biome: its floors before the Warden are the zones of one map (the Confluence's dungeons, one a floor),
+  -- which takes the place of shuffled floors.
+  run.joined = setting("confluence", true) and setting("one_map", true) or nil
+  -- The whole run on one map: every biome's floors, its Warden's hall, the Rest stops and the Lair are zones of 1-1's
+  -- map, in order, a Warden's way on shut until it falls.
+  run.whole = run.joined and setting("one_map_run", true) or nil
   -- Shuffled floors: after 1-1 (always the first biome's own dungeon) each floor before a Warden is in a dungeon
   -- drawn at random.
-  if setting("floor_shuffle", true) and #available > 1 then
+  if setting("floor_shuffle", true) and #available > 1 and not run.joined then
     run.plan = {}
     for p = 1, #biomes do
       run.plan[p] = {}
@@ -2497,6 +2506,8 @@ local function warden_cleared()
   floor.warden_done = true
   try(game.render.bar_remove, {id = "warden"})
   if not floor.back then try(game.dungeons.warden_room_release) end
+  -- the whole run on one map: the hall's doors open, then the gate on to the next zone (run.map_at is the zone after it)
+  local open_on = run.whole and function() try(game.dungeons.room_release); try(game.dungeons.zone_gate_open, {zone = run.map_at or 1}) end
   if floor.back then
     earn_shards(eternal("tithe") > 0 and 8 or 5)
     give_tiles(2, "Vault Warden felled")
@@ -2534,7 +2545,7 @@ local function warden_cleared()
     -- The finale: the floor below the last Warden is the Genie's Lair.
     run.lair = "pending"
     toast("The last Warden falls, and the ground shakes. The Genie's Lair awaits!")
-    queue_transition(lair.id, 300, "genie's lair")
+    if open_on then open_on() else queue_transition(lair.id, 300, "genie's lair") end
   elseif last then
     run.phase = "victory"
     toast("The last Warden falls. The Gauntlet is conquered!")
@@ -2551,7 +2562,8 @@ local function warden_cleared()
     end
     toast("Warden felled! " .. (rest and "A rest before " or "On to ") .. next_biome.name .. "." ..
         (run.heirloom_charges > 0 and " Heirloom charge ready." or ""))
-    queue_transition(rest and rest.id or route(planned(run.pos + 1, 1)).floors[1].id, 300, rest and "rest floor" or "next biome")
+    if open_on then open_on()
+    else queue_transition(rest and rest.id or route(planned(run.pos + 1, 1)).floors[1].id, 300, rest and "rest floor" or "next biome") end
   end
   save_run()
   refresh()
@@ -2566,8 +2578,14 @@ local function enter_floor(world)
   -- floor uncleared, so a run keeps 12 awake.
   try(game.entities.set_active_limit, {active = 12})
   local hit = floor_at(world.dungeon_id, world.floor_id)
+  -- One map per biome: floor I's map holds the floors before the Warden. Walking into a zone (world.joined) is the
+  -- next floor; coming back to the map (from a Vault, or its back side) is the floor the run has reached on it.
+  if hit and run.joined and not world.joined and hit.slot == 1 and run.slot > 1 and run.slot < WARDEN_SLOT and
+      run.biomes[run.pos] == hit.biome then
+    hit = {biome = hit.biome, slot = run.slot}
+  end
   -- The native exit gate led on in the same dungeon while the plan has the next floor elsewhere: send the run there.
-  if hit and run.phase == "active" and not run.shuffle_to and not world.back_floor and floor and floor.dungeon == hit.biome and
+  if hit and run.phase == "active" and not run.shuffle_to and not world.back_floor and not world.joined and floor and floor.dungeon == hit.biome and
       hit.slot == run.slot + 1 then
     local want = planned(run.pos, hit.slot)
     local r = want and route(want)
@@ -2639,6 +2657,7 @@ local function enter_floor(world)
   floor = {token = world.token, biome = pos, dungeon = hit.biome, slot = hit.slot, back = world.back_floor == true, scaled = {}, seen = 0,
            lair = hit.lair and world.back_floor ~= true, rest = hit.rest == true, cursed_path = path,
            entered = frame, swept = false, atla = nil,
+           toughest = world.joined and prev and prev.toughest or nil, -- on a run's map the hall grows its Warden from the floors before
            cursed = cursing or (not advanced and prev and prev.cursed) or false,
            curses = cursing and roll_curses() or (not advanced and prev and prev.curses) or {}}
   if advanced then run.next_cursed = false end
@@ -2649,8 +2668,9 @@ local function enter_floor(world)
   local b = BIOMES[hit.biome] or biome_def(pos)
   local intro = hit.lair and "The Genie's Lair. Clear it; the Dark Genie waits behind the last door." or
       hit.rest and (b.name .. " Rest: a spring, Gaffer, and two ways on.") or
-      hit.slot == WARDEN_SLOT and (b.name .. " Warden. Clear the floor to open the Warden's door.") or
-      string.format("%s %d-%d.", b.name, pos, hit.slot)
+      hit.slot == WARDEN_SLOT and (b.name .. (run.whole and " Warden. The way on opens when it falls." or
+                                             " Warden. Clear the floor to open the Warden's door.")) or
+      string.format("%s %d-%d.", world.label or b.name, pos, hit.slot)
 
   if floor.back then intro = intro .. " A Vault: brutal monsters, a Warden of its own, rich rewards." end
   if floor.cursed then
@@ -3182,7 +3202,8 @@ do
     local b = biome_def(run.pos)
     if floor.warden_boss == nil then
       local boss = BOSSES[b and b.key or ""]
-      floor.warden_boss = (boss and math.random(100) <= setting("boss_wardens", 50)) and b.key or false
+      -- a hall on the run's map with no monster to grow a Warden from gets the dungeon's own boss
+      floor.warden_boss = (boss and (math.random(100) <= setting("boss_wardens", 50) or (run.whole and not floor.toughest))) and b.key or false
     end
     local boss = floor.warden_boss and BOSSES[floor.warden_boss]
     local toughest = floor.toughest
@@ -3806,7 +3827,7 @@ moonmod.on("game.tick", function(e)
   if floor.rest then REST.tick(p) end
   if eternal("partner") > 0 and not floor.gaffer and frame - floor.entered > 90 then gaffer_arrive() end
   if frame % 60 == 0 then poll_atla() end
-  if frame - floor.entered > 180 and not floor.swept then
+  if frame - floor.entered > 180 and not floor.swept and not run.whole then
     local combat = try(game.combat.get)
     local alive = combat and tonumber(combat.remaining)
     if alive then floor.seen = math.max(floor.seen, alive) end
@@ -4009,6 +4030,14 @@ end
 
 function REST.tick(p)
   if frame - floor.entered < 60 then return end
+  if not floor.rest_ready and run.whole then
+    -- a Rest stop on the run's map: its zone's spring, and no gate key to hand out (its way on stands open)
+    local z = try(game.dungeons.zones_get)
+    for _, s in ipairs(z and z.shrines or {}) do
+      if s.zone == z.current then floor.spring = {x = 160 * s.x, z = 160 * (s.y + 1)} end
+    end
+    floor.rest_ready, floor.rest_key_held = true, true
+  end
   if not floor.rest_ready then
     -- the floor is built a few frames after it is reported: wait for its spring
     local room = try(game.dungeons.rest_room_get)
@@ -4160,6 +4189,192 @@ try(game.scripts.register_function, {id = "run_state", description = "Moon Gaunt
   return {active = run ~= nil and run.phase == "active" and not run.suspended, biome = run and run.pos or 0, floor = run and run.slot or 0,
           depth = run and run.depth or 0, cursed = floor and floor.cursed or false}
 end)
+
+-- The Confluence (VIGIL_PLAN.md §14, X3): a floor before a Warden runs through several dungeons, one zone each,
+-- joined by locked gates. It starts in the floor's own dungeon; past each gate the next dungeon takes over (the run's
+-- order, then the Gallery of Time), with its own rooms, corridors, spring and monsters (dungeons.set_zones
+-- source_dungeon), each zone a step lower than the last. A zone's monsters are that dungeon's at the floor's depth (its
+-- biome's source floor for the slot), and a monster in each zone carries the next gate's key. (A function of its
+-- own: the main chunk is at Lua's 200 locals.)
+;(function()
+  local GALLERY = {dungeon = 5, name = "Gallery of Time", sources = {2, 5, 10, 8}}
+  local asked, names = false, {}
+  local function order()
+    local list = {}
+    for _, b in ipairs(BIOMES) do list[#list + 1] = b end
+    list[#list + 1] = GALLERY
+    return list
+  end
+  local joined = false -- the map asked for is a whole biome's floors (run.joined)
+  local function release()
+    if not asked then return end
+    try(game.dungeons.set_zones, {})
+    asked, names, joined = false, {}, false
+  end
+  local plan = nil -- the run's map (run.whole): each zone's {kind = "floor" | "warden" | "rest" | "lair", pos, slot, label}
+  -- The whole run as one map: for each biome its floors (its own dungeon, then the Confluence's), its Warden's hall
+  -- (an arena of its own dungeon, quiet but for the Warden, its way on smoke until it falls) and a Rest stop of the next
+  -- biome's dungeon (a spring that heals, its way on open); the Lair last, in the map's own dungeon. Nil when it would
+  -- not fit (Endless Maze's five-floor biomes): the run is then one map per biome.
+  local function whole_request()
+    local list = order()
+    local own = BIOMES[run.biomes[1]].dungeon
+    local zones, meta_, smoke, open = {}, {}, {}, {}
+    local function add(zone, info)
+      if zone.source_dungeon == own then zone.source_dungeon = nil end
+      zones[#zones + 1] = zone
+      meta_[#zones] = info
+    end
+    for pos, index in ipairs(run.biomes) do
+      local b = BIOMES[index]
+      local at = 1
+      for i, d in ipairs(list) do if d.dungeon == b.dungeon then at = i end end
+      local others = {}
+      for k = 1, #list - 1 do others[k] = list[(at - 1 + k) % #list + 1] end
+      for slot = 1, WARDEN_SLOT - 1 do
+        local d = slot == 1 and b or others[(slot - 2 + pos - 1) % #others + 1]
+        local zone = {rooms = 4, source_dungeon = d.dungeon, source_floor = d.sources[math.min(slot, #d.sources)]}
+        if #zones == 0 then zone = {rooms = 4} end -- 1-1 is the map's own floor
+        add(zone, {kind = "floor", pos = pos, slot = slot, label = d.name})
+      end
+      add({rooms = 2, arena = true, quiet = true, source_dungeon = b.dungeon}, {kind = "warden", pos = pos, slot = WARDEN_SLOT, label = b.name})
+      smoke[#smoke + 1] = #zones -- the gate out of the hall (into the next zone, numbered from 0)
+      if pos < #run.biomes and setting("rest_rooms", true) then
+        local nb = BIOMES[run.biomes[pos + 1]]
+        add({rooms = 2, quiet = true, heal = true, source_dungeon = nb.dungeon}, {kind = "rest", pos = pos + 1, label = nb.name})
+        open[#open + 1] = #zones
+      elseif pos == #run.biomes and run.finale then
+        add({rooms = 2, arena = true, quiet = true}, {kind = "lair", pos = pos, label = "the Genie's Lair"})
+      end
+    end
+    -- the last zone's gate out of a hall leads nowhere: no smoke past the end
+    if smoke[#smoke] and smoke[#smoke] >= #zones then smoke[#smoke] = nil end
+    if #zones > 25 then return nil end
+    return {zones = zones, shrines = true, shrine_heal = false, descent = 20, vaults = false, smoke = smoke,
+            open = #open > 0 and open or nil}, meta_
+  end
+  -- The zones of a floor: nil for a floor that stays one dungeon (the Rest floor, a Warden's, the Lair, a back floor).
+  local function zones_for(hit, back_floor)
+    if not (run and hit and not back_floor and not hit.rest and not hit.lair and hit.slot >= 1 and hit.slot < WARDEN_SLOT) then return nil end
+    if not setting("confluence", true) then return nil end
+    if run.whole and hit.slot == 1 and run.pos == 1 and hit.biome == run.biomes[1] then
+      local request, meta_ = whole_request()
+      if request then
+        plan = meta_
+        local labels = {}
+        for z, info in ipairs(meta_) do labels[z] = info.label end
+        return request, labels, true
+      end
+      run.whole = nil -- too many zones: one map per biome
+    end
+    local list = order()
+    local own = BIOMES[hit.biome].dungeon
+    local at = 1
+    for i, d in ipairs(list) do if d.dungeon == own then at = i end end
+    -- the dungeons after the floor's own, in order, starting further along on later floors
+    local others = {}
+    for k = 1, #list - 1 do others[k] = list[(at - 1 + k) % #list + 1] end
+    -- one map per biome: floor I's map runs on through a zone for each floor up to the Warden's, whose floor its exit
+    -- gate leads to; on the way back to it the gates the run has passed stand open
+    if run.joined and hit.slot == 1 then
+      local zones, labels = {{rooms = 5}}, {BIOMES[hit.biome].name}
+      for slot = 2, WARDEN_SLOT - 1 do
+        local d = others[(slot - 2) % #others + 1]
+        zones[slot] = {rooms = 5, source_dungeon = d.dungeon, source_floor = d.sources[math.min(slot, #d.sources)]}
+        labels[slot] = d.name
+      end
+      local request = {zones = zones, shrines = true, shrine_heal = false, descent = 40}
+      local r = route(hit.biome)
+      request.exit_floor = r and r.floors[WARDEN_SLOT] and r.floors[WARDEN_SLOT].native or nil
+      if run.slot > 1 and run.slot < WARDEN_SLOT and run.biomes[run.pos] == hit.biome then
+        request.open = {}
+        for z = 1, run.slot - 1 do request.open[z] = z end
+      end
+      return request, labels, true
+    end
+    local count = clamp(math.floor(setting("confluence_zones", 3)), 2, 4)
+    local zones, labels = {{rooms = 4}}, {BIOMES[hit.biome].name}
+    for z = 1, count - 1 do
+      local d = others[((hit.slot - 1) + (z - 1)) % #others + 1]
+      zones[#zones + 1] = {rooms = 4, source_dungeon = d.dungeon, source_floor = d.sources[math.min(hit.slot, #d.sources)]}
+      labels[#labels + 1] = d.name
+    end
+    return {zones = zones, shrines = true, shrine_heal = false, descent = 40}, labels
+  end
+  moonmod.on("game.dungeon.generating", function(e)
+    if type(e) ~= "table" then return end
+    -- the floor's back side is built just after it: one dungeon, while the front keeps the zones it was built with
+    if e.back_floor then
+      if asked then try(game.dungeons.set_zones, {}) end
+      return
+    end
+    local request, labels, whole = zones_for(floor_at(e.dungeon_id, e.floor_id), e.back_floor)
+    if not request then release() return end
+    local r = call(game.dungeons.set_zones, request)
+    asked = r ~= nil
+    names = asked and labels or {}
+    joined = asked and whole == true
+    if asked and plan and run.whole and run.pos == 1 and run.slot <= 1 then run.map_at = 1 end
+    if not (asked and run.whole) then plan = nil end
+    -- shortcut doors would step past the locked gates
+    if asked then try(game.dungeons.set_shortcuts, {count = 0}) end
+  end)
+  -- Walking through a gate: the dungeon you are in now.
+  moonmod.on("game.dungeon.zone_entered", function(e)
+    if not (asked and type(e) == "table" and math.type(e.zone) == "integer" and e.previous ~= nil and e.previous >= 0) then return end
+    local name = names[e.zone + 1]
+    -- the whole run on one map: each zone further on is the next stop of the run, gate by gate
+    if joined and plan and run and run.whole and floor then
+      while (run.map_at or 1) < e.zone + 1 do
+        local info = plan[(run.map_at or 1) + 1]
+        run.map_at = (run.map_at or 1) + 1
+        if not info then break end
+        local index = run.biomes[info.pos]
+        local r = route(index)
+        local f = info.kind == "rest" and r.rest or info.kind == "lair" and r.lair or r.floors[info.slot]
+        if f then
+          enter_floor({dungeon_id = BIOMES[index].dungeon, floor_id = f.native, token = floor.token, joined = true,
+                       label = info.kind == "floor" and info.label or nil})
+        end
+      end
+      save_run()
+      return
+    end
+    -- one map per biome: a zone further on is the next floor (each gate in turn)
+    if joined and run and floor and floor.slot >= 1 and e.zone + 1 > run.slot then
+      local r = route(floor.dungeon)
+      for slot = run.slot + 1, math.min(e.zone + 1, WARDEN_SLOT - 1) do
+        local f = r and r.floors[slot]
+        if f then enter_floor({dungeon_id = BIOMES[floor.dungeon].dungeon, floor_id = f.native, token = floor.token, joined = true, label = names[slot]}) end
+      end
+      return
+    end
+    if name then toast(string.format("The Confluence: %s.", name)) end
+  end)
+  -- A Warden's hall on the run's map: walking into it shuts its doors and the Warden comes out (the Lair: the Genie);
+  -- with no doors to shut, it comes out once the player has been in the hall a while.
+  moonmod.on("game.tick", function()
+    if not (plan and run and run.whole and floor and (floor.slot == WARDEN_SLOT or floor.lair) and not floor.rest) then return end
+    if floor.warden or floor.warden_done or floor.warden_at then return end
+    floor.hall_frames = (floor.hall_frames or 0) + 1
+    if floor.hall_frames % 10 ~= 0 then return end
+    local p = try(game.player.get)
+    if not (p and p.position) then return end
+    local r = call(game.dungeons.room_seal, {})
+    local room = r and r.sealed and r.room
+    if room then
+      floor.warden_at = {x = 160 * (room.x + (room.w - 1) / 2), y = p.position.y or 0, z = 160 * (room.y + (room.h - 1) / 2)}
+    elseif floor.hall_frames > 360 then
+      floor.warden_at = {x = p.position.x, y = p.position.y or 0, z = p.position.z + 60}
+    end
+  end)
+  moonmod.on("game.dungeon.smoke_touched", function()
+    if plan and run and run.whole and floor and floor.slot == WARDEN_SLOT and not floor.warden_done then
+      toast("The way on is sealed until the Warden falls.")
+    end
+  end)
+  moonmod.on("game.session.ended", function() release(); plan = nil end)
+end)()
 
 -- Start-up: a run still in storage was cut short when the game closed mid-run: it counts as a retreat.
 if run then

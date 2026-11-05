@@ -367,8 +367,9 @@ local function new_game(opts)
       feel_clear = function() S.feel = nil return {cleared = true} end,
       register_formula = function(a)
         for k in pairs(a) do
-          assert(k == "id" or k == "operation" or k == "value" or k == "native_model_id", "register_formula field " .. k)
+          assert(k == "id" or k == "operation" or k == "value" or k == "native_model_id" or k == "charged", "register_formula field " .. k)
         end
+        assert(a.charged == nil or type(a.charged) == "boolean", "charged is a boolean")
         assert(a.operation == "multiply" and type(a.value) == "number" and a.value >= 0 and a.value <= 100, "multiply 0..100")
         assert(a.native_model_id == nil or math.type(a.native_model_id) == "integer", "native_model_id is an integer")
         S.formulas = S.formulas or {}
@@ -461,7 +462,7 @@ local function new_game(opts)
         end
         assert(({hat = 1, tunic = 1, gloves = 1, boots = 1, pouch = 1})[a.kind], "gear kind " .. tostring(a.kind))
         assert(type(a.name) == "string" and #a.name >= 1 and #a.name <= 24, "gear name is 1-24 bytes (a row value)")
-        assert(math.type(a.rarity) == "integer" and a.rarity >= 0 and a.rarity <= 3, "rarity 0..3")
+        assert(math.type(a.rarity) == "integer" and a.rarity >= 0 and a.rarity <= 4, "rarity 0..4")
         assert(math.type(a.value) == "integer" and a.value >= 0 and a.value <= 65535, "value")
         local caps = {stamina = 120, lightness = 50, defence = 99, run_cost = 75, poise = 8, bag = 50}
         for k, v in pairs(a.effects or {}) do
@@ -2321,14 +2322,14 @@ do
   check(swift_red, "and is the run's red")
   local tunics_poise, poise_only_tunics = true, true
   for _, p in ipairs(S.gear) do
-    if p.kind == "tunic" and not (p.effects.poise and p.effects.poise >= 1 and p.effects.poise <= 4) then tunics_poise = false end
+    if p.kind == "tunic" and not (p.effects.poise and p.effects.poise >= 1 and p.effects.poise <= 5) then tunics_poise = false end
     if p.kind ~= "tunic" and p.effects.poise then poise_only_tunics = false end
   end
-  check(tunics_poise, "every tunic carries poise, 1 to 4 by rarity")
+  check(tunics_poise, "every tunic carries poise, 1 to 5 by rarity")
   check(poise_only_tunics, "and only a tunic does")
   local pouches_bag, bag_only_pouches = true, true
   for _, p in ipairs(S.gear) do
-    if p.kind == "pouch" and not (p.effects.bag and p.effects.bag % 5 == 0 and p.effects.bag >= 5 and p.effects.bag <= 20) then pouches_bag = false end
+    if p.kind == "pouch" and not (p.effects.bag and p.effects.bag % 5 == 0 and p.effects.bag >= 5 and p.effects.bag <= 25) then pouches_bag = false end
     if p.kind ~= "pouch" and p.effects.bag then bag_only_pouches = false end
   end
   check(pouches_bag, "every pouch grows the item bag, 5 slots a tier")
@@ -3416,6 +3417,205 @@ do
     if n.entity == "r3" and n.native == "SET_SHOT2" and n.args[1] == "dcol2" then two = true end
   end
   check(one and two, "a caster alternates its two spells")
+end
+
+print("44. Weapon rarity, from the Gauntlet")
+do
+  -- The party's weapons: id -> instances; give puts a weapon in the next free slot.
+  local function armory(S)
+    local owned = {["chronicle:weapon:258"] = {{character = "toan", slot = 0, level = 1, equipped = true,
+                                                stats = {attack = 20, endurance = 10, speed = 30, magic = 4}}}}
+    local next_slot = {toan = 1, xiao = 0}
+    S.stats, S.loot_styles = {}, {}
+    S.game.weapons = {
+      get = function(id)
+        id = type(id) == "table" and id.id or id
+        return {id = id, name = "Baselard", stats = {attack = 30, endurance = 12, speed = 30, magic = 5}, instances = copy(owned[id] or {})}
+      end,
+      give = function(a)
+        local c = a.character or "toan"
+        local slot = next_slot[c] or 0
+        next_slot[c] = slot + 1
+        owned[a.id] = owned[a.id] or {}
+        table.insert(owned[a.id], {character = c, slot = slot, level = 1, stats = {attack = 40, endurance = 20, speed = 30, magic = 10}})
+        return {id = a.id, slot = slot}
+      end,
+      remove = function(a)
+        for i, inst in ipairs(owned[a.id] or {}) do
+          if inst.character == a.character and inst.slot == a.slot then table.remove(owned[a.id], i) return {} end
+        end
+        return nil, {code = "not_found", message = "no such weapon"}
+      end,
+      stats_set = function(a) S.stats[#S.stats + 1] = copy(a) return {} end,
+      style_set = function(a)
+        for k in pairs(a) do
+          assert(({character = 1, slot = 1, name = 1, color = 1, glow = 1, badge = 1, details = 1})[k], "style_set field " .. k)
+        end
+        assert(#(a.details or {}) <= 5 and #(a.badge or {}) <= 3, "up to 5 details and 3 badge lines")
+        for _, line in ipairs(a.details or {}) do
+          local text = type(line) == "table" and line.text or line
+          assert(type(text) == "string" and #text <= 64, "a detail line is up to 64 bytes")
+        end
+        assert(a.name == nil or #a.name <= 40, "a name is up to 40 bytes")
+        S.loot_styles[a.character .. ":" .. a.slot] = copy(a)
+        return {}
+      end,
+      style_clear = function() S.loot_styles = {}; return {} end,
+    }
+    S.owned = owned
+  end
+
+  local S = new_game({slot = {slot_id = 2, slot_generation = 1}, settings = {loot_tier = 4}}).load()
+  armory(S)
+  S.emit("game.world.location_changed", {context = "dungeon", dungeon_id = 1, floor_id = 3})
+  S.game.weapons.give({id = "chronicle:weapon:261", character = "toan"})
+  S.emit("game.item_picked_up", {kind = "weapon", id = "chronicle:weapon:261", character = "toan", slot = 1})
+  local r = S.save_data["floors:2:1"] and S.save_data["floors:2:1"].loot and S.save_data["floors:2:1"].loot["toan:1"]
+  check(r and r.tier == 4 and #r.touches == 2 and r.id == "chronicle:weapon:261", "a found weapon rolls a rarity, kept with the save")
+  local grown = S.stats[#S.stats]
+  check(grown and grown.slot == 1 and grown.attack == 60 and grown.magic == 15, "its stats grow once by the tier (Epic x1.5)")
+  local card = S.loot_styles["toan:1"]
+  check(card and card.name == r.name and card.badge[1].text == "EPIC" and card.color.r == 205 and card.glow,
+    "its card shows the tier in the Gauntlet's colour, and its swing glows")
+  check(card and card.details[1].text:find(":") and #card.details >= 2, "and its touches")
+  check(#r.name <= 22 and r.name ~= "Baselard", "an Epic gets a name of its own: " .. tostring(r.name))
+  S.emit("game.item_picked_up", {kind = "weapon", id = "chronicle:weapon:261", character = "toan", slot = 1})
+  check(#S.stats == 1, "a weapon is rolled once")
+
+  -- The Dagger has an art: the art shares the card with its rarity.
+  S.game.weapons.give({id = "chronicle:weapon:258", character = "toan"})
+  S.owned["chronicle:weapon:258"][2].slot = 2
+  S.emit("game.item_picked_up", {kind = "weapon", id = "chronicle:weapon:258", character = "toan", slot = 2})
+  local dagger = S.loot_styles["toan:2"]
+  local art_line
+  for _, d in ipairs(dagger and dagger.details or {}) do if (d.text or d):find("^Art: Piercing Rush") then art_line = true end end
+  check(dagger and dagger.badge and art_line and #dagger.details <= 5, "a rolled weapon with an art shows both on its card")
+
+  -- Touches: Vampire heals, Reaper finishes.
+  S.loot_styles = {}
+  -- (the save as Vigil would read it back, with the touches chosen)
+  local kept = copy(S.save_data["floors:2:1"])
+  kept.loot["toan:1"].touches = {"vampire", "reaper"}
+  S.save_data["floors:2:2"], S.slot = kept, {slot_id = 2, slot_generation = 2}
+  S.game.player.get = function() return {character = "toan", hp = 50, max_hp = 100, position = {x = 0, y = 0, z = 0},
+                                          weapon = {id = "chronicle:weapon:261", slot = 1, attack = 60}} end
+  S.heals, S.damaged = {}, {}
+  S.game.player.heal = function(a) S.heals[#S.heals + 1] = copy(a); return {} end
+  S.game.combat.damage = function(a) S.damaged[#S.damaged + 1] = copy(a); return {} end
+  S.game.physics = {query = function() return {matches = {}} end}
+  S.game.entities.get = function(id) return {id = id, position = {x = 0, y = 0, z = 50}, health = {current = 10, maximum = 100}} end
+  S.emit("game.enemy_hit", {entity = "m1", damage = 50})
+  check(#S.heals == 1 and S.heals[1].amount == 4, "Vampire Touch heals 8% of the damage dealt")
+  check(#S.damaged == 1 and S.damaged[1].entity == "m1" and S.damaged[1].amount == 10, "Reaper finishes a foe under 15%")
+
+  -- The menu moved the weapon: its record follows it to the new slot.
+  S.owned["chronicle:weapon:261"][1].slot = 5
+  S.emit("game.world.location_changed", {context = "dungeon", dungeon_id = 1, floor_id = 4})
+  local loot = S.save_data["floors:2:2"].loot
+  check(loot["toan:5"] and not loot["toan:1"] and S.loot_styles["toan:5"], "a weapon that moved keeps its rarity")
+  table.remove(S.owned["chronicle:weapon:261"], 1)
+  S.emit("game.world.location_changed", {context = "town"})
+  check(not S.save_data["floors:2:2"].loot["toan:5"], "a weapon that's gone lets its record go")
+
+  -- A Legendary may be the hero's own.
+  local L = new_game({slot = {slot_id = 3, slot_generation = 1}, settings = {loot_tier = 5}}).load()
+  armory(L)
+  L.emit("game.world.location_changed", {context = "dungeon", dungeon_id = 3, floor_id = 2})
+  local legend
+  for _ = 1, 40 do
+    local got = L.game.weapons.give({id = "chronicle:weapon:262", character = "toan"})
+    L.emit("game.item_picked_up", {kind = "weapon", id = got.id, character = "toan", slot = got.slot})
+    for _, rec in pairs(L.save_data["floors:3:1"].loot) do if rec.legend == "moonfang" then legend = rec end end
+    if legend then break end
+  end
+  check(legend and legend.name == "Moonfang" and legend.id == "chronicle:weapon:266" and legend.tier == 5,
+    "a Legendary can turn out to be Toan's own Moonfang")
+
+  -- Bought in town, or the setting off: plain.
+  local T = new_game({slot = {slot_id = 4, slot_generation = 1}}).load()
+  armory(T)
+  T.emit("game.world.location_changed", {context = "town"})
+  T.emit("game.item_picked_up", {kind = "weapon", id = "chronicle:weapon:258", character = "toan", slot = 0})
+  check(#T.stats == 0, "a weapon got in town stays plain")
+  local O = new_game({slot = {slot_id = 5, slot_generation = 1}, settings = {loot_rarity = false}}).load()
+  armory(O)
+  O.emit("game.world.location_changed", {context = "dungeon", dungeon_id = 0, floor_id = 1})
+  O.emit("game.item_picked_up", {kind = "weapon", id = "chronicle:weapon:258", character = "toan", slot = 0})
+  check(#O.stats == 0, "off in the settings: weapons stay plain")
+end
+
+print("45. The Vigil sky (§14, X2)")
+do
+  local S = new_game({slot = {slot_id = 6, slot_generation = 1}, settings = {world_zones = true}})
+  local gilda, sky, max_hp = 5000, nil, {toan = 100}
+  S.game.skills = {register = function() return {id = "moonmod.vigil:shrine"} end, set_rank = function(a) return {rank = a.rank} end}
+  S.game.ui.sheet_set = function() return {} end
+  S.game.ui.sheet_open = function() S.sheet_opened = true return {} end
+  S.game.ui.sky_open = function(a)
+    for k in pairs(a) do assert(({id = 1, title = 1, hint = 1, sky = 1})[k], "sky_open field " .. k) end
+    assert(#a.title <= 32 and #(a.hint or "") <= 160, "sky_open title and hint")
+    local ids, groups = {}, {}
+    for _, g in ipairs(a.sky.groups) do groups[g.id] = true; assert(#g.name <= 32, "a group's name is up to 32 bytes") end
+    for _, n in ipairs(a.sky.nodes) do
+      assert(groups[n.group], "a node's group: " .. tostring(n.group))
+      assert(#n.label <= 32 and #(n.text or "") <= 160 and #(n.cost or "") <= 48 and #(n.needs or "") <= 96, "node text sizes")
+      assert(n.state == "owned" or n.state == "open" or n.state == "locked", "node state")
+      ids[n.id] = true
+    end
+    for _, n in ipairs(a.sky.nodes) do for _, l in ipairs(n.links or {}) do assert(ids[l], "a link to a node: " .. l) end end
+    assert(#a.sky.top <= 3, "three top lines at most")
+    sky = copy(a)
+    return {id = a.id, nodes = #a.sky.nodes}
+  end
+  S.game.economy = {
+    get = function() return {amount = gilda} end,
+    add = function(a) gilda = gilda + a.amount return {amount = gilda} end,
+    spend = function(a)
+      if a.amount > gilda then return nil, {code = "failed", message = "not enough"} end
+      gilda = gilda - a.amount
+      return {amount = gilda}
+    end,
+  }
+  S.game.characters = {get = function(a) return max_hp[a.id] and {id = a.id, max_hp = max_hp[a.id]} or nil end}
+  S.game.player.set = function(a) max_hp[a.character] = a.max_hp return {max_hp = a.max_hp} end
+  S.game.player.get = function() return {hp = 50, max_hp = 100, character = "toan", position = {x = 1600, y = 0, z = 800}} end
+  S.load()
+  S.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 0, back_floor = false})
+  S.emit("game.dungeon.generated", {dungeon_id = 0, floor_id = 0, back_floor = false, floor_seed = 900, room_count = 35})
+  S.emit("game.dungeon.shrine_reached", {zone = 0, x = 10, y = 4})
+  pray(S, {zone = 0, x = 10, y = 4})
+  S.emit("ui.choice_made", {id = "vigil.shrine", index = 4})
+  check(sky and sky.id == "vigil_sky" and not S.sheet_opened, "Level up opens the Vigil sky over the dungeon")
+  local function node(id) for _, n in ipairs(sky.sky.nodes) do if n.id == id then return n end end end
+  check(node("vigour") and node("keen") and node("bloodletter").keystone and node("bloodletter").state == "locked",
+    "the shrine's three skills and the new constellations; a Keystone waits on its path")
+  check(#sky.sky.groups == 7 and node("keen").state == "open", "seven constellations; Keen Edge is open to buy")
+
+  local function buy(id) S.emit("ui.sky_selected", {id = "vigil_sky", entry = id, action = "buy"}) end
+  S.game.player.get = function() return {hp = 50, max_hp = 100, character = "toan", position = {x = 1600, y = 0, z = 160 * 5 + 30}} end
+  buy("keen")
+  check(gilda == 5000 - 150 and node("keen").state == "owned" and node("keen").rank == "1/5", "Cross buys a rank for a level's Gilda")
+  check(S.formulas.sky_keen and math.abs(S.formulas.sky_keen.value - 1.04) < 1e-9, "Keen Edge: +4% damage")
+  check(node("bloodletter").state == "open", "and opens the next nodes")
+  buy("bloodletter")
+  check(node("bloodletter").state == "open" and any_toast(S, "takes 2 Embers"), "a Keystone takes Embers")
+  S.emit("game.dungeon.generated", {dungeon_id = 0, floor_id = 0, back_floor = false, floor_seed = 900, room_count = 35})
+  S.emit("game.enemy_defeated", {entity = "boss", native_model_id = 78, attacker = 0})
+  S.emit("game.enemy_defeated", {entity = "boss", native_model_id = 78, attacker = 0})
+  check(S.save_data["floors:6:1"].embers == 2, "Dran leaves two Embers, once a cycle")
+  buy("bloodletter")
+  check(node("bloodletter").state == "owned" and S.save_data["floors:6:1"].embers == 0, "the Keystone bought with them")
+  S.heals = {}
+  S.game.player.heal = function(a) S.heals[#S.heals + 1] = copy(a) return {} end
+  S.emit("game.enemy_hit", {entity = "m1", damage = 100})
+  local healed = false
+  for _, h in ipairs(S.heals) do healed = healed or h.amount == 3 end
+  check(healed, "Bloodletter: a blow heals 3% of its damage")
+  buy("deep_flask")
+  check(S.save_data["floors:6:1"].tree.deep_flask == 1, "Deep Flask kept with the save")
+  check(sky.sky.top[1]:find("Level 3", 1, true), "the purse lines show the level")
+  S.emit("ui.sky_selected", {id = "vigil_sky", entry = "flame", action = "buy"})
+  check(S.save_data["floors:6:1"].tree.flame == nil, "the Flame itself isn't bought")
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

@@ -1765,7 +1765,11 @@ local TREE_SKILLS = {
 }
 local tree_registered = false
 
-level_now = function() return TREE.vigour + TREE.endurance + TREE.guard end
+level_now = function()
+  local n = 0
+  for _, r in pairs(TREE) do if math.type(r) == "integer" then n = n + r end end
+  return n
+end
 level_cost = function() return 10 * math.floor(15 * 1.12 ^ level_now() + 0.5) end
 
 -- The kept ranks into TREE (and the engine's tree), and the party's Vigour HP topped up to them.
@@ -1778,6 +1782,7 @@ local function load_tree()
     changed = changed or TREE[s.id] ~= r
     TREE[s.id] = r
   end
+  if later.load_sky then later.load_sky() end -- the Vigil sky's other nodes (below)
   if not tree_registered then
     local ok, err = call(game.skills and game.skills.register, {id = "shrine", title = "Shrine", description = "Bought with Gilda at a shrine.", skills = TREE_SKILLS})
     tree_registered = true
@@ -1788,6 +1793,7 @@ local function load_tree()
     for _, s in ipairs(TREE_SKILLS) do try(game.skills and game.skills.set_rank, {id = ID .. ":shrine." .. s.id, rank = TREE[s.id]}) end
     apply_tuning()
   end
+  if later.apply_sky then later.apply_sky() end
   -- Vigour: each member's max HP raised once per rank ("tree".hp says how many ranks each has had)
   if TREE.vigour > 0 then
     local seeds = floor_seeds()
@@ -1830,6 +1836,7 @@ end
 
 open_tree = function()
   load_tree()
+  if setting("vigil_sky", true) and later.sky_open and later.sky_open() then return end
   tree_sheet()
   local ok, err = call(game.ui.sheet_open)
   if not ok then toast("Vigil: can't open the tree: " .. message(err), 240) end
@@ -1856,6 +1863,199 @@ moonmod.on("skills.train_requested", function(e)
   tree_sheet()
   toast(string.format("Vigil: %s %d. Level %d.", def.title, TREE[def.id], level_now()), 200)
 end)
+
+-- The Vigil sky (VIGIL_PLAN §14, X2), the Gauntlet's Norune Eternal in Vigil's shape: the shrine tree's three skills
+-- are three constellations' trunks (a save keeps their ranks), and around them Arms, Fortune and Flask. A node needs
+-- the one it hangs from; each rank costs a level's Gilda (the curve above), and a Keystone also takes Embers, which
+-- named elites (1), story bosses (2) and each new cycle (3) leave. It opens at a shrine's Level up card
+-- (ui.sky_open over the paused dungeon); an engine without it shows the shrine tree on the Journal instead.
+do
+  local function rgb(r, g, b) return {r, g, b} end
+  local GROUPS = {
+    {id = "flame", name = "The Shrine Flame", colour = rgb(255, 240, 190), x = 0, y = 0},
+    {id = "vigour", name = "Vigour", colour = rgb(236, 110, 110), x = 0, y = -430},
+    {id = "endurance", name = "Endurance", colour = rgb(244, 200, 90), x = 380, y = -210},
+    {id = "guard", name = "Guard", colour = rgb(150, 190, 236), x = 380, y = 230},
+    {id = "arms", name = "Arms", colour = rgb(248, 206, 92), x = 0, y = 440},
+    {id = "fortune", name = "Fortune", colour = rgb(196, 160, 255), x = -380, y = 230},
+    {id = "flask", name = "Flask", colour = rgb(120, 220, 200), x = -380, y = -210},
+  }
+  local GROUP = {}
+  for _, g in ipairs(GROUPS) do GROUP[g.id] = g end
+  -- {id, group, title, ranks, text, needs, icon, dx, dy (from the constellation's centre), embers (a Keystone's)}
+  local NODES = {
+    {id = "vigour", group = "vigour", title = "Vigour", ranks = 20, text = "+5 max HP for everyone in the party per rank.",
+     icon = "heart", dx = 0, dy = 60},
+    {id = "endurance", group = "endurance", title = "Endurance", ranks = 10, text = "The action gauge refills 10% faster per rank.",
+     icon = "stamina", dx = -40, dy = 30},
+    {id = "guard", group = "guard", title = "Guard", ranks = 10, text = "Holding the guard slows the gauge's refill less (5 points a rank).",
+     icon = "shield", dx = -40, dy = -30},
+    {id = "keen", group = "arms", title = "Keen Edge", ranks = 5, text = "+4% damage per rank.", icon = "sword", dx = 0, dy = -70},
+    {id = "heavy_hand", group = "arms", title = "Heavy Hand", ranks = 3, needs = "keen", text = "Charged blows land 10% harder per rank.",
+     icon = "sword", dx = -90, dy = 10},
+    {id = "bloodletter", group = "arms", title = "Bloodletter", ranks = 1, needs = "keen", embers = 2, icon = "heart", dx = 90, dy = 10,
+     text = "Keystone. Every blow heals you 3% of the damage it deals."},
+    {id = "last_light", group = "arms", title = "Last Light", ranks = 1, needs = "heavy_hand", embers = 3, icon = "curse", dx = -40, dy = 100,
+     text = "Keystone. Under a quarter of your HP, your blows land 30% harder."},
+    {id = "keen_eye", group = "fortune", title = "Keen Eye", ranks = 3, text = "Found weapons roll as if a dungeon deeper per rank.",
+     icon = "crystal", dx = 50, dy = -50},
+    {id = "gilded_path", group = "fortune", title = "Gilded Path", ranks = 3, needs = "keen_eye", text = "Each kill drops Gilda, more per rank and deeper in.",
+     icon = "crystal", dx = -60, dy = -10},
+    {id = "fortunes_favour", group = "fortune", title = "Fortune's Favour", ranks = 1, needs = "keen_eye", embers = 2, icon = "map", dx = 40, dy = 70,
+     text = "Keystone. Every named elite leaves a weapon, Rare or better."},
+    {id = "deep_flask", group = "flask", title = "Deep Flask", ranks = 3, text = "+1 flask charge per rank.", icon = "flask", dx = 50, dy = 50},
+    {id = "healing_draught", group = "flask", title = "Healing Draught", ranks = 3, needs = "deep_flask", text = "A drink heals 10% more of your HP per rank.",
+     icon = "drop", dx = -50, dy = 0},
+  }
+  local NODE = {}
+  for _, n in ipairs(NODES) do NODE[n.id] = n end
+  later.SKY_NODES = NODES
+
+  local function seeds_tree()
+    local seeds = floor_seeds()
+    if type(seeds.tree) ~= "table" then seeds.tree = {} end
+    return seeds.tree, seeds
+  end
+  later.sky_rank = function(id)
+    local r = TREE[id]
+    return math.type(r) == "integer" and r or 0
+  end
+  later.embers = function()
+    local e = floor_seeds().embers
+    return math.type(e) == "integer" and e or 0
+  end
+  later.give_embers = function(n, why)
+    if in_sandbox or not setting("vigil_sky", true) then return end
+    local seeds = floor_seeds()
+    seeds.embers = later.embers() + n
+    if floors.key then try(game.save.set, floors.key, seeds) end
+    toast(string.format("Vigil: %s left %d Ember%s (%d).", why, n, n == 1 and "" or "s", seeds.embers), 240)
+  end
+  -- The ranks of the sky's own nodes, from the save (the three trunks are read with the shrine tree).
+  later.load_sky = function()
+    local t = seeds_tree()
+    for _, n in ipairs(NODES) do
+      if not (n.id == "vigour" or n.id == "endurance" or n.id == "guard") then
+        local r = t[n.id]
+        TREE[n.id] = math.type(r) == "integer" and math.max(0, math.min(n.ranks, r)) or 0
+      end
+    end
+  end
+
+  local function open_to(n)
+    return not n.needs or later.sky_rank(n.needs) > 0
+  end
+  local function page()
+    local gilda = try(game.economy.get)
+    local purse = type(gilda) == "table" and gilda.amount or 0
+    local groups, nodes = {}, {}
+    for _, g in ipairs(GROUPS) do groups[#groups + 1] = {id = g.id, name = g.name, colour = g.colour, x = g.x, y = g.y} end
+    nodes[1] = {id = "flame", group = "flame", x = 0, y = 0, label = "The Shrine Flame", title = "The Shrine Flame", state = "owned",
+                icon = "crystal", text = "Gilda buys levels here, each dearer than the last. Keystones also take Embers, from elites, bosses and cycles."}
+    for _, n in ipairs(NODES) do
+      local g = GROUP[n.group]
+      local r = later.sky_rank(n.id)
+      local state = r > 0 and "owned" or (open_to(n) and "open" or "locked")
+      local cost = r >= n.ranks and "Most" or string.format("%d G%s", level_cost(), n.embers and string.format(" + %d Embers", n.embers) or "")
+      nodes[#nodes + 1] = {id = n.id, group = n.group, x = g.x + n.dx, y = g.y + n.dy, label = n.title, title = n.title,
+                           rank = n.ranks > 1 and string.format("%d/%d", r, n.ranks) or nil, icon = n.icon, text = n.text,
+                           tag = g.name, cost = cost, state = state, keystone = n.embers ~= nil,
+                           needs = n.needs and ("Needs " .. NODE[n.needs].title .. ".") or nil,
+                           links = {n.needs or "flame"}}
+    end
+    return {groups = groups, nodes = nodes,
+            top = {string.format("Level %d", level_now()), string.format("Gilda %d", purse), string.format("Embers %d", later.embers())}}
+  end
+  later.sky_open = function()
+    if not (game.ui and game.ui.sky_open) then return false end
+    local ok = call(game.ui.sky_open, {id = "vigil_sky", title = "VIGIL SKY", sky = page(),
+      hint = "{dpad} Move  {L2}{R2} Sky  {cross} Level up  {triangle} Map  {circle} Back"})
+    return ok ~= nil
+  end
+
+  -- Cross on a node: one rank more, at a shrine, for a level's Gilda (and a Keystone's Embers).
+  moonmod.on("ui.sky_selected", function(e)
+    if in_sandbox or type(e) ~= "table" or e.id ~= "vigil_sky" or e.action ~= "buy" then return end
+    local n = NODE[e.entry]
+    if not n then return end
+    load_tree()
+    local r = later.sky_rank(n.id)
+    if r >= n.ranks then toast("Vigil: " .. n.title .. " is at its most.", 200)
+    elseif not open_to(n) then toast("Vigil: " .. n.title .. " needs " .. NODE[n.needs].title .. " first.", 200)
+    elseif not at_shrine() then toast("Vigil: you can level up only at a shrine.", 240)
+    elseif n.embers and later.embers() < n.embers then toast(string.format("Vigil: %s takes %d Embers.", n.title, n.embers), 240)
+    else
+      local cost = level_cost()
+      if not call(game.economy.spend, {amount = cost}) then
+        toast(string.format("Vigil: the next level costs %d Gilda.", cost), 240)
+      else
+        local t, seeds = seeds_tree()
+        t[n.id] = r + 1
+        if n.embers then seeds.embers = later.embers() - n.embers end
+        if floors.key then try(game.save.set, floors.key, seeds) end
+        load_tree()
+        if n.id == "vigour" then heal_party() end
+        toast(string.format("Vigil: %s %d. Level %d.", n.title, r + 1, level_now()), 200)
+      end
+    end
+    later.sky_open()
+  end)
+
+  -- What the nodes do -----------------------------------------------------------------------------------------------
+  local last_light = false
+  later.apply_sky = function()
+    if in_sandbox then return end
+    try(game.combat.register_formula, {id = "sky_keen", operation = "multiply", value = 1 + 0.04 * later.sky_rank("keen")})
+    try(game.combat.register_formula, {id = "sky_heavy", operation = "multiply", value = 1 + 0.1 * later.sky_rank("heavy_hand"), charged = true})
+  end
+  moonmod.on("game.enemy_hit", function(e)
+    if in_sandbox or type(e) ~= "table" or later.sky_rank("bloodletter") == 0 then return end
+    local damage = tonumber(e.damage) or 0
+    if damage > 0 then try(game.player.heal, {amount = math.max(1, math.floor(damage * 0.03 + 0.5))}) end
+  end)
+  moonmod.on("game.enemy_defeated", function(e)
+    if in_sandbox or type(e) ~= "table" or e.attacker == nil then return end
+    local r = later.sky_rank("gilded_path")
+    local d = floor_now and tonumber(floor_now.dungeon_id) or 0
+    if r > 0 then try(game.economy.add, {amount = math.random(2, 4) * r * (1 + d)}) end
+  end)
+  local BOSSES = {[78] = "Dran", [79] = "Master Utan", [80] = "The Ice Queen", [81] = "The King's Curse", [83] = "Minotaur Joe",
+                  [84] = "The Dark Genie", [106] = "The Dark Genie"}
+  moonmod.on("game.enemy_defeated", function(e)
+    if in_sandbox or type(e) ~= "table" or not BOSSES[e.native_model_id] then return end
+    local seeds = floor_seeds()
+    local key = string.format("ember_boss:%d:%d", e.native_model_id, later.cycle_now and later.cycle_now() or 0)
+    if seeds[key] then return end
+    seeds[key] = true
+    later.give_embers(2, BOSSES[e.native_model_id])
+  end)
+
+  local ticks, stood = 0, false
+  moonmod.on("game.tick", function()
+    ticks = ticks + 1
+    if ticks % 15 ~= 0 then return end
+    -- Another mod's run (a Gauntlet run): the sky's formulas stand down, and come back after.
+    if in_sandbox ~= stood then
+      stood = in_sandbox
+      for _, id in ipairs({"sky_keen", "sky_heavy", "sky_last_light"}) do
+        try(game.combat.register_formula, {id = id, operation = "multiply", value = 1, charged = id == "sky_heavy" or nil})
+      end
+      last_light = false
+      if not stood then later.apply_sky() end
+    end
+    if in_sandbox then return end
+    local on = false
+    if in_dungeon and later.sky_rank("last_light") > 0 then
+      local p = try(game.player.get)
+      on = type(p) == "table" and tonumber(p.hp) and tonumber(p.max_hp) and p.hp > 0 and p.hp < p.max_hp * 0.25 or false
+    end
+    if on ~= last_light then
+      last_light = on
+      try(game.combat.register_formula, {id = "sky_last_light", operation = "multiply", value = on and 1.3 or 1})
+      if on then toast("Vigil: Last Light.", 90) end
+    end
+  end)
+end
 
 moonmod.on("game.dungeon.generated", function(e)
   if not in_sandbox and type(e) == "table" and not e.back_floor then load_tree() end
@@ -2022,7 +2222,7 @@ do
     s.taken = type(s.taken) == "table" and s.taken or {}
     return s, key
   end
-  local function most(s) return clamp(setting("flask_charges", 3), 1, 10) + s.shards end
+  local function most(s) return clamp(setting("flask_charges", 3), 1, 10) + s.shards + later.sky_rank("deep_flask") end
   local function charges(s) return math.type(s.charges) == "integer" and math.min(s.charges, most(s)) or most(s) end
   local function store(s, key) if key then try(game.save.set, key, s) end end
 
@@ -2071,7 +2271,8 @@ do
     if drinking and drinking.at and ticks >= drinking.at then
       local p = try(game.player.get)
       local most_hp = type(p) == "table" and math.type(p.max_hp) == "integer" and p.max_hp or 0
-      local amount = math.max(1, math.floor(most_hp * clamp(setting("flask_heal", 40), 10, 100) / 100 + 0.5))
+      local heal = clamp(setting("flask_heal", 40), 10, 100) + 10 * later.sky_rank("healing_draught")
+      local amount = math.max(1, math.floor(most_hp * math.min(heal, 100) / 100 + 0.5))
       try(game.player.heal, {amount = math.min(amount, 32767), character = drinking.who})
       local at = type(p) == "table" and type(p.position) == "table" and p.position or nil
       if at then try(game.effects.burst, {kind = "heal", position = {x = at.x, y = (at.y or 0) + 10, z = at.z}}) end
@@ -2113,16 +2314,450 @@ do
   end)
 end
 
+-- Weapon rarity (from the Gauntlet's loot) ----------------------------------------------------------------------------
+-- A weapon found in a dungeon (a chest, a pickup, a named elite's drop) rolls a rarity: Common, Uncommon, Rare, Epic or
+-- Legendary, the Gauntlet's five, in its colours. Its stats grow once by the tier's multiplier, its name shows in the
+-- tier's colour in the weapon menu and its swing trail glows in it. Rare and better carry touches, mechanics that fire
+-- on hits and kills (Vampire, Poison, Frost, Thunder Chain, Echo, ...); Epic and Legendary get a generated name from
+-- them ("Dracula's Baselard"). Each character has one fixed legendary with a signature of its own (Toan's Moonfang),
+-- which a Legendary roll may turn out to be. Deeper dungeons, later cycles and elites lean rarer. The rarities are kept
+-- with the save ("loot", by character and weapon slot) and shown again on load. Weapons bought in town stay plain.
+-- The setting `loot_rarity` turns it off; weapons already rolled keep their stats.
+do
+  local function rgb(r, g, b) return {r = r, g = g, b = b} end
+  local TIERS = {
+    {key = "common", name = "Common", mult = 1.0, color = rgb(235, 235, 235), touches = 0},
+    {key = "uncommon", name = "Uncommon", mult = 1.15, color = rgb(120, 230, 120), glow = rgb(70, 210, 70), touches = 0},
+    {key = "rare", name = "Rare", mult = 1.3, color = rgb(110, 170, 255), glow = rgb(70, 130, 255), touches = 1},
+    {key = "epic", name = "Epic", mult = 1.5, color = rgb(205, 125, 255), glow = rgb(175, 70, 255), touches = 2},
+    {key = "legendary", name = "Legendary", mult = 1.8, color = rgb(255, 170, 60), glow = rgb(255, 150, 30), touches = 2},
+  }
+  -- adj: a Rare's word; own: an Epic's owner; of: an Epic's ending; roots/ends: a Legendary's own name is made of two.
+  local TOUCHES = {
+    vampire = {name = "Vampire Touch", short = "heals 8% of damage dealt", adj = "Vampiric", own = "Dracula's",
+               of = "of the Hungry Night", roots = {"Blood", "Night", "Crimson"}, ends = {"fang", "thirst", "kiss"}},
+    poison = {name = "Poison Touch", short = "1 in 3 hits poisons", adj = "Venomous", own = "Viper's",
+              of = "of Slow Rot", roots = {"Venom", "Blight", "Rot"}, ends = {"sting", "bite", "kiss"}},
+    goo = {name = "Goo Touch", short = "hits slow enemies", adj = "Gooey", own = "the Slime King's",
+           of = "of Clinging Muck", roots = {"Muck", "Ooze", "Mire"}, ends = {"grip", "drip", "maw"}},
+    frost = {name = "Frost Touch", short = "hits may freeze", adj = "Frozen", own = "the Ice Queen's",
+             of = "of the Long Winter", roots = {"Frost", "Rime", "Winter"}, ends = {"bite", "song", "heart"}},
+    thunder = {name = "Thunder Chain", short = "1 in 4 hits arc to another", adj = "Stormcalled", own = "Raijin's",
+               of = "of the Seventh Storm", roots = {"Storm", "Thunder", "Volt"}, ends = {"call", "crack", "fury"}},
+    echo = {name = "Echo", short = "1 in 3 hits strike again", adj = "Echoing", own = "the Phantom's",
+            of = "of Twice-Told Blows", roots = {"Echo", "Ghost", "Shade"}, ends = {"song", "step", "call"}},
+    ember = {name = "Ember Burst", short = "kills explode in flame", adj = "Blazing", own = "the Salamander's",
+             of = "of Ash", roots = {"Ember", "Ash", "Cinder"}, ends = {"heart", "brand", "fall"}},
+    gravity = {name = "Gravity Well", short = "charged hits pull foes in", adj = "Abyssal", own = "the Black Star's",
+               of = "of the Undertow", roots = {"Void", "Abyss", "Star"}, ends = {"pull", "well", "maw"}},
+    quake = {name = "Quake", short = "charged hits throw foes back", adj = "Quaking", own = "the Titan's",
+             of = "of Broken Earth", roots = {"Quake", "Stone", "Titan"}, ends = {"fall", "break", "heart"}},
+    reaper = {name = "Reaper", short = "finishes foes under 15% HP", adj = "Grim", own = "the Reaper's",
+              of = "of the Final Hour", roots = {"Grave", "Dusk", "Death"}, ends = {"knell", "reap", "end"}},
+    gilded = {name = "Gilded", short = "kills drop gilda", adj = "Gilded", own = "Midas'", of = "of Fortune",
+              roots = {"Gold", "Coin", "Sun"}, ends = {"gleam", "purse", "crown"}},
+    thorns = {name = "Thorns", short = "returns the hits you take", adj = "Thorned", own = "the Briar Witch's",
+              of = "of Bramble", roots = {"Thorn", "Briar", "Bramble"}, ends = {"guard", "spite", "kiss"}},
+    frenzy = {name = "Frenzy", short = "kills stack +8% damage", adj = "Frenzied", own = "the Berserker's",
+              of = "of Red Mist", roots = {"Rage", "Red", "Wild"}, ends = {"fury", "howl", "fang"}},
+    -- the legendaries' signatures
+    lunar = {name = "Lunar Arc", short = "charged hits chain to 3 foes", signature = true},
+    ricochet = {name = "Ricochet", short = "shots bounce to 2 more foes", signature = true},
+    earthsplit = {name = "Earthsplitter", short = "charged hits explode", signature = true},
+    phoenix = {name = "Phoenix", short = "kills explode and heal you", signature = true},
+    venomtotem = {name = "Venom Totem", short = "poisons; kills under 25%", signature = true},
+    starfall = {name = "Starfall", short = "every 5th hit calls a star", signature = true},
+  }
+  local POOL = {"vampire", "poison", "goo", "frost", "thunder", "echo", "ember", "gravity", "quake", "reaper", "gilded", "thorns", "frenzy"}
+  local LEGENDS = {
+    toan = {key = "moonfang", name = "Moonfang", item = 266, touches = {"thunder", "echo", "lunar"}},
+    xiao = {key = "ninefold", name = "Ninefold", item = 304, touches = {"vampire", "frost", "ricochet"}},
+    goro = {key = "titanfall", name = "Titanfall", item = 322, touches = {"quake", "gravity", "earthsplit"}},
+    ruby = {key = "emberheart", name = "Emberheart", item = 337, touches = {"ember", "thunder", "phoenix"}},
+    ungaga = {key = "gaiasting", name = "Gaia's Sting", item = 352, touches = {"poison", "reaper", "venomtotem"}},
+    osmond = {key = "starfall", name = "Starfall", item = 365, touches = {"echo", "gilded", "starfall"}},
+  }
+  -- Each character's weapons, by native item number, for an elite's drop.
+  local RANGES = {toan = {258, 272}, xiao = {300, 311}, goro = {315, 325}, ruby = {332, 340}, ungaga = {348, 357}, osmond = {364, 368}}
+  local ROSTER = {"toan", "xiao", "goro", "ruby", "ungaga", "osmond"}
+  local QUALITY = {"Fine", "Keen", "Honed", "Sturdy", "Polished", "Tempered"}
+  local NAME_CAP = 22 -- names stay short enough for the weapon menu's name plates
+  local TOUCH_RGB, SIGNATURE_RGB = rgb(240, 215, 150), rgb(255, 225, 120)
+
+  local function pick(t) return t[math.random(#t)] end
+  local function on() return setting("loot_rarity", true) and not in_sandbox end
+  local function wid(item) return "chronicle:weapon:" .. item end
+  local function who_of(c) return type(c) == "number" and ROSTER[c + 1] or c end
+
+  -- The save's rolled weapons: {["toan:3"] = {id, tier, touches, name, legend}}.
+  local function kept()
+    local seeds = floor_seeds()
+    if type(seeds.loot) ~= "table" then seeds.loot = {} end
+    return seeds.loot, seeds
+  end
+  local function store(seeds) if floors.key then try(game.save.set, floors.key, seeds) end end
+
+  local function base_name(id)
+    local w = try(game.weapons.get, id)
+    return type(w) == "table" and type(w.name) == "string" and w.name ~= "" and w.name or "Weapon"
+  end
+  local function first_fit(...)
+    local shortest
+    for _, s in ipairs({...}) do
+      if #s <= NAME_CAP then return s end
+      if not shortest or #s < #shortest then shortest = s end
+    end
+    return shortest
+  end
+  local function make_name(tier, base, touches)
+    local t1, t2, t3 = TOUCHES[touches[1] or ""], TOUCHES[touches[2] or ""], TOUCHES[touches[3] or ""]
+    if tier == 2 then return first_fit(pick(QUALITY) .. " " .. base, "Fine " .. base, base) end
+    if tier == 3 and t1 then return first_fit(t1.adj .. " " .. base, base) end
+    if tier == 4 and t1 then
+      local long = t2 and (t1.adj .. " " .. base .. " " .. t2.of)
+      if long and #long <= NAME_CAP and math.random(2) == 1 then return long end
+      return first_fit(t1.own .. " " .. base, t1.adj .. " " .. base, base)
+    end
+    if tier == 5 and t1 then
+      local a, b = t1, t2 or t1
+      local proper = pick(a.roots) .. pick(b.ends)
+      return first_fit(proper .. ", " .. (t3 or a).own .. " " .. base, proper .. " " .. base, proper)
+    end
+    return base
+  end
+
+  -- How deep the party is: the dungeon (0-6) counts most, then the floor, then each cycle past the first.
+  local function depth()
+    local d = floor_now and tonumber(floor_now.dungeon_id) or 0
+    local f = floor_now and tonumber(floor_now.floor_id) or 0
+    return 3 * d + math.floor(f / 4) + 6 * (later.cycle_now and later.cycle_now() or 0) + 3 * later.sky_rank("keen_eye")
+  end
+  -- The tier a weapon rolls; `least` is the lowest allowed.
+  local function roll_tier(least)
+    local forced = setting("loot_tier", 0) -- tests only: always this tier
+    if forced >= 1 and forced <= 5 then return forced end
+    local d = depth()
+    local weights = {math.max(8, 52 - 2 * d), 28, 14 + d, 5 + 0.6 * d, 1 + 0.25 * d}
+    local total = 0
+    for t = least or 1, 5 do total = total + weights[t] end
+    local r = math.random() * total
+    for t = least or 1, 5 do
+      r = r - weights[t]
+      if r <= 0 then return t end
+    end
+    return 5
+  end
+  local function draw_touches(n)
+    local bag, out = {}, {}
+    for _, id in ipairs(POOL) do bag[#bag + 1] = id end
+    for _ = 1, n do
+      if #bag == 0 then break end
+      out[#out + 1] = table.remove(bag, math.random(#bag))
+    end
+    return out
+  end
+
+  -- The record of the weapon in a character's slot, if it is still the one that rolled.
+  local function record(c, slot, id)
+    local r = kept()[c .. ":" .. tostring(slot)]
+    if type(r) == "table" and (id == nil or r.id == id) then return r end
+  end
+
+  -- What the menu shows of a rolled weapon: {name, color, glow, badge, details}, or nil for a plain one.
+  later.loot_style = function(c, slot, id)
+    local r = on() and record(c, slot, id)
+    local tier = r and TIERS[r.tier]
+    if not tier then return nil end
+    local badge = {{text = tier.name:upper(), color = tier.color, scale = 1.15},
+                   {text = (string.format("Stats x%.2f", tier.mult):gsub("0$", "")), color = rgb(200, 195, 185), scale = 0.75}}
+    local details = {}
+    for _, t in ipairs(r.touches or {}) do
+      local d = TOUCHES[t]
+      if d then details[#details + 1] = {text = (d.signature and "* " or "") .. d.name .. ": " .. d.short, color = d.signature and SIGNATURE_RGB or TOUCH_RGB} end
+    end
+    return {name = r.name, color = tier.color, glow = tier.glow, badge = badge, details = details}
+  end
+
+  -- The weapons that moved: a record whose slot now holds another weapon follows its weapon to the slot it went to
+  -- (the menu sorts, a sale shifts the rest), or is let go once the weapon is gone. Returns the records to show.
+  later.loot_settle = function()
+    local loot, seeds = kept()
+    if not (try(game.save.slot_id) or floors.key) then return loot end -- no save loaded: leave the records be
+    local changed = false
+    local owned, asked = {}, {} -- "c:slot" -> id, for each weapon a record names
+    for _, r in pairs(loot) do
+      if type(r) == "table" and type(r.id) == "string" and not asked[r.id] then
+        asked[r.id] = true
+        local w = try(game.weapons.get, r.id)
+        for _, inst in ipairs(type(w) == "table" and type(w.instances) == "table" and w.instances or {}) do
+          local c = who_of(inst.character)
+          if type(c) == "string" and math.type(inst.slot) == "integer" then owned[c .. ":" .. inst.slot] = r.id end
+        end
+      end
+    end
+    local moved = {}
+    for k, r in pairs(loot) do
+      if type(r) ~= "table" or owned[k] ~= r.id then moved[#moved + 1] = k end
+    end
+    for _, k in ipairs(moved) do
+      local r = loot[k]
+      loot[k] = nil
+      changed = true
+      local c = k:match("^([^:]+):")
+      if type(r) == "table" and c then
+        for ok, id in pairs(owned) do
+          if id == r.id and ok:match("^([^:]+):") == c and not loot[ok] then loot[ok] = r; break end
+        end
+      end
+    end
+    if changed then store(seeds) end
+    return loot
+  end
+
+  -- Grows the weapon's stats by the tier and keeps its record.
+  local function apply(c, slot, id, tier, touches, name, legend)
+    local w = try(game.weapons.get, {id = id, character = c, slot = slot})
+    local stats
+    for _, inst in ipairs(type(w) == "table" and type(w.instances) == "table" and w.instances or {}) do
+      if who_of(inst.character) == c and inst.slot == slot then stats = inst.stats end
+    end
+    stats = stats or (type(w) == "table" and w.stats)
+    if type(stats) == "table" then
+      local request = {id = id, character = c, slot = slot}
+      for _, k in ipairs({"attack", "endurance", "speed", "magic"}) do
+        request[k] = math.floor(clamp((tonumber(stats[k]) or 0) * TIERS[tier].mult + 0.5, 0, 32767))
+      end
+      try(game.weapons.stats_set, request)
+    end
+    local loot, seeds = kept()
+    loot[c .. ":" .. tostring(slot)] = {id = id, tier = tier, touches = touches, name = name, legend = legend}
+    store(seeds)
+    if later.weapon_cards then later.weapon_cards() end
+  end
+
+  -- A found weapon rolls its rarity. Returns the tier rolled, or nil.
+  later.loot_roll = function(c, id, slot, least)
+    c = who_of(c)
+    if not on() or type(c) ~= "string" or type(id) ~= "string" or math.type(slot) ~= "integer" then return nil end
+    if record(c, slot, id) then return nil end -- already rolled
+    local tier = roll_tier(least)
+    local legend = LEGENDS[c]
+    if tier == 5 and legend and math.random(100) <= 35 then
+      local given = call(game.weapons.give, {id = wid(legend.item), character = c})
+      if given and given.slot then
+        try(game.weapons.remove, {id = id, character = c, slot = slot})
+        later.loot_settle()
+        apply(c, given.slot, wid(legend.item), 5, legend.touches, legend.name, legend.key)
+        toast(string.format("Vigil: %s! %s's own legendary.", legend.name, (c:gsub("^%l", string.upper))), 300)
+        return 5
+      end
+    end
+    local touches = draw_touches(TIERS[tier].touches + (tier == 5 and 1 or 0))
+    local name = (make_name(tier, base_name(id), touches):gsub("^%l", string.upper))
+    apply(c, slot, id, tier, touches, name)
+    if tier >= 3 then toast(string.format("Vigil: %s (%s).", name, TIERS[tier].name), 240) end
+    return tier
+  end
+
+  -- A named elite leaves a weapon, Rare or better, for someone in the party.
+  later.loot_elite_drop = function(who)
+    if not on() then return end
+    local party = {}
+    local members = try(game.party and game.party.list)
+    for _, m in ipairs(type(members) == "table" and (members.members or members) or {}) do
+      if type(m) == "table" and RANGES[m.id] and m.joined ~= false then party[#party + 1] = m.id end
+    end
+    local c = pick(#party > 0 and party or {"toan"})
+    local range = RANGES[c]
+    local given = call(game.weapons.give, {id = wid(math.random(range[1], range[2])), character = c})
+    if not (given and given.slot) then return end
+    toast(string.format("Vigil: %s left a weapon behind for %s.", who or "The elite", (c:gsub("^%l", string.upper))), 240)
+    later.loot_roll(c, given.id or wid(given.native_item_no), given.slot, 3)
+  end
+
+  moonmod.on("game.item_picked_up", function(e)
+    if type(e) ~= "table" or e.kind ~= "weapon" or not in_dungeon then return end
+    later.loot_roll(e.character, e.id, e.slot)
+  end)
+
+  -- Touches in play ------------------------------------------------------------------------------------------------
+  local dots, echoes, last_pos, frenzy = {}, {}, {}, {stacks = 0, until_ = 0}
+  local hits, tick, hp_seen, hp_who = 0, 0, nil, nil
+  local function touches_of(p)
+    local w = type(p) == "table" and p.weapon
+    local r = type(w) == "table" and w.id and on() and record(p.character, w.slot, w.id)
+    local set = {}
+    for _, t in ipairs(r and r.touches or {}) do set[t] = true end
+    return set
+  end
+  local function position_of(entity)
+    local m = try(game.entities.get, entity)
+    if type(m) == "table" and m.position then last_pos[tostring(entity)] = m.position end
+    return m
+  end
+  local function others(center, radius, except)
+    local near = try(game.physics.query, {shape = "sphere", center = {x = center.x, y = center.y, z = center.z}, radius = radius})
+    local out = {}
+    for _, m in ipairs(type(near) == "table" and near.matches or {}) do
+      if tostring(m.entity) ~= tostring(except) then out[#out + 1] = m end
+    end
+    table.sort(out, function(a, b) return (a.distance or 0) < (b.distance or 0) end)
+    return out
+  end
+  local function burst(kind, at, scale) if at then try(game.effects.burst, {kind = kind, position = {x = at.x, y = (at.y or 0) + 8, z = at.z}, scale = scale}) end end
+  local function poison(entity, m, frames)
+    local max = type(m) == "table" and m.health and tonumber(m.health.maximum) or 40
+    dots[tostring(entity)] = {entity = entity, until_ = tick + frames, next = tick + 60, amount = math.max(1, math.floor(max * 0.03))}
+    try(game.entities.tint, {entity = entity, color = rgb(90, 255, 90), frames = frames})
+  end
+  local function chain(at, except, count, amount)
+    local struck = 0
+    for _, o in ipairs(others(at, 150, except)) do
+      if struck >= count then break end
+      if try(game.combat.damage, {entity = o.entity, amount = amount}) then
+        struck = struck + 1
+        burst("sparks", (position_of(o.entity) or {}).position, 0.8)
+      end
+    end
+  end
+  local function explode(at, except, amount)
+    burst("explosion", at, 0.8)
+    for _, o in ipairs(others(at, 100, except)) do try(game.combat.damage, {entity = o.entity, amount = amount}) end
+  end
+
+  moonmod.on("game.enemy_hit", function(e)
+    if type(e) ~= "table" or not e.entity then return end
+    local damage = tonumber(e.damage) or 0
+    if damage <= 0 then return end
+    local p = try(game.player.get)
+    local set = touches_of(p)
+    if next(set) == nil then return end
+    hits = hits + 1
+    local m = position_of(e.entity)
+    local at = type(m) == "table" and m.position
+    local hp = type(m) == "table" and m.health and tonumber(m.health.current) or 0
+    local max = type(m) == "table" and m.health and tonumber(m.health.maximum) or 1
+    if set.vampire then
+      try(game.player.heal, {amount = math.max(1, math.floor(damage * 0.08))})
+      if hits % 4 == 0 then burst("heal", p.position, 1) end
+    end
+    if set.frenzy and frenzy.stacks > 0 and tick < frenzy.until_ then
+      try(game.combat.damage, {entity = e.entity, amount = math.max(1, math.floor(damage * 0.08 * frenzy.stacks))})
+    end
+    if (set.poison and math.random(3) == 1) or set.venomtotem then poison(e.entity, m, 300) end
+    if set.goo then
+      try(game.combat.status_add, {entity = e.entity, status = "slow", duration_frames = 150})
+      try(game.entities.tint, {entity = e.entity, color = rgb(190, 100, 255), frames = 150})
+    end
+    if set.frost and math.random(100) <= 15 then
+      try(game.combat.status_add, {entity = e.entity, status = "stop", duration_frames = 75})
+      try(game.entities.tint, {entity = e.entity, color = rgb(160, 225, 255), frames = 75})
+      burst("guard", at, 1)
+    end
+    if at and set.thunder and math.random(4) == 1 then chain(at, e.entity, 1, math.max(1, math.floor(damage * 0.5))) end
+    if at and set.ricochet then chain(at, e.entity, 2, math.max(1, math.floor(damage * 0.35))) end
+    if at and set.lunar and e.charged then chain(at, e.entity, 3, math.max(1, math.floor(damage * 0.6))) end
+    if set.echo and math.random(3) == 1 then echoes[#echoes + 1] = {at = tick + 30, entity = e.entity, amount = math.max(1, math.floor(damage * 0.6))} end
+    if at and set.gravity and e.charged then
+      for _, o in ipairs(others(at, 170, e.entity)) do
+        local om = try(game.entities.get, o.entity)
+        local op = type(om) == "table" and om.position
+        if op then try(game.entities.knockback, {entity = o.entity, direction = {x = at.x - op.x, z = at.z - op.z}, speed = 9}) end
+      end
+      burst("guard", at, 1.4)
+    end
+    if set.quake and e.charged and p.position then
+      for _, o in ipairs(others(p.position, 130, nil)) do
+        local om = try(game.entities.get, o.entity)
+        local op = type(om) == "table" and om.position
+        if op then try(game.entities.knockback, {entity = o.entity, direction = {x = op.x - p.position.x, z = op.z - p.position.z}, speed = 12}) end
+      end
+      burst("sparks", p.position, 1.5)
+    end
+    if at and set.earthsplit and e.charged then explode(at, nil, math.max(1, math.floor(damage * 1.2))) end
+    if at and set.starfall and hits % 5 == 0 then explode(at, nil, math.max(1, math.floor(damage * 2))) end
+    -- finishers last, on what is left after the hit
+    if hp > 0 and ((set.reaper and hp < max * 0.15) or (set.venomtotem and dots[tostring(e.entity)] and hp < max * 0.25)) then
+      try(game.combat.damage, {entity = e.entity, amount = hp})
+      burst("guard", at, 1)
+    end
+  end)
+
+  moonmod.on("game.enemy_defeated", function(e)
+    if type(e) ~= "table" or not e.entity then return end
+    local id = tostring(e.entity)
+    dots[id] = nil
+    local at = last_pos[id]
+    last_pos[id] = nil
+    local p = try(game.player.get)
+    local set = touches_of(p)
+    if next(set) == nil then return end
+    if set.frenzy then frenzy.stacks, frenzy.until_ = math.min(5, (tick < frenzy.until_ and frenzy.stacks or 0) + 1), tick + 360 end
+    if set.gilded then try(game.economy.add, {amount = math.random(5, 15) * (1 + depth())}) end
+    if at and (set.ember or set.phoenix) then
+      local w = p.weapon
+      explode(at, e.entity, math.max(4, math.floor((tonumber(type(w) == "table" and w.attack) or 20) * 1.5)))
+    end
+    if set.phoenix and p.max_hp then try(game.player.heal, {amount = math.max(1, math.floor(p.max_hp * 0.04))}) end
+  end)
+
+  -- Each tick: poison and echoes land, and Thorns answers the hits taken.
+  moonmod.on("game.tick", function()
+    tick = tick + 1
+    if next(dots) == nil and #echoes == 0 and tick % 6 ~= 0 then return end
+    for id, d in pairs(dots) do
+      if tick >= d.until_ then dots[id] = nil
+      elseif tick >= d.next then
+        d.next = tick + 60
+        if not try(game.combat.damage, {entity = d.entity, amount = d.amount}) then dots[id] = nil end
+      end
+    end
+    for i = #echoes, 1, -1 do
+      local q = echoes[i]
+      if tick >= q.at then
+        table.remove(echoes, i)
+        local m = position_of(q.entity)
+        if try(game.combat.damage, {entity = q.entity, amount = q.amount}) then burst("sparks", type(m) == "table" and m.position, 1.2) end
+      end
+    end
+    if not in_dungeon then return end
+    local p = try(game.player.get)
+    if type(p) == "table" and p.hp then
+      local was = hp_seen
+      hp_seen = p.hp
+      if was and p.hp < was and p.character == hp_who and touches_of(p).thorns and p.position then
+        local o = others(p.position, 130, nil)[1]
+        if o then try(game.combat.damage, {entity = o.entity, amount = math.floor((was - p.hp) * 1.5) + 2}) end
+      end
+      hp_who = p.character
+    end
+  end)
+
+  moonmod.on("game.world.location_changed", function()
+    dots, echoes, last_pos, hp_seen = {}, {}, {}, nil
+  end)
+end
+
 -- Weapon arts (above): each weapon that has an art (Toan's, and with Party attacks the others') says so on its card in
 -- the weapon menu, with the level
--- it unlocks at. Done again on each new place and when a weapon levels up; Arts off takes the cards away.
+-- it unlocks at. Done again on each new place and when a weapon levels up; Arts off takes the cards away. A weapon
+-- that rolled a rarity (Weapon rarity, above) shows it on the same card: its name and colour, the tier, its touches,
+-- then its art in two lines.
 do
   local function cards()
     if in_sandbox or type(game.weapons) ~= "table" then return end
     try(game.weapons.style_clear, {})
-    if not setting("arts", true) then return end
+    local styles = {} -- "who:slot" -> the style_set request
+    for k, r in pairs(later.loot_settle()) do
+      local who, slot = k:match("^([^:]+):(%d+)$")
+      local style = who and later.loot_style(who, tonumber(slot), r.id)
+      if style then
+        style.character, style.slot = who, tonumber(slot)
+        styles[k] = style
+      end
+    end
     local need = clamp(setting("art_level", 3), 1, 99)
-    for _, art in ipairs(ATTACKS.arts) do
+    for _, art in ipairs(setting("arts", true) and ATTACKS.arts or {}) do
       local gauge, who = art.gauge, art.character or "toan"
       local shown = who == "toan" and setting("toan_attacks", true) or who ~= "toan" and setting("party_attacks", true)
       for _, item_no in ipairs(shown and art.weapons or {}) do
@@ -2130,22 +2765,36 @@ do
         for _, owned in ipairs(type(w) == "table" and type(w.instances) == "table" and w.instances or {}) do
           if owned.character == who and math.type(owned.slot) == "integer" then
             local level = math.type(owned.level) == "integer" and owned.level or 1
-            try(game.weapons.style_set, {character = who, slot = owned.slot, details = {
-              {text = "Art: " .. art.name, color = {236, 200, 120}},
-              art.line,
-              string.format("Guard (R1) + R2. Costs %d gauge.", gauge),
-              level >= need and {text = "Ready.", color = {140, 220, 140}}
-                or {text = string.format("Unlocks at level %d (now %d).", need, level), color = {200, 160, 160}},
-            }})
+            local ready = level >= need and {text = "Ready.", color = {140, 220, 140}}
+              or {text = string.format("Unlocks at level %d (now %d).", need, level), color = {200, 160, 160}}
+            local k = who .. ":" .. owned.slot
+            local style = styles[k]
+            if style and #style.details > 0 then
+              -- the touches first; the art in two lines below them (a card holds five)
+              while #style.details > 3 do table.remove(style.details) end
+              style.details[#style.details + 1] = {text = string.format("Art: %s (R1 + R2, %d gauge)", art.name, gauge), color = {236, 200, 120}}
+              style.details[#style.details + 1] = ready
+            else
+              style = style or {character = who, slot = owned.slot}
+              style.details = {{text = "Art: " .. art.name, color = {236, 200, 120}}, art.line,
+                               string.format("Guard (R1) + R2. Costs %d gauge.", gauge), ready}
+              styles[k] = style
+            end
           end
         end
       end
     end
+    for _, style in pairs(styles) do
+      if #style.details == 0 then style.details = {{text = "No touches. Stronger than its plain kind.", color = {200, 195, 185}}} end
+      try(game.weapons.style_set, style)
+    end
   end
+  later.weapon_cards = cards
   moonmod.on("game.world.location_changed", cards)
   moonmod.on("game.weapon.upgraded", cards)
   moonmod.on("settings.changed", function(e)
-    if type(e) == "table" and (e.id == "arts" or e.id == "art_level" or e.id == "toan_attacks" or e.id == "party_attacks") then cards() end
+    if type(e) == "table" and (e.id == "arts" or e.id == "art_level" or e.id == "toan_attacks" or e.id == "party_attacks" or
+                               e.id == "loot_rarity") then cards() end
   end)
 end
 
@@ -3233,6 +3882,10 @@ do
     slain_key = elite.key
     toast(string.format("Vigil: %s has fallen.", elite.name), 240)
     if later.elite_gear then later.elite_gear(floor_now and floor_now.dungeon_id, elite.name) end
+    if later.loot_elite_drop and (later.sky_rank("fortunes_favour") > 0 or math.random(100) <= 35 + 10 * later.cycle_now()) then
+      later.loot_elite_drop(elite.name)
+    end
+    if later.give_embers then later.give_embers(1, elite.name) end
     if later.elite_fell then later.elite_fell(elite) end -- Georama as a hub, below
     elite = nil
     drop_bar()
@@ -3268,6 +3921,7 @@ do
       if k:match("^%d+:%d+$") then forget_place(seeds, k) else seeds[k] = nil end
     end
     seeds.cycle, seeds.cycle_ready = later.cycle_now() + 1, nil
+    seeds.embers = later.embers() + 3
     if floors.key then try(game.save.set, floors.key, seeds) end
     toast(string.format("Vigil: cycle %d begins. Every map is new, and all in them stronger.", seeds.cycle + 1), 420)
     return true
@@ -4095,7 +4749,7 @@ do
     local slot = try(game.save.slot_id)
     local key = type(slot) == "table" and slot.slot_id and ("lantern:" .. slot.slot_id .. ":" .. tostring(slot.slot_generation)) or nil
     if not key or try(game.save.get, key) then return end
-    local piece = call(game.items.gear_give, {kind = "pouch", name = LANTERN, rarity = 3, value = 600, icon = "gear_pouch",
+    local piece = call(game.items.gear_give, {kind = "pouch", name = LANTERN, rarity = 4, value = 600, icon = "gear_pouch",
                                               effects = {bag = 10}, color = {r = 255, g = 196, b = 96}})
     if piece then
       try(game.save.set, key, true)
@@ -4493,6 +5147,12 @@ end)
 moonmod.on("game.session.started", function(e)
   local session = try(game.session.get)
   set_sandbox(type(session) == "table" and session.kind == "sandbox" and session.owner ~= ID)
+  -- Another mod's run lays its own floors out (the Gauntlet's Confluence asks for zones): hand them over.
+  if in_sandbox and zones_asked then
+    try(game.dungeons.set_zones, {})
+    try(game.dungeons.set_exits, {town = "any"})
+    zones_asked = false
+  end
 end)
 moonmod.on("game.session.ended", function() set_sandbox(false) end)
 
@@ -4540,7 +5200,7 @@ do
                       pouch = {"Pouch", "Satchel", "Pack"}}
   -- Each kind's first effect, so a piece's kind says something about it; the rest are drawn from them all.
   -- A tunic's is poise, which only a tunic has: hits taken without a stagger (light 1 point, heavy 2). A pouch's is bag,
-  -- which only a pouch has: 5 more item slots a tier, 20 for a unique.
+  -- which only a pouch has: 5 more item slots a tier, 25 for a legendary.
   local GEAR_SIGNATURE = {hat = "guard", tunic = "poise", gloves = "lightness", boots = "run_cost", pouch = "bag"}
   local GEAR_EFFECTS = {"guard", "stamina", "lightness", "defence", "run_cost"}
   local AILMENTS = {"freeze", "poison", "curse", "goo"}
@@ -4552,22 +5212,24 @@ do
                       goo = {r = 196, g = 160, b = 92}, stamina = {r = 244, g = 160, b = 64}, lightness = {r = 244, g = 222, b = 110},
                       defence = {r = 176, g = 188, b = 204}, run_cost = {r = 232, g = 92, b = 76},
                       poise = {r = 206, g = 146, b = 92}, bag = {r = 196, g = 150, b = 104}}
-  -- Common, fine, rare, unique: effects on a piece, what each is worth at that tier, and the piece's price.
+  -- The Gauntlet's five rarities, as weapons have them (Weapon rarity, above): effects on a piece and its price.
+  -- Each effect is as strong as the tier's number (a legendary's five times a common's).
   local RARITY = {
     {name = "Common", effects = 1, value = 60},
-    {name = "Fine", effects = 2, value = 180},
+    {name = "Uncommon", effects = 2, value = 180},
     {name = "Rare", effects = 3, value = 450},
-    {name = "Unique", effects = 3, value = 1200},
+    {name = "Epic", effects = 3, value = 900},
+    {name = "Legendary", effects = 4, value = 1600},
   }
   local GEAR_STRENGTH = {guard = 15, stamina = 6, lightness = 5, defence = 2, run_cost = 8, poise = 1, bag = 5}
   local GEAR_CHEST_CHANCE, GEAR_KILL_CHANCE = 0.2, 0.03
 
   local function gear_on() return setting("gear", true) and not in_sandbox end
 
-  -- A rarity from 1 to 4: deeper dungeons lean rarer.
+  -- A rarity from 1 to 5: deeper dungeons lean rarer.
   local function roll_rarity(dungeon_id)
     local r = math.random(100) + 4 * (tonumber(dungeon_id) or 0)
-    if r > 98 then return 4 elseif r > 86 then return 3 elseif r > 58 then return 2 end
+    if r > 99 then return 5 elseif r > 94 then return 4 elseif r > 82 then return 3 elseif r > 56 then return 2 end
     return 1
   end
 

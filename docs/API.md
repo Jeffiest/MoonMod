@@ -683,6 +683,10 @@ is built again from another seed. `darkcloud_tests --gtest_filter=DungeonReach.*
     should show only those that parse back into them.
   - `messages.rate({id, rating})`: 1 good, -1 poor, 0 takes it back; not one's own.
   - `messages.remove({id})` takes back one of the player's own.
+- `dungeons.zone_gate_open({zone})`: opens the gate into `zone` (1 to zones - 1) of the floor the player is on, a keyed
+  gate or a smoke gate, as `game.dungeon.zone_gate_opened` (with `key = nil`); `{opened = false}` when it already stood
+  open. For the mod whose zones the floor has (or any mod when no mod asks for zones now). The Gauntlet opens a
+  Warden's way on with it once the Warden falls.
 - `dungeons.room_seal({})`: shuts the room the player stands in (well inside it, past its edge cells), each doorway
   closed by a gate facing its corridor, as the Warden room's are; returns `{sealed = true, doors, room = {x, y, w, h}}`
   in cells, or `{sealed = false}` in a corridor or a room with no doorways. `dungeons.room_release()` opens it again
@@ -1075,7 +1079,7 @@ game.items.gear_page_set({icons = {hat = "gear_hat", tunic = "gear_tunic", glove
 
 Each character wears up to five **gear** pieces, one of each kind: `hat`, `tunic`, `gloves`, `boots` and `pouch`. A mod makes
 each piece with `items.gear_give({kind, name, rarity?, value?, icon?, color?, effects?})` (`game.write`): `name` 1-32 bytes, `rarity`
-0 to 3 (common, fine, rare, unique; the engine only keeps it), `value` the Gilda it sells for (0 to 65535), and
+0 to 4 (common, uncommon, rare, epic, legendary: the Gauntlet's five, named and coloured so in the item page's help box; a gear.json from before version 2 had four, and its 3, unique, loads as legendary), `value` the Gilda it sells for (0 to 65535), and
 `effects` any of `guard` (`{freeze, poison, curse, goo = percent}`, 0 to 90 each), `stamina` (gauge a second, 0 to
 120), `lightness` (percent off a swing's cost, 0 to 50), `defence` (0 to 99), `run_cost` (percent off what a
 `dodge_run` drains, 0 to 75), `poise` (points of hits taken without a stagger, 0 to 8) and `bag` (item bag slots, 0 to
@@ -1571,9 +1575,29 @@ game.dungeons.set_zones({zones = {{rooms = 5}, {rooms = 5}}, open = {1}})
 game.dungeons.set_zones({}) -- floors as the game builds them
 ```
 
-- `zones`: 2-24 zones of 2-12 rooms each (the first needs 2), 159 rooms in all. Zones are numbered from 0; gate `n` leads into zone `n`. The zones' squares (each the build area, 16 cells by default) snake two wide down the grid, so eight zones of a 16-cell area take 32 x 64 cells; a request of more than eight snakes five wide (24 zones take 80 x 80). Zones whose squares would not fit (a large `set_layout` area) are left off.
+- `zones`: 2-30 zones of 2-12 rooms each (the first needs 2), 159 rooms in all. Zones are numbered from 0; gate `n` leads into zone `n`. The zones' squares (each the build area, 16 cells by default) snake two wide down the grid, so eight zones of a 16-cell area take 32 x 64 cells; a request of more than eight snakes five wide (24 zones take 80 x 80). Zones whose squares would not fit (a large `set_layout` area) are left off.
 - `open`: gates to build open (a list of 1 to zones - 1), for a floor built again from its seed whose gates the player already opened. Keep them the way Vigil does: `game.dungeon.zone_gate_opened` reports each.
 - `source_floor` (per zone, 0-99): the zone takes that floor's monsters, atla and chest items, so one map can hold several of the game's floors (a **region**; Vigil makes all of Divine Beast Cave one map this way). The monster models of all the zones' floors are loaded together (up to 48 kinds, in the whole model arena) and each stands only in its own floor's zone; each zone lays its floor's atla, and picking one up credits its own floor. The HUD's floor number follows the zone the player stands in. Without it a zone takes the floor being built.
+- `source_dungeon` (per zone, 0-6): the zone is built from that dungeon's parts and has its monsters (the
+  Gauntlet's **Confluence**: a Divine Beast Cave floor whose second zone is Wise Owl Forest and third the Shipwreck).
+  That dungeon's main floor pack (`dun/mpd_pack/dNNmain_a.mpd`) loads beside the floor's own when the map loads, or
+  when the floor is built if the zones were asked for in `game.dungeon.generating`; its ground textures get a texture
+  block of their own. The zone's corridors, room walls, doors, corners, floors, dividing walls, pillars and its shrine's
+  spring are that dungeon's (drawn, collided with, and their torches and water too); stairs, gates and the character
+  doors stay the floor's own, so its keys and events line up. Each zone is lit as its dungeon is: the lights, ambient,
+  fog and background ease (over about a second) to the bank dungeon's while the player stands in its zone, and back to
+  the floor's own elsewhere (`dungeons.lighting_set` on such a floor becomes the floor's own lighting). With
+  `source_dungeon`, a zone's `source_floor` is a floor of that dungeon, whose monsters the zone takes (else the floor
+  of the same number, or that dungeon's last); such a zone lays none of the floor's atla, and its chests and HUD floor
+  number are the floor's own. Up to six other dungeons on one map.
+- `quiet` (per zone, true or false): none of the floor's monsters start in the zone, and it adds none to the floor's
+  count (a boss's hall, a rest stop); a mod's own spawns still can. Its gate out takes no key carrier from it: make that
+  gate smoke (opened by `dungeons.zone_gate_open`) or open.
+- `heal` (per zone): the zone's spring heals as a spring does even with `shrine_heal = false` (a rest stop).
+- `arena` (per zone): the zone's rooms are built 6x6, room for a boss and its cast; `dungeons.room_seal` in one shuts
+  it for the fight.
+- `vaults = false`: no way down to the floor's back side (a map whose zones are a whole run, which a Vault and back
+  would populate again).
 - `exit_floor` (0-99): where the floor's exit gate leads instead of the next floor (past a region's last floor). It also ends the floor the way the game's own `_SET_FLOOR_LEVEL` would.
 - `shrines = true`: each zone has a **shrine**, a healing spring against the top wall of its shrine room (the first zone's first room, a later zone's gate room), and no room gets a random spring. No monster starts within two and a half cells of the spot in front of a shrine, so a party that rests or arrives there isn't set upon at once (monsters can still walk in).
 - `shrine_heal = false`: those springs refill the water gauge but leave HP alone (a mod whose rest heals, for a price), and Cross pressed in one no longer shows the game's "Recover health and thirst here". The default heals as the game's springs do.
@@ -1584,7 +1608,8 @@ game.dungeons.set_zones({}) -- floors as the game builds them
 - A layout that can't be split cleanly (a room that lands outside its zone, a corridor that gets round a gate) is built again from another seed, as an uncrossable floor is; a floor that still won't split after the rebuilds is left whole.
 - The keys are the shortcut keys from the Silver Key down (passing over the one the shortcut doors skip), so a floor with zones has fewer shortcut doors. A locked zone gate shows its key's colour. A map of more than eight zones runs out of keys: from the eighth gate on, the six come round again (a key opens the nearest gate it fits, which is the one before the next that takes it).
 
-`dungeons.zones_get()` returns `{zones, rooms, open, smoke, shrines, shrine_heal, source_floors, exit_floor, floor_zones, current, zone_floors, gates = {{zone, x, y, key, key_item, locked, smoke, carrier}, ...}, shrines = {{zone, x, y}, ...}}` (a smoke gate has no `key`): the request, the zones of the floor the player is on (0 on a floor without zones), the zone the player stands in, each gate with the entity id of the monster carrying its key (while it lives and the gate is locked), and each zone's shrine spring (on the floor the player is on; the request's `shrines` is true or false), and `zone_floors`, the floor each zone of that floor stands for (its `source_floor`, or the floor itself). The cell to stand on in front of a spring is `y + 1`. With height steps on that floor it also has `heights` (each zone's floor height, from zone 0) and `ramps = {{x, y, from, to}, ...}` (each ramp's cell and the heights it runs between: `from` the zone outside the gate, `to` the one inside), and the request's `descent`.
+`dungeons.zones_get()` returns `{zones, rooms, open, smoke, shrines, shrine_heal, source_floors, source_dungeons, quiet, heal, arena, vaults, exit_floor, floor_zones, current, zone_floors, zone_dungeons, gates = {{zone, x, y, key, key_item, locked, smoke, carrier}, ...}, shrines = {{zone, x, y}, ...}}` (a smoke gate has no `key`): the request, the zones of the floor the player is on (0 on a floor without zones), the zone the player stands in, each gate with the entity id of the monster carrying its key (while it lives and the gate is locked), and each zone's shrine spring (on the floor the player is on; the request's `shrines` is true or false), and `zone_floors`, the floor each zone of that floor stands for (its `source_floor`, or the floor itself), and
+`zone_dungeons`, the dungeon each zone is built from. The cell to stand on in front of a spring is `y + 1`. With height steps on that floor it also has `heights` (each zone's floor height, from zone 0) and `ramps = {{x, y, from, to}, ...}` (each ramp's cell and the heights it runs between: `from` the zone outside the gate, `to` the one inside), and the request's `descent`.
 
 A zone's key is never handed out twice: a floor built again while the player still holds the key (or it lies on the floor) gives no monster or chest another.
 
@@ -1652,6 +1677,25 @@ game.ui.map_open({id = "map", title = "Divine Beast Cave", cells = snap.cells, h
   show it.
 - On a map too big for the corner (a region of several floors) the mini map shows the part around the player, at a
   readable size, scrolling as they walk, in a framed box.
+
+### A node sky in play (`ui.sky_open`, Chronicle)
+
+```lua
+game.ui.sky_open({id = "sky", title = "VIGIL SKY", hint = "{dpad} Move  {cross} Level up  {circle} Back",
+  sky = {groups = groups, nodes = nodes, top = {"Level 3", "Gilda 1200", "Embers 2"}}})
+moonmod.on("ui.sky_selected", function(e)        -- {id, entry, action = "buy" | "toggle" | "rank_down" | "rank_up"}
+  if e.action == "buy" then buy(e.entry) game.ui.sky_open({id = "sky", title = "VIGIL SKY", sky = page()}) end
+end)
+```
+
+- `ui.sky_open({id, title, hint?, sky})` (`game.write`) opens a node sky over the dungeon and pauses it, as the map
+  screen does. `sky` is what `title.mode_set` takes as its `sky` (groups, nodes, links, states, Keystones, the top
+  lines), read and drawn the same way; `id` is 1-64 bytes, `title` 1-32 and `hint` up to 160. The pad or left stick
+  moves between nodes, L2/R2 jump between constellations and Triangle shows the whole sky. Cross sends
+  `ui.sky_selected` with action `buy`, Square `toggle`, L1 `rank_down` and R1 `rank_up`. Circle, Select or Start close
+  it (`ui.sky_closed` `{id}`). The engine changes nothing itself: the mod answers by opening the page again with the
+  new states, which keeps the cursor on the node it was on. It opens only during dungeon play, and one mod's page at a
+  time; `ui.sky_close()` takes it away, and unloading the mod does too.
 
 ### Room-scaled encounter and chest population (`dungeons.set_population`)
 
