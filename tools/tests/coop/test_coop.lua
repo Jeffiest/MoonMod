@@ -55,7 +55,12 @@ local function make_game(name)
         S.avatar_hits = {}
         return {monsters = S.monsters, hits = hits}
       end,
-      puppet_set = function(a) S.puppets = a.monsters; return {followed = {}, refused = {}} end,
+      puppet_set = function(a)
+        S.puppets = a.monsters
+        local hits = S.puppet_hits or {}
+        S.puppet_hits = {}
+        return {followed = {}, refused = {}, hits = hits}
+      end,
       puppet_clear = function() S.puppets = nil; return {cleared = true} end,
       mirror_hit = function(a) S.mirror_hits[#S.mirror_hits + 1] = a; return {slot = a.slot, damage = a.damage} end,
     },
@@ -322,9 +327,10 @@ do
   -- a guest's blow on a copy reaches the host's monster
   h.monsters = {{slot = 0, kind = 3, state = 2, hp = 40, max_hp = 60, x = 10, y = 0, z = 0, heading = 0, motion = 0}}
   both(h, g, 8)
-  g.emit("game.enemy_hit", {slot = 0, damage = 17, attacker = 1})
-  both(h, g, 2)
-  check(h.mirror_hits[1] and h.mirror_hits[1].slot == 0 and h.mirror_hits[1].damage == 17, "a guest's blow lands on the host's monster")
+  g.puppet_hits = {{slot = 0, damage = 17}, {slot = 0, damage = 30}} -- a sword's, then a bomb's
+  both(h, g, 8)
+  check(h.mirror_hits[1] and h.mirror_hits[1].slot == 0 and h.mirror_hits[1].damage == 17 and h.mirror_hits[2] and
+        h.mirror_hits[2].damage == 30, "a guest's blows, a bomb's too, land on the host's monster")
   -- the host's monster strikes the guest's hero
   h.avatar_hits = {{avatar = 1, slot = 0, damage = 12, kind = 3, flags = 0}}
   both(h, g, 6)
@@ -348,9 +354,9 @@ do
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 8}
   both(h, g, 12)
   check(g.puppets == nil, "on another floor the guest's monsters think for themselves")
-  g.emit("game.enemy_hit", {slot = 0, damage = 5})
-  both(h, g, 2)
-  check(#h.mirror_hits == 1, "and its blows there stay its own")
+  g.puppet_hits = {{slot = 0, damage = 5}}
+  both(h, g, 12)
+  check(#h.mirror_hits == 2, "and its blows there stay its own")
   h.keys.leave_key = true
   both(h, g, 2)
 end
@@ -430,6 +436,16 @@ do
   check(h.towns[1] == g.towns[1], "a guest's Georama edit reaches the host's world (in pieces)")
   check(k.towns[1] == g.towns[1], "and the host sends it on to the other guest")
   check(find_toast(h, "Xiao changed Matataki"), "the host is told who changed which town")
+  -- two building in one town are told
+  g.map = {context = "georama", map_id = 2, town_map = 2, editing = true}
+  all(31)
+  k.map = {context = "georama", map_id = 2, town_map = 2, editing = true}
+  all(62)
+  check(find_toast(k, "Xiao is building in Queens too"), "a player opening a town's editor hears who else builds there")
+  check(find_toast(g, "Goro is building in Queens too"), "and the other hears it too")
+  g.map = {context = "georama", map_id = 2, town_map = 2, editing = false}
+  k.map = {context = "georama", map_id = 2, town_map = 2, editing = false}
+  all(62)
   -- the host edits Norune while Goro stands in Norune's Georama editor: Goro's game waits, then takes it
   k.map = {context = "georama", map_id = 0, town_map = 0, editing = false}
   k.busy_town = 0

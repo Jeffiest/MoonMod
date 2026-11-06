@@ -224,7 +224,8 @@ end)
 -- ("D damage kind flags"), which takes it as a monster's blow (combat.strike_player), guard and dodge and all. Fifteen
 -- times a second the host sends where its monsters are ("M scene slot,kind,state,hp,max_hp,x,y,z,heading,motion;..."),
 -- and a guest on that floor makes its own monsters copies of them (monsters.puppet_set): they stand, move and die as
--- the host's do. A guest's blow on one goes to the host ("H slot damage"), whose monster takes it.
+-- the host's do. A guest's blow on one (puppet_set returns them) goes to the host ("H slot damage"), whose monster
+-- takes it.
 
 local MIRROR_EVERY = 4    -- frames between the host's monster reports
 local mon = {puppets = false, scene = nil, said_none = false}
@@ -280,9 +281,14 @@ function mon.hear(peer, rest)
       end
     end
   end
-  if try(game.monsters and game.monsters.puppet_set, {monsters = monsters}) then
+  local got = try(game.monsters and game.monsters.puppet_set, {monsters = monsters})
+  if got then
     mon.puppets = true
     mon.scene = scene
+    -- every blow this guest landed on a copy (a weapon's, a bomb's, a thrown item's) goes to the host's monster
+    for _, hit in ipairs(type(got) == "table" and got.hits or {}) do
+      send(0, "H", string.format("%d %d", hit.slot, math.floor(hit.damage)))
+    end
   end
 end
 
@@ -310,11 +316,6 @@ function mon.tick()
   -- floor has its own monsters on the next.
   if S.role == "guest" and mon.puppets and (mon.scene ~= my_scene or not on_floor()) then mon.release() end
 end
-
-moonmod.on("game.enemy_hit", function(e)
-  if S.role ~= "guest" or not mon.puppets or type(e) ~= "table" or not e.slot or not e.damage then return end
-  send(0, "H", string.format("%d %d", e.slot, math.floor(e.damage)))
-end)
 
 -- Doors: opened for everyone ----------------------------------------------------------------------------------------
 -- A script that changes the floor without leaving it (a door or gate opens, a switch turns) comes from
@@ -410,15 +411,39 @@ local function town_from(peer, data)
   end
 end
 
+-- Who is building where ("B town 1" on opening the editor, "B town 0" on leaving it): two building in one town are
+-- told, since the last of them to leave keeps their changes.
+local builders = {} -- peer -> town
+local function name_of(peer)
+  local o = others[peer]
+  return (o and o.name) or (peer == 0 and "The host") or (S.players[peer] and S.players[peer].name) or "Another player"
+end
+local function warn_builders(town, peer)
+  toast(name_of(peer) .. " is building in " .. (TOWNS[town] or "this town") ..
+        " too: whoever leaves the editor last keeps their changes")
+end
+local function hear_builder(peer, rest)
+  local town, on = rest:match("^(%d+) ([01])$")
+  if not town then return end
+  town = tonumber(town)
+  builders[peer] = on == "1" and town or nil
+  if on == "1" and editing_town == town then warn_builders(town, peer) end
+end
+
 local function watch_editing()
   local w = try(game.world.get)
   if type(w) == "table" and w.editing then
-    editing_town = w.town_map
+    if editing_town ~= w.town_map then
+      editing_town = w.town_map
+      send("all", "B", editing_town .. " 1")
+      for peer, town in pairs(builders) do if town == editing_town then warn_builders(town, peer) end end
+    end
     return
   end
   if editing_town == nil then return end
   local town = editing_town
   editing_town = nil
+  send("all", "B", town .. " 0")
   local export = try(game.georama and game.georama.town_export, {town_id = town})
   if not (export and export.data) then return end
   if S.role == "host" then
@@ -438,6 +463,7 @@ local function stop(reason)
   forget_all()
   mon.release()
   door.log, door.done, door.waiting = {}, {}, {}
+  builders = {}
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest = nil, nil, {}, {}, nil
   show_room()
@@ -544,6 +570,7 @@ local function message(peer, data)
   if not kind then return end
   if kind == "P" then hear_position(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
+  if kind == "B" then hear_builder(peer, rest) return end
   if kind == "M" then mon.hear(peer, rest) return end
   if kind == "E" then door.hear(rest) return end
   if kind == "H" then if S.role == "host" then mon.hit_on_host(peer, rest) end return end
@@ -596,6 +623,7 @@ local function pump()
       local p = S.players[e.peer]
       S.players[e.peer] = nil
       forget(e.peer)
+      builders[e.peer] = nil
       if S.role == "host" and p then toast("Co-op: " .. tostring(p.name or "a player") .. " left") end
       show_room()
     elseif e.kind == "message" then

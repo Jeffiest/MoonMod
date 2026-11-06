@@ -2540,7 +2540,9 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   `monsters.puppet_set({monsters})` (a guest) makes this floor's monsters copies of those, by slot: a copy has no
   thoughts or blows of its own and stands, turns and moves as the host's does; a slot left out, or one with `hp` 0, is
   gone on the host, and a copy still up dies, its own death and drops playing out. A slot holding another kind here is
-  `refused`. `monsters.puppet_clear()` gives them their own thoughts back (leaving the floor does too).
+  `refused`. It returns, as `hits = {{slot, damage}, ...}`, the blows this player landed on the copies since the last
+  call (any blow: a weapon's, a bomb's, a thrown item's), for the host's monsters; a copy keeps a sliver of life until
+  the host's dies. `monsters.puppet_clear()` gives them their own thoughts back (leaving the floor does too).
   `monsters.mirror_hit({slot, damage})` (the host) lands another player's blow on a monster: the life goes, and a kill
   dies on the host as the host's own would.
 

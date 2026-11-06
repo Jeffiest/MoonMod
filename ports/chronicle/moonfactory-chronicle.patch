@@ -3292,10 +3292,10 @@ index 00000000..494c7f6b
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_monsters.hpp b/port/include/moonmod/coop_monsters.hpp
 new file mode 100644
-index 00000000..9927747b
+index 00000000..3c5fe1d6
 --- /dev/null
 +++ b/port/include/moonmod/coop_monsters.hpp
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,53 @@
 +#pragma once
 +
 +// Co-op's monsters (monsters.mirror_get / puppet_set / mirror_hit), from src/moonmod/coop_monsters_moonmod.cpp. The
@@ -3325,6 +3325,12 @@ index 00000000..9927747b
 +void MoonModCoopPuppetsClear();
 +bool MoonModCoopIsPuppet(int slot);
 +void MoonModCoopPuppetsStep(); // after the monsters' own step
++// A blow this player landed on a copy (any: a weapon's, a bomb's, a thrown item's), for the host's monster.
++void MoonModCoopPuppetHit(int slot, int damage);
++struct MoonModPuppetHit {
++    int slot = 0, damage = 0;
++};
++std::vector<MoonModPuppetHit> MoonModCoopTakePuppetHits();
 +
 +// Host: the remote players as the monsters' targets, around the monsters' step.
 +float MoonModCoopNearestDistance(const float *player, const float *monster);
@@ -23735,10 +23741,10 @@ index 00000000..e7817877
 +
 +} // namespace dc::game
 diff --git a/port/src/game/monstorunit.cpp b/port/src/game/monstorunit.cpp
-index d645aa5a..8f12334a 100644
+index d645aa5a..69a42811 100644
 --- a/port/src/game/monstorunit.cpp
 +++ b/port/src/game/monstorunit.cpp
-@@ -1,5 +1,8 @@
+@@ -1,7 +1,11 @@
  #include "monstorunit.hpp"
  
 +#include "moonmod/game_hooks.hpp"
@@ -23746,8 +23752,11 @@ index d645aa5a..8f12334a 100644
 +
  #include <libvu0.h>
  
++#include <algorithm>
  #include <array>
-@@ -30,6 +33,7 @@
+ #include <cmath>
+ #include <cstdlib>
+@@ -30,6 +34,7 @@
  #include "mathutil.hpp"
  #include "menu_inventory.hpp"
  #include "mglib.hpp"
@@ -23755,7 +23764,7 @@ index d645aa5a..8f12334a 100644
  #include "nowload.hpp"
  #include "platform/config.hpp"
  #include "randomitem.hpp"
-@@ -61,7 +65,7 @@ namespace {
+@@ -61,7 +66,7 @@ namespace {
  float CharaHeight(CUserStatus *status) {
      constexpr std::array<float, 6> chara_height = {16.0f, 14.0f, 16.0f, 16.0f, 18.0f, 15.0f};
  
@@ -23764,7 +23773,7 @@ index d645aa5a..8f12334a 100644
  }
  
  /**
-@@ -463,9 +467,11 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
+@@ -463,9 +468,11 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
      CRect_i_      clip;
      CTexture     *texture = TexManager.GetTexture("itempack", -1);
  
@@ -23778,7 +23787,7 @@ index d645aa5a..8f12334a 100644
  
              if (draw) {
                  CCharacter *character = &chara[i][0];
-@@ -474,10 +480,12 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
+@@ -474,10 +481,12 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
                  clip.y = 96;
                  clip.width = 8;
                  clip.height = 8;
@@ -23795,7 +23804,7 @@ index d645aa5a..8f12334a 100644
                  set2DSprite(Vif1Packet, texture, screen, clip);
              }
          }
-@@ -582,9 +590,13 @@ int CMonstorUnit::CheckEventFlag2() {
+@@ -582,9 +591,13 @@ int CMonstorUnit::CheckEventFlag2() {
  }
  
  void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int /*unused*/) {
@@ -23810,7 +23819,7 @@ index d645aa5a..8f12334a 100644
  
      for (int n = 0; n < count; n++) {
          bool placed = false;
-@@ -597,12 +609,32 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -597,12 +610,32 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                  placed = true;
              }
  
@@ -23845,7 +23854,7 @@ index d645aa5a..8f12334a 100644
                      if (monster[i].state != -1) {
                          CCharacter *character = &chara[i][0];
                          character->GetPosition(existing);
-@@ -616,7 +648,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -616,7 +649,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                  if (!close) {
                      int nearby = 0;
  
@@ -23854,7 +23863,7 @@ index d645aa5a..8f12334a 100644
                          if (monster[i].state != -1) {
                              CCharacter *character = &chara[i][0];
                              character->GetPosition(existing);
-@@ -633,6 +665,11 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -633,6 +666,11 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                          if (model_no == -1) {
                              selected = static_cast<int>(static_cast<float>(model_count) * static_cast<float>(rand()) / 2147483648.0f);
  
@@ -23866,7 +23875,7 @@ index d645aa5a..8f12334a 100644
                              if (model[selected].kind != MONSTER_KIND_NORMAL && model[selected].kind != MONSTER_KIND_MIMIC_SMALL) {
                                  if (used[selected]) {
                                      continue;
-@@ -651,6 +688,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -651,6 +689,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
      }
  
      SetKey();
@@ -23874,7 +23883,7 @@ index d645aa5a..8f12334a 100644
  }
  
  void CMonstorUnit::AllBin2() {
-@@ -770,7 +808,7 @@ void CMonstorUnit::DrawMonstor() {
+@@ -770,7 +809,7 @@ void CMonstorUnit::DrawMonstor() {
      MGGetAmbient(ambient);
      TexManager.ReloadTexture(Vif1Packet, 42);
  
@@ -23883,7 +23892,7 @@ index d645aa5a..8f12334a 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              current_monster = i;
              CCharacter *character = &chara[i][0];
-@@ -842,7 +880,7 @@ void CMonstorUnit::DrawMonstor() {
+@@ -842,7 +881,7 @@ void CMonstorUnit::DrawMonstor() {
  void CMonstorUnit::DrawMonstorCursor() {
      sceVu0FVECTOR position;
  
@@ -23892,7 +23901,7 @@ index d645aa5a..8f12334a 100644
          if (monster[i].view_held != 0) {
              CCharacter *character = &chara[i][0];
              character->GetPosition(position);
-@@ -919,7 +957,7 @@ void CMonstorUnit::DrawShadowMonstor() {
+@@ -919,7 +958,7 @@ void CMonstorUnit::DrawShadowMonstor() {
      sceVu0FVECTOR light = {0.0f, 1.0f, 0.0f, 0.0f};
      const float   detail_distance = ConfigDetailDistance();
  
@@ -23901,7 +23910,7 @@ index d645aa5a..8f12334a 100644
          const MONSTOR &mon = monster[i];
          const bool     drawn = mon.state == 2 || (mon.state == 1 && mon.player_distance < detail_distance);
  
-@@ -945,16 +983,16 @@ void CMonstorUnit::DrawShadowMonstor() {
+@@ -945,16 +984,16 @@ void CMonstorUnit::DrawShadowMonstor() {
  void CMonstorUnit::CheckViewLevel() {
      sceVu0FVECTOR player_position;
      sceVu0FVECTOR monster_position;
@@ -23922,7 +23931,7 @@ index d645aa5a..8f12334a 100644
          sorted[i] = -1;
          monster[i].view_held = false;
  
-@@ -966,7 +1004,8 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -966,7 +1005,8 @@ void CMonstorUnit::CheckViewLevel() {
          character->GetPosition(monster_position);
          monster_position[3] = 1;
          player_position[3] = 1;
@@ -23932,7 +23941,7 @@ index d645aa5a..8f12334a 100644
          monster[i].player_distance = distance;
  
          if (monster[i].state == 1 && distance < monster[i].clip_distance) {
-@@ -989,7 +1028,7 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -989,7 +1029,7 @@ void CMonstorUnit::CheckViewLevel() {
  
      int sorted_count = 0;
  
@@ -23941,7 +23950,7 @@ index d645aa5a..8f12334a 100644
          int floor = UserStatus->cur_floor;
          int max_floor = maxFloorTbl__3[selectMapNo];
  
-@@ -1002,8 +1041,19 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -1002,8 +1042,19 @@ void CMonstorUnit::CheckViewLevel() {
              float distance = 3200.0f;
  
              for (int j = 0; j < active_count; j++) {
@@ -23963,7 +23972,7 @@ index d645aa5a..8f12334a 100644
                      closest = j;
                  }
              }
-@@ -1015,7 +1065,7 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -1015,7 +1066,7 @@ void CMonstorUnit::CheckViewLevel() {
              }
          }
  
@@ -23972,7 +23981,7 @@ index d645aa5a..8f12334a 100644
              if (sorted[i] != -1 && monster[sorted[i]].state == 2 && monster[sorted[i]].hp > 0 && monster[sorted[i]].kind != MONSTER_KIND_NO_LOCK_ON) {
                  monster[sorted[i]].state = 1;
                  monster[sorted[i]].view_held = true;
-@@ -1067,6 +1117,29 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1067,6 +1118,29 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
      sceVu0FVECTOR       direction;
      sceVu0FVECTOR       position;
  
@@ -24002,7 +24011,7 @@ index d645aa5a..8f12334a 100644
      if (monster[current_monster].stop_timer <= 0) {
          for (int i = 0; i < 16; i++) {
              if (effect2[current_monster].active[i] != 0) {
-@@ -1187,9 +1260,11 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1187,9 +1261,11 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
  
              if (monster[current_monster].hp <= 0) {
                  monster[current_monster].hp = 0;
@@ -24014,7 +24023,7 @@ index d645aa5a..8f12334a 100644
              }
  
              chara[current_monster][0].GetPosition(poison_position);
-@@ -1214,7 +1289,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1214,7 +1290,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
              }
  
              if (active) {
@@ -24025,7 +24034,7 @@ index d645aa5a..8f12334a 100644
                  int rejected = 0;
  
                  if (hit != -1) {
-@@ -1378,6 +1455,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1378,6 +1456,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      const float mark_spread = 1.0f / 2.0f;
                      HitMark[hitCnt].Set(effect[current_monster].position[i], hit_direction, HIT_MARK_HIT, mark_spread, 0.01f, 0.02f, mark_scale, 32, monster[current_monster].ground_y);
                      HitPointMark[hitCnt].Set(effect[current_monster].position[i]);
@@ -24034,7 +24043,7 @@ index d645aa5a..8f12334a 100644
  
                      if (hitCnt == 15) {
                          hitCnt = 0;
-@@ -1528,6 +1607,10 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1528,6 +1608,10 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      if (owner != -1) {
                          float old_damage = damage;
                          int   multiplier = effect[index].parameter[i][owner];
@@ -24045,7 +24054,7 @@ index d645aa5a..8f12334a 100644
                          auto  damage_scale = static_cast<float>(multiplier);
                          damage = damage / 100.0f * damage_scale;
  
-@@ -1559,6 +1642,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1559,6 +1643,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          damage = 0;
                      }
  
@@ -24063,7 +24072,7 @@ index d645aa5a..8f12334a 100644
                      auto amount = static_cast<int>(damage);
  
                      if (!(damage - static_cast<float>(amount) <= 0.0f)) {
-@@ -1578,12 +1672,20 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1578,12 +1673,26 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          amount = monster[current_monster].hp;
                      }
  
@@ -24077,6 +24086,12 @@ index d645aa5a..8f12334a 100644
                      }
  
                      BtActStatus.monstor_target = owner;
++                    if (amount > 0 && MoonModCoopIsPuppet(current_monster)) {
++                        // MoonMod co-op: a blow on the host's monster's copy is the host's to land; the copy
++                        // keeps a sliver of life until the host's dies.
++                        MoonModCoopPuppetHit(current_monster, amount);
++                        amount = std::max(0, std::min(amount, monster[current_monster].hp - 1));
++                    }
                      monster[current_monster].hp -= amount;
 +                    if (amount > 0) {
 +                        moonmod::QueueChronicleMonsterHit(this, current_monster, owner, weapon_id, amount, element);
@@ -24084,7 +24099,7 @@ index d645aa5a..8f12334a 100644
  
                      if (monster[current_monster].hp <= 0) {
                          monster[current_monster].last_attacker = owner;
-@@ -1622,6 +1724,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1622,6 +1731,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      }
  
                      if (result == MonsterDamageResult::Killed) {
@@ -24092,7 +24107,7 @@ index d645aa5a..8f12334a 100644
                          return MonsterDamageResult::Killed;
                      }
  
-@@ -1658,7 +1761,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
+@@ -1658,7 +1768,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
      float upper = top[1];
      float lower = end[1];
  
@@ -24101,7 +24116,7 @@ index d645aa5a..8f12334a 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              if (effect3[i].count == 0) {
                  CCharacter *character = &chara[i][0];
-@@ -1828,7 +1931,7 @@ void CMonstorUnit::MoveChecMonster() {
+@@ -1828,7 +1938,7 @@ void CMonstorUnit::MoveChecMonster() {
      sceVu0CopyVector(flat_next, next_position);
      flat_next[1] = 1;
  
@@ -24110,7 +24125,7 @@ index d645aa5a..8f12334a 100644
          if (monster[i].state == 2 && i != current_monster) {
              CCharacter *other = &chara[i][0];
              other->GetPosition(other_position);
-@@ -1880,7 +1983,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1880,7 +1990,7 @@ void CMonstorUnit::Step(int pause) {
      }
  
      if (paused != 0) {
@@ -24119,7 +24134,7 @@ index d645aa5a..8f12334a 100644
              if (monster[i].state == 2) {
                  monster[i].requested_motion_flags &= ~4;
  
-@@ -1921,9 +2024,10 @@ void CMonstorUnit::Step(int pause) {
+@@ -1921,9 +2031,10 @@ void CMonstorUnit::Step(int pause) {
  
      BtActStatus.monstor_target = -1;
  
@@ -24131,7 +24146,7 @@ index d645aa5a..8f12334a 100644
  
              if (monster[current_monster].motion_reset_pending != 0) {
                  monster[current_monster].requested_motion_flags &= ~4;
-@@ -1974,7 +2078,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1974,7 +2085,7 @@ void CMonstorUnit::Step(int pause) {
                  box.min[1] = position[1] - 80.0f;
                  box.min[2] = position[2] - 30.0f;
  
@@ -24140,7 +24155,7 @@ index d645aa5a..8f12334a 100644
                      if (j != current_monster && monster[j].state == 2) {
                          chara[j][0].GetPosition(other_position);
                          collision->SetPosition(other_position);
-@@ -1992,11 +2096,15 @@ void CMonstorUnit::Step(int pause) {
+@@ -1992,11 +2103,15 @@ void CMonstorUnit::Step(int pause) {
                      case MonsterDamageResult::None:
                          break;
                      case MonsterDamageResult::Hit:
@@ -24159,7 +24174,7 @@ index d645aa5a..8f12334a 100644
                          script_state[current_monster] = 1;
                          break;
                  }
-@@ -2008,15 +2116,36 @@ void CMonstorUnit::Step(int pause) {
+@@ -2008,15 +2123,36 @@ void CMonstorUnit::Step(int pause) {
                          monster[current_monster].invincible_timer--;
                      }
                  } else {
@@ -24199,7 +24214,7 @@ index d645aa5a..8f12334a 100644
                      } else {
                          interpreter[current_monster].resume();
  
-@@ -2092,6 +2221,28 @@ void CMonstorUnit::Step(int pause) {
+@@ -2092,6 +2228,28 @@ void CMonstorUnit::Step(int pause) {
                          }
                      }
  
@@ -24228,7 +24243,7 @@ index d645aa5a..8f12334a 100644
                      monster[current_monster].ground_distance = 0.0f;
                      chara[current_monster][0].GetPosition(position);
                      position[1] += 10.0f;
-@@ -2289,8 +2440,9 @@ void CMonstorUnit::Step(int pause) {
+@@ -2289,8 +2447,9 @@ void CMonstorUnit::Step(int pause) {
  }
  
  void CMonstorUnit::CleanViewMonstor(int back_floor) {
@@ -24239,7 +24254,7 @@ index d645aa5a..8f12334a 100644
          monster[i].stop_timer = 0;
          monster[i].poison_timer = 0;
          monster[i].anger_timer = 0;
-@@ -2379,10 +2531,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
+@@ -2379,10 +2538,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
  
      back_dungeon = back_floor;
      alive_count = 0;
@@ -24256,7 +24271,7 @@ index d645aa5a..8f12334a 100644
      CFrameAttr     attr;
      int            file_size = 0;
      attr.fog_enable = true;
-@@ -2424,6 +2581,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2424,6 +2588,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  
          if (entry == -1) {
              std::println("******* ShotEntry Error !!***********");
@@ -24264,7 +24279,7 @@ index d645aa5a..8f12334a 100644
          } else {
              model[slot].shot_effect[0] = entry;
          }
-@@ -2434,11 +2592,13 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2434,11 +2599,13 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  
          if (entry == -1) {
              std::println("******* ShotEntry Error !!***********");
@@ -24278,7 +24293,7 @@ index d645aa5a..8f12334a 100644
      model_count++;
      return 1;
  }
-@@ -2446,7 +2606,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2446,7 +2613,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag) {
      current_monster = -1;
  
@@ -24287,7 +24302,7 @@ index d645aa5a..8f12334a 100644
          if (monster[i].state == -1) {
              current_monster = i;
              break;
-@@ -2461,6 +2621,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2461,6 +2628,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      BtSetEventScript(&interpreter[current_monster], script_data[model_no], script[current_monster]);
      chara[current_monster][0] = base_chara[model_no][0];
      chara[current_monster][0].motion[0] = &chara[current_monster][0].motion_type;
@@ -24295,7 +24310,7 @@ index d645aa5a..8f12334a 100644
      chara[current_monster][0].SetPosition(position);
      chara[current_monster][0].SetRotation(0.0f, 0.0f, 0.0f);
  
-@@ -2480,6 +2641,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2480,6 +2648,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      monster[current_monster].state = 1;
@@ -24303,7 +24318,7 @@ index d645aa5a..8f12334a 100644
      monster[current_monster].base_model = model_no;
      monster[current_monster].max_hp = model[model_no].max_hp;
      monster[current_monster].hp = model[model_no].max_hp;
-@@ -2536,11 +2698,13 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2536,11 +2705,13 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      if (interpreter[current_monster].check_program(1) != 0) {
@@ -29482,10 +29497,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..1e595ad8
+index 00000000..b87aa016
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17260 @@
+@@ -0,0 +1,17263 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -43190,7 +43205,10 @@ index 00000000..1e595ad8
 +        for (int slot = 0; slot < MONSTOR_SLOT_MAX; ++slot) {
 +            if (!named[slot] && MoonModCoopIsPuppet(slot)) MoonModCoopPuppetSet(slot, MoonModPuppet{});
 +        }
-+        return {ApiCallStatus::Ok, {{"followed", followed}, {"refused", refused}}, {}};
++        // The blows this player landed on the copies since the last call, for the host's monsters.
++        Json hits = Json::array();
++        for (const MoonModPuppetHit &hit : MoonModCoopTakePuppetHits()) hits.push_back({{"slot", hit.slot}, {"damage", hit.damage}});
++        return {ApiCallStatus::Ok, {{"followed", followed}, {"refused", refused}, {"hits", hits}}, {}};
 +    }
 +    // dungeons.shared_events_get / shared_event_run: co-op's shared doors (moonmod/coop_events.hpp).
 +    if (operation.path == "dungeons.shared_events_get") {
@@ -47908,10 +47926,10 @@ index 00000000..8c7bd594
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_monsters_moonmod.cpp b/port/src/moonmod/coop_monsters_moonmod.cpp
 new file mode 100644
-index 00000000..136fee79
+index 00000000..83110a2b
 --- /dev/null
 +++ b/port/src/moonmod/coop_monsters_moonmod.cpp
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,234 @@
 +// Co-op's monsters (moonmod/coop_monsters.hpp): on the host they see every player; on a guest they mirror the host's.
 +
 +#include "moonmod/coop_monsters.hpp"
@@ -48001,7 +48019,22 @@ index 00000000..136fee79
 +    return true;
 +}
 +
++namespace {
++std::vector<MoonModPuppetHit> g_puppet_hits;
++} // namespace
++
++void MoonModCoopPuppetHit(int slot, int damage) {
++    if (damage > 0 && g_puppet_hits.size() < 32) g_puppet_hits.push_back({slot, damage});
++}
++
++std::vector<MoonModPuppetHit> MoonModCoopTakePuppetHits() {
++    std::vector<MoonModPuppetHit> out;
++    out.swap(g_puppet_hits);
++    return out;
++}
++
 +void MoonModCoopPuppetsClear() {
++    g_puppet_hits.clear();
 +    for (Puppet &p : g_puppets) p = Puppet{};
 +}
 +
