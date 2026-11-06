@@ -2520,17 +2520,22 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   `kind = "visit"`; `game.session.failed` `{kind = "visit", reason}` comes to the mod when the data didn't fit.
 
 - `world.avatar_set({slot, character, weapon?, x, y, z, heading, motion, tint?, name?})` shows another player (slot 1-3) on
-  the dungeon floor: `character` a character id, `weapon` an `item_no` (as `player.get().weapon.item_no`), the position
+  the dungeon floor, or walking in the town the player walks in (without a weapon there, and with the town's motions): `character` a character id, `weapon` an `item_no` (as `player.get().weapon.item_no`), the position
   and `heading` as `player.get()` reports them, `motion` its `motion`, and `tint` `{r, g, b}` (each 0-128) the ambient
   it draws in. Set it as reports come (several a second): between them the hero eases there and turns the shortest
-  way, and it jumps when more than three cells away. Each has its own model and texture arenas, loaded on the next
+  way, and it jumps when far away (a warp, the stairs). Each has its own model and texture arenas, loaded on the next
   dungeon frame and let go out of the dungeon (the slot is kept for the next floor). `world.avatar_clear({slot})`
-  takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays. `name` (24
-  bytes at most) is drawn over the hero's head, in blue for a tinted one, fading out between six and nine cells away.
+  takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays, and in a town,
+  walking, its `position`, `heading`, `motion` and `town_character` (the hero it walks as, `party.town_set_active`).
+  `world.get()` in a town reports `walking` too. `name` (24
+  bytes at most) is drawn over the hero's head, in blue for a tinted one, fading out toward where monsters stop being
+  drawn.
 
 - `monsters.mirror_get()` (co-op's host) gives the floor's monsters, `{monsters = {{slot, kind, state, hp, max_hp, x,
-  y, z, heading, motion}, ...}, hits}`, and the blows its monsters landed on other players' heroes since the last call,
-  `hits = {{avatar, slot, damage, kind, flags}, ...}` (`avatar` as `world.avatar_set` numbers it). While heroes are on
+  y, z, heading, motion}, ...}, hits}`, and what struck other players' heroes since the last call (anything that would
+  strike the player: a monster's blow, its shot or spell, a trap, measured on each hero as the game measures it on the
+  player), `hits = {{avatar, slot, damage, kind, flags}, ...}` (`avatar` as `world.avatar_set` numbers it, `slot` the
+  monster or -1, `kind` 2 a small hit, 3 a blow, 4 a heavy blow). While heroes are on
   the floor, the host's monsters see them as players: each wakes for the nearest player and chases it.
   `monsters.puppet_set({monsters})` (a guest) makes this floor's monsters copies of those, by slot: a copy has no
   thoughts or blows of its own and stands, turns and moves as the host's does; a slot left out, or one with `hp` 0, is

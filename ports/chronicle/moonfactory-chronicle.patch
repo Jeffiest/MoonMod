@@ -3218,14 +3218,14 @@ index 00000000..d857f227
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_avatars.hpp b/port/include/moonmod/coop_avatars.hpp
 new file mode 100644
-index 00000000..cb19e837
+index 00000000..3560e9dc
 --- /dev/null
 +++ b/port/include/moonmod/coop_avatars.hpp
 @@ -0,0 +1,34 @@
 +#pragma once
 +
 +// Co-op's remote players (world.avatar_set / avatar_clear), drawn and driven by src/moonmod/coop_avatars_moonmod.cpp:
-+// up to three other players on the dungeon floor, each a hero of its own with the weapon in its hand. A mod sets
++// up to three other players on the dungeon floor or walking in the town, each a hero of its own with the weapon in its hand. A mod sets
 +// where each one is as the network reports it, a few times a second; between reports it eases there, turns the
 +// shortest way and plays the motion it was told. Each has its own model and texture arenas, taken only while it is up.
 +#include <string>
@@ -3292,10 +3292,10 @@ index 00000000..494c7f6b
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_monsters.hpp b/port/include/moonmod/coop_monsters.hpp
 new file mode 100644
-index 00000000..5fecd24f
+index 00000000..9927747b
 --- /dev/null
 +++ b/port/include/moonmod/coop_monsters.hpp
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,47 @@
 +#pragma once
 +
 +// Co-op's monsters (monsters.mirror_get / puppet_set / mirror_hit), from src/moonmod/coop_monsters_moonmod.cpp. The
@@ -3332,10 +3332,13 @@ index 00000000..5fecd24f
 +void  MoonModCoopMonsterTarget(int slot);
 +void  MoonModCoopMonstersStepEnd();
 +
++// Host: what would strike the player that lands on a hero instead, from the player's own damage check each frame.
++void MoonModCoopAvatarHitsScan();
++
 +struct MoonModAvatarHit {
 +    int avatar = 0;  // 1..3, as world.avatar_set numbers them
 +    int monster = 0; // its slot
-+    int damage = 0, kind = 0, flags = 0;
++    int damage = 0, kind = 0, flags = 0; // kind: 2 a small hit, 3 a blow, 4 a heavy blow (COLLISION_HIT)
 +};
 +std::vector<MoonModAvatarHit> MoonModCoopTakeAvatarHits();
 +
@@ -12429,7 +12432,7 @@ index 00000000..d56b5827
 +
 +} // namespace dc::game
 diff --git a/port/src/game/dun/gameloop.cpp b/port/src/game/dun/gameloop.cpp
-index 0e33bf79..2077d6fa 100644
+index 0e33bf79..5e3ff291 100644
 --- a/port/src/game/dun/gameloop.cpp
 +++ b/port/src/game/dun/gameloop.cpp
 @@ -1,3 +1,5 @@
@@ -13767,7 +13770,7 @@ index 0e33bf79..2077d6fa 100644
  } // namespace
  
  void HitBlowVelocity(int hit_no, float *velocity) {
-@@ -3808,6 +4344,18 @@ void HitBlowVelocity(int hit_no, float *velocity) {
+@@ -3808,7 +4344,20 @@ void HitBlowVelocity(int hit_no, float *velocity) {
      velocity[2] = away_z / length;
  }
  
@@ -13784,9 +13787,11 @@ index 0e33bf79..2077d6fa 100644
 +}
 +
  int BtCheckDamageProc() {
++    MoonModCoopAvatarHitsScan(); // MoonMod co-op: what strikes another player's hero here goes to their game
      sceVu0FVECTOR pos;
      sceVu0FVECTOR from;
-@@ -3854,18 +4402,21 @@ int BtCheckDamageProc() {
+     sceVu0FVECTOR blow;
+@@ -3854,18 +4403,21 @@ int BtCheckDamageProc() {
  
              BtActStatus.move_power = 0.0f;
              BtActStatus.gauge_exhausted = 0;
@@ -13811,7 +13816,7 @@ index 0e33bf79..2077d6fa 100644
  
              if (StatusErrCheck(AILMENT_STAMINA) != 0) {
                  guard *= 2;
-@@ -3916,51 +4467,35 @@ int BtCheckDamageProc() {
+@@ -3916,51 +4468,35 @@ int BtCheckDamageProc() {
              }
  
              if ((hit->flags & 0x100) && roll < 0x41) {
@@ -13867,7 +13872,7 @@ index 0e33bf79..2077d6fa 100644
                  }
              }
  
-@@ -3969,11 +4504,29 @@ int BtCheckDamageProc() {
+@@ -3969,11 +4505,29 @@ int BtCheckDamageProc() {
                  damage = UserStatus->max_hp[static_cast<int>(UserStatus->cur_chara)] >> 1;
              }
  
@@ -13898,7 +13903,7 @@ index 0e33bf79..2077d6fa 100644
                      HitBlowVelocity(hit_no, blowVelo);
                      velo__2[0] = blowVelo[0] / 10.0f;
                      velo__2[2] = blowVelo[2] / 10.0f;
-@@ -3990,6 +4543,7 @@ int BtCheckDamageProc() {
+@@ -3990,6 +4544,7 @@ int BtCheckDamageProc() {
                      SndSePlay(SE_CHARA_HURT, -1, 0);
                      SndSePlay(SE_PLAYER_HIT, -1, 0);
                      BtActStatus.hud_shake_frames = 15;
@@ -13906,7 +13911,7 @@ index 0e33bf79..2077d6fa 100644
                      setUnitAmbientAnime(160.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                      UserStatus->AddNowLife(UserStatus->cur_chara, -damage, 10.0f);
  
-@@ -3998,14 +4552,20 @@ int BtCheckDamageProc() {
+@@ -3998,14 +4553,20 @@ int BtCheckDamageProc() {
                      number_pos[1] = CharaHeight(UserStatus);
                      HitValueEntry(NowHitValue, number_pos, damage, HIT_VALUE_PLAYER, CharaMain.frame);
  
@@ -13930,7 +13935,7 @@ index 0e33bf79..2077d6fa 100644
                          BtActStatus.action_on = 5;
                          BtActStatus.motion_no = 6;
                          CharaMain.motion_type.state.time = static_cast<float>(CharaMain.motion_type.motion_info[6].start);
-@@ -4015,9 +4575,12 @@ int BtCheckDamageProc() {
+@@ -4015,9 +4576,12 @@ int BtCheckDamageProc() {
                          CharaMain.motion_type.state.time = static_cast<float>(CharaMain.motion_type.motion_info[4].start);
                      }
  
@@ -13946,7 +13951,7 @@ index 0e33bf79..2077d6fa 100644
                  }
              }
  
-@@ -4028,7 +4591,8 @@ int BtCheckDamageProc() {
+@@ -4028,7 +4592,8 @@ int BtCheckDamageProc() {
                  sceVu0CopyVector(at, hit->pos);
                  GamePad.SetVibration(1, 0xDC, 0xC);
  
@@ -13956,7 +13961,7 @@ index 0e33bf79..2077d6fa 100644
                      sceVu0CopyVector(away, CharaMain.pos);
  
                      if (monster != -1) {
-@@ -4060,6 +4624,7 @@ int BtCheckDamageProc() {
+@@ -4060,6 +4625,7 @@ int BtCheckDamageProc() {
                      SndSePlay(SE_CHARA_HURT_HEAVY, -1, 0);
                      SndSePlay(SE_PLAYER_HIT, -1, 0);
                      BtActStatus.hud_shake_frames = 25;
@@ -13964,7 +13969,7 @@ index 0e33bf79..2077d6fa 100644
                      setUnitAmbientAnime(80.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                      UserStatus->AddNowLife(UserStatus->cur_chara, -damage, 10.0f);
  
-@@ -4086,7 +4651,9 @@ int BtCheckDamageProc() {
+@@ -4086,7 +4652,9 @@ int BtCheckDamageProc() {
                          cnt++;
                      }
  
@@ -13975,7 +13980,7 @@ index 0e33bf79..2077d6fa 100644
                          BtActStatus.action_on = 0;
                          BtActStatus.motion_no = 0x1D;
                      } else {
-@@ -4095,14 +4662,18 @@ int BtCheckDamageProc() {
+@@ -4095,14 +4663,18 @@ int BtCheckDamageProc() {
                          CharaMain.motion_type.state.time = static_cast<float>(CharaMain.motion_type.motion_info[4].start);
                      }
  
@@ -14001,7 +14006,7 @@ index 0e33bf79..2077d6fa 100644
                      }
                  }
              }
-@@ -4192,7 +4763,7 @@ void BattleActionThlow() {
+@@ -4192,7 +4764,7 @@ void BattleActionThlow() {
      if (BombInfo.throw_step == 1) {
          constexpr std::array<float, 6> throw_frame = {548.0f, 452.0f, 267.0f, 347.0f, 188.0f, 321.0f};
          auto                           end = static_cast<float>(CharaMain.motion_type.motion_info[27].end);
@@ -14010,7 +14015,7 @@ index 0e33bf79..2077d6fa 100644
  
          if (CharaMain.motion_type.state.time >= start && CharaMain.motion_type.state.time <= end) {
              SndSePlay(SE_THROW, -1, 0);
-@@ -4280,7 +4851,7 @@ void BattleActionDrink() {
+@@ -4280,7 +4852,7 @@ void BattleActionDrink() {
  
      BtActStatus.motion_no = 0x1C;
  
@@ -14019,7 +14024,7 @@ index 0e33bf79..2077d6fa 100644
      float now = CharaMain.motion_type.state.time;
  
      if (now >= frame && now < frame + 0.3f) {
-@@ -4342,7 +4913,22 @@ void EndAction(bool face_target = true) {
+@@ -4342,7 +4914,22 @@ void EndAction(bool face_target = true) {
  /**
   * Puts a shot from the player's character in the first free slot, if there is one.
   */
@@ -14042,7 +14047,7 @@ index 0e33bf79..2077d6fa 100644
      CSHOT *shots = NowShotData;
  
      for (int i = 0; i < 12; i++) {
-@@ -4355,6 +4941,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+@@ -4355,6 +4942,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
              shots->halted[i] = 0;
              shots->start_flag[i] = 0;
              shots->used[i] = 1;
@@ -14050,7 +14055,7 @@ index 0e33bf79..2077d6fa 100644
              break;
          }
      }
-@@ -4362,6 +4949,77 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+@@ -4362,6 +4950,77 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
  
  } // namespace
  
@@ -14128,7 +14133,7 @@ index 0e33bf79..2077d6fa 100644
  void BattleActionOn_Jinn() {
      if (BtActStatus.action_on == 0 && static_cast<s32>(BtActStatus.action_gauge) == 100) {
          BtActStatus.action_step = 0;
-@@ -4508,6 +5166,8 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
+@@ -4508,6 +5167,8 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
          damage *= 2;
      }
  
@@ -14137,7 +14142,7 @@ index 0e33bf79..2077d6fa 100644
      // A repeat shot reuses the start and the way the first one took.
      if (repeat != 0) {
          if (NowMainEffect->Set(ruby_effect_pos, ruby_effect_vec, 3, element, 0, nullptr, 1) != -1) {
-@@ -4556,6 +5216,19 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
+@@ -4556,6 +5217,19 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
          NowMainEffect->SetVsMonster(NowWeaponHave->vs_monster);
          NowMainEffect->SetDmg(damage);
      }
@@ -14157,7 +14162,7 @@ index 0e33bf79..2077d6fa 100644
  }
  
  void BattleActionPlay_Ruby(CCharacter *chara, int aimed) {
-@@ -4788,6 +5461,7 @@ void BattleActionPlay_Ozumond(int aimed) {
+@@ -4788,6 +5462,7 @@ void BattleActionPlay_Ozumond(int aimed) {
          sceVu0Normalize(shot, shot);
          sceVu0ScaleVectorXYZ(shot, shot, 10.0f);
          OzumondShot.Set(pos, shot, damage, 0);
@@ -14165,7 +14170,7 @@ index 0e33bf79..2077d6fa 100644
          BtActStatus.frames_since_attack = 0;
          SwordDmgCheck1(0.5f, 0);
      }
-@@ -4853,6 +5527,7 @@ void BattleActionPlay_Ozumond_H(int aimed) {
+@@ -4853,6 +5528,7 @@ void BattleActionPlay_Ozumond_H(int aimed) {
              NowMainEffect->SetAttribute(GetWeaponElementAttr(NowWeaponHave->best_elem));
              NowMainEffect->SetDmg(damage);
          }
@@ -14173,7 +14178,7 @@ index 0e33bf79..2077d6fa 100644
  
          BtActStatus.action_step = 1;
          BtActStatus.frames_since_attack = 0;
-@@ -4900,6 +5575,7 @@ void BattleActionPlay_Ozumond_F(int aimed) {
+@@ -4900,6 +5576,7 @@ void BattleActionPlay_Ozumond_F(int aimed) {
              }
  
              OzumondFire.Init(start, start_dir, 0, 0);
@@ -14181,7 +14186,7 @@ index 0e33bf79..2077d6fa 100644
          }
  
          if (GamePad.On(PadInput_OK) == 0) {
-@@ -5028,6 +5704,10 @@ void autoCamTrial() {
+@@ -5028,6 +5705,10 @@ void autoCamTrial() {
          return;
      }
  
@@ -14192,7 +14197,7 @@ index 0e33bf79..2077d6fa 100644
      NowCamera__3->GetPos(eye);
      NowCamera__3->GetRef(look);
  
-@@ -5080,12 +5760,13 @@ void autoCamTrial() {
+@@ -5080,12 +5761,13 @@ void autoCamTrial() {
              }
          }
      } else {
@@ -14210,7 +14215,7 @@ index 0e33bf79..2077d6fa 100644
  
                  if (frame == nullptr) {
                      continue;
-@@ -5097,7 +5778,7 @@ void autoCamTrial() {
+@@ -5097,7 +5779,7 @@ void autoCamTrial() {
  
                  int turn = cell->direction;
  
@@ -14219,7 +14224,7 @@ index 0e33bf79..2077d6fa 100644
  
                  if (turn > 3) {
                      turn -= 3;
-@@ -5109,7 +5790,10 @@ void autoCamTrial() {
+@@ -5109,7 +5791,10 @@ void autoCamTrial() {
  
                  frame->SetRotation(0.0f, PI * (-90.0f * turn) / 180.0f, 0.0f);
                  frame->SetPosition(160.0f * i, 0.0f, 160.0f * j);
@@ -14231,7 +14236,7 @@ index 0e33bf79..2077d6fa 100644
              }
          }
      }
-@@ -5120,14 +5804,14 @@ void autoCamTrial() {
+@@ -5120,14 +5805,14 @@ void autoCamTrial() {
      sceVu0SubVector(reach, pos, forward);
      sceVu0SubVector(reach, pos, ref);
      sceVu0Normalize(reach, reach);
@@ -14248,7 +14253,7 @@ index 0e33bf79..2077d6fa 100644
  
      if (hits > 0) {
          camera_far_dist_limmit = DistVector(ref, hit_point[0]);
-@@ -5160,7 +5844,7 @@ void autoCamTrial() {
+@@ -5160,7 +5845,7 @@ void autoCamTrial() {
                      } else {
                          CameraAutoMove(NowCamera__3, hit_point[last], 1000000.0f, 1000000.0f);
                      }
@@ -14257,7 +14262,7 @@ index 0e33bf79..2077d6fa 100644
                      NowCamera__3->SetPos(hit_point[0]);
                  } else {
                      CameraAutoMove(NowCamera__3, hit_point[last], 1000000.0f, 1000000.0f);
-@@ -5213,8 +5897,8 @@ void autoCamTrial() {
+@@ -5213,8 +5898,8 @@ void autoCamTrial() {
          }
      }
  
@@ -14268,7 +14273,7 @@ index 0e33bf79..2077d6fa 100644
      }
  
      if (NowCamera__3->GetDistance() < camera_near_dist__2) {
-@@ -5254,11 +5938,24 @@ void autoCamTrial() {
+@@ -5254,11 +5939,24 @@ void autoCamTrial() {
      // A locked-on monster pulls the camera round behind the player.
      if (lockOnTargetFlag != 0) {
          sceVu0CopyVector(near_chara, CharaMain.pos);
@@ -14295,7 +14300,7 @@ index 0e33bf79..2077d6fa 100644
              CharaMain.frame->GetLWMatrix(world);
  
              auto want = static_cast<float>(atan2f(world[2][0], world[2][2]) - PI_D);
-@@ -5331,7 +6028,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
+@@ -5331,7 +6029,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
      s16          item_no = weapon->item_no;
  
      // The first two weapons of each character turn every trap into the stamina trap.
@@ -14304,7 +14309,7 @@ index 0e33bf79..2077d6fa 100644
          kind = TRAP_CIRCLE_STAMINA;
      }
  
-@@ -5403,6 +6100,112 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
+@@ -5403,6 +6101,112 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
      return kind;
  }
  
@@ -14417,7 +14422,7 @@ index 0e33bf79..2077d6fa 100644
  void LockOffTargte() {
      lockOnTargetDraw = 0;
      lockOnTargetNo = -1;
-@@ -5430,6 +6233,11 @@ void DrawTargetLife() {
+@@ -5430,6 +6234,11 @@ void DrawTargetLife() {
          return;
      }
  
@@ -14429,7 +14434,7 @@ index 0e33bf79..2077d6fa 100644
      s32 x = EnemyLifeGage.x - 32;
  
      EnemyLifeGage.y = (EnemyLifeGage.y >> 1) << 1;
-@@ -5506,9 +6314,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5506,9 +6315,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      CUserStatus  *status = UserStatus;
      sceVu0FVECTOR at;
      sceVu0FVECTOR towards;
@@ -14442,7 +14447,7 @@ index 0e33bf79..2077d6fa 100644
      float         rate = CharaRangeRate(status);
  
      CharaFrame->GetRotation(at);
-@@ -5516,7 +6324,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5516,7 +6325,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      sceVu0FVECTOR forward = {0.0f, 0.0f, 1.0f, 1.0f};
      sceVu0FMATRIX unit;
      sceVu0FMATRIX turn;
@@ -14451,7 +14456,7 @@ index 0e33bf79..2077d6fa 100644
      int           screen[4];
  
      sceVu0UnitMatrix(unit);
-@@ -5532,7 +6340,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5532,7 +6341,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
          monster = -1;
      }
  
@@ -14460,7 +14465,7 @@ index 0e33bf79..2077d6fa 100644
          MonstorPicupInner[i] = 0.0f;
  
          CMonstorUnit *monsters = NowMonstorUnit;
-@@ -5687,6 +6495,27 @@ void setTargetCursor(int on) {
+@@ -5687,6 +6496,27 @@ void setTargetCursor(int on) {
  
      float rate = CharaRangeRate(status);
  
@@ -19838,7 +19843,7 @@ index c00195f0..a54e8ef8 100644
          }
  
 diff --git a/port/src/game/editloop.cpp b/port/src/game/editloop.cpp
-index 12cad0dd..ae990658 100644
+index 12cad0dd..b369187f 100644
 --- a/port/src/game/editloop.cpp
 +++ b/port/src/game/editloop.cpp
 @@ -1,3 +1,4 @@
@@ -19854,10 +19859,11 @@ index 12cad0dd..ae990658 100644
  #include "mapparts.hpp"
  #include "mathutil.hpp"
  #include "mds.hpp"
-@@ -88,6 +90,10 @@
+@@ -88,6 +90,11 @@
  #include "vutext.hpp"
  #include "weaponlevelup.hpp"
  #include "wind.hpp"
++#include "moonmod/coop_avatars.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/choice_panel.hpp"
@@ -19865,7 +19871,7 @@ index 12cad0dd..ae990658 100644
  
  namespace dc::game {
  
-@@ -168,9 +174,31 @@ int start_event_no;
+@@ -168,9 +175,31 @@ int start_event_no;
  int          start_system_event;
  int          move_count;
  int          interior_test;
@@ -19897,7 +19903,7 @@ index 12cad0dd..ae990658 100644
  CEditArea   *EditArea;
  CMapParts   *ObjParts;
  CMapParts   *RiverParts;
-@@ -853,6 +881,111 @@ void FormatInto(char (&buffer)[N], std::format_string<Args...> format, Args &&..
+@@ -853,6 +882,111 @@ void FormatInto(char (&buffer)[N], std::format_string<Args...> format, Args &&..
  }
  } // namespace
  
@@ -20009,7 +20015,7 @@ index 12cad0dd..ae990658 100644
  int EditInit(void * /*param*/) {
      std::string map_path;
      std::string save_path;
-@@ -896,6 +1029,25 @@ int EditInit(void * /*param*/) {
+@@ -896,6 +1030,25 @@ int EditInit(void * /*param*/) {
  
      bgm_play_flag = 0;
      bgm_play_start = 0;
@@ -20035,7 +20041,7 @@ index 12cad0dd..ae990658 100644
      InitializeDataBuffer();
      SetDataBuffer(&VisualData, 100);
      SetDataBuffer(&EtcDataBuffer, 40000);
-@@ -905,7 +1057,7 @@ int EditInit(void * /*param*/) {
+@@ -905,7 +1058,7 @@ int EditInit(void * /*param*/) {
      SetDataBuffer(&EdScriptBuffer, 16000);
  #endif
      SetDataBuffer(&EPartsInfoBuff, 8000);
@@ -20044,7 +20050,7 @@ index 12cad0dd..ae990658 100644
      SetDataBuffer(&TextureData, 10);
      SetDataBuffer(&MotionData, 7900);
      SetDataBuffer(&EdMesBuffer, 13000);
-@@ -917,7 +1069,8 @@ int EditInit(void * /*param*/) {
+@@ -917,7 +1070,8 @@ int EditInit(void * /*param*/) {
      EPartsInfoBuff.used = 0;
      EditArea = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CEditArea>(4)))) CEditArea[4];
      pEditGround = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CEditGround>(1)))) CEditGround;
@@ -20054,7 +20060,7 @@ index 12cad0dd..ae990658 100644
      MotionParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CCharacter>(4)))) CCharacter[4];
      RiverParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CMapParts>(16)))) CMapParts[16];
      RoadParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CMapParts>(6)))) CMapParts[6];
-@@ -964,39 +1117,7 @@ int EditInit(void * /*param*/) {
+@@ -964,39 +1118,7 @@ int EditInit(void * /*param*/) {
          interior_name[row][0] = '\0';
      }
  
@@ -20095,7 +20101,7 @@ index 12cad0dd..ae990658 100644
      EdEventInfo.world_coord_enable = false;
      EdEventInfo.main_character = Chara;
      EdEventInfo.main_texture_animation = CharaTexAnimeData;
-@@ -1112,6 +1233,10 @@ int EditInit(void * /*param*/) {
+@@ -1112,6 +1234,10 @@ int EditInit(void * /*param*/) {
      EdVillagerBuffer.base = reinterpret_cast<u_char *>(free_start);
      EdVillagerBuffer.limit = free_quads - 4;
      EdVillagerBuffer.used = 0;
@@ -20106,7 +20112,7 @@ index 12cad0dd..ae990658 100644
      EdNPCReadBuffer = reinterpret_cast<u_long128 *>(EdNPCBuffer.base + EdNPCBuffer.used * 16 + (free_quads >> 1) * 16);
      const auto read_address = reinterpret_cast<std::uintptr_t>(EdNPCReadBuffer);
      EdNPCReadBuffer = reinterpret_cast<u_long128 *>(read_address + ((0x40 - (read_address & 0x3F)) & 0x3F));
-@@ -1119,13 +1244,17 @@ int EditInit(void * /*param*/) {
+@@ -1119,13 +1245,17 @@ int EditInit(void * /*param*/) {
      EdCreateVillagerTable(EditMapInfo);
      EdInitVillagerControl();
      EdInitVillagerTable(NowTime, EditMapInfo);
@@ -20126,7 +20132,7 @@ index 12cad0dd..ae990658 100644
      Chara->SetPosition(start_position);
      Chara->SetRotation(start_rotation);
      float yaw = start_rotation[1] - PI_SHORT;
-@@ -1202,64 +1331,48 @@ int EditInit(void * /*param*/) {
+@@ -1202,64 +1332,48 @@ int EditInit(void * /*param*/) {
      CommonMenuMes1.SetBuff_system(SystemMes);
      CommonMenuMes2.SetBuff_system(SystemMes);
      CommonMenuMes3.SetBuff_system(SystemMes);
@@ -20230,7 +20236,7 @@ index 12cad0dd..ae990658 100644
  /**
   * Returns the sum of the editor category indices from zero through nine.
   */
-@@ -1287,8 +1400,19 @@ struct ED_GRD_DATA {
+@@ -1287,8 +1401,19 @@ struct ED_GRD_DATA {
  /**
   * Runs one frame of the editor and reports what it is to do next.
   */
@@ -20250,7 +20256,7 @@ index 12cad0dd..ae990658 100644
  
      // Pausing is a walking action: an event must not open the pause menu, which reads state only
      // valid outside an event, over itself.
-@@ -1427,6 +1551,23 @@ int EditLoop() {
+@@ -1427,6 +1552,23 @@ int EditLoop() {
  
      EdInteriorFlag = 0;
  
@@ -20274,7 +20280,7 @@ index 12cad0dd..ae990658 100644
      if (interior_test != 0) {
          static int             select = 0;
          std::array<char *, 64> menu{};
-@@ -1534,6 +1675,29 @@ int EditLoop() {
+@@ -1534,6 +1676,29 @@ int EditLoop() {
  
              break;
          case ED_MODE_WALK:
@@ -20304,7 +20310,7 @@ index 12cad0dd..ae990658 100644
              if (loop_counter > 0) {
                  TownMouseBegin(&MainCamera, pEditGround, MapNo, GameMode);
                  if (EdCheckViewMode() == 0) {
-@@ -1808,6 +1972,8 @@ int EditLoop() {
+@@ -1808,6 +1973,8 @@ int EditLoop() {
  
      TownZoomEnd();
      TownMouseApply(NowCamera, pEditGround, MapNo, GameMode);
@@ -20313,7 +20319,7 @@ index 12cad0dd..ae990658 100644
  
      sceVu0FMATRIX view;
      sceVu0FVECTOR eye;
-@@ -1815,6 +1981,7 @@ int EditLoop() {
+@@ -1815,6 +1982,7 @@ int EditLoop() {
      NowCamera->GetCameraMatrix(view);
      NowCamera->GetPos(eye);
      MGSetViewMatrix(view, eye);
@@ -20321,7 +20327,7 @@ index 12cad0dd..ae990658 100644
  
      if (GameMode != ED_MODE_GEORAMA && GameMode != ED_MODE_GEORAMA_MENU_INIT && GameMode != ED_MODE_RETURN_MENU_GEORAMA) {
          if (move_count > 0) {
-@@ -1968,6 +2135,19 @@ int EditLoop() {
+@@ -1968,6 +2136,19 @@ int EditLoop() {
          }
      }
  
@@ -20341,7 +20347,7 @@ index 12cad0dd..ae990658 100644
      if (GameMode == ED_MODE_WALK && (EdPadDown(0x10, 1) != 0 || goto_menu != 0 || (SystemMesCheck() == 0 && EdCheckItemOver() != 0))) {
          int menu_no = ED_MENU_BATTLE;
  
-@@ -2104,8 +2284,15 @@ int EditLoop() {
+@@ -2104,8 +2285,15 @@ int EditLoop() {
      if (GameMode != ED_MODE_EVENT) {
          auto *player = static_cast<CMainChara *>(Chara);
  
@@ -20358,7 +20364,7 @@ index 12cad0dd..ae990658 100644
              player->move_info.ground_poly.attr.ground_kind = 0;
          }
      }
-@@ -2311,6 +2498,38 @@ bool EdDrawBeyondRetailReach(int *far_marks, const GameDrawTrace &draw_trace) {
+@@ -2311,6 +2499,38 @@ bool EdDrawBeyondRetailReach(int *far_marks, const GameDrawTrace &draw_trace) {
      return drawn;
  }
  
@@ -20397,7 +20403,7 @@ index 12cad0dd..ae990658 100644
  /**
   * Draws the editor's world for one frame (retail's MainDraw).
   */
-@@ -2320,6 +2539,7 @@ void EditMainDraw() {
+@@ -2320,6 +2540,7 @@ void EditMainDraw() {
      bool                far_drawn = false;
  
      if (EdDrawOffFlag == 0) {
@@ -20405,7 +20411,7 @@ index 12cad0dd..ae990658 100644
          if (EdPauseFlag != 0 || GameMode == ED_MODE_RETURN_MENU_WALK || GameMode == ED_MODE_RETURN_MENU_GEORAMA) {
              CTextureAnime::stop_anime = 1;
          } else {
-@@ -2429,6 +2649,11 @@ void EditMainDraw() {
+@@ -2429,6 +2650,11 @@ void EditMainDraw() {
  
              pEditGround->DrawRipple(0x15);
              draw_trace.Finish(GameDrawPhase::Water, water_start);
@@ -20417,16 +20423,26 @@ index 12cad0dd..ae990658 100644
  
              if (depth_of_field != 0) {
                  const auto far_dof_start = draw_trace.Start();
-@@ -3295,6 +3520,8 @@ void DrawSysGra() {
+@@ -2578,6 +2804,8 @@ void EditMainDraw() {
+                 draw_trace.Finish(GameDrawPhase::CharacterLights, lights_start);
+                 const auto draw_start = draw_trace.Start();
+                 EdDrawCharacter(Chara, detail, 0xA, EdVillager, marks, shadow_on, event);
++                MoonModAvatarsStep();      // MoonMod co-op: the other players walking in this town
++                MoonModAvatarsDraw(false);
+                 draw_trace.Finish(GameDrawPhase::CharacterDraw, draw_start);
+                 break;
+             }
+@@ -3295,6 +3523,9 @@ void DrawSysGra() {
              set2DSprite(GetVif1Packet(), pause, screen, texel, 0x80);
          }
      }
++    MoonModAvatarsDrawNames(); // MoonMod co-op: the other players' names
 +    MoonModMapDraw(); // MoonMod: a mod's map screen
 +    MoonModChoiceDraw(); // and choice panel
  }
  
  // Kept in the window's top right corner.
-@@ -3542,6 +3769,12 @@ void MainEditMode() {
+@@ -3542,6 +3773,12 @@ void MainEditMode() {
      char night_window[10] = "win2";
  
      for (level = 0; level < 4; level++) {
@@ -20439,7 +20455,7 @@ index 12cad0dd..ae990658 100644
          CMapParts *obj = &ObjParts[parts];
          CFrame    *frame = obj->frame[level];
  
-@@ -3551,7 +3784,7 @@ void MainEditMode() {
+@@ -3551,7 +3788,7 @@ void MainEditMode() {
  
      parts++;
  
@@ -20448,7 +20464,7 @@ index 12cad0dd..ae990658 100644
          parts = 0;
      }
  
-@@ -3914,6 +4147,18 @@ void MoveChara() {
+@@ -3914,6 +4151,18 @@ void MoveChara() {
      EdMoveCharaInfo.fishing = (GameMode == ED_MODE_FISHING);
      EdMoveChara();
  
@@ -20467,7 +20483,7 @@ index 12cad0dd..ae990658 100644
      if (EdMoveCharaInfo.system_event_no > 0) {
          RunSystemEvent(EdMoveCharaInfo.system_event_no, &MainCamera);
      } else if (EdMoveCharaInfo.event_no > 0) {
-@@ -3923,7 +4168,15 @@ void MoveChara() {
+@@ -3923,7 +4172,15 @@ void MoveChara() {
  
          if (param->kind == ED_EVENT_POINT_DOOR) {
              if (std::string_view(param->point->destination) == "dungeon") {
@@ -20484,7 +20500,7 @@ index 12cad0dd..ae990658 100644
              } else if (EdPadDown(0x40, 1) != 0 && EdCheckViewMode() == 0 && key_lock == 0) {
                  ED_EVENT_POINT *point = param->point;
  
-@@ -4832,6 +5085,9 @@ void LoadGroundData() {
+@@ -4832,6 +5089,9 @@ void LoadGroundData() {
  
      EditPartsInfo.Initialize(NowEditMap);
      LoadObjectParts();
@@ -29466,10 +29482,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..8019732a
+index 00000000..1e595ad8
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17245 @@
+@@ -0,0 +1,17260 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -31048,6 +31064,20 @@ index 00000000..8019732a
 +        CharaMain.GetRotation(rotation);
 +        if (std::isfinite(rotation[1])) result["heading"] = rotation[1]; // the way the player faces: (sin, cos) in (x, z)
 +        result["motion"] = CharaMain.motion_no; // the motion the hero plays (co-op's avatars play it on other screens)
++    } else if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT && GameMode == ED_MODE_WALK && Chara != nullptr &&
++               Chara->frame != nullptr) {
++        // Walking in a town: where the town's hero is, and which one it is (party.town_set_active).
++        float position[4]{}, rotation[4]{};
++        Chara->GetPosition(position);
++        Chara->GetRotation(rotation);
++        if (std::isfinite(position[0]) && std::isfinite(position[1]) && std::isfinite(position[2])) {
++            result["position"] = {{"x", position[0]}, {"y", position[1]}, {"z", position[2]}};
++            if (std::isfinite(rotation[1])) result["heading"] = rotation[1];
++            result["motion"] = Chara->motion_no;
++            if (g_town_loaded_character >= 0 && g_town_loaded_character < static_cast<int>(kCharacterIds.size())) {
++                result["town_character"] = kCharacterIds[g_town_loaded_character];
++            }
++        }
 +    }
 +    return {ApiCallStatus::Ok, std::move(result), {}};
 +}
@@ -32244,6 +32274,7 @@ index 00000000..8019732a
 +        // A town: its map, and whether the player is in Georama's edit mode (co-op sends a town once it's left).
 +        result["town_map"] = MapNo;
 +        result["editing"] = GameMode == ED_MODE_GEORAMA || GameMode == ED_MODE_GEORAMA_MENU_INIT || GameMode == ED_MODE_GEORAMA_MENU;
++        result["walking"] = GameMode == ED_MODE_WALK;
 +    }
 +    return {ApiCallStatus::Ok, std::move(result), {}};
 +}
@@ -47432,10 +47463,10 @@ index 00000000..ae25e54b
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_avatars_moonmod.cpp b/port/src/moonmod/coop_avatars_moonmod.cpp
 new file mode 100644
-index 00000000..ec745242
+index 00000000..56f9b924
 --- /dev/null
 +++ b/port/src/moonmod/coop_avatars_moonmod.cpp
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,310 @@
 +// Co-op's remote players (moonmod/coop_avatars.hpp). Each avatar loads like the companion (its own file and model
 +// arenas, its own texture blocks, the weapon referenced to the hand) and is moved like the ghost (placed each frame),
 +// but from reports that come a few times a second: it eases toward the last one.
@@ -47455,6 +47486,9 @@ index 00000000..ec745242
 +#include "dataalloc.hpp"
 +#include "dataread.hpp"
 +#include "dun/gameloop.hpp"
++#include "editground.hpp"
++#include "editloop.hpp"
++#include "editmapscript.hpp"
 +#include "gamemode.hpp"
 +#include "itemdata.hpp"
 +#include "main.hpp"
@@ -47477,7 +47511,7 @@ index 00000000..ec745242
 +constexpr size_t kFileBytes = 6 * 1024 * 1024;
 +constexpr size_t kModelBytes = 8 * 1024 * 1024;
 +// Past this from where it stands, an avatar jumps instead of easing (a warp, the stairs, a new floor).
-+constexpr float kJump = 480.0f;
++constexpr float kJump = 160.0f;
 +
 +struct Avatar {
 +    bool               wanted = false;
@@ -47501,6 +47535,30 @@ index 00000000..ec745242
 +}
 +
 +bool InDungeon() { return mode == GAME_MODE_DUNGEON && UserStatus != nullptr && CharaMain.frame != nullptr; }
++bool InTown() {
++    return mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT && Chara != nullptr && Chara->frame != nullptr &&
++           (GameMode == ED_MODE_WALK || GameMode == ED_MODE_TALK || GameMode == ED_MODE_EVENT || GameMode == ED_MODE_FISHING ||
++            GameMode == ED_MODE_TIME_CHANGE || GameMode == ED_MODE_DOOR_OPEN);
++}
++bool InPlace() { return InDungeon() || InTown(); }
++// Where the avatars are: a dungeon, or a town by its map. A new place loads them afresh (its own arenas and textures).
++int Place() { return mode == GAME_MODE_DUNGEON ? 1000 : mode == GAME_MODE_EDIT ? MapNo : -1; }
++int g_place = -1;
++
++void PlayerAt(float out[4]) {
++    if (mode == GAME_MODE_DUNGEON) {
++        std::copy(CharaMain.pos, CharaMain.pos + 4, out);
++    } else if (Chara != nullptr) {
++        Chara->GetPosition(out);
++    }
++}
++
++// A town hero walks with the town's motions (Toan's own town model numbers them 0-10); the avatars' models are the
++// dungeon's, whose numbers the town maps them to (as party.town_set_active does for the others).
++int TownMotion(int motion) {
++    static constexpr int kMap[11] = {0, 1, 2, 0, 0, 34, 35, 31, 32, 0, 0};
++    return motion >= 0 && motion < 11 ? kMap[motion] : motion;
++}
 +
 +void Unload(int slot) {
 +    Avatar &a = g_avatars[slot];
@@ -47525,6 +47583,9 @@ index 00000000..ec745242
 +    at += ((size >> 6) + 1) << 6;
 +    return buffer;
 +}
++
++// A town's heroes carry no weapon.
++int WeaponHere(const Avatar &a) { return mode == GAME_MODE_EDIT ? -1 : a.target.weapon; }
 +
 +bool Load(int slot) {
 +    Avatar &a = g_avatars[slot];
@@ -47560,9 +47621,10 @@ index 00000000..ec745242
 +    a.loaded_character = chara;
 +    a.loaded_weapon = -1;
 +    a.weapon.Initialize();
-+    if (a.target.weapon >= ITEM_WEAPON_START) {
++    const int weapon = WeaponHere(a);
++    if (weapon >= ITEM_WEAPON_START) {
 +        std::array<char, 64> file{}, cfg{};
-+        BtGetWeaponNamePath3(file.data(), cfg.data(), a.target.weapon);
++        BtGetWeaponNamePath3(file.data(), cfg.data(), weapon);
 +        const std::string path = std::string("commenu/weapon/") + file.data();
 +        if (unsigned int *weapon = file[0] != 0 ? ReadPack(path.c_str(), at, end) : nullptr) {
 +            a.weapon.LoadPackData3(weapon, cfg.data(), &a.arena, a.BodyBlock(slot) + 1, &a.arena, 1, 0);
@@ -47574,7 +47636,7 @@ index 00000000..ec745242
 +        }
 +    }
 +    // Loaded even without a weapon that fits: a weapon that won't load isn't tried again until it changes.
-+    a.loaded_weapon = a.target.weapon;
++    a.loaded_weapon = weapon;
 +    a.placed = false;
 +    return true;
 +}
@@ -47612,24 +47674,23 @@ index 00000000..ec745242
 +}
 +
 +bool MoonModAvatarAt(int slot, float out[3]) {
-+    if (!MoonModAvatarShown(slot) || !g_avatars[slot].placed || !InDungeon()) return false;
++    if (!MoonModAvatarShown(slot) || !g_avatars[slot].placed || !InDungeon() || g_place != Place()) return false;
 +    std::copy(g_avatars[slot].at, g_avatars[slot].at + 3, out);
 +    return true;
 +}
 +
-+// Once a frame from the dungeon loop.
++// Once a frame from the dungeon loop, or a town's while walking.
 +void MoonModAvatarsStep() {
-+    if (!InDungeon()) {
-+        // Out of the dungeon the arenas go; the mod's wishes stay, for the next floor.
-+        if (mode != GAME_MODE_DUNGEON) {
-+            for (int i = 0; i < kMoonModAvatars; ++i) Unload(i);
-+        }
-+        return;
++    if (Place() != g_place) {
++        // Another place: the arenas go; the mod's wishes stay, for wherever comes next.
++        for (int i = 0; i < kMoonModAvatars; ++i) Unload(i);
++        g_place = Place();
 +    }
++    if (!InPlace()) return;
 +    for (int slot = 0; slot < kMoonModAvatars; ++slot) {
 +        Avatar &a = g_avatars[slot];
 +        if (!a.wanted) continue;
-+        if (a.loaded_character != a.target.character || a.loaded_weapon != a.target.weapon) {
++        if (a.loaded_character != a.target.character || a.loaded_weapon != WeaponHere(a)) {
 +            if (!Load(slot)) {
 +                a.wanted = false; // a character that can't load isn't tried every frame
 +                continue;
@@ -47651,7 +47712,7 @@ index 00000000..ec745242
 +        a.body.SetPosition(p);
 +        a.body.frame->SetRotation(0.0f, a.heading, 0.0f);
 +        a.body.SetRotation(0.0f, a.heading, 0.0f);
-+        int motion = a.target.motion;
++        int motion = mode == GAME_MODE_EDIT ? TownMotion(a.target.motion) : a.target.motion;
 +        if (motion < 0 || motion >= a.body.motion_end[0]) motion = 0;
 +        if (motion != a.motion) {
 +            a.body.motion_no = motion;
@@ -47668,7 +47729,7 @@ index 00000000..ec745242
 +}
 +
 +void MoonModAvatarsDraw(bool shadow) {
-+    if (!InDungeon()) return;
++    if (!InPlace() || g_place != Place()) return;
 +    for (int slot = 0; slot < kMoonModAvatars; ++slot) {
 +        Avatar &a = g_avatars[slot];
 +        if (!a.wanted || a.loaded_character < 0 || a.body.frame == nullptr) continue;
@@ -47695,21 +47756,23 @@ index 00000000..ec745242
 +}
 +
 +void MoonModAvatarsDrawNames() {
-+    if (!InDungeon()) return;
++    if (!InPlace() || g_place != Place()) return;
++    float player[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    PlayerAt(player);
 +    for (int slot = 0; slot < kMoonModAvatars; ++slot) {
 +        const Avatar &a = g_avatars[slot];
 +        if (!a.wanted || !a.placed || a.loaded_character < 0 || a.target.name.empty()) continue;
-+        const float far = std::hypot(a.at[0] - CharaMain.pos[0], a.at[2] - CharaMain.pos[2]);
-+        if (far > 900.0f) continue;
-+        sceVu0FVECTOR head = {a.at[0], a.at[1] + 72.0f, a.at[2], 1.0f};
++        const float far = std::hypot(a.at[0] - player[0], a.at[2] - player[2]);
++        if (far > 260.0f) continue;
++        sceVu0FVECTOR head = {a.at[0], a.at[1] + 20.0f, a.at[2], 1.0f}; // just over the head (CharaHeight is 14-18)
 +        int           screen[4] = {};
 +        if (MGRotTransPers2D(screen, head, 0) == 0) continue;
-+        // Full until six cells away, gone by nine.
-+        const int alpha = far < 600.0f ? 128 : static_cast<int>(128.0f * (900.0f - far) / 300.0f);
++        // Full nearby, gone toward where monsters stop being drawn (300).
++        const int alpha = far < 160.0f ? 128 : static_cast<int>(128.0f * (260.0f - far) / 100.0f);
 +        ui::Label label(a.target.name, ui::ColorWhite, ui::Alignment::Center, true, 0.7f);
 +        if (a.target.tint[0] >= 0.0f) label.SetCustomRgb(150, 186, 255); // a guest's name in their blue
 +        label.SetOutline(2.0f, 10, 10, 20);
-+        label.Draw(screen[0], screen[1] - 16, alpha);
++        label.Draw(screen[0], screen[1] - 30, alpha); // where the game's damage numbers rise from, above them
 +    }
 +}
 +
@@ -47845,10 +47908,10 @@ index 00000000..8c7bd594
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_monsters_moonmod.cpp b/port/src/moonmod/coop_monsters_moonmod.cpp
 new file mode 100644
-index 00000000..29ae8a38
+index 00000000..136fee79
 --- /dev/null
 +++ b/port/src/moonmod/coop_monsters_moonmod.cpp
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,219 @@
 +// Co-op's monsters (moonmod/coop_monsters.hpp): on the host they see every player; on a guest they mirror the host's.
 +
 +#include "moonmod/coop_monsters.hpp"
@@ -47863,6 +47926,7 @@ index 00000000..29ae8a38
 +#include "gamemode.hpp"
 +#include "main.hpp"
 +#include "monstorunit.hpp"
++#include "collisiondata.hpp"
 +#include "moonmod/coop_avatars.hpp"
 +#include "moonmod/game_hooks.hpp"
 +
@@ -47879,6 +47943,8 @@ index 00000000..29ae8a38
 +    int           motion = -1;
 +};
 +std::array<Puppet, MONSTOR_SLOT_MAX> g_puppets;
++
++constexpr float kAvatarHeight = 16.0f; // a hero's height for a hit, as the player's (CharaHeight)
 +
 +bool InDungeon() { return mode == GAME_MODE_DUNGEON && NowMonstorUnit != nullptr; }
 +
@@ -47962,7 +48028,7 @@ index 00000000..29ae8a38
 +        if (p.host.max_hp > 0) m.max_hp = p.host.max_hp;
 +        m.hp = std::clamp(p.host.hp, 1, std::max(1, m.max_hp));
 +        const float to[3] = {p.host.x, p.host.y, p.host.z};
-+        if (!p.placed || std::hypot(to[0] - p.at[0], to[2] - p.at[2]) > 480.0f) {
++        if (!p.placed || std::hypot(to[0] - p.at[0], to[2] - p.at[2]) > 160.0f) {
 +            std::copy(to, to + 3, p.at);
 +            p.heading = p.host.heading;
 +            p.placed = true;
@@ -48031,36 +48097,30 @@ index 00000000..29ae8a38
 +void MoonModCoopMonstersStepEnd() {
 +    if (g_swapped) std::copy(g_saved, g_saved + 4, CharaMain.pos);
 +    g_swapped = false;
-+    if (!InDungeon()) return;
++}
++
++void MoonModCoopAvatarHitsScan() {
++    if (!InDungeon() || NowColData == nullptr) return;
 +    std::array<std::array<float, 3>, kMoonModAvatars> at{};
 +    std::array<bool, kMoonModAvatars>                 here{};
 +    if (Avatars(at, here) == 0) return;
-+    // A blow whose sphere overlaps an avatar, as the game measures one on the player.
++    // Whatever would strike the player (a monster's blow, its shot or spell, a trap), measured on each hero as the
++    // game measures it on the player (CCollisionData::CheckHitUser).
 +    for (int a = 0; a < kMoonModAvatars; ++a) {
 +        if (g_hit_cooldown[a] > 0) {
 +            --g_hit_cooldown[a];
 +            continue;
 +        }
 +        if (!here[a] || g_hits.size() >= 8) continue;
-+        bool hit = false;
-+        for (int i = 0; i < MONSTOR_SLOT_MAX && !hit; ++i) {
-+            const MONSTOR &m = NowMonstorUnit->monster[i];
-+            if (m.state != 2 || m.hp <= 0 || m.stop_timer > 0) continue;
-+            const MONSTOR_EFFECT_STATE2 &e = NowMonstorUnit->effect2[i];
-+            const float time = NowMonstorUnit->chara[i][0].motion_type.state.time;
-+            for (int k = 0; k < 16; ++k) {
-+                if (e.active[k] == 0 || !(e.motion_start[k] < time) || e.motion_end[k] <= time) continue;
-+                const float dx = e.position[k][0] - at[a][0], dz = e.position[k][2] - at[a][2];
-+                const float dy = e.position[k][1] - at[a][1];
-+                const float reach = e.radius[k] + 14.0f;
-+                if (dx * dx + dz * dz <= reach * reach && dy > -e.radius[k] - 10.0f && dy < 55.0f + e.radius[k]) {
-+                    g_hits.push_back({a + 1, i, e.damage[k] * (m.anger_timer > 0 ? 2 : 1), e.kind[k], e.flags[k]});
-+                    g_hit_cooldown[a] = 60; // about the game's own grace after a hit
-+                    hit = true;
-+                    break;
-+                }
-+            }
-+        }
++        float feet[4] = {at[a][0], at[a][1], at[a][2], 1.0f};
++        const int i = NowColData->CheckHitUser(feet, 1, kAvatarHeight);
++        if (i < 0) continue;
++        const COLLISION_HIT &hit = NowColData->hit[i];
++        int monster = hit.monster_no;
++        if (monster < 0 && hit.owner >= 200) monster = (hit.owner - 200) / 5;
++        const int damage = moonmod::ChronicleMonsterHitDamage(hit.damage, hit.owner, hit.monster_no);
++        g_hits.push_back({a + 1, monster, damage, hit.kind, hit.flags});
++        g_hit_cooldown[a] = 60; // about the game's own grace after a hit
 +    }
 +}
 +

@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 3
+local PROTOCOL = 4
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -115,9 +115,14 @@ local others = {}        -- peer -> {scene, state, heard, slot}
 local my_scene = nil
 
 local function scene_of(w)
-  if type(w) ~= "table" or w.context ~= "dungeon" or not w.dungeon_id then return nil end
-  return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id or -1, tostring(w.floor_seed or "-"))
+  if type(w) ~= "table" then return nil end
+  if w.context == "dungeon" and w.dungeon_id then
+    return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id or -1, tostring(w.floor_seed or "-"))
+  end
+  if w.town_map then return "T" .. w.town_map end -- walking (or in a menu) in a town
+  return nil
 end
+local function on_floor() return my_scene ~= nil and my_scene:sub(1, 1) == "D" end
 
 local function slot_of(peer)
   -- the others in id order take slots 1, 2, 3
@@ -190,8 +195,11 @@ local function send_position()
   if my_scene then
     local p = try(game.player and game.player.get)
     if p and p.position then
-      text = string.format("%s %s %s %.1f %.1f %.1f %.3f %d", my_scene, p.character, tostring(p.weapon and p.weapon.item_no or "-"),
-                           p.position.x, p.position.y, p.position.z, p.heading or 0, p.motion or 0)
+      text = string.format("%s %s %s %.1f %.1f %.1f %.3f %d", my_scene, p.town_character or p.character,
+                           tostring(p.weapon and p.weapon.item_no or "-"), p.position.x, p.position.y, p.position.z,
+                           p.heading or 0, p.motion or 0)
+    elseif last_sent and last_sent:sub(1, #my_scene + 1) == my_scene .. " " then
+      text = last_sent -- in a menu or a talk: still standing there
     end
   end
   if text == "-" and last_sent == "-" then return end -- out of the dungeon it is said once
@@ -212,7 +220,7 @@ end)
 
 -- Monsters: the host's -------------------------------------------------------------------------------------------
 -- The host's game runs a floor's monsters for everyone. There they see every player on the floor and go for the
--- nearest; a blow that lands on another player comes back from monsters.mirror_get and goes to that player's game
+-- nearest; a blow, shot or spell that lands on another player comes back from monsters.mirror_get and goes to that player's game
 -- ("D damage kind flags"), which takes it as a monster's blow (combat.strike_player), guard and dodge and all. Fifteen
 -- times a second the host sends where its monsters are ("M scene slot,kind,state,hp,max_hp,x,y,z,heading,motion;..."),
 -- and a guest on that floor makes its own monsters copies of them (monsters.puppet_set): they stand, move and die as
@@ -227,7 +235,7 @@ function mon.peer_with_avatar(slot)
 end
 
 function mon.host_step()
-  if not my_scene then
+  if not on_floor() then
     -- off the floors: the guests' copies are theirs again
     if not mon.said_none then send("all", "M", "- -") end
     mon.said_none = true
@@ -291,15 +299,16 @@ function mon.struck(rest)
   local damage, kind, flags = rest:match("^(%d+) (%-?%d+) (%-?%d+)$")
   local p = try(game.player and game.player.get)
   if not (damage and my_scene and p and p.position) then return end
-  try(game.combat and game.combat.strike_player, {x = p.position.x, y = p.position.y + 20, z = p.position.z, radius = 30,
-      damage = math.min(9999, tonumber(damage)), kind = tonumber(flags) ~= 0 and "heavy" or "light"})
+  -- kind as the host's hit list has it: 2 a small hit (a flinch), 3 or 4 a blow (a knock-back)
+  try(game.combat and game.combat.strike_player, {x = p.position.x, y = p.position.y + 8, z = p.position.z, radius = 12,
+      damage = math.min(9999, tonumber(damage)), kind = tonumber(kind) >= 3 and "heavy" or "light"})
 end
 
 function mon.tick()
   if S.role == "host" and S.frame % MIRROR_EVERY == 0 then mon.host_step() end
   -- A host that stops sending (paused, in a menu) leaves its monsters held where they are; a guest who leaves the
   -- floor has its own monsters on the next.
-  if S.role == "guest" and mon.puppets and mon.scene ~= my_scene then mon.release() end
+  if S.role == "guest" and mon.puppets and (mon.scene ~= my_scene or not on_floor()) then mon.release() end
 end
 
 moonmod.on("game.enemy_hit", function(e)
@@ -327,6 +336,7 @@ function door.remember(scene, text)
 end
 
 function door.step()
+  if not on_floor() then return end
   local got = try(game.dungeons and game.dungeons.shared_events_get)
   for _, e in ipairs(type(got) == "table" and got.events or {}) do
     if my_scene then

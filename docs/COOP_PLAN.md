@@ -29,19 +29,19 @@ shared pause and doors.
 | Visits | `session.start {visit}`: the host's world and the guest's things in a fresh game, in the host's town; no save writes |
 | The mod: joining | Host (F8 or Mod Manager), join from the title screen's Online Co-op by code; the world and the account cross in pieces; a new account for someone new; the guest's things go to the host every minute and on leaving (F10); the host leaving ends the visits. `tools/tests/coop/test_coop.lua` |
 | Seeing each other | `world.avatar_set`: up to three other players on the dungeon floor, with their weapons, easing between reports sent ten times a second; the host in its own colours, guests in blue; only on the same floor; gone after three quiet seconds. Every game builds each floor from the room's seed, so floors match whoever arrives first |
-| Monsters | The host's game runs each floor's monsters: they wake for and chase the nearest player, a remote one too, and a blow on a guest's hero goes to that guest as a monster's blow (`combat.strike_player`, so guard and dodge work). A guest's monsters are copies of the host's (`monsters.puppet_set`), fifteen reports a second; a guest's blow goes to the host's monster (`monsters.mirror_hit`); a kill on the host is a death on every game. Loot stays each game's own |
+| Monsters | The host's game runs each floor's monsters: they wake for and chase the nearest player, a remote one too, and a blow, shot or spell on a guest's hero goes to that guest as a monster's blow (`combat.strike_player`, so guard and dodge work; a small hit flinches, a blow knocks back). A guest's monsters are copies of the host's (`monsters.puppet_set`), fifteen reports a second; a guest's blow goes to the host's monster (`monsters.mirror_hit`); a kill on the host is a death on every game. Loot stays each game's own: a chest or a drop is every player's to take, in their own game |
 | Doors | A door, gate or switch one player opens (a script that changes the floor without leaving it) opens in every game on that floor (`dungeons.shared_events_get/run`), the key taken as given; each game keeps the floor's opened doors for a player who arrives later |
-| Names | Each player's name over their hero on the floor (the mod's "name" setting), the guests' in blue |
+| Towns | Players walking in the same town see each other there, as the town's hero each walks as; one in a menu or a talk still stands where they were |
+| Names | Each player's name over their hero on the floor or in town (the mod's "name" setting), the guests' in blue |
 | Pausing | A pause or menu holds only that player's game. The host's holds the floor's monsters for everyone (the guests' copies wait where they are); a guest's holds nothing of the others' |
 | Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`) and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
 
 ## Next
 
-1. **Seeing each other in towns** (dungeons are done): the town's player model, Georama's edit mode, names over heads.
+1. **Seeing each other in Georama's edit mode** (walking in a town is done): the editor's camera and cursor.
 2. **Georama, finer.** Two players editing one town at once: the last to leave the editor wins today; a lock on a
    town being edited would let the second know.
-3. **Dungeons.** Projectiles and magic from the host's monsters on guests (only blows that touch are sent today);
-   treasure chests opened once for the floor.
+3. **Dungeons.** A guest's item attacks (bombs, throwables) on the host's monsters; only weapon hits go across today.
 4. **Accounts, wider.** Gear and charm slots (MoonMod's own, beside the save) in a guest's things; mods' levels
    (RPG, Ascension) the same way; the host's view of its guests in the Mod Manager (list, forget).
 5. **Joining.** A picker for the code on a keyboard; the server setting on the title page; friends' names on the HUD.

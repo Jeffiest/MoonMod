@@ -269,6 +269,21 @@ do
   check(h.avatars[1] == nil, "a player quiet for three seconds is taken away")
   both(h, g, 12)
   check(h.avatars[1] ~= nil, "and comes back when heard again")
+  -- both walk in Norune: the town's heroes
+  h.map = {context = "georama", map_id = 0, town_map = 0, editing = false, walking = true}
+  g.map = {context = "georama", map_id = 0, town_map = 0, editing = false, walking = true}
+  h.player = {character = "toan", town_character = "goro", position = {x = 5, y = 0, z = 6}, heading = 0, motion = 1}
+  g.player = {character = "xiao", position = {x = 9, y = 0, z = 6}, heading = 0, motion = 0}
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].character == "goro" and g.avatars[1].x == 5, "in town each sees the other, as the town's hero they walk as")
+  -- the host opens a menu: no position, but it still stands there
+  h.player = {character = "toan"}
+  for _ = 1, 200 do both(h, g) end
+  check(g.avatars[1] and g.avatars[1].x == 5, "a player in a menu still stands where they were")
+  h.map = {context = "georama", map_id = 1, town_map = 1, editing = false, walking = true}
+  h.player = {character = "toan", position = {x = 5, y = 0, z = 6}, heading = 0, motion = 0}
+  both(h, g, 12)
+  check(g.avatars[1] == nil, "in another town they don't")
   g.keys.leave_key = true
   both(h, g, 3)
   check(h.avatars[1] == nil, "a guest who leaves is taken away")
@@ -311,11 +326,14 @@ do
   both(h, g, 2)
   check(h.mirror_hits[1] and h.mirror_hits[1].slot == 0 and h.mirror_hits[1].damage == 17, "a guest's blow lands on the host's monster")
   -- the host's monster strikes the guest's hero
-  h.avatar_hits = {{avatar = 1, slot = 0, damage = 12, kind = 0, flags = 1}}
+  h.avatar_hits = {{avatar = 1, slot = 0, damage = 12, kind = 3, flags = 0}}
   both(h, g, 6)
   local strike = g.strikes[1]
   check(strike and strike.damage == 12 and strike.kind == "heavy" and strike.x == 50, "a monster's blow on a guest's hero strikes the guest", strike and strike.damage)
   check(#g.strikes == 1, "once")
+  h.avatar_hits = {{avatar = 1, slot = 4, damage = 5, kind = 2, flags = 0}} -- a shot
+  both(h, g, 6)
+  check(g.strikes[2] and g.strikes[2].kind == "light" and g.strikes[2].damage == 5, "a small hit (a shot) flinches")
   -- the host pauses (its game sends nothing): the copies hold
   for _ = 1, 120 do g.tick() end
   check(g.puppets ~= nil, "while the host is paused the guest's monsters stay held as the host's")
