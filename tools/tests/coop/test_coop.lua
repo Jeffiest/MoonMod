@@ -20,6 +20,7 @@ local function make_game(name)
              map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {},
              avatars = {}, seeds = {}, player = {character = "toan"},
              monsters = {}, avatar_hits = {}, puppets = nil, mirror_hits = {}, strikes = {},
+             doors_out = {}, doors_run = {}, door_busy = false,
              towns = {[0] = "DCT10:start", "DCT11:start", "DCT12:start", "DCT13:start", "DCT14:start"}}
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
@@ -59,7 +60,15 @@ local function make_game(name)
       mirror_hit = function(a) S.mirror_hits[#S.mirror_hits + 1] = a; return {slot = a.slot, damage = a.damage} end,
     },
     combat = {strike_player = function(a) S.strikes[#S.strikes + 1] = a; return {} end},
-    dungeons = {set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end},
+    dungeons = {
+      set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end,
+      shared_events_get = function() local out = S.doors_out; S.doors_out = {}; return {events = out} end,
+      shared_event_run = function(a)
+        if S.door_busy then return nil, {code = "failed", message = "busy: another player's door is already waiting"} end
+        S.doors_run[#S.doors_run + 1] = a
+        return {queued = true}
+      end,
+    },
     georama = {
       town_export = function(a) return {town_id = a.town_id, data = S.towns[a.town_id]} end,
       town_import = function(a)
@@ -243,6 +252,8 @@ do
   local host_sees = h.avatars[1]
   check(host_sees and host_sees.character == "xiao" and host_sees.weapon == nil and host_sees.tint and host_sees.tint[3] == 128,
         "the host sees the guest, in blue")
+  check(seen and seen.name == "Toan" and host_sees and host_sees.name == "Xiao", "each hero has its player's name over it",
+        tostring(seen and seen.name) .. "/" .. tostring(host_sees and host_sees.name))
   h.player.position = {x = 300, y = 0, z = 200}
   both(h, g, 12)
   check(g.avatars[1] and g.avatars[1].x == 300, "the host's moves reach the guest")
@@ -305,6 +316,16 @@ do
   local strike = g.strikes[1]
   check(strike and strike.damage == 12 and strike.kind == "heavy" and strike.x == 50, "a monster's blow on a guest's hero strikes the guest", strike and strike.damage)
   check(#g.strikes == 1, "once")
+  -- the host pauses (its game sends nothing): the copies hold
+  for _ = 1, 120 do g.tick() end
+  check(g.puppets ~= nil, "while the host is paused the guest's monsters stay held as the host's")
+  -- the host goes back to town: the guest's monsters think for themselves
+  h.map = {context = "town", map_id = 0}
+  both(h, g, 12)
+  check(g.puppets == nil, "the host off the floor, the guest's monsters are its own")
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 7}
+  both(h, g, 12)
+  check(g.puppets ~= nil, "and copies again when the host is back")
   -- the guest goes down the stairs: its monsters are its own again
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 8}
   both(h, g, 12)
@@ -314,6 +335,55 @@ do
   check(#h.mirror_hits == 1, "and its blows there stay its own")
   h.keys.leave_key = true
   both(h, g, 2)
+end
+
+print("Doors: opened for everyone")
+do
+  relay.rooms = {}
+  local h, g, k = make_game("Toan"), make_game("Xiao"), make_game("Goro")
+  local function all(n) for _ = 1, n or 1 do h.tick(); g.tick(); k.tick() end end
+  h.keys.host_key = true
+  all(2)
+  for _, guest in ipairs({g, k}) do
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if guest.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+        guest.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+    guest.emit("game.title.selected", {entry = "join"})
+    all(8)
+  end
+  local floor = {context = "dungeon", dungeon_id = 1, floor_id = 4, floor_seed = 77}
+  for i, game_ in ipairs({h, g}) do
+    game_.map = floor
+    game_.player = {character = "toan", position = {x = i * 10, y = 0, z = 0}, heading = 0, motion = 0}
+  end
+  k.map = {context = "dungeon", dungeon_id = 1, floor_id = 3, floor_seed = 76}
+  k.player = {character = "goro", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  all(25)
+  -- Xiao opens a gate with a key
+  g.doors_out = {{script = 31, mode = 1, ext = 0, pos = {120.5, 0, -40}, dir = {0, 0, 1}}}
+  all(25)
+  local run = h.doors_run[1]
+  check(run and run.script == 31 and run.mode == 1 and run.pos[1] == 120.5 and run.dir[3] == 1, "a guest's opened gate opens in the host's game")
+  check(#k.doors_run == 0, "a player on another floor doesn't run it")
+  check(#g.doors_run == 0, "and the one who opened it doesn't run it again")
+  -- Goro comes down to that floor later: the gate is opened for him too, once
+  k.map = floor
+  all(40)
+  check(#k.doors_run == 1 and k.doors_run[1].script == 31, "a player who arrives later finds it open", #k.doors_run)
+  -- a game busy with another door takes the next one when free
+  h.door_busy = true
+  k.doors_out = {{script = 40, mode = 2, ext = 0, pos = {1, 2, 3}, dir = {0, 0, 0}}}
+  all(25)
+  check(#h.doors_run == 1, "a busy game waits")
+  h.door_busy = false
+  all(25)
+  check(#h.doors_run == 2 and h.doors_run[2].script == 40, "and opens it once free")
+  check(#g.doors_run == 1 and #k.doors_run == 1, "each door runs once in each game")
+  h.keys.leave_key = true
+  all(2)
 end
 
 print("Georama: the host's world")

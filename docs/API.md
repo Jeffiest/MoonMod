@@ -2519,13 +2519,14 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   refuses, and autosave skips it. `session.get()`, `game.session.started` and `game.session.ended` say
   `kind = "visit"`; `game.session.failed` `{kind = "visit", reason}` comes to the mod when the data didn't fit.
 
-- `world.avatar_set({slot, character, weapon?, x, y, z, heading, motion, tint?})` shows another player (slot 1-3) on
+- `world.avatar_set({slot, character, weapon?, x, y, z, heading, motion, tint?, name?})` shows another player (slot 1-3) on
   the dungeon floor: `character` a character id, `weapon` an `item_no` (as `player.get().weapon.item_no`), the position
   and `heading` as `player.get()` reports them, `motion` its `motion`, and `tint` `{r, g, b}` (each 0-128) the ambient
   it draws in. Set it as reports come (several a second): between them the hero eases there and turns the shortest
   way, and it jumps when more than three cells away. Each has its own model and texture arenas, loaded on the next
   dungeon frame and let go out of the dungeon (the slot is kept for the next floor). `world.avatar_clear({slot})`
-  takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays.
+  takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays. `name` (24
+  bytes at most) is drawn over the hero's head, in blue for a tinted one, fading out between six and nine cells away.
 
 - `monsters.mirror_get()` (co-op's host) gives the floor's monsters, `{monsters = {{slot, kind, state, hp, max_hp, x,
   y, z, heading, motion}, ...}, hits}`, and the blows its monsters landed on other players' heroes since the last call,
@@ -2537,6 +2538,13 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   `refused`. `monsters.puppet_clear()` gives them their own thoughts back (leaving the floor does too).
   `monsters.mirror_hit({slot, damage})` (the host) lands another player's blow on a monster: the life goes, and a kill
   dies on the host as the host's own would.
+
+- `dungeons.shared_events_get()` gives the system scripts this player ran since the last call that changed the floor
+  without leaving it (a door or gate opened, a switch turned: an object moved or an event switched), as `{events =
+  {{script, mode, ext, pos = {x, y, z}, dir = {x, y, z}}, ...}}`; one that leaves the floor or changes the character is
+  never listed, nor one this game ran for another player. `dungeons.shared_event_run(event)` runs one here, at its
+  place, once the player is free (not in a menu, a script or held still; it waits up to half a minute), the key it asks
+  for taken as given. One waits at a time: another fails `busy` until it is taken.
 
 - `georama.town_export({town_id})` gives one town's Georama (its record and chips) as `{data}` text, and
   `georama.town_import({town_id, data})` takes it. A town open in Georama's editor or a menu is not imported over: the

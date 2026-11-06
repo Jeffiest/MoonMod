@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 2
+local PROTOCOL = 3
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -135,7 +135,8 @@ local function show_others()
     if here then
       local st = o.state
       try(game.world and game.world.avatar_set, {slot = slot, character = st.character, weapon = st.weapon, x = st.x, y = st.y, z = st.z,
-                                  heading = st.heading, motion = st.motion, tint = peer ~= 0 and GUEST_TINT or nil})
+                                  heading = st.heading, motion = st.motion, tint = peer ~= 0 and GUEST_TINT or nil,
+                                  name = o.name or (peer == 0 and "Host" or ("Player " .. peer))})
       o.slot = slot
     elseif o.slot then
       try(game.world and game.world.avatar_clear, {slot = o.slot})
@@ -154,6 +155,19 @@ local function hear_position(peer, rest)
   o.scene = scene
   o.state = {character = character, weapon = tonumber(weapon), x = tonumber(x) or 0, y = tonumber(y) or 0,
              z = tonumber(z) or 0, heading = tonumber(heading) or 0, motion = math.floor(tonumber(motion) or 0)}
+end
+
+-- Names: each game says its player's name ("N name") on joining, and the others answer with theirs.
+local function say_name(to)
+  send(to, "N", (my_name() or ("Player " .. tostring(S.me_peer or "?"))):sub(1, 24))
+end
+
+local function hear_name(peer, rest)
+  local o = others[peer] or {}
+  others[peer] = o
+  local first = o.name == nil
+  o.name = rest ~= "" and rest:sub(1, 24) or nil
+  if first then say_name(peer) end
 end
 
 local function forget(peer)
@@ -205,8 +219,7 @@ end)
 -- the host's do. A guest's blow on one goes to the host ("H slot damage"), whose monster takes it.
 
 local MIRROR_EVERY = 4    -- frames between the host's monster reports
-local MIRROR_QUIET = 60   -- frames without one before a guest's monsters think for themselves again
-local mon = {puppets = false, heard = 0}
+local mon = {puppets = false, scene = nil, said_none = false}
 
 function mon.peer_with_avatar(slot)
   for peer, o in pairs(others) do if o.slot == slot then return peer end end
@@ -214,9 +227,16 @@ function mon.peer_with_avatar(slot)
 end
 
 function mon.host_step()
+  if not my_scene then
+    -- off the floors: the guests' copies are theirs again
+    if not mon.said_none then send("all", "M", "- -") end
+    mon.said_none = true
+    return
+  end
+  mon.said_none = false
   local anyone = false
   for _, o in pairs(others) do if o.slot then anyone = true break end end
-  if not anyone or not my_scene then return end
+  if not anyone then return end
   local got = try(game.monsters and game.monsters.mirror_get)
   if type(got) ~= "table" then return end
   local parts = {}
@@ -254,7 +274,7 @@ function mon.hear(peer, rest)
   end
   if try(game.monsters and game.monsters.puppet_set, {monsters = monsters}) then
     mon.puppets = true
-    mon.heard = S.frame
+    mon.scene = scene
   end
 end
 
@@ -277,13 +297,72 @@ end
 
 function mon.tick()
   if S.role == "host" and S.frame % MIRROR_EVERY == 0 then mon.host_step() end
-  if S.role == "guest" and mon.puppets and (S.frame - mon.heard > MIRROR_QUIET or not my_scene) then mon.release() end
+  -- A host that stops sending (paused, in a menu) leaves its monsters held where they are; a guest who leaves the
+  -- floor has its own monsters on the next.
+  if S.role == "guest" and mon.puppets and mon.scene ~= my_scene then mon.release() end
 end
 
 moonmod.on("game.enemy_hit", function(e)
   if S.role ~= "guest" or not mon.puppets or type(e) ~= "table" or not e.slot or not e.damage then return end
   send(0, "H", string.format("%d %d", e.slot, math.floor(e.damage)))
 end)
+
+-- Doors: opened for everyone ----------------------------------------------------------------------------------------
+-- A script that changes the floor without leaving it (a door or gate opens, a switch turns) comes from
+-- dungeons.shared_events_get and goes to the others ("E scene script mode ext px py pz dx dy dz"); a game on that floor
+-- runs it there (dungeons.shared_event_run) once its player is free, the key it asks for taken as given. Each game
+-- keeps the floor's opened doors and hands them to a player who arrives later, so the floor is the same for everyone.
+
+local door = {log = {}, done = {}, waiting = {}}
+
+function door.key(scene, text) return scene .. "|" .. text:match("^(%S+ %S+ %S+ %S+ %S+)") end
+
+function door.remember(scene, text)
+  local key = door.key(scene, text)
+  if door.done[key] then return false end
+  door.done[key] = true
+  door.log[scene] = door.log[scene] or {}
+  table.insert(door.log[scene], text)
+  return true
+end
+
+function door.step()
+  local got = try(game.dungeons and game.dungeons.shared_events_get)
+  for _, e in ipairs(type(got) == "table" and got.events or {}) do
+    if my_scene then
+      local text = string.format("%d %d %d %.2f %.2f %.2f %.2f %.2f %.2f", e.script, e.mode, e.ext,
+                                 e.pos[1], e.pos[2], e.pos[3], e.dir[1], e.dir[2], e.dir[3])
+      door.remember(my_scene, text)
+      send("all", "E", my_scene .. " " .. text)
+    end
+  end
+  -- a player newly on this floor gets the doors already open here
+  for peer, o in pairs(others) do
+    if o.scene and o.scene == my_scene and o.doors_for ~= my_scene then
+      o.doors_for = my_scene
+      for _, text in ipairs(door.log[my_scene] or {}) do send(peer, "E", my_scene .. " " .. text) end
+    elseif o.scene ~= my_scene then
+      o.doors_for = nil
+    end
+  end
+  -- one waits at a time in the game: the next goes when it is taken
+  while door.waiting[1] and door.waiting[1].scene ~= my_scene do table.remove(door.waiting, 1) end -- left that floor
+  local nextone = door.waiting[1]
+  if nextone then
+    local f = {}
+    for v in nextone.text:gmatch("%S+") do f[#f + 1] = tonumber(v) end
+    local ok, err = call(game.dungeons and game.dungeons.shared_event_run,
+                         {script = f[1], mode = f[2], ext = f[3], pos = {f[4], f[5], f[6]}, dir = {f[7], f[8], f[9]}})
+    if ok or not tostring(errmsg(err)):find("busy") then table.remove(door.waiting, 1) end
+  end
+end
+
+function door.hear(rest)
+  local scene, text = rest:match("^(%S+) (.+)$")
+  if not scene or select(2, text:gsub("%S+", "")) ~= 9 then return end
+  if scene ~= my_scene or not door.remember(scene, text) then return end -- elsewhere, or opened here already
+  table.insert(door.waiting, {scene = scene, text = text})
+end
 
 -- Georama: the host's world -----------------------------------------------------------------------------------------
 -- When a player leaves Georama's edit mode, their game sends that town (georama.town_export) to the host, which takes
@@ -348,6 +427,7 @@ local function stop(reason)
   try(game.net.leave)
   forget_all()
   mon.release()
+  door.log, door.done, door.waiting = {}, {}, {}
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest = nil, nil, {}, {}, nil
   show_room()
@@ -453,7 +533,9 @@ local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
   if not kind then return end
   if kind == "P" then hear_position(peer, rest) return end
+  if kind == "N" then hear_name(peer, rest) return end
   if kind == "M" then mon.hear(peer, rest) return end
+  if kind == "E" then door.hear(rest) return end
   if kind == "H" then if S.role == "host" then mon.hit_on_host(peer, rest) end return end
   if kind == "D" then if S.role == "guest" and peer == 0 then mon.struck(rest) end return end
   if kind == "TOWN" then
@@ -487,6 +569,8 @@ local function pump()
   for _, e in ipairs(got and got.events or {}) do
     if e.kind == "connected" then
       S.code = e.code
+      S.me_peer = e.peer
+      say_name("all")
       if S.role == "host" then
         toast("Co-op room " .. tostring(e.code) .. ": friends join with this code from the title screen")
       else
@@ -526,6 +610,7 @@ moonmod.on("game.tick", function(e)
     show_others()
   end
   if S.role and S.code then mon.tick() end
+  if S.role and S.code and S.frame % 10 == 0 then door.step() end
   if S.role and S.code and S.frame % 30 == 0 then
     watch_editing()
     retry_towns()
