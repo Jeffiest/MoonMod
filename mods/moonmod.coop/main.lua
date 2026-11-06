@@ -101,8 +101,104 @@ local function show_room()
   hud(string.format("CO-OP %s  %d of 4", S.code or "....", count))
 end
 
+-- Seeing each other ------------------------------------------------------------------------------------------------
+-- Ten times a second each game sends where its player is on a dungeon floor ("P scene character weapon x y z heading
+-- motion"); each game shows the others on the same floor as heroes of their own (world.avatar_set), the host in its
+-- own colours and guests in blue, and takes away one that has gone quiet for three seconds or is elsewhere. Every game
+-- builds each floor from a seed made of the room's code, the dungeon and the floor (dungeons.set_seed), so the floors
+-- are the same for everyone, whoever comes first.
+
+local SEND_EVERY = 6     -- frames between reports
+local QUIET = 180        -- frames without a report before a player's hero goes
+local GUEST_TINT = {64, 84, 128}
+local others = {}        -- peer -> {scene, state, heard, slot}
+local my_scene = nil
+
+local function scene_of(w)
+  if type(w) ~= "table" or w.context ~= "dungeon" or not w.dungeon_id then return nil end
+  return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id or -1, tostring(w.floor_seed or "-"))
+end
+
+local function slot_of(peer)
+  -- the others in id order take slots 1, 2, 3
+  local ids = {}
+  for id in pairs(others) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for i, id in ipairs(ids) do if id == peer then return i <= 3 and i or nil end end
+  return nil
+end
+
+local function show_others()
+  for peer, o in pairs(others) do
+    local slot = slot_of(peer)
+    local here = slot and o.state and my_scene and o.scene == my_scene and S.frame - o.heard < QUIET
+    if here then
+      local st = o.state
+      try(game.world and game.world.avatar_set, {slot = slot, character = st.character, weapon = st.weapon, x = st.x, y = st.y, z = st.z,
+                                  heading = st.heading, motion = st.motion, tint = peer ~= 0 and GUEST_TINT or nil})
+      o.slot = slot
+    elseif o.slot then
+      try(game.world and game.world.avatar_clear, {slot = o.slot})
+      o.slot = nil
+    end
+  end
+end
+
+local function hear_position(peer, rest)
+  local scene, character, weapon, x, y, z, heading, motion =
+    rest:match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)$")
+  local o = others[peer] or {}
+  others[peer] = o
+  o.heard = S.frame
+  if not scene or scene == "-" then o.scene, o.state = nil, nil return end
+  o.scene = scene
+  o.state = {character = character, weapon = tonumber(weapon), x = tonumber(x) or 0, y = tonumber(y) or 0,
+             z = tonumber(z) or 0, heading = tonumber(heading) or 0, motion = math.floor(tonumber(motion) or 0)}
+end
+
+local function forget(peer)
+  local o = others[peer]
+  if o and o.slot then try(game.world and game.world.avatar_clear, {slot = o.slot}) end
+  others[peer] = nil
+end
+
+local function forget_all()
+  others = {}
+  try(game.world and game.world.avatar_clear)
+end
+
+local last_sent = nil
+local function send_position()
+  if not S.role or not S.code then return end
+  local w = try(game.world.get)
+  my_scene = scene_of(w)
+  local text = "-"
+  if my_scene then
+    local p = try(game.player and game.player.get)
+    if p and p.position then
+      text = string.format("%s %s %s %.1f %.1f %.1f %.3f %d", my_scene, p.character, tostring(p.weapon and p.weapon.item_no or "-"),
+                           p.position.x, p.position.y, p.position.z, p.heading or 0, p.motion or 0)
+    end
+  end
+  if text == "-" and last_sent == "-" then return end -- out of the dungeon it is said once
+  last_sent = text
+  send("all", "P", text)
+end
+
+-- The room's floors: the same seed for a floor in every game in the room.
+local function floor_seed(dungeon, floor)
+  local h = 5381
+  for c in (tostring(S.code) .. ":" .. dungeon .. ":" .. floor):gmatch(".") do h = (h * 33 + c:byte()) % 2147483647 end
+  return h
+end
+moonmod.on("game.dungeon.generating", function(e)
+  if not (S.role and S.code and type(e) == "table") or e.back_floor then return end
+  try(game.dungeons and game.dungeons.set_seed, {seed = floor_seed(e.dungeon_id or 0, e.floor_id or 0)})
+end)
+
 local function stop(reason)
   try(game.net.leave)
+  forget_all()
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest = nil, nil, {}, {}, nil
   show_room()
@@ -207,6 +303,7 @@ end
 local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
   if not kind then return end
+  if kind == "P" then hear_position(peer, rest) return end
   if S.role == "host" then
     if kind == "HELLO" then
       local id, name = rest:match("^(%S+) ?(.*)$")
@@ -247,6 +344,7 @@ local function pump()
     elseif e.kind == "left" then
       local p = S.players[e.peer]
       S.players[e.peer] = nil
+      forget(e.peer)
       if S.role == "host" and p then toast("Co-op: " .. tostring(p.name or "a player") .. " left") end
       show_room()
     elseif e.kind == "message" then
@@ -266,6 +364,10 @@ end
 moonmod.on("game.tick", function(e)
   S.frame = e and e.frame or S.frame + 1
   pump()
+  if S.role and S.code and S.frame % SEND_EVERY == 0 then
+    send_position()
+    show_others()
+  end
   if S.role == "guest" and S.guest and S.guest.visiting then
     local every = math.max(15, math.min(600, setting("keep_every", 60))) * 60
     if S.frame - S.kept_at >= every then

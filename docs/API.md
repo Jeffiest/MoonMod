@@ -2519,6 +2519,14 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   refuses, and autosave skips it. `session.get()`, `game.session.started` and `game.session.ended` say
   `kind = "visit"`; `game.session.failed` `{kind = "visit", reason}` comes to the mod when the data didn't fit.
 
+- `world.avatar_set({slot, character, weapon?, x, y, z, heading, motion, tint?})` shows another player (slot 1-3) on
+  the dungeon floor: `character` a character id, `weapon` an `item_no` (as `player.get().weapon.item_no`), the position
+  and `heading` as `player.get()` reports them, `motion` its `motion`, and `tint` `{r, g, b}` (each 0-128) the ambient
+  it draws in. Set it as reports come (several a second): between them the hero eases there and turns the shortest
+  way, and it jumps when more than three cells away. Each has its own model and texture arenas, loaded on the next
+  dungeon frame and let go out of the dungeon (the slot is kept for the next floor). `world.avatar_clear({slot})`
+  takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays.
+
 The bundled Online Co-op mod (`mods/moonmod.coop`) is built on these and `net.*`; `docs/COOP_PLAN.md` has what is
 built and what comes next.
 

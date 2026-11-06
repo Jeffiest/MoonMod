@@ -17,7 +17,8 @@ local function make_game(name)
   local S = {name = name, handlers = {}, storage = {}, settings = {name = name}, toasts = {}, layers = {},
              net_events = {}, net = nil, session = {kind = "story"}, accounts = {}, frame = 0, keys = {},
              world = "DCW1" .. string.rep("w", 30000) .. name, things = "DCP1" .. string.rep("p", 20000) .. name,
-             map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {}}
+             map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {},
+             avatars = {}, seeds = {}, player = {character = "toan"}}
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
     on = function(event, fn) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], fn) end,
@@ -39,7 +40,13 @@ local function make_game(name)
     render = {layer_register = function(l) S.layers[l.id] = l.text end, layer_remove = function(l) S.layers[l.id] = nil end},
     input = {bind = function() return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end},
     title = {mode_register = function(d) S.title = d; return true end, mode_set = function(d) S.title = d; return true end},
-    world = {get = function() return S.map end},
+    world = {
+      get = function() return S.map end,
+      avatar_set = function(a) S.avatars[a.slot] = a; return {slot = a.slot, shown = true} end,
+      avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
+    },
+    player = {get = function() return S.player end},
+    dungeons = {set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end},
     session = {
       get = function() return S.session end,
       start = function(args)
@@ -182,6 +189,60 @@ host.keys.leave_key = true
 for _ = 1, 3 do host.tick(); guest.tick(); third.tick() end
 check(guest.session.kind == "title" and third.session.kind == "title", "the host leaving sends the guests back to the title")
 check(find_toast(third, "room closed"), "and tells them why")
+
+print("Seeing each other")
+do
+  relay.rooms = {}
+  local h = make_game("Toan")
+  local g = make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  -- both on Divine Beast Cave floor 3, built from the room's seed
+  h.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 3, back_floor = false})
+  g.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 3, back_floor = false})
+  check(#h.seeds == 1 and h.seeds[1] == g.seeds[1], "the host's and the guest's floor 3 come from one seed", h.seeds[1])
+  g.emit("game.dungeon.generating", {dungeon_id = 0, floor_id = 4, back_floor = false})
+  check(g.seeds[2] ~= g.seeds[1], "another floor, another seed")
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 4242}
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 4242}
+  h.player = {character = "toan", weapon = {item_no = 258}, position = {x = 100, y = 0, z = 200}, heading = 1.5, motion = 2}
+  g.player = {character = "xiao", position = {x = 160, y = 0, z = 220}, heading = 0.5, motion = 0}
+  both(h, g, 12)
+  local seen = g.avatars[1]
+  check(seen and seen.character == "toan" and seen.weapon == 258 and seen.x == 100 and seen.z == 200 and seen.motion == 2 and
+        seen.tint == nil, "the guest sees the host on the floor, with its weapon, in the host's own colours")
+  local host_sees = h.avatars[1]
+  check(host_sees and host_sees.character == "xiao" and host_sees.weapon == nil and host_sees.tint and host_sees.tint[3] == 128,
+        "the host sees the guest, in blue")
+  h.player.position = {x = 300, y = 0, z = 200}
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].x == 300, "the host's moves reach the guest")
+  -- the guest goes down a floor: each is out of the other's sight
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 99}
+  both(h, g, 12)
+  check(g.avatars[1] == nil and h.avatars[1] == nil, "on different floors neither sees the other")
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 4242}
+  both(h, g, 12)
+  check(h.avatars[1] ~= nil, "back on the same floor, the host sees the guest again")
+  -- the guest's game goes quiet (a lost connection the relay hasn't noticed yet)
+  for _ = 1, 200 do h.tick() end
+  check(h.avatars[1] == nil, "a player quiet for three seconds is taken away")
+  both(h, g, 12)
+  check(h.avatars[1] ~= nil, "and comes back when heard again")
+  g.keys.leave_key = true
+  both(h, g, 3)
+  check(h.avatars[1] == nil, "a guest who leaves is taken away")
+  h.keys.leave_key = true
+  h.tick()
+end
 
 print("Refusals")
 local lost = make_game("Ruby")

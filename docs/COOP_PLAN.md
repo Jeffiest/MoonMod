@@ -28,12 +28,11 @@ shared pause and doors.
 | Accounts | `save.account_*`, kept in the host's slot folder with each save; tested |
 | Visits | `session.start {visit}`: the host's world and the guest's things in a fresh game, in the host's town; no save writes |
 | The mod: joining | Host (F8 or Mod Manager), join from the title screen's Online Co-op by code; the world and the account cross in pieces; a new account for someone new; the guest's things go to the host every minute and on leaving (F10); the host leaving ends the visits. `tools/tests/coop/test_coop.lua` |
+| Seeing each other | `world.avatar_set`: up to three other players on the dungeon floor, with their weapons, easing between reports sent ten times a second; the host in its own colours, guests in blue; only on the same floor; gone after three quiet seconds. Every game builds each floor from the room's seed, so floors match whoever arrives first |
 
 ## Next
 
-1. **Seeing each other.** Remote players drawn as characters of their own (the engine's death ghost plays back one
-   recording; this needs up to three live ones), position, heading and motion sent ten times a second, in the same
-   scene only. The fork's `dc.ghost` and its own-texture tints (host natural, guests blue).
+1. **Seeing each other in towns** (dungeons are done): the town's player model, Georama's edit mode, names over heads.
 2. **Georama.** A guest's edit becomes a request to the host, which places it (`georama.place/remove`) and tells
    everyone; each game applies it to its loaded town; a player standing where a part lands goes back to the entrance.
 3. **Dungeons.** The floor seed from whoever enters first (`dungeons.set_seed`); monsters mirrored from the host
