@@ -414,14 +414,15 @@ end
 
 local TOWNS = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
 local editing_town = nil
+local editing_base = nil  -- that town when the editor opened
 local waiting_towns = {} -- town -> {data, from}
 
-local function take_town(data, from)
+local function take_town(data, from, base)
   local town = tonumber(data:match("^DCT1(%d+):"))
   if not town then return end
-  local ok, err = call(game.georama and game.georama.town_import, {town_id = town, data = data})
+  local ok, err = call(game.georama and game.georama.town_import, {town_id = town, data = data, base = base})
   if not ok then
-    if errmsg(err):find("busy") then waiting_towns[town] = {data = data, from = from} end
+    if errmsg(err):find("busy") then waiting_towns[town] = {data = data, from = from, base = base} end
     if not errmsg(err):find("busy") then moonmod.log("warn", "co-op town: " .. errmsg(err)) end
     return false
   end
@@ -431,19 +432,29 @@ local function take_town(data, from)
   return true
 end
 
-local function town_from(peer, data)
+-- A guest's edit comes with the town as it was when they opened the editor ("edited\nbase"): the host merges only
+-- what they changed into its own town (georama.town_import with base), so two building at once both keep their work,
+-- and sends the merged town to everyone, the editor too. The host's word is the whole town.
+local function send_merged(town)
+  local export = try(game.georama and game.georama.town_export, {town_id = town})
+  if not (export and export.data) then return end
+  for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
+end
+
+local function town_from(peer, payload)
+  local cut = payload:find("\n", 1, true)
+  local data = cut and payload:sub(1, cut - 1) or payload
+  local base = cut and payload:sub(cut + 1) or nil
+  local town = tonumber(data:match("^DCT1(%d+):"))
   if S.role == "host" then
-    -- the host's world takes it first, then everyone else gets it
-    if take_town(data, peer) ~= false or waiting_towns[tonumber(data:match("^DCT1(%d+):"))] then
-      for id in pairs(S.players) do if id ~= peer then send_pieces(id, "TOWN", data) end end
-    end
+    if take_town(data, peer, base) and town then send_merged(town) end
   elseif peer == 0 then
     take_town(data, 0)
   end
 end
 
 -- Who is building where ("B town 1" on opening the editor, "B town 0" on leaving it): two building in one town are
--- told, since the last of them to leave keeps their changes.
+-- told, since where both change the same plot, chip or building the last to leave wins.
 local builders = {} -- peer -> town
 local function name_of(peer)
   local o = others[peer]
@@ -451,7 +462,7 @@ local function name_of(peer)
 end
 local function warn_builders(town, peer)
   toast(name_of(peer) .. " is building in " .. (TOWNS[town] or "this town") ..
-        " too: whoever leaves the editor last keeps their changes")
+        " too: you both keep your work, but where you change the same spot the last to leave wins")
 end
 local function hear_builder(peer, rest)
   local town, on = rest:match("^(%d+) ([01])$")
@@ -466,6 +477,9 @@ local function watch_editing()
   if type(w) == "table" and w.editing then
     if editing_town ~= w.town_map then
       editing_town = w.town_map
+      -- the town as it is now: what this player changes is measured from it
+      local start = try(game.georama and game.georama.town_export, {town_id = editing_town})
+      editing_base = start and start.data or nil
       send("all", "B", editing_town .. " 1")
       for peer, town in pairs(builders) do if town == editing_town then warn_builders(town, peer) end end
     end
@@ -480,13 +494,16 @@ local function watch_editing()
   if S.role == "host" then
     for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
   elseif S.role == "guest" then
-    send_pieces(0, "TOWN", export.data)
+    send_pieces(0, "TOWN", export.data .. (editing_base and ("\n" .. editing_base) or ""))
   end
+  editing_base = nil
 end
 
 -- A town that came while its player was busy is tried again (the host sent it on when it first came).
 local function retry_towns()
-  for _, w in pairs(waiting_towns) do take_town(w.data, w.from) end
+  for town, w in pairs(waiting_towns) do
+    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then send_merged(town) end
+  end
 end
 
 local function stop(reason)

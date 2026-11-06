@@ -2562,7 +2562,10 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   for taken as given. One waits at a time: another fails `busy` until it is taken.
 
 - `georama.town_export({town_id})` gives one town's Georama (its record and chips) as `{data}` text, and
-  `georama.town_import({town_id, data})` takes it. A town open in Georama's editor or a menu is not imported over: the
+  `georama.town_import({town_id, data, base?})` takes it. With `base` (the town as the editing game had it when its
+  player opened the editor), only what they changed comes across, merged into this game's town: a plot, villager,
+  chip or request they changed takes their value, the buildings they put up are added and those they took down taken
+  away, and the rest stays as it is here (`merged = true`). A town open in Georama's editor or a menu is not imported over: the
   call fails with a reason starting `busy`, to be tried again. A player walking in that town is walked into it again,
   at its entrance (`reloaded = true`), so no one stands where a building just went. `world.get()` in a town reports
   `town_map` and `editing` (Georama's edit mode or its menu).

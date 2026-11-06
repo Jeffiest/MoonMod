@@ -36,10 +36,8 @@ shared pause and doors.
 | The clock | The host's time of day, every ten seconds, to a guest whose clock has drifted (`world.set_time`) |
 | Names | Each player's name over their hero on the floor or in town, and the others' names on the HUD under the room's code (the mod's "name" setting), the guests' in blue |
 | Pausing | A pause or menu holds only that player's game. The host's holds the floor's monsters for everyone (the guests' copies wait where they are); a guest's holds nothing of the others' |
-| Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`) and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
+| Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`), merged into it (only what they changed, so two building in one town at once both keep their work; they are told of each other), and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
 
 ## Next
 
 1. **Seeing each other in Georama's edit mode** (walking in a town is done): the editor's camera and cursor.
-2. **Georama, finer.** Two players editing one town at once are told so (the last to leave the editor keeps their
-   changes); merging the two edits chip by chip would keep both.

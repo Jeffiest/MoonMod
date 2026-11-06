@@ -86,7 +86,8 @@ local function make_game(name)
       town_import = function(a)
         if S.busy_town == a.town_id then return nil, {code = "failed", message = "busy: the player is editing"} end
         S.towns[a.town_id] = a.data
-        return {town_id = a.town_id, imported = true, reloaded = S.map.town_map == a.town_id}
+        S.last_base = a.base
+        return {town_id = a.town_id, imported = true, merged = a.base ~= nil, reloaded = S.map.town_map == a.town_id}
       end,
     },
     session = {
@@ -456,6 +457,7 @@ do
   g.map = {context = "georama", map_id = 1, town_map = 1, editing = false}
   all(40)
   check(h.towns[1] == g.towns[1], "a guest's Georama edit reaches the host's world (in pieces)")
+  check(h.last_base == "DCT11:start", "with the town as it was when they opened the editor, for the host to merge", tostring(h.last_base):sub(1, 40))
   check(k.towns[1] == g.towns[1], "and the host sends it on to the other guest")
   check(find_toast(h, "Xiao changed Matataki"), "the host is told who changed which town")
   -- two building in one town are told

@@ -3351,10 +3351,10 @@ index 00000000..3c5fe1d6
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_save.hpp b/port/include/moonmod/coop_save.hpp
 new file mode 100644
-index 00000000..8fccf5a3
+index 00000000..e3b35b7e
 --- /dev/null
 +++ b/port/include/moonmod/coop_save.hpp
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,59 @@
 +#pragma once
 +
 +// Co-op's split of a save (save.world_export/import, save.player_export/import): a visit plays the host's world with
@@ -3387,6 +3387,11 @@ index 00000000..8fccf5a3
 +// game to the others. "DCT1", the town's number, then the bytes, base64.
 +std::string ExportTown(const dc::game::CSaveData &save, int town);
 +bool        ImportTown(std::string_view text, int town, dc::game::CSaveData &save, std::string &error);
++// Another game's edit of a town, merged into this save's: base is the town as that game had it when its player opened
++// the editor, edited as they left it. Only what they changed comes across: a plot, a villager, a chip or a request
++// they changed takes their value, the buildings they put up are added and those they took down taken away; anything
++// they left alone stays as this save has it now, so two players building at once both keep their work.
++bool MergeTown(std::string_view base, std::string_view edited, int town, dc::game::CSaveData &save, std::string &error);
 +
 +// The host's guests (save.account_*): each guest's own things, kept in the host's save, as coop_accounts.json in its
 +// slot folder beside the save, written with every save of the slot and read with its load. A new game has none.
@@ -29499,10 +29504,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..efbf90c2
+index 00000000..cf31a8cc
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17331 @@
+@@ -0,0 +1,17339 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -43125,7 +43130,7 @@ index 00000000..efbf90c2
 +    // edit mode isn't imported over; a town the player walks in is walked into again, so it shows what came.
 +    if (operation.path == "georama.town_export" || operation.path == "georama.town_import") {
 +        const bool importing = operation.path == "georama.town_import";
-+        if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(importing ? "expected {town_id = 0-4, data}" : "expected {town_id = 0-4}");
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(importing ? "expected {town_id = 0-4, data, base = optional}" : "expected {town_id = 0-4}");
 +        int town = 0;
 +        if (!ReadBoundedInt(args[0], "town_id", 0, TOWN_COUNT - 1, town)) return Invalid("town_id must be 0-" + std::to_string(TOWN_COUNT - 1));
 +        if (SaveData == nullptr) return Failed("the game has no save data yet");
@@ -43134,10 +43139,18 @@ index 00000000..efbf90c2
 +        const bool here = mode == GAME_MODE_EDIT && MapNo == town;
 +        if (here && GameMode != ED_MODE_WALK) return Failed("busy: the player is editing or in a menu in that town; try again in a moment");
 +        std::string error;
-+        if (!moonmod::coop::ImportTown(args[0]["data"].get_ref<const std::string &>(), town, *SaveData, error)) return Invalid(error);
++        // With base (the town as the editing game had it when its player opened the editor), only what they changed
++        // comes across, merged into this save's town (coop::MergeTown); without, the town is taken whole.
++        const std::string &data = args[0]["data"].get_ref<const std::string &>();
++        const bool merging = args[0].contains("base") && !args[0]["base"].is_null();
++        if (merging && !args[0]["base"].is_string()) return Invalid("base must be georama.town_export text");
++        if (merging ? !moonmod::coop::MergeTown(args[0]["base"].get_ref<const std::string &>(), data, town, *SaveData, error)
++                    : !moonmod::coop::ImportTown(data, town, *SaveData, error)) {
++            return Invalid(error);
++        }
 +        const bool reload = here && NextMapNo < 0;
 +        if (reload) MapJump(town, -1);
-+        return {ApiCallStatus::Ok, {{"town_id", town}, {"imported", true}, {"reloaded", reload}}, {}};
++        return {ApiCallStatus::Ok, {{"town_id", town}, {"imported", true}, {"merged", merging}, {"reloaded", reload}}, {}};
 +    }
 +    // world.avatar_set / avatar_clear: co-op's remote players on the dungeon floor (moonmod/coop_avatars.hpp).
 +    if (operation.path == "world.avatar_set") {
@@ -48236,10 +48249,10 @@ index 00000000..83110a2b
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_save_moonmod.cpp b/port/src/moonmod/coop_save_moonmod.cpp
 new file mode 100644
-index 00000000..b5982614
+index 00000000..80afcef1
 --- /dev/null
 +++ b/port/src/moonmod/coop_save_moonmod.cpp
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,401 @@
 +// Co-op's split of a save into the host's world and a player's own things (moonmod/coop_save.hpp).
 +
 +#include "moonmod/coop_save.hpp"
@@ -48250,6 +48263,8 @@ index 00000000..b5982614
 +#include <fstream>
 +#include <iterator>
 +#include <map>
++#include <memory>
++#include <type_traits>
 +#include <cstdio>
 +#include <vector>
 +
@@ -48299,6 +48314,7 @@ index 00000000..b5982614
 +    }
 +
 +    static constexpr int kTowns = static_cast<int>(sizeof(CSaveData::georama) / sizeof(CSaveData::georama[0]));
++    static constexpr std::size_t kChips = sizeof(CSaveData::elem_data[0]) / sizeof(CSaveData::elem_data[0][0]);
 +    static std::vector<Field> Town(CSaveData &save, int town) {
 +        return {
 +            {1, &save.georama[town], sizeof(save.georama[town])},
@@ -48452,6 +48468,93 @@ index 00000000..b5982614
 +        return false;
 +    }
 +    return Import(tag.c_str(), text, SaveAccess::Town(save, town), error);
++}
++
++namespace {
++
++// A town's two fields, decoded apart from any save.
++struct TownCopy {
++    dc::game::SV_GEORAMA_DATA geo{};
++    std::int16_t              chips[SaveAccess::kChips]{};
++    std::vector<Field>        Fields() { return {{1, &geo, sizeof(geo)}, {2, chips, sizeof(chips)}}; }
++};
++
++template <typename T> bool Same(const T &a, const T &b) { return std::memcmp(&a, &b, sizeof(T)) == 0; }
++
++// Each record they changed takes their value.
++template <typename T, std::size_t N> void TakeChanged(T (&into)[N], const T (&base)[N], const T (&edited)[N]) {
++    for (std::size_t i = 0; i < N; ++i) {
++        if (!Same(base[i], edited[i])) into[i] = edited[i];
++    }
++}
++
++// The placed buildings, a list ended by part_id -1: theirs taken away, theirs added.
++std::vector<dc::game::SV_GRD_PART> Placed(const dc::game::SV_GEORAMA_DATA &geo) {
++    std::vector<dc::game::SV_GRD_PART> out;
++    for (const auto &part : geo.placed_parts) {
++        if (part.part_id == -1) break;
++        out.push_back(part);
++    }
++    return out;
++}
++
++} // namespace
++
++bool MergeTown(std::string_view base, std::string_view edited, int town, CSaveData &save, std::string &error) {
++    constexpr int kTowns = SaveAccess::kTowns;
++    if (town < 0 || town >= kTowns) {
++        error = "no such town";
++        return false;
++    }
++    const std::string tag = "DCT1" + std::to_string(town) + ":";
++    if (!base.starts_with(tag) || !edited.starts_with(tag)) {
++        error = "not this town's georama.town_export";
++        return false;
++    }
++    auto before = std::make_unique<TownCopy>(), after = std::make_unique<TownCopy>(), now = std::make_unique<TownCopy>();
++    if (!Import(tag.c_str(), base, before->Fields(), error) || !Import(tag.c_str(), edited, after->Fields(), error)) return false;
++    const std::vector<Field> live = SaveAccess::Town(save, town);
++    std::memcpy(&now->geo, live[0].data, sizeof(now->geo));
++    std::memcpy(now->chips, live[1].data, sizeof(now->chips));
++
++    auto &geo = now->geo;
++    const auto &was = before->geo, &is = after->geo;
++    if (was.request_count != is.request_count) geo.request_count = is.request_count;
++    if (was.request_event_flag != is.request_event_flag) geo.request_event_flag = is.request_event_flag;
++    TakeChanged(geo.request_complete, was.request_complete, is.request_complete);
++    TakeChanged(geo.parts_info, was.parts_info, is.parts_info);
++    TakeChanged(geo.npc, was.npc, is.npc);
++    TakeChanged(now->chips, before->chips, after->chips);
++
++    std::vector<dc::game::SV_GRD_PART> placed = Placed(geo), removed = Placed(was), added = Placed(is);
++    // what both lists hold is neither taken away nor added (one for one, as a building may stand twice)
++    for (auto it = removed.begin(); it != removed.end();) {
++        const auto kept = std::ranges::find_if(added, [&](const auto &part) { return Same(part, *it); });
++        if (kept != added.end()) {
++            added.erase(kept);
++            it = removed.erase(it);
++        } else {
++            ++it;
++        }
++    }
++    for (const auto &gone : removed) {
++        const auto found = std::ranges::find_if(placed, [&](const auto &part) { return Same(part, gone); });
++        if (found != placed.end()) placed.erase(found);
++    }
++    for (const auto &part : added) placed.push_back(part);
++    constexpr std::size_t kSlots = std::extent_v<decltype(dc::game::SV_GEORAMA_DATA::placed_parts)>;
++    if (placed.size() >= kSlots) placed.resize(kSlots - 1); // the list keeps its end
++    for (std::size_t i = 0; i < kSlots; ++i) {
++        if (i < placed.size()) {
++            geo.placed_parts[i] = placed[i];
++        } else {
++            geo.placed_parts[i] = {};
++            geo.placed_parts[i].part_id = -1;
++        }
++    }
++    std::memcpy(live[0].data, &now->geo, sizeof(now->geo));
++    std::memcpy(live[1].data, now->chips, sizeof(now->chips));
++    return true;
 +}
 +
 +std::string ExportPlayer(const CSaveData &save) { return Export(kPlayerTag, SaveAccess::Player(const_cast<CSaveData &>(save))); }
@@ -69281,10 +69384,10 @@ index 00000000..4ac4f6c9
 +}
 diff --git a/port/src/tests/moonmod_coop_save_test.cpp b/port/src/tests/moonmod_coop_save_test.cpp
 new file mode 100644
-index 00000000..d076e884
+index 00000000..890e0c84
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_save_test.cpp
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,255 @@
 +// Co-op's split of a save (moonmod/coop_save.hpp): the world and a player's own things go across whole, each without
 +// the other, and a damaged or foreign one changes nothing.
 +#include <gtest/gtest.h>
@@ -69380,6 +69483,105 @@ index 00000000..d076e884
 +    EXPECT_EQ(moonmod::coop::ExportTown(other->save(), 2), town);
 +    EXPECT_NE(moonmod::coop::ExportTown(other->save(), 1), moonmod::coop::ExportTown(editor->save(), 1)); // only town 2 came
 +    EXPECT_TRUE(moonmod::coop::ExportTown(other->save(), 7).empty());
++}
++
++// A town as georama.town_export writes it, made and read here: field 1 the record, field 2 the chips.
++struct Town {
++    dc::game::SV_GEORAMA_DATA geo{};
++    std::int16_t              chips[128]{};
++    Town() {
++        for (auto &part : geo.placed_parts) part.part_id = -1;
++    }
++    void Place(std::int16_t id, float x) {
++        for (auto &part : geo.placed_parts) {
++            if (part.part_id == -1) {
++                part = {id, 0, x, 0.0f, 0.0f};
++                return;
++            }
++        }
++    }
++    std::vector<std::int16_t> Placed() const {
++        std::vector<std::int16_t> out;
++        for (const auto &part : geo.placed_parts) {
++            if (part.part_id == -1) break;
++            out.push_back(part.part_id);
++        }
++        return out;
++    }
++    std::string Text(int town) const {
++        std::string bytes;
++        const auto field = [&bytes](std::uint16_t id, const void *data, std::uint32_t size) {
++            bytes.push_back(static_cast<char>(id & 0xFF));
++            bytes.push_back(static_cast<char>(id >> 8));
++            for (int shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<char>((size >> shift) & 0xFF));
++            bytes.append(static_cast<const char *>(data), size);
++        };
++        field(1, &geo, sizeof(geo));
++        field(2, chips, sizeof(chips));
++        static constexpr char kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++        std::string out = "DCT1" + std::to_string(town) + ":";
++        for (std::size_t i = 0; i < bytes.size(); i += 3) {
++            const auto     at = [&bytes](std::size_t k) { return static_cast<unsigned>(static_cast<unsigned char>(bytes[k])); };
++            const unsigned v = (at(i) << 16) | ((i + 1 < bytes.size() ? at(i + 1) : 0) << 8) | (i + 2 < bytes.size() ? at(i + 2) : 0);
++            out.push_back(kTable[(v >> 18) & 63]);
++            out.push_back(kTable[(v >> 12) & 63]);
++            out.push_back(i + 1 < bytes.size() ? kTable[(v >> 6) & 63] : '=');
++            out.push_back(i + 2 < bytes.size() ? kTable[v & 63] : '=');
++        }
++        return out;
++    }
++    static Town Read(const std::string &text) {
++        std::string bytes;
++        unsigned    value = 0;
++        int         bits = 0;
++        for (char c : text.substr(text.find(':') + 1)) {
++            int digit = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 : c == '+' ? 62 : c == '/' ? 63 : -1;
++            if (digit < 0) break;
++            value = (value << 6) | static_cast<unsigned>(digit);
++            bits += 6;
++            if (bits >= 8) {
++                bits -= 8;
++                bytes.push_back(static_cast<char>((value >> bits) & 0xFF));
++            }
++        }
++        Town town;
++        std::memcpy(&town.geo, bytes.data() + 6, sizeof(town.geo));
++        std::memcpy(town.chips, bytes.data() + 6 + sizeof(town.geo) + 6, sizeof(town.chips));
++        return town;
++    }
++};
++
++TEST(MoonModCoopSave, TwoBuildingInOneTownBothKeepTheirWork) {
++    auto host = std::make_unique<RawSave>(0x00);
++    std::string error;
++    Town start;
++    start.Place(10, 1.0f); // a house
++    start.Place(11, 2.0f); // a mill
++    ASSERT_TRUE(moonmod::coop::ImportTown(start.Text(2), 2, host->save(), error)) << error;
++    const std::string base = moonmod::coop::ExportTown(host->save(), 2); // the guest opens the editor here
++
++    // Meanwhile the host puts up a shop and paints chip 6.
++    Town hosts = Town::Read(base);
++    hosts.Place(12, 3.0f);
++    hosts.chips[6] = 77;
++    ASSERT_TRUE(moonmod::coop::ImportTown(hosts.Text(2), 2, host->save(), error)) << error;
++
++    // The guest took the house down, put up a well, painted chip 5 and finished plot 4.
++    Town guests = Town::Read(base);
++    guests.geo.placed_parts[0] = guests.geo.placed_parts[1];
++    guests.geo.placed_parts[1].part_id = -1;
++    guests.Place(13, 4.0f);
++    guests.chips[5] = 55;
++    guests.geo.parts_info[4].placed = 1;
++
++    ASSERT_TRUE(moonmod::coop::MergeTown(base, guests.Text(2), 2, host->save(), error)) << error;
++    const Town merged = Town::Read(moonmod::coop::ExportTown(host->save(), 2));
++    EXPECT_EQ(merged.Placed(), (std::vector<std::int16_t>{11, 12, 13})); // the house gone, the shop and the well both up
++    EXPECT_EQ(merged.chips[5], 55);
++    EXPECT_EQ(merged.chips[6], 77);
++    EXPECT_EQ(merged.geo.parts_info[4].placed, 1);
++
++    EXPECT_FALSE(moonmod::coop::MergeTown(base, guests.Text(3), 2, host->save(), error)); // another town's
 +}
 +
 +struct TempDir {
