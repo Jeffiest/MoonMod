@@ -209,6 +209,10 @@ build, alone). Delete the `mods` folder if you no longer want it, and build agai
   `git submodule update --init --recursive`, paste the release again and rebuild.
 - **The build fails after pasting.** Make sure every file was replaced (step 2), then build from scratch:
   `$env:CLEAN=1; .\build.bat windows-x64-release`.
+- **The link fails with `duplicate symbol` errors** (`CWind`, `CWeaponLevelUp` and others, each "defined at" two
+  objects). The checkout is in a folder whose name has brackets, such as `Program Files (x86)`, and a release made
+  before 2026-11-06 lists every game file twice there. This release builds there; with an older one, move the
+  `Chronicle` folder to a path without brackets (`D:\Games\Chronicle`) and build from scratch with `$env:CLEAN=1`.
 - **The Mod Manager says no mods were found.** Each mod needs its own folder directly in `Chronicle\mods` with
   `mod.json` inside (`Chronicle\mods\moonmod.rpg\mod.json`, not `Chronicle\mods\moonmod.rpg\moonmod.rpg\mod.json`).
   The game's console output names the folder it reads, in the line `moonmod: mods folder ...`.
