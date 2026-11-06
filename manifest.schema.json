@@ -19,7 +19,7 @@
     "optional_dependencies": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "load_after": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "load_before": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
-    "permissions": {"type": "array", "maxItems": 64, "items": {"enum": ["storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override", "debug.inspect", "native.extension"]}, "uniqueItems": true},
+    "permissions": {"type": "array", "maxItems": 64, "items": {"enum": ["storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override", "debug.inspect", "native.extension", "net.session"]}, "uniqueItems": true},
     "native_extension": {
       "type": "object",
       "additionalProperties": false,

@@ -43,7 +43,7 @@ index 00000000..2147797e
 +
 +Regression suites: `DungeonAerialCache`, `DungeonAerialProjection`, `DungeonVisibility`, and `PlatformConfig.AerialMap`.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 5a0b2fc1..3e4a63e7 100644
+index 5a0b2fc1..eea7e97d 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -9,6 +9,32 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -106,15 +106,33 @@ index 5a0b2fc1..3e4a63e7 100644
  # Flatpak builds have no network: their single-file libraries are staged in audio_decoders/ and stb_truetype/; others fetch them.
  set(KZ_PORT_VENDOR_DIRS ${CMAKE_SOURCE_DIR}/audio_decoders ${CMAKE_SOURCE_DIR}/stb_truetype)
  # The Flatpak also stages each library Kazarov's FetchContent_Declare downloads, in flatpak-deps/<name>
-@@ -168,6 +207,7 @@ if(NINTENDO_SWITCH)
+@@ -168,6 +207,25 @@ if(NINTENDO_SWITCH)
      dc_switch_port(dc_port)
  endif()
  target_link_libraries(dc_port PRIVATE dc_options SDL3::SDL3 Vulkan::Vulkan nlohmann_json::nlohmann_json fastgltf::fastgltf kz_port_headers)
 +target_link_libraries(dc_port PRIVATE moonmod_lua ${CMAKE_DL_LIBS})
++# Online play's socket (moonmod/net_session.hpp, coop/relay): the browser's WebSocket on the web (web.cmake links
++# Emscripten's), WinHTTP on Windows, libcurl's TLS connection on Linux and macOS where it is found. Without one,
++# net.* reports itself unsupported. DC_COOP_RELAY_DEFAULT is the relay a mod's net.host/join use unless it names one.
++set(DC_COOP_RELAY_DEFAULT "" CACHE STRING "The co-op relay (wss://...) online play uses by default")
++target_compile_definitions(dc_port PRIVATE DC_COOP_RELAY_DEFAULT="${DC_COOP_RELAY_DEFAULT}")
++set(DC_NET_LIBS)
++if(WIN32)
++    set(DC_NET_LIBS winhttp)
++elseif(NOT EMSCRIPTEN AND NOT NINTENDO_SWITCH AND NOT ANDROID)
++    find_package(CURL QUIET)
++    if(CURL_FOUND)
++        target_compile_definitions(dc_port PRIVATE DC_HAVE_CURL)
++        target_link_libraries(dc_port PRIVATE CURL::libcurl)
++        set(DC_NET_LIBS CURL::libcurl)
++    else()
++        message(STATUS "libcurl not found: this build has no online play")
++    endif()
++endif()
  # port/src, the generated headers, dcdata's header-only core and the stb directories: captionfont.cpp
  # rasterizes with stb_truetype and platform/png_image.cpp decodes with stb_image, which Kazarov stages
  # (or fetches) for dc_host.
-@@ -182,6 +222,7 @@ function(dc_port_includes target)
+@@ -182,6 +240,7 @@ function(dc_port_includes target)
  endfunction()
  dc_port_includes(dc_port)
  dc_port_includes(dc_ps2)
@@ -122,16 +140,29 @@ index 5a0b2fc1..3e4a63e7 100644
  # The game's headers trip a few warnings that only describe how MWCC's source
  # was written, not a problem in the port.
  target_compile_options(dc_port PRIVATE -Wall -Wno-mismatched-tags -Wno-unused-label
-@@ -212,7 +253,8 @@ endif()
+@@ -212,7 +271,8 @@ endif()
  
  function(dc_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:dc_port> $<TARGET_OBJECTS:dc_ps2>)
 -    target_link_libraries(${target} PRIVATE dc_options dc_host kz_port_headers SDL3::SDL3 Vulkan::Vulkan fastgltf::fastgltf)
 +    target_link_libraries(${target} PRIVATE dc_options dc_host kz_port_headers SDL3::SDL3 Vulkan::Vulkan fastgltf::fastgltf
-+        nlohmann_json::nlohmann_json moonmod_lua ${CMAKE_DL_LIBS})
++        nlohmann_json::nlohmann_json moonmod_lua ${DC_NET_LIBS} ${CMAKE_DL_LIBS})
      target_include_directories(${target} PRIVATE ${PORT_DIR} ${CMAKE_SOURCE_DIR}/tools/dcdata)
      target_compile_options(${target} PRIVATE -Wall -Wno-mismatched-tags -Wno-unused-label
          -Wno-overloaded-virtual -Wno-unused-function)
+diff --git a/port/flatpak/org.themoonpeople.Chronicle.yml b/port/flatpak/org.themoonpeople.Chronicle.yml
+index 715c9417..4241026e 100644
+--- a/port/flatpak/org.themoonpeople.Chronicle.yml
++++ b/port/flatpak/org.themoonpeople.Chronicle.yml
+@@ -18,6 +18,8 @@ finish-args:
+   - --socket=pulseaudio
+   # hidraw, for the 2026 Steam Controller.
+   - --device=all
++  # Online play, through the co-op relay (coop/relay).
++  - --share=network
+   # Discord Rich Presence.
+   - --filesystem=xdg-run/discord-ipc-0
+   - --filesystem=xdg-run/app/com.discordapp.Discord:create
 diff --git a/port/include/game/battlemenu.hpp b/port/include/game/battlemenu.hpp
 index 96fca7af..c566c971 100644
 --- a/port/include/game/battlemenu.hpp
@@ -4561,6 +4592,126 @@ index 00000000..56ee5ec6
 +void ResetNativeResourceOverridesForTests();
 +
 +} // namespace moonmod
+diff --git a/port/include/moonmod/net_session.hpp b/port/include/moonmod/net_session.hpp
+new file mode 100644
+index 00000000..73384372
+--- /dev/null
++++ b/port/include/moonmod/net_session.hpp
+@@ -0,0 +1,114 @@
++#pragma once
++
++// Online play (net.*): one session at a time, through the co-op relay (coop/relay/README.md). A player hosts a room or
++// joins one by its five-letter code; the relay passes messages between the players' games and keeps no game state, so
++// the host's game is the world and a mod decides what the messages mean. The web build talks to the relay with the
++// browser's WebSocket, Windows with WinHTTP, Linux and macOS with a WebSocket of our own over libcurl's TLS connection
++// (net_transport_*.cpp); a build without any of them reports net.* unsupported.
++
++#include <chrono>
++#include <cstdint>
++#include <deque>
++#include <functional>
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++namespace moonmod::net {
++
++inline constexpr std::size_t kMessageMax = 16 * 1024; // bytes of one message's data
++inline constexpr std::size_t kQueueMax = 4096;        // events waiting for the mod; past it the oldest messages go
++inline constexpr int         kPlayersMax = 4;
++inline constexpr int         kBroadcast = 255;
++
++// What a transport hands up: the socket opened, a text or binary frame came, or it closed (data: why).
++struct Frame {
++    enum class Kind { Open, Text, Binary, Closed } kind = Kind::Binary;
++    std::string data;
++};
++
++// One WebSocket to the relay. Frames come in on any thread and wait in the transport until Poll takes them, on the
++// game's thread; Send may be called from the game's thread while frames arrive.
++class Transport {
++public:
++    virtual ~Transport() = default;
++    virtual void Send(std::string_view bytes) = 0; // one binary frame
++    virtual bool Poll(Frame &frame) = 0;
++    virtual void Close() = 0;
++};
++
++// Opens a socket to url (wss://, or ws:// to this machine for testing), or says why it can't.
++using TransportFactory = std::function<std::unique_ptr<Transport>(const std::string &url, std::string &error)>;
++// The platform's: nullptr where the build has no network support.
++TransportFactory PlatformTransport();
++
++struct Peer {
++    int         id = -1;
++    std::string name;
++};
++
++// What net.receive hands a mod: connected (peer = its own id, data = the room code), joined, left (peer), message
++// (peer = sender, data), closed (data = why the session ended).
++struct Event {
++    std::string kind;
++    int         peer = -1;
++    std::string data;
++    std::string name;
++};
++
++enum class State { Idle, Connecting, Hosting, Joined };
++std::string_view StateName(State state);
++
++class Session {
++public:
++    explicit Session(TransportFactory factory) : factory_(std::move(factory)) {}
++
++    // Opens a room (code empty) or joins one. game and version must match the room's: a room is one game at one
++    // protocol version. False, with the reason, when the session can't start.
++    bool Start(std::string_view owner, const std::string &relay, const std::string &code, const std::string &name,
++               const std::string &game, int version, std::string &error);
++    void Leave(std::string_view why = "left");
++    // Takes what the transport received and keeps the socket alive; Receive and Send do it too.
++    void Pump();
++    // to: a peer id, or kBroadcast for everyone else. False with the reason when it can't go.
++    bool Send(int to, std::string_view data, std::string &error);
++    std::vector<Event> Receive(std::size_t max);
++
++    State                    state() const { return state_; }
++    const std::string       &owner() const { return owner_; }
++    int                      id() const { return id_; }
++    const std::string       &code() const { return code_; }
++    const std::vector<Peer> &peers() const { return peers_; }
++    const std::string       &relay() const { return relay_; }
++    bool                     available() const { return static_cast<bool>(factory_); }
++
++private:
++    void Control(const std::string &text);
++    void Push(Event event);
++    void End(const std::string &why);
++
++    TransportFactory                         factory_;
++    std::unique_ptr<Transport>               transport_;
++    State                                    state_ = State::Idle;
++    std::string                              owner_;
++    std::string                              relay_;
++    std::string                              code_;
++    int                                      id_ = -1;
++    std::vector<Peer>                        peers_;
++    std::deque<Event>                        events_;
++    std::chrono::steady_clock::time_point    last_sent_{};
++};
++
++// The relay address for a call: the mod's, else DC_COOP_RELAY, else the build's (DC_COOP_RELAY_DEFAULT).
++std::string RelayAddress(const std::string &asked);
++bool        ValidRelay(const std::string &url);
++bool        ValidUtf8(std::string_view text);
++// Percent-encodes a query value.
++std::string Escape(std::string_view text);
++
++// The one session of this process, made with PlatformTransport the first time it's asked for.
++Session &Shared();
++
++} // namespace moonmod::net
 diff --git a/port/include/moonmod/run_menu.hpp b/port/include/moonmod/run_menu.hpp
 new file mode 100644
 index 00000000..a9f3a8b3
@@ -27363,10 +27514,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..df5045ae
+index 00000000..76226712
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,646 @@
+@@ -0,0 +1,652 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -27487,6 +27638,12 @@ index 00000000..df5045ae
 +    {"messages.list", "messages", "list", "any", "storage.read", "The messages this mod's players left at some places, best rated first."},
 +    {"messages.rate", "messages", "rate", "any", "storage.write", "Rate another player's message good or poor, or take the rating back."},
 +    {"messages.remove", "messages", "remove", "any", "storage.write", "Take back one of this player's own messages."},
++    {"net.host", "net", "host", "any", "net.session", "Open an online room through the co-op relay; net.receive's connected event names its code."},
++    {"net.join", "net", "join", "any", "net.session", "Join another player's online room by its five-letter code."},
++    {"net.leave", "net", "leave", "any", "net.session", "Leave the online room (a host leaving ends it for everyone)."},
++    {"net.status", "net", "status", "any", "net.session", "The online session: state, this player's id, the room code and the other players."},
++    {"net.send", "net", "send", "any", "net.session", "Send text (at most 16 KiB) to one player, by id, or to all the others."},
++    {"net.receive", "net", "receive", "any", "net.session", "Take what came: connected, joined, left, message and closed events, oldest first."},
 +    {"world.dungeon_npc_clear", "world", "dungeon_npc_clear", "simulation", "game.write", "Take this mod's figure off the dungeon floor."},
 +    {"ui.run_menu_set", "ui", "run_menu_set", "simulation", "game.write", "Set this mod's Chronicle run menu: tabs of rows, opened from Start in a dungeon in place of the pause."},
 +    {"ui.run_menu_clear", "ui", "run_menu_clear", "simulation", "game.write", "Take back this mod's run menu; Start pauses as retail does again."},
@@ -27812,9 +27969,9 @@ index 00000000..df5045ae
 +    {"skills.unlocked", "skills", "both", "A skill's rank first became positive."},
 +};
 +
-+constexpr std::array<std::string_view, 8> kKnownPermissions = {
++constexpr std::array<std::string_view, 9> kKnownPermissions = {
 +    "storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override",
-+    "debug.inspect", "native.extension",
++    "debug.inspect", "native.extension", "net.session",
 +};
 +
 +} // namespace
@@ -28875,10 +29032,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..61ea3603
+index 00000000..0835c3f1
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,16797 @@
+@@ -0,0 +1,16917 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -28898,6 +29055,7 @@ index 00000000..61ea3603
 +#include "itembombeffect.hpp"
 +#include "moonmod/companion.hpp"
 +#include "moonmod/ghost.hpp"
++#include "moonmod/net_session.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
@@ -42081,6 +42239,115 @@ index 00000000..61ea3603
 +    return {ApiCallStatus::Ok, {{"queued", true}, {"mode", session->mode_id}}, {}};
 +}
 +
++// net.*: one online session for the game, owned by the mod that opened it (moonmod/net_session.hpp).
++Json NetStatusJson() {
++    moonmod::net::Session &session = moonmod::net::Shared();
++    Json peers = Json::array();
++    for (const moonmod::net::Peer &peer : session.peers()) peers.push_back({{"id", peer.id}, {"name", peer.name}});
++    Json out = {{"state", std::string(moonmod::net::StateName(session.state()))}, {"available", session.available()},
++                {"peers", std::move(peers)}};
++    if (session.id() >= 0) out["id"] = session.id();
++    if (!session.code().empty()) out["code"] = session.code();
++    if (!session.owner().empty()) out["owner"] = session.owner();
++    return out;
++}
++
++ApiCallResult NetCall(std::string_view mod_id, const ApiOperationSpec &operation, const Json &args) {
++    moonmod::net::Session &session = moonmod::net::Shared();
++    const bool            no_args = args.is_array() && (args.empty() || (args.size() == 1 && args[0].is_object() && args[0].empty()));
++    const Json            empty = Json::object();
++    const Json           &request = args.is_array() && args.size() == 1 && args[0].is_object() ? args[0] : empty;
++    if (!args.is_array() || args.size() > 1 || (args.size() == 1 && !args[0].is_object())) return Invalid("expected one table, or none");
++    const auto text_of = [&request](const char *key) {
++        return request.contains(key) && request[key].is_string() ? request[key].get<std::string>() : std::string();
++    };
++    if (operation.path == "net.status") {
++        if (!no_args) return Invalid("net.status takes no arguments");
++        session.Pump();
++        return {ApiCallStatus::Ok, NetStatusJson(), {}};
++    }
++    const bool mine = session.owner() == mod_id;
++    if (!session.owner().empty() && !mine) return Failed("another mod's online session is open (" + session.owner() + ")");
++    if (operation.path == "net.host" || operation.path == "net.join") {
++        for (auto field = request.begin(); field != request.end(); ++field) {
++            const std::string &key = field.key();
++            if (key != "name" && key != "relay" && key != "version" && key != "code") return Invalid("unknown field: " + key);
++        }
++        const bool  join = operation.path == "net.join";
++        std::string code = text_of("code");
++        if (join) {
++            std::ranges::transform(code, code.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
++            if (code.size() != 5 || !std::ranges::all_of(code, [](unsigned char c) { return std::isalnum(c) != 0; })) {
++                return Invalid("code must be the room's five letters and digits");
++            }
++        } else if (request.contains("code")) {
++            return Invalid("net.host takes no code: the relay gives the room one");
++        }
++        if (!request.contains("version") || !request["version"].is_number_integer() || request["version"].get<int>() < 1 ||
++            request["version"].get<int>() > 9999) {
++            return Invalid("version must be the mod's message protocol number, 1-9999: players on other numbers can't join");
++        }
++        std::string name = text_of("name");
++        if (name.size() > 24 || !moonmod::net::ValidUtf8(name)) return Invalid("name must be text of at most 24 bytes");
++        const std::string relay = moonmod::net::RelayAddress(text_of("relay"));
++        std::string       error;
++        if (!session.Start(mod_id, relay, join ? code : std::string(), name, "chronicle", request["version"].get<int>(), error)) {
++            return session.available() ? Failed(error) : ApiCallResult{ApiCallStatus::Unsupported, {}, error};
++        }
++        return {ApiCallStatus::Ok, NetStatusJson(), {}};
++    }
++    if (operation.path == "net.leave") {
++        if (!no_args) return Invalid("net.leave takes no arguments");
++        const bool was_open = session.state() != moonmod::net::State::Idle;
++        if (mine) session.Leave();
++        return {ApiCallStatus::Ok, {{"left", was_open && mine}}, {}};
++    }
++    if (operation.path == "net.send") {
++        for (auto field = request.begin(); field != request.end(); ++field) {
++            if (field.key() != "to" && field.key() != "data") return Invalid("unknown field: " + field.key());
++        }
++        if (!request.contains("data") || !request["data"].is_string()) return Invalid("data must be text");
++        int to = -1;
++        if (request.contains("to") && request["to"].is_string() && request["to"].get<std::string>() == "all") {
++            to = moonmod::net::kBroadcast;
++        } else if (request.contains("to") && request["to"].is_number_integer()) {
++            to = request["to"].get<int>();
++        } else {
++            return Invalid("to must be a player's id or \"all\"");
++        }
++        if (!mine) return Failed("not in an online session");
++        std::string error;
++        if (!session.Send(to, request["data"].get_ref<const std::string &>(), error)) return Failed(error);
++        return {ApiCallStatus::Ok, {{"sent", true}}, {}};
++    }
++    if (operation.path == "net.receive") {
++        for (auto field = request.begin(); field != request.end(); ++field) {
++            if (field.key() != "max") return Invalid("unknown field: " + field.key());
++        }
++        std::size_t max = 256;
++        if (request.contains("max")) {
++            if (!request["max"].is_number_integer() || request["max"].get<int>() < 1 || request["max"].get<int>() > 1024) {
++                return Invalid("max must be 1-1024");
++            }
++            max = static_cast<std::size_t>(request["max"].get<int>());
++        }
++        Json events = Json::array();
++        if (mine) {
++            for (moonmod::net::Event &event : session.Receive(max)) {
++                Json entry = {{"kind", event.kind}};
++                if (event.peer >= 0) entry["peer"] = event.peer;
++                if (event.kind == "message") entry["data"] = std::move(event.data);
++                if (event.kind == "connected") entry["code"] = std::move(event.data);
++                if (event.kind == "closed") entry["reason"] = std::move(event.data);
++                if (!event.name.empty()) entry["name"] = std::move(event.name);
++                events.push_back(std::move(entry));
++            }
++        }
++        return {ApiCallStatus::Ok, {{"events", std::move(events)}}, {}};
++    }
++    return Invalid("unknown net operation");
++}
++
 +ApiCallResult Call(std::string_view mod_id, const std::filesystem::path &save_root,
 +                   const ApiOperationSpec &operation, const Json &args) {
 +    if (operation.path == "save.slot_id") {
@@ -42232,6 +42499,9 @@ index 00000000..61ea3603
 +        if (!dc::game::MoonModNpcSet(std::string(mod_id), id, model, place == "exit" ? 0 : 1)) return Failed("another mod has a figure on this floor");
 +        return {ApiCallStatus::Ok, {{"id", id}}, {}};
 +    }
++    // net.*: online play through the co-op relay (moonmod/net_session.hpp). One session at a time, owned by the mod that
++    // opened it; the others may read net.status but not use the session.
++    if (operation.path.starts_with("net.")) return NetCall(mod_id, operation, args);
 +    // messages.*: notes players leave for each other through the messages folder (moonmod/messages_moonmod.hpp). The
 +    // folder is the player's choice, never a mod's: no call takes a path.
 +    if (operation.path.starts_with("messages.")) {
@@ -45368,6 +45638,12 @@ index 00000000..61ea3603
 +    for (const char *path : {"messages.post", "messages.list", "messages.rate", "messages.remove"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
++    {
++        const bool online = moonmod::net::Shared().available();
++        for (const char *path : {"net.host", "net.join", "net.leave", "net.status", "net.send", "net.receive"}) {
++            config.api_capabilities.push_back({path, online, online ? std::string() : "this build has no network socket (no libcurl was found)"});
++        }
++    }
 +    config.api_capabilities.push_back({"characters.register_playable", true, {}});
 +    config.api_capabilities.push_back({"render.camera_get", true, {}});
 +    config.api_capabilities.push_back({"render.camera_set", true, {}});
@@ -45424,6 +45700,7 @@ index 00000000..61ea3603
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
 +    config.api_owner_unloaded = [](std::string_view mod_id) {
++        if (moonmod::net::Shared().owner() == mod_id) moonmod::net::Shared().Leave("the mod left");
 +        const std::string prefix = std::string(mod_id) + ":";
 +        InputUnbindModActionsByPrefix(prefix);
 +        g_input_contexts.UnloadOwner(mod_id);
@@ -56435,6 +56712,859 @@ index 00000000..e29c7329
 +}
 +
 +} // namespace moonmod
+diff --git a/port/src/moonmod/net_session.cpp b/port/src/moonmod/net_session.cpp
+new file mode 100644
+index 00000000..e4df5bc6
+--- /dev/null
++++ b/port/src/moonmod/net_session.cpp
+@@ -0,0 +1,254 @@
++// Online play's session (moonmod/net_session.hpp): the relay's protocol over whatever socket the platform gives.
++
++#include "moonmod/net_session.hpp"
++
++#include <algorithm>
++#include <cstdlib>
++
++#include <nlohmann/json.hpp>
++
++namespace moonmod::net {
++namespace {
++
++using Clock = std::chrono::steady_clock;
++using Json = nlohmann::json;
++
++// A socket with nothing on it is closed by proxies after a minute or two: a frame to oneself, which the relay drops,
++// keeps it open.
++constexpr auto kKeepAlive = std::chrono::seconds(25);
++constexpr auto kConnectTimeout = std::chrono::seconds(20);
++
++#ifndef DC_COOP_RELAY_DEFAULT
++#define DC_COOP_RELAY_DEFAULT ""
++#endif
++
++} // namespace
++
++std::string_view StateName(State state) {
++    switch (state) {
++        case State::Connecting: return "connecting";
++        case State::Hosting: return "hosting";
++        case State::Joined: return "joined";
++        default: return "idle";
++    }
++}
++
++bool ValidUtf8(std::string_view text) {
++    for (std::size_t i = 0; i < text.size();) {
++        const auto c = static_cast<unsigned char>(text[i]);
++        int        more = 0;
++        if (c < 0x80) more = 0;
++        else if (c >= 0xC2 && c <= 0xDF) more = 1;
++        else if ((c & 0xF0) == 0xE0) more = 2;
++        else if (c >= 0xF0 && c <= 0xF4) more = 3;
++        else return false;
++        if (text.size() - i <= static_cast<std::size_t>(more)) return false;
++        for (int k = 1; k <= more; ++k) {
++            if ((static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) return false;
++        }
++        i += static_cast<std::size_t>(more) + 1;
++    }
++    return true;
++}
++
++std::string Escape(std::string_view text) {
++    static constexpr char kHex[] = "0123456789ABCDEF";
++    std::string out;
++    for (const char ch : text) {
++        const auto c = static_cast<unsigned char>(ch);
++        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
++            out.push_back(ch);
++        } else {
++            out.push_back('%');
++            out.push_back(kHex[c >> 4]);
++            out.push_back(kHex[c & 15]);
++        }
++    }
++    return out;
++}
++
++bool ValidRelay(const std::string &url) {
++    if (url.size() > 200 || url.find_first_of(" ?#\\\"'<>") != std::string::npos) return false;
++    if (url.starts_with("wss://")) return url.size() > 6;
++    // Plain ws:// only to this machine, for a relay under wrangler dev.
++    return url.starts_with("ws://127.0.0.1:") || url.starts_with("ws://localhost:");
++}
++
++std::string RelayAddress(const std::string &asked) {
++    std::string url = asked;
++    if (url.empty()) {
++        if (const char *env = std::getenv("DC_COOP_RELAY"); env != nullptr) url = env;
++    }
++    if (url.empty()) url = DC_COOP_RELAY_DEFAULT;
++    while (url.ends_with('/')) url.pop_back();
++    return url;
++}
++
++bool Session::Start(std::string_view owner, const std::string &relay, const std::string &code, const std::string &name,
++                    const std::string &game, int version, std::string &error) {
++    if (!factory_) {
++        error = "this build of the game has no online play";
++        return false;
++    }
++    if (state_ != State::Idle) {
++        error = "a session is already open; leave it first";
++        return false;
++    }
++    if (!ValidRelay(relay)) {
++        error = relay.empty() ? "no relay address: this build has none, so pass one" : "the relay address must be wss://...";
++        return false;
++    }
++    std::string url = relay + (code.empty() ? std::string("/v1/host") : "/v1/join/" + code) + "?game=" + Escape(game) +
++                      "&proto=" + std::to_string(version) + "&name=" + Escape(name);
++    transport_ = factory_(url, error);
++    if (!transport_) {
++        if (error.empty()) error = "the relay can't be reached";
++        return false;
++    }
++    owner_ = std::string(owner);
++    relay_ = relay;
++    code_ = code;
++    id_ = -1;
++    peers_.clear();
++    events_.clear();
++    state_ = State::Connecting;
++    last_sent_ = Clock::now();
++    return true;
++}
++
++void Session::End(const std::string &why) {
++    if (transport_) {
++        transport_->Close();
++        transport_.reset();
++    }
++    if (state_ != State::Idle) Push({"closed", -1, why, {}});
++    state_ = State::Idle;
++    id_ = -1;
++    peers_.clear();
++}
++
++void Session::Leave(std::string_view why) {
++    End(std::string(why));
++    // The mod that left asked for it: nothing waits to be read, and the session is anyone's again.
++    events_.clear();
++    owner_.clear();
++    code_.clear();
++}
++
++void Session::Push(Event event) {
++    if (events_.size() >= kQueueMax) {
++        const auto message = std::ranges::find(events_, std::string("message"), &Event::kind);
++        events_.erase(message != events_.end() ? message : events_.begin());
++    }
++    events_.push_back(std::move(event));
++}
++
++void Session::Control(const std::string &text) {
++    const Json message = Json::parse(text, nullptr, false);
++    if (!message.is_object() || !message.contains("t") || !message["t"].is_string()) return;
++    const std::string t = message["t"].get<std::string>();
++    const auto        number = [&message](const char *key) {
++        return message.contains(key) && message[key].is_number_integer() ? message[key].get<int>() : -1;
++    };
++    const auto text_of = [&message](const char *key) {
++        return message.contains(key) && message[key].is_string() ? message[key].get<std::string>() : std::string();
++    };
++    if (t == "welcome") {
++        id_ = number("id");
++        code_ = text_of("code");
++        peers_.clear();
++        if (message.contains("peers") && message["peers"].is_array()) {
++            for (const Json &peer : message["peers"]) {
++                if (peer.is_object() && peer.contains("id") && peer["id"].is_number_integer()) {
++                    peers_.push_back({peer["id"].get<int>(), peer.value("name", std::string())});
++                }
++            }
++        }
++        state_ = id_ == 0 ? State::Hosting : State::Joined;
++        Push({"connected", id_, code_, {}});
++    } else if (t == "join") {
++        const int id = number("id");
++        std::erase_if(peers_, [id](const Peer &peer) { return peer.id == id; });
++        peers_.push_back({id, text_of("name")});
++        Push({"joined", id, {}, text_of("name")});
++    } else if (t == "leave") {
++        const int id = number("id");
++        std::erase_if(peers_, [id](const Peer &peer) { return peer.id == id; });
++        Push({"left", id, {}, {}});
++    } else if (t == "error" || t == "closed") {
++        const std::string reason = text_of("reason");
++        End(reason.empty() ? std::string("the relay closed the room") : reason);
++    }
++}
++
++void Session::Pump() {
++    if (!transport_) return;
++    Frame frame;
++    while (transport_ && transport_->Poll(frame)) {
++        switch (frame.kind) {
++            case Frame::Kind::Open: break;
++            case Frame::Kind::Text: Control(frame.data); break;
++            case Frame::Kind::Binary:
++                if (frame.data.size() >= 1 && frame.data.size() - 1 <= kMessageMax) {
++                    std::string data = frame.data.substr(1);
++                    if (ValidUtf8(data)) Push({"message", static_cast<unsigned char>(frame.data[0]), std::move(data), {}});
++                }
++                break;
++            case Frame::Kind::Closed:
++                End(frame.data.empty() ? std::string("the connection to the relay closed") : frame.data);
++                return;
++        }
++    }
++    if (!transport_) return;
++    const auto now = Clock::now();
++    if (state_ == State::Connecting && now - last_sent_ > kConnectTimeout) {
++        End("the relay didn't answer");
++    } else if (state_ != State::Connecting && id_ >= 0 && now - last_sent_ > kKeepAlive) {
++        transport_->Send(std::string(1, static_cast<char>(id_)));
++        last_sent_ = now;
++    }
++}
++
++bool Session::Send(int to, std::string_view data, std::string &error) {
++    Pump();
++    if (state_ != State::Hosting && state_ != State::Joined) {
++        error = state_ == State::Connecting ? "still connecting" : "not in a session";
++        return false;
++    }
++    if (data.size() > kMessageMax || !ValidUtf8(data)) {
++        error = "data must be text (UTF-8) of at most 16 KiB";
++        return false;
++    }
++    if (to != kBroadcast && (to < 0 || to >= kPlayersMax || to == id_)) {
++        error = "to must be another player's id, or all";
++        return false;
++    }
++    std::string frame(1, static_cast<char>(to));
++    frame.append(data);
++    transport_->Send(frame);
++    last_sent_ = Clock::now();
++    return true;
++}
++
++std::vector<Event> Session::Receive(std::size_t max) {
++    Pump();
++    std::vector<Event> out;
++    while (!events_.empty() && out.size() < max) {
++        out.push_back(std::move(events_.front()));
++        events_.pop_front();
++    }
++    if (state_ == State::Idle && events_.empty()) owner_.clear(); // a closed session read to its end is anyone's again
++    return out;
++}
++
++#if !defined(__EMSCRIPTEN__) && !defined(_WIN32) && !defined(DC_HAVE_CURL)
++// No socket on this build (no libcurl found): net.* says so.
++TransportFactory PlatformTransport() { return {}; }
++#endif
++
++Session &Shared() {
++    static Session session(PlatformTransport());
++    return session;
++}
++
++} // namespace moonmod::net
+diff --git a/port/src/moonmod/net_transport_curl.cpp b/port/src/moonmod/net_transport_curl.cpp
+new file mode 100644
+index 00000000..727106b5
+--- /dev/null
++++ b/port/src/moonmod/net_transport_curl.cpp
+@@ -0,0 +1,269 @@
++// Online play's socket on Linux and macOS (moonmod/net_session.hpp): libcurl makes the TLS connection (CONNECT_ONLY),
++// and the WebSocket on top of it is ours, the handshake and RFC 6455 framing, so any libcurl does, not only one built
++// with its own WebSocket support. One thread per socket does all the I/O; the game's thread only queues and takes.
++
++#if defined(DC_HAVE_CURL) && !defined(__EMSCRIPTEN__) && !defined(_WIN32)
++
++#include "moonmod/net_session.hpp"
++
++#include <atomic>
++#include <cstring>
++#include <mutex>
++#include <poll.h>
++#include <random>
++#include <thread>
++
++#include <curl/curl.h>
++
++namespace moonmod::net {
++namespace {
++
++std::string Base64(const unsigned char *data, std::size_t size) {
++    static constexpr char kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++    std::string out;
++    for (std::size_t i = 0; i < size; i += 3) {
++        const unsigned v = (data[i] << 16) | ((i + 1 < size ? data[i + 1] : 0) << 8) | (i + 2 < size ? data[i + 2] : 0);
++        out.push_back(kTable[(v >> 18) & 63]);
++        out.push_back(kTable[(v >> 12) & 63]);
++        out.push_back(i + 1 < size ? kTable[(v >> 6) & 63] : '=');
++        out.push_back(i + 2 < size ? kTable[v & 63] : '=');
++    }
++    return out;
++}
++
++class CurlTransport final : public Transport {
++public:
++    CurlTransport(std::string origin, std::string target, std::string host) :
++        origin_(std::move(origin)), target_(std::move(target)), host_(std::move(host)), thread_([this] { Run(); }) {}
++
++    ~CurlTransport() override {
++        Close();
++        if (thread_.joinable()) thread_.join();
++    }
++
++    void Send(std::string_view bytes) override {
++        const std::lock_guard lock(mutex_);
++        outgoing_.emplace_back(Encode(0x2, bytes));
++    }
++
++    bool Poll(Frame &frame) override {
++        const std::lock_guard lock(mutex_);
++        if (incoming_.empty()) return false;
++        frame = std::move(incoming_.front());
++        incoming_.pop_front();
++        return true;
++    }
++
++    void Close() override { stop_ = true; }
++
++private:
++    void Deliver(Frame::Kind kind, std::string data) {
++        const std::lock_guard lock(mutex_);
++        incoming_.push_back({kind, std::move(data)});
++    }
++
++    std::string Encode(int opcode, std::string_view payload) {
++        std::string frame;
++        frame.push_back(static_cast<char>(0x80 | opcode));
++        const std::size_t size = payload.size();
++        if (size < 126) {
++            frame.push_back(static_cast<char>(0x80 | size));
++        } else if (size < 65536) {
++            frame.push_back(static_cast<char>(0x80 | 126));
++            frame.push_back(static_cast<char>(size >> 8));
++            frame.push_back(static_cast<char>(size & 255));
++        } else {
++            frame.push_back(static_cast<char>(0x80 | 127));
++            for (int shift = 56; shift >= 0; shift -= 8) frame.push_back(static_cast<char>((static_cast<std::uint64_t>(size) >> shift) & 255));
++        }
++        unsigned char mask[4];
++        for (unsigned char &m : mask) m = static_cast<unsigned char>(random_());
++        frame.append(reinterpret_cast<const char *>(mask), 4);
++        for (std::size_t i = 0; i < size; ++i) frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
++        return frame;
++    }
++
++    // Waits until the socket can be read (or written), at most ms.
++    bool Wait(bool write, int ms) {
++        pollfd fd{static_cast<int>(socket_), static_cast<short>(write ? POLLOUT : POLLIN), 0};
++        return poll(&fd, 1, ms) > 0;
++    }
++
++    bool SendAll(std::string_view bytes) {
++        std::size_t done = 0;
++        while (done < bytes.size()) {
++            std::size_t sent = 0;
++            const CURLcode result = curl_easy_send(curl_, bytes.data() + done, bytes.size() - done, &sent);
++            if (result == CURLE_AGAIN) {
++                Wait(true, 100);
++                continue;
++            }
++            if (result != CURLE_OK) return false;
++            done += sent;
++        }
++        return true;
++    }
++
++    // Reads what has come, into buffer_. False when the connection is gone.
++    bool ReadSome() {
++        char           chunk[16384];
++        std::size_t    got = 0;
++        const CURLcode result = curl_easy_recv(curl_, chunk, sizeof(chunk), &got);
++        if (result == CURLE_AGAIN) return true;
++        if (result != CURLE_OK || got == 0) return false;
++        buffer_.append(chunk, got);
++        return true;
++    }
++
++    bool Handshake() {
++        unsigned char key[16];
++        for (unsigned char &k : key) k = static_cast<unsigned char>(random_());
++        const std::string request = "GET " + target_ + " HTTP/1.1\r\nHost: " + host_ +
++                                    "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " +
++                                    Base64(key, sizeof(key)) + "\r\nUser-Agent: chronicle-coop\r\n\r\n";
++        if (!SendAll(request)) return false;
++        for (int waited = 0; waited < 150; ++waited) {
++            if (const std::size_t end = buffer_.find("\r\n\r\n"); end != std::string::npos) {
++                const std::string head = buffer_.substr(0, end);
++                buffer_.erase(0, end + 4);
++                if (head.rfind("HTTP/1.1 101", 0) == 0) return true;
++                const std::size_t line = head.find("\r\n");
++                failure_ = "the relay refused: " + head.substr(0, line);
++                return false;
++            }
++            Wait(false, 100);
++            if (!ReadSome()) return false;
++        }
++        failure_ = "the relay didn't answer";
++        return false;
++    }
++
++    // Takes whole frames off buffer_. False on a close frame.
++    bool Frames() {
++        for (;;) {
++            if (buffer_.size() < 2) return true;
++            const auto     b0 = static_cast<unsigned char>(buffer_[0]);
++            const auto     b1 = static_cast<unsigned char>(buffer_[1]);
++            std::uint64_t  size = b1 & 0x7F;
++            std::size_t    at = 2;
++            if (size == 126) {
++                if (buffer_.size() < 4) return true;
++                size = (static_cast<unsigned char>(buffer_[2]) << 8) | static_cast<unsigned char>(buffer_[3]);
++                at = 4;
++            } else if (size == 127) {
++                if (buffer_.size() < 10) return true;
++                size = 0;
++                for (int i = 0; i < 8; ++i) size = (size << 8) | static_cast<unsigned char>(buffer_[2 + i]);
++                at = 10;
++            }
++            const bool masked = (b1 & 0x80) != 0;
++            unsigned char mask[4] = {};
++            if (masked) {
++                if (buffer_.size() < at + 4) return true;
++                std::memcpy(mask, buffer_.data() + at, 4);
++                at += 4;
++            }
++            if (size > 1024 * 1024) return false;
++            if (buffer_.size() < at + size) return true;
++            std::string payload = buffer_.substr(at, static_cast<std::size_t>(size));
++            buffer_.erase(0, at + static_cast<std::size_t>(size));
++            if (masked) for (std::size_t i = 0; i < payload.size(); ++i) payload[i] = static_cast<char>(payload[i] ^ mask[i % 4]);
++            const int  opcode = b0 & 0x0F;
++            const bool fin = (b0 & 0x80) != 0;
++            if (opcode == 0x8) {
++                if (payload.size() > 2) failure_ = payload.substr(2);
++                return false;
++            }
++            if (opcode == 0x9) {
++                SendAll(Encode(0xA, payload));
++                continue;
++            }
++            if (opcode == 0xA) continue;
++            if (opcode == 0x1 || opcode == 0x2) {
++                message_kind_ = opcode;
++                message_ = std::move(payload);
++            } else if (opcode == 0x0) {
++                message_.append(payload);
++            } else {
++                continue;
++            }
++            if (fin) Deliver(message_kind_ == 0x1 ? Frame::Kind::Text : Frame::Kind::Binary, std::move(message_));
++        }
++    }
++
++    void Run() {
++        curl_ = curl_easy_init();
++        if (curl_ == nullptr) {
++            Deliver(Frame::Kind::Closed, "the network library didn't start");
++            return;
++        }
++        curl_easy_setopt(curl_, CURLOPT_URL, origin_.c_str());
++        curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY, 1L);
++        curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 15L);
++        curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
++        CURLcode result = curl_easy_perform(curl_);
++        if (result == CURLE_OK) result = curl_easy_getinfo(curl_, CURLINFO_ACTIVESOCKET, &socket_);
++        if (result != CURLE_OK) {
++            Deliver(Frame::Kind::Closed, std::string("the relay can't be reached: ") + curl_easy_strerror(result));
++        } else if (!Handshake()) {
++            Deliver(Frame::Kind::Closed, failure_.empty() ? std::string("the relay closed the connection") : failure_);
++        } else {
++            Deliver(Frame::Kind::Open, {});
++            bool alive = Frames();
++            while (alive && !stop_) {
++                std::deque<std::string> sending;
++                {
++                    const std::lock_guard lock(mutex_);
++                    sending.swap(outgoing_);
++                }
++                for (const std::string &frame : sending) {
++                    if (!SendAll(frame)) alive = false;
++                }
++                if (!alive) break;
++                if (Wait(false, 15)) alive = ReadSome() && Frames();
++            }
++            if (stop_) {
++                SendAll(Encode(0x8, "\x03\xE8"));
++            } else {
++                Deliver(Frame::Kind::Closed, failure_.empty() ? std::string("the connection to the relay closed") : failure_);
++            }
++        }
++        curl_easy_cleanup(curl_);
++        curl_ = nullptr;
++    }
++
++    std::string             origin_, target_, host_;
++    std::mutex              mutex_;
++    std::deque<Frame>       incoming_;
++    std::deque<std::string> outgoing_;
++    std::atomic<bool>       stop_{false};
++    std::mt19937            random_{std::random_device{}()};
++    CURL                   *curl_ = nullptr;
++    curl_socket_t           socket_ = CURL_SOCKET_BAD;
++    std::string             buffer_, message_, failure_;
++    int                     message_kind_ = 0x2;
++    std::thread             thread_; // last: it starts Run, which uses everything above
++};
++
++} // namespace
++
++TransportFactory PlatformTransport() {
++    static const bool ready = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
++    if (!ready) return {};
++    return [](const std::string &url, std::string &error) -> std::unique_ptr<Transport> {
++        const bool        secure = url.starts_with("wss://");
++        const std::size_t start = secure ? 6 : 5;
++        const std::size_t slash = url.find('/', start);
++        const std::string authority = url.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
++        const std::string target = slash == std::string::npos ? std::string("/") : url.substr(slash);
++        if (authority.empty()) {
++            error = "the relay address has no host";
++            return nullptr;
++        }
++        return std::make_unique<CurlTransport>((secure ? "https://" : "http://") + authority, target, authority);
++    };
++}
++
++} // namespace moonmod::net
++
++#endif
+diff --git a/port/src/moonmod/net_transport_web.cpp b/port/src/moonmod/net_transport_web.cpp
+new file mode 100644
+index 00000000..17be2652
+--- /dev/null
++++ b/port/src/moonmod/net_transport_web.cpp
+@@ -0,0 +1,121 @@
++// Online play's socket in the browser (moonmod/net_session.hpp): Emscripten's WebSocket API over the page's own
++// WebSocket. The game runs on a pthread (PROXY_TO_PTHREAD); the socket lives on the page's main thread, whose callbacks
++// queue frames under a lock for the game's thread to take, and sends are proxied to it by Emscripten.
++
++#if defined(__EMSCRIPTEN__)
++
++#include "moonmod/net_session.hpp"
++
++#include <atomic>
++#include <mutex>
++
++#include <emscripten/html5.h>
++#include <emscripten/websocket.h>
++
++namespace moonmod::net {
++namespace {
++
++class WebTransport final : public Transport {
++public:
++    explicit WebTransport(EMSCRIPTEN_WEBSOCKET_T socket) : socket_(socket) {
++        // The callbacks run on the page's main thread, the socket's own.
++        emscripten_websocket_set_onopen_callback_on_thread(socket_, this, OnOpen, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_set_onmessage_callback_on_thread(socket_, this, OnMessage, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_set_onerror_callback_on_thread(socket_, this, OnError, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_set_onclose_callback_on_thread(socket_, this, OnClose, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++    }
++
++    ~WebTransport() override {
++        Close();
++        // No callback may reach this object once it is gone.
++        emscripten_websocket_set_onopen_callback_on_thread(socket_, nullptr, nullptr, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_set_onmessage_callback_on_thread(socket_, nullptr, nullptr, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_set_onerror_callback_on_thread(socket_, nullptr, nullptr, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_set_onclose_callback_on_thread(socket_, nullptr, nullptr, EM_CALLBACK_THREAD_CONTEXT_MAIN_RUNTIME_THREAD);
++        emscripten_websocket_delete(socket_);
++    }
++
++    void Send(std::string_view bytes) override {
++        if (open_) emscripten_websocket_send_binary(socket_, const_cast<char *>(bytes.data()), static_cast<uint32_t>(bytes.size()));
++    }
++
++    bool Poll(Frame &frame) override {
++        const std::lock_guard lock(mutex_);
++        if (incoming_.empty()) return false;
++        frame = std::move(incoming_.front());
++        incoming_.pop_front();
++        return true;
++    }
++
++    void Close() override {
++        if (!closed_) {
++            closed_ = true;
++            emscripten_websocket_close(socket_, 1000, "left");
++        }
++    }
++
++private:
++    void Deliver(Frame::Kind kind, std::string data) {
++        const std::lock_guard lock(mutex_);
++        incoming_.push_back({kind, std::move(data)});
++    }
++
++    static EM_BOOL OnOpen(int, const EmscriptenWebSocketOpenEvent *, void *user) {
++        auto *self = static_cast<WebTransport *>(user);
++        self->open_ = true;
++        self->Deliver(Frame::Kind::Open, {});
++        return EM_TRUE;
++    }
++
++    static EM_BOOL OnMessage(int, const EmscriptenWebSocketMessageEvent *event, void *user) {
++        auto       *self = static_cast<WebTransport *>(user);
++        std::string data(reinterpret_cast<const char *>(event->data), event->numBytes);
++        // A text frame's bytes end with the terminating zero Emscripten adds.
++        if (event->isText && !data.empty() && data.back() == '\0') data.pop_back();
++        self->Deliver(event->isText ? Frame::Kind::Text : Frame::Kind::Binary, std::move(data));
++        return EM_TRUE;
++    }
++
++    static EM_BOOL OnError(int, const EmscriptenWebSocketErrorEvent *, void *user) {
++        auto *self = static_cast<WebTransport *>(user);
++        if (!self->open_) self->Deliver(Frame::Kind::Closed, "the relay can't be reached");
++        return EM_TRUE;
++    }
++
++    static EM_BOOL OnClose(int, const EmscriptenWebSocketCloseEvent *event, void *user) {
++        auto *self = static_cast<WebTransport *>(user);
++        self->open_ = false;
++        self->Deliver(Frame::Kind::Closed, event->reason[0] != '\0' ? std::string(event->reason) : std::string());
++        return EM_TRUE;
++    }
++
++    EMSCRIPTEN_WEBSOCKET_T socket_;
++    std::mutex             mutex_;
++    std::deque<Frame>      incoming_;
++    std::atomic<bool>      open_{false};
++    bool                   closed_ = false;
++};
++
++} // namespace
++
++TransportFactory PlatformTransport() {
++    if (!emscripten_websocket_is_supported()) return {};
++    return [](const std::string &url, std::string &error) -> std::unique_ptr<Transport> {
++        EmscriptenWebSocketCreateAttributes attributes;
++        emscripten_websocket_init_create_attributes(&attributes);
++        attributes.url = url.c_str();
++        attributes.createOnMainThread = EM_TRUE;
++        const EMSCRIPTEN_WEBSOCKET_T socket = emscripten_websocket_new(&attributes);
++        if (socket <= 0) {
++            error = "the browser couldn't open a socket to the relay";
++            return nullptr;
++        }
++        auto transport = std::make_unique<WebTransport>(socket);
++        // binaryType is arraybuffer, which emscripten_websocket_new sets.
++        return transport;
++    };
++}
++
++} // namespace moonmod::net
++
++#endif
+diff --git a/port/src/moonmod/net_transport_winhttp.cpp b/port/src/moonmod/net_transport_winhttp.cpp
+new file mode 100644
+index 00000000..f2b8c625
+--- /dev/null
++++ b/port/src/moonmod/net_transport_winhttp.cpp
+@@ -0,0 +1,185 @@
++// Online play's socket on Windows (moonmod/net_session.hpp): WinHTTP's own WebSocket (Windows 8 and later), TLS and
++// proxies as the system has them. One thread connects and receives; sends come from the game's thread under a lock
++// (WinHTTP allows one send and one receive at a time on a socket).
++
++#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
++
++#include "moonmod/net_session.hpp"
++
++#include <atomic>
++#include <mutex>
++#include <thread>
++
++#include <windows.h>
++#include <winhttp.h>
++
++namespace moonmod::net {
++namespace {
++
++std::wstring Wide(const std::string &text) {
++    if (text.empty()) return {};
++    const int    size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
++    std::wstring out(static_cast<std::size_t>(size), L'\0');
++    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
++    return out;
++}
++
++class WinHttpTransport final : public Transport {
++public:
++    WinHttpTransport(std::wstring host, INTERNET_PORT port, std::wstring path, bool secure) :
++        host_(std::move(host)), port_(port), path_(std::move(path)), secure_(secure), thread_([this] { Run(); }) {}
++
++    ~WinHttpTransport() override {
++        Close();
++        if (thread_.joinable()) thread_.join();
++        if (session_ != nullptr) WinHttpCloseHandle(session_);
++    }
++
++    void Send(std::string_view bytes) override {
++        const std::lock_guard lock(send_mutex_);
++        if (socket_ != nullptr && !stop_) {
++            WinHttpWebSocketSend(socket_, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, const_cast<char *>(bytes.data()),
++                                 static_cast<DWORD>(bytes.size()));
++        }
++    }
++
++    bool Poll(Frame &frame) override {
++        const std::lock_guard lock(mutex_);
++        if (incoming_.empty()) return false;
++        frame = std::move(incoming_.front());
++        incoming_.pop_front();
++        return true;
++    }
++
++    void Close() override {
++        if (stop_.exchange(true)) return;
++        const std::lock_guard lock(send_mutex_);
++        // Closing the handle ends the receive the thread waits in.
++        if (socket_ != nullptr) {
++            WinHttpWebSocketClose(socket_, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
++            WinHttpCloseHandle(socket_);
++            socket_ = nullptr;
++        }
++    }
++
++private:
++    void Deliver(Frame::Kind kind, std::string data) {
++        const std::lock_guard lock(mutex_);
++        incoming_.push_back({kind, std::move(data)});
++    }
++
++    void Fail(const char *what) {
++        if (!stop_) Deliver(Frame::Kind::Closed, std::string(what) + " (error " + std::to_string(GetLastError()) + ")");
++    }
++
++    void Run() {
++        session_ = WinHttpOpen(L"chronicle-coop", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
++                               WINHTTP_NO_PROXY_BYPASS, 0);
++        if (session_ == nullptr) {
++            session_ = WinHttpOpen(L"chronicle-coop", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
++                                   WINHTTP_NO_PROXY_BYPASS, 0);
++        }
++        if (session_ == nullptr) return Fail("the network couldn't start");
++        WinHttpSetTimeouts(session_, 15000, 15000, 15000, 0); // no timeout on receiving: a quiet room is fine
++        HINTERNET connection = WinHttpConnect(session_, host_.c_str(), port_, 0);
++        if (connection == nullptr) return Fail("the relay can't be reached");
++        HINTERNET request = WinHttpOpenRequest(connection, L"GET", path_.c_str(), nullptr, WINHTTP_NO_REFERER,
++                                               WINHTTP_DEFAULT_ACCEPT_TYPES, secure_ ? WINHTTP_FLAG_SECURE : 0);
++        bool ok = request != nullptr && WinHttpSetOption(request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) &&
++                  WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
++                  WinHttpReceiveResponse(request, nullptr);
++        DWORD status = 0, size = sizeof(status);
++        if (ok) {
++            WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
++                                &status, &size, WINHTTP_NO_HEADER_INDEX);
++        }
++        HINTERNET socket = ok && status == 101 ? WinHttpWebSocketCompleteUpgrade(request, 0) : nullptr;
++        if (request != nullptr) WinHttpCloseHandle(request);
++        WinHttpCloseHandle(connection);
++        if (socket == nullptr) {
++            if (ok) {
++                if (!stop_) Deliver(Frame::Kind::Closed, "the relay refused (HTTP " + std::to_string(status) + ")");
++                return;
++            }
++            return Fail("the relay can't be reached");
++        }
++        {
++            const std::lock_guard lock(send_mutex_);
++            if (stop_) {
++                WinHttpCloseHandle(socket);
++                return;
++            }
++            socket_ = socket;
++        }
++        Deliver(Frame::Kind::Open, {});
++        std::string message;
++        char        chunk[16384];
++        while (!stop_) {
++            DWORD                            read = 0;
++            WINHTTP_WEB_SOCKET_BUFFER_TYPE   type{};
++            const DWORD result = WinHttpWebSocketReceive(socket, chunk, sizeof(chunk), &read, &type);
++            if (result != ERROR_SUCCESS) {
++                if (!stop_) Deliver(Frame::Kind::Closed, "the connection to the relay closed");
++                return;
++            }
++            if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
++                USHORT status_code = 0;
++                char   reason[123] = {};
++                DWORD  reason_size = 0;
++                WinHttpWebSocketQueryCloseStatus(socket, &status_code, reason, sizeof(reason), &reason_size);
++                if (!stop_) Deliver(Frame::Kind::Closed, std::string(reason, reason_size));
++                return;
++            }
++            message.append(chunk, read);
++            if (message.size() > 1024 * 1024) {
++                if (!stop_) Deliver(Frame::Kind::Closed, "the relay sent too much");
++                return;
++            }
++            if (type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE) {
++                Deliver(Frame::Kind::Binary, std::move(message));
++                message.clear();
++            } else if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) {
++                Deliver(Frame::Kind::Text, std::move(message));
++                message.clear();
++            }
++            // A *_FRAGMENT_BUFFER_TYPE: more of the same message follows.
++        }
++    }
++
++    std::wstring       host_;
++    INTERNET_PORT      port_;
++    std::wstring       path_;
++    bool               secure_;
++    std::mutex         mutex_, send_mutex_;
++    std::deque<Frame>  incoming_;
++    std::atomic<bool>  stop_{false};
++    HINTERNET          session_ = nullptr;
++    HINTERNET          socket_ = nullptr;
++    std::thread        thread_; // last: it starts Run, which uses everything above
++};
++
++} // namespace
++
++TransportFactory PlatformTransport() {
++    return [](const std::string &url, std::string &error) -> std::unique_ptr<Transport> {
++        const bool        secure = url.starts_with("wss://");
++        const std::size_t start = secure ? 6 : 5;
++        const std::size_t slash = url.find('/', start);
++        std::string       authority = url.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
++        const std::string path = slash == std::string::npos ? std::string("/") : url.substr(slash);
++        INTERNET_PORT     port = secure ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
++        if (const std::size_t colon = authority.rfind(':'); colon != std::string::npos) {
++            port = static_cast<INTERNET_PORT>(std::atoi(authority.c_str() + colon + 1));
++            authority.resize(colon);
++        }
++        if (authority.empty()) {
++            error = "the relay address has no host";
++            return nullptr;
++        }
++        return std::make_unique<WinHttpTransport>(Wide(authority), port, Wide(path), secure);
++    };
++}
++
++} // namespace moonmod::net
++
++#endif
 diff --git a/port/src/moonmod/part_banks_moonmod.cpp b/port/src/moonmod/part_banks_moonmod.cpp
 new file mode 100644
 index 00000000..1cd2e04d
@@ -71533,6 +72663,197 @@ index 00000000..eeff1dcd
 +    EXPECT_EQ(moonmod::ValidateNativePluginV1(&plugin, "example.native-probe", 1, 0, permissions),
 +              moonmod::NativePluginValidation::MissingUnloadCallback);
 +}
+diff --git a/port/src/tests/moonmod_net_test.cpp b/port/src/tests/moonmod_net_test.cpp
+new file mode 100644
+index 00000000..451cbce5
+--- /dev/null
++++ b/port/src/tests/moonmod_net_test.cpp
+@@ -0,0 +1,185 @@
++// Online play's session (moonmod/net_session.hpp) over a scripted transport: the relay's protocol, the event queue
++// and the checks on what a mod sends. The real sockets are tested against a relay by coop/relay/test.
++#include <gtest/gtest.h>
++
++#include <deque>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "moonmod/net_session.hpp"
++
++namespace {
++
++using namespace moonmod::net;
++
++struct Wire {
++    std::string              url;
++    std::deque<Frame>        incoming;
++    std::vector<std::string> sent;
++    bool                     closed = false;
++};
++
++class FakeTransport final : public Transport {
++public:
++    explicit FakeTransport(std::shared_ptr<Wire> wire) : wire_(std::move(wire)) {}
++    void Send(std::string_view bytes) override { wire_->sent.emplace_back(bytes); }
++    bool Poll(Frame &frame) override {
++        if (wire_->incoming.empty()) return false;
++        frame = wire_->incoming.front();
++        wire_->incoming.pop_front();
++        return true;
++    }
++    void Close() override { wire_->closed = true; }
++
++private:
++    std::shared_ptr<Wire> wire_;
++};
++
++TransportFactory Fake(std::shared_ptr<Wire> wire) {
++    return [wire](const std::string &url, std::string &) -> std::unique_ptr<Transport> {
++        wire->url = url;
++        return std::make_unique<FakeTransport>(wire);
++    };
++}
++
++std::vector<std::string> Kinds(const std::vector<Event> &events) {
++    std::vector<std::string> out;
++    for (const Event &e : events) out.push_back(e.kind);
++    return out;
++}
++
++TEST(MoonModNet, HostingAsksTheRelayForARoomAndTakesItsWelcome) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "", "Toan & co", "chronicle", 3, error)) << error;
++    EXPECT_EQ(wire->url, "wss://relay.example/v1/host?game=chronicle&proto=3&name=Toan%20%26%20co");
++    EXPECT_EQ(session.state(), State::Connecting);
++    wire->incoming.push_back({Frame::Kind::Open, {}});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":0,"code":"AB3CD","host":0,"peers":[]})"});
++    const auto events = session.Receive(10);
++    ASSERT_EQ(Kinds(events), (std::vector<std::string>{"connected"}));
++    EXPECT_EQ(events[0].peer, 0);
++    EXPECT_EQ(events[0].data, "AB3CD");
++    EXPECT_EQ(session.state(), State::Hosting);
++    EXPECT_EQ(session.code(), "AB3CD");
++    EXPECT_EQ(session.owner(), "coop");
++}
++
++TEST(MoonModNet, AGuestSeesPlayersComeAndGoAndTheirMessages) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "AB3CD", "Xiao", "chronicle", 1, error));
++    EXPECT_EQ(wire->url, "wss://relay.example/v1/join/AB3CD?game=chronicle&proto=1&name=Xiao");
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":2,"code":"AB3CD","host":0,"peers":[{"id":0,"name":"Toan"},{"id":1,"name":"Goro"}]})"});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"join","id":3,"name":"Ruby"})"});
++    wire->incoming.push_back({Frame::Kind::Binary, std::string("\x00", 1) + "P 1 2 3"});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"leave","id":1})"});
++    wire->incoming.push_back({Frame::Kind::Binary, std::string("\x03", 1) + "\xFF not text"});
++    const auto events = session.Receive(10);
++    ASSERT_EQ(Kinds(events), (std::vector<std::string>{"connected", "joined", "message", "left"}));
++    EXPECT_EQ(session.state(), State::Joined);
++    EXPECT_EQ(session.id(), 2);
++    EXPECT_EQ(events[1].name, "Ruby");
++    EXPECT_EQ(events[2].peer, 0);
++    EXPECT_EQ(events[2].data, "P 1 2 3");
++    ASSERT_EQ(session.peers().size(), 2u); // Toan and Ruby; Goro left
++    EXPECT_EQ(session.peers()[1].name, "Ruby");
++}
++
++TEST(MoonModNet, SendingFramesTheDataForTheRelayAndChecksIt) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    EXPECT_FALSE(session.Send(0, "early", error));
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "AB3CD", "", "chronicle", 1, error));
++    EXPECT_FALSE(session.Send(0, "before the welcome", error));
++    EXPECT_EQ(error, "still connecting");
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":1,"code":"AB3CD","peers":[{"id":0,"name":"Toan"}]})"});
++    session.Pump();
++    ASSERT_TRUE(session.Send(0, "to the host", error)) << error;
++    ASSERT_TRUE(session.Send(kBroadcast, "to all", error)) << error;
++    ASSERT_EQ(wire->sent.size(), 2u);
++    EXPECT_EQ(wire->sent[0], std::string("\x00", 1) + "to the host");
++    EXPECT_EQ(wire->sent[1], "\xFF" "to all");
++    EXPECT_FALSE(session.Send(1, "to myself", error));
++    EXPECT_FALSE(session.Send(7, "nobody", error));
++    EXPECT_FALSE(session.Send(0, std::string("\xC3\x28", 2), error));
++    EXPECT_FALSE(session.Send(0, std::string(kMessageMax + 1, 'x'), error));
++    EXPECT_TRUE(session.Send(0, std::string(kMessageMax, 'x'), error));
++}
++
++TEST(MoonModNet, ARefusalOrAClosedSocketEndsTheSessionWithItsReason) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "ZZZZZ", "", "chronicle", 1, error));
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"error","reason":"no room with that code"})"});
++    auto events = session.Receive(10);
++    ASSERT_EQ(Kinds(events), (std::vector<std::string>{"closed"}));
++    EXPECT_EQ(events[0].data, "no room with that code");
++    EXPECT_TRUE(wire->closed);
++    EXPECT_EQ(session.state(), State::Idle);
++    EXPECT_TRUE(session.owner().empty()); // read to its end, the session is anyone's again
++
++    ASSERT_TRUE(session.Start("other", "wss://relay.example", "", "", "chronicle", 1, error));
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":0,"code":"QQQQQ","peers":[]})"});
++    wire->incoming.push_back({Frame::Kind::Closed, ""});
++    events = session.Receive(10);
++    ASSERT_EQ(Kinds(events), (std::vector<std::string>{"connected", "closed"}));
++    EXPECT_EQ(events[1].data, "the connection to the relay closed");
++}
++
++TEST(MoonModNet, OneSessionAtATimeAndOnlyToARelay) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    EXPECT_FALSE(session.Start("coop", "https://relay.example", "", "", "chronicle", 1, error));
++    EXPECT_FALSE(session.Start("coop", "ws://relay.example", "", "", "chronicle", 1, error));
++    EXPECT_FALSE(session.Start("coop", "", "", "", "chronicle", 1, error));
++    ASSERT_TRUE(session.Start("coop", "ws://127.0.0.1:8787", "", "", "chronicle", 1, error)) << error;
++    EXPECT_FALSE(session.Start("coop", "wss://relay.example", "", "", "chronicle", 1, error));
++    session.Leave();
++    EXPECT_EQ(session.state(), State::Idle);
++    EXPECT_TRUE(session.Receive(10).empty());
++    EXPECT_TRUE(session.Start("coop", "wss://relay.example", "", "", "chronicle", 1, error));
++}
++
++TEST(MoonModNet, ABuildWithoutASocketSaysSo) {
++    Session     session(TransportFactory{});
++    std::string error;
++    EXPECT_FALSE(session.available());
++    EXPECT_FALSE(session.Start("coop", "wss://relay.example", "", "", "chronicle", 1, error));
++    EXPECT_EQ(error, "this build of the game has no online play");
++}
++
++TEST(MoonModNet, AFullQueueDropsTheOldestMessagesFirst) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "", "", "chronicle", 1, error));
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":0,"code":"AB3CD","peers":[]})"});
++    for (std::size_t i = 0; i < kQueueMax + 10; ++i) wire->incoming.push_back({Frame::Kind::Binary, "\x01" + std::to_string(i)});
++    session.Pump();
++    auto events = session.Receive(kQueueMax + 100);
++    ASSERT_EQ(events.size(), kQueueMax);
++    EXPECT_EQ(events[0].kind, "connected"); // kept: only messages are dropped
++    EXPECT_EQ(events[1].data, "11"); // the connected event takes a place too: eleven of the oldest messages went
++    EXPECT_EQ(events.back().data, std::to_string(kQueueMax + 9));
++}
++
++TEST(MoonModNet, Utf8AndEscaping) {
++    EXPECT_TRUE(ValidUtf8("plain"));
++    EXPECT_TRUE(ValidUtf8("\xE2\x9C\xA8 \xF0\x9F\x8E\xAE"));
++    EXPECT_FALSE(ValidUtf8("\xE2\x9C"));
++    EXPECT_FALSE(ValidUtf8("\xC0\xAF"));
++    EXPECT_FALSE(ValidUtf8("\xF5\x80\x80\x80"));
++    EXPECT_EQ(Escape("a b/c?\xC3\xA9"), "a%20b%2Fc%3F%C3%A9");
++    EXPECT_TRUE(ValidRelay("wss://chronicle-coop-relay.example.workers.dev"));
++    EXPECT_FALSE(ValidRelay("wss://relay.example/?inject"));
++    EXPECT_EQ(RelayAddress("wss://relay.example//"), "wss://relay.example");
++}
++
++} // namespace
 diff --git a/port/src/tests/moonmod_player_party_api_test.cpp b/port/src/tests/moonmod_player_party_api_test.cpp
 new file mode 100644
 index 00000000..0db3e7b0

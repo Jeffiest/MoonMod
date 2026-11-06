@@ -2461,9 +2461,44 @@ These operations bind each game's signature systems to native save or live engin
   - `game.dungeons.spheda_spawn({par = optional 1..99})` requires an already allocated Spheda session on an active dungeon floor. It calls the game's native course setup again, optionally overrides par, and enables the play/status/minimap flags so the new pin and ball are active. It cannot allocate a Spheda session when the floor event has not created one.
   - `game.spheda.completed` is queued when the native floor-info setter first records a Spheda clear (through the clear value or the floor clear flag). It contains `dungeon_id`, `floor_id`, `cleared`, `clear_value`, and `frame`; stroke count and medal are not stored by the native save format.
 
+## Online play (`net.*`, `net.session` permission, Chronicle)
+
+```lua
+local ok = game.net.host({version = 1, name = "Toan"})        -- a room through the co-op relay
+-- or: game.net.join({code = "AB3CD", version = 1, name = "Xiao"})
+for _, e in ipairs(game.net.receive().events) do            -- each tick
+  if e.kind == "connected" then moonmod.log("info", "room " .. e.code .. ", I am " .. e.peer)
+  elseif e.kind == "message" then handle(e.peer, e.data) end
+end
+game.net.send({to = "all", data = "P 120 0 340"})           -- or to = a player's id (the host is 0)
+```
+
+One online session for the game at a time, owned by the mod that opens it; another mod's calls fail while it is open,
+and it closes when its mod unloads. The relay (DC_Web's `coop/relay`, a Cloudflare Worker) passes messages between up
+to four players and keeps no game state: the host's game is the world, and the mod decides what its messages mean.
+
+- `net.host({version, name?, relay?})` opens a room; `net.join({code, version, name?, relay?})` joins one by its five
+  letters and digits (any case). `version` (1-9999) is the mod's message protocol: a room takes only players on the
+  same number, so change it when the messages change. `name` is at most 24 bytes. `relay` is a `wss://` address
+  (`ws://` only to this machine, for a relay under `wrangler dev`); without it the game uses `DC_COOP_RELAY` from its
+  environment, else the one the build names (`DC_COOP_RELAY_DEFAULT`). Both return the status at once; the result
+  arrives through `net.receive`.
+- `net.receive({max?})` takes waiting events, oldest first (256 by default, up to 1024): `connected` `{peer = this
+  player's id, code}`, `joined` `{peer, name}`, `left` `{peer}`, `message` `{peer = the sender, data}`, and `closed`
+  `{reason}`, which ends the session (the relay refused, the host left, the connection dropped). At most 4096 wait;
+  past that the oldest messages go first.
+- `net.send({to, data})`: `to` a player's id or `"all"` (everyone else); `data` text (UTF-8) of at most 16 KiB.
+  A guest can send to another guest. The relay drops a player's frames past 240 a second.
+- `net.status()` gives `{state = "idle" | "connecting" | "hosting" | "joined", available, id?, code?, peers = {{id,
+  name}}, owner?}`; any mod with the permission can read it.
+- `net.leave()` leaves; a host leaving ends the room for everyone.
+
+The web build uses the browser's WebSocket, Windows WinHTTP, Linux and macOS libcurl; a build without libcurl reports
+`net.*` unsupported.
+
 ## Permissions and ownership
 
-Permissions are declared in `mod.json` and checked by the runtime for each operation: `game.read`, `game.write`, `content.register`, and `scripts.override` cover game adapters; `debug.inspect` gates diagnostics; `storage.read` and `storage.write` cover per-mod storage. Enabling a local package enables its declared Lua permissions. A package that declares `native.extension` also needs a package-relative native library and a separate local trust confirmation before that library loads. Lua does not get direct filesystem, process, network, native code, or arbitrary memory access. `storage.*` is sandboxed to a fixed JSON file under that mod's user-data directory. Trusted native code runs in-process and is outside the Lua sandbox; see [Native SDK](NATIVE_SDK.md).
+Permissions are declared in `mod.json` and checked by the runtime for each operation: `game.read`, `game.write`, `content.register`, and `scripts.override` cover game adapters; `debug.inspect` gates diagnostics; `storage.read` and `storage.write` cover per-mod storage. Enabling a local package enables its declared Lua permissions. A package that declares `native.extension` also needs a package-relative native library and a separate local trust confirmation before that library loads. Lua does not get direct filesystem, process, network, native code, or arbitrary memory access. `storage.*` is sandboxed to a fixed JSON file under that mod's user-data directory. `net.session` lets a mod play online through `net.*`: it talks only to the co-op relay, in text messages to the other players in its room, never to an address of its own choosing beyond a `wss://` relay. Trusted native code runs in-process and is outside the Lua sandbox; see [Native SDK](NATIVE_SDK.md).
 
 ## Native extension surface
 
