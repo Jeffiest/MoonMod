@@ -12,6 +12,7 @@
   "settings": [
     {"id": "name", "name": "Your name, as the others see it", "type": "string", "default": ""},
     {"id": "server", "name": "Server (blank: the public relay; or ws://... / wss://... for a private server)", "type": "string", "default": ""},
+    {"id": "shared_doors", "name": "Doors, gates and switches one player opens open for everyone on the floor", "type": "boolean", "default": true},
     {"id": "keep_every", "name": "A guest's things go to the host every this many seconds", "type": "integer", "default": 60, "min": 15, "max": 600}
   ]
 }

@@ -351,6 +351,11 @@ end
 
 function door.step()
   if not on_floor() then return end
+  if not setting("shared_doors", true) then
+    try(game.dungeons and game.dungeons.shared_events_get) -- this game's are kept to itself
+    door.waiting = {}
+    return
+  end
   local got = try(game.dungeons and game.dungeons.shared_events_get)
   for _, e in ipairs(type(got) == "table" and got.events or {}) do
     if my_scene then

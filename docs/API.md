@@ -2557,7 +2557,8 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
 - `dungeons.shared_events_get()` gives the system scripts this player ran since the last call that changed the floor
   without leaving it (a door or gate opened, a switch turned: an object moved or an event switched), as `{events =
   {{script, mode, ext, pos = {x, y, z}, dir = {x, y, z}}, ...}}`; one that leaves the floor or changes the character is
-  never listed, nor one this game ran for another player. `dungeons.shared_event_run(event)` runs one here, at its
+  never listed, nor one this game ran for another player, nor one every game runs by itself (a room cleared of its
+  monsters, a monster's death). `dungeons.shared_event_run(event)` runs one here, at its
   place, once the player is free (not in a menu, a script or held still; it waits up to half a minute), the key it asks
   for taken as given. One waits at a time: another fails `busy` until it is taken.
 

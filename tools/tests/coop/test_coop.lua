@@ -429,6 +429,13 @@ do
   all(25)
   check(#h.doors_run == 2 and h.doors_run[2].script == 40, "and opens it once free")
   check(#g.doors_run == 1 and #k.doors_run == 1, "each door runs once in each game")
+  -- with the setting off, a game keeps its doors to itself and takes none
+  h.settings.shared_doors = false
+  k.doors_out = {{script = 41, mode = 1, ext = 0, pos = {5, 0, 5}, dir = {0, 0, 1}}}
+  h.doors_out = {{script = 42, mode = 1, ext = 0, pos = {6, 0, 6}, dir = {0, 0, 1}}}
+  all(25)
+  check(#h.doors_run == 2 and #k.doors_run == 1 and #g.doors_run == 2, "a game with shared doors off neither sends nor takes them",
+        #h.doors_run .. "/" .. #k.doors_run .. "/" .. #g.doors_run)
   h.keys.leave_key = true
   all(2)
 end
