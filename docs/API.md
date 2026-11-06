@@ -2527,6 +2527,12 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   dungeon frame and let go out of the dungeon (the slot is kept for the next floor). `world.avatar_clear({slot})`
   takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays.
 
+- `georama.town_export({town_id})` gives one town's Georama (its record and chips) as `{data}` text, and
+  `georama.town_import({town_id, data})` takes it. A town open in Georama's editor or a menu is not imported over: the
+  call fails with a reason starting `busy`, to be tried again. A player walking in that town is walked into it again,
+  at its entrance (`reloaded = true`), so no one stands where a building just went. `world.get()` in a town reports
+  `town_map` and `editing` (Georama's edit mode or its menu).
+
 The bundled Online Co-op mod (`mods/moonmod.coop`) is built on these and `net.*`; `docs/COOP_PLAN.md` has what is
 built and what comes next.
 

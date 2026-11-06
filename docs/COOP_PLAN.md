@@ -29,12 +29,13 @@ shared pause and doors.
 | Visits | `session.start {visit}`: the host's world and the guest's things in a fresh game, in the host's town; no save writes |
 | The mod: joining | Host (F8 or Mod Manager), join from the title screen's Online Co-op by code; the world and the account cross in pieces; a new account for someone new; the guest's things go to the host every minute and on leaving (F10); the host leaving ends the visits. `tools/tests/coop/test_coop.lua` |
 | Seeing each other | `world.avatar_set`: up to three other players on the dungeon floor, with their weapons, easing between reports sent ten times a second; the host in its own colours, guests in blue; only on the same floor; gone after three quiet seconds. Every game builds each floor from the room's seed, so floors match whoever arrives first |
+| Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`) and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
 
 ## Next
 
 1. **Seeing each other in towns** (dungeons are done): the town's player model, Georama's edit mode, names over heads.
-2. **Georama.** A guest's edit becomes a request to the host, which places it (`georama.place/remove`) and tells
-   everyone; each game applies it to its loaded town; a player standing where a part lands goes back to the entrance.
+2. **Georama, finer.** Two players editing one town at once: the last to leave the editor wins today; a lock on a
+   town being edited would let the second know.
 3. **Dungeons.** The floor seed from whoever enters first (`dungeons.set_seed`); monsters mirrored from the host
    (the fork's puppets), guests' hits sent to the host, monster hits on guests sent back; loot on each machine; the
    shared pause; doors and key rooms opened for everyone (the fork's `MpEventPoll`).

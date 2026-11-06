@@ -196,6 +196,65 @@ moonmod.on("game.dungeon.generating", function(e)
   try(game.dungeons and game.dungeons.set_seed, {seed = floor_seed(e.dungeon_id or 0, e.floor_id or 0)})
 end)
 
+-- Georama: the host's world -----------------------------------------------------------------------------------------
+-- When a player leaves Georama's edit mode, their game sends that town (georama.town_export) to the host, which takes
+-- it into its world and sends it on to everyone else; the host's own edits go straight out. Each game takes the town
+-- (georama.town_import); a player walking in it is walked into it again, at the town's entrance, so no one stands in
+-- a house that just went up. A town arriving while its player is busy in it (editing, a menu) waits and is tried again.
+
+local TOWNS = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
+local editing_town = nil
+local waiting_towns = {} -- town -> {data, from}
+
+local function take_town(data, from)
+  local town = tonumber(data:match("^DCT1(%d+):"))
+  if not town then return end
+  local ok, err = call(game.georama and game.georama.town_import, {town_id = town, data = data})
+  if not ok then
+    if errmsg(err):find("busy") then waiting_towns[town] = {data = data, from = from} end
+    if not errmsg(err):find("busy") then moonmod.log("warn", "co-op town: " .. errmsg(err)) end
+    return false
+  end
+  waiting_towns[town] = nil
+  local who = from == 0 and "The host" or (S.players[from] and S.players[from].name) or "A player"
+  if from ~= nil then toast(who .. " changed " .. (TOWNS[town] or "a town") .. (ok.reloaded and "; back to its entrance" or "")) end
+  return true
+end
+
+local function town_from(peer, data)
+  if S.role == "host" then
+    -- the host's world takes it first, then everyone else gets it
+    if take_town(data, peer) ~= false or waiting_towns[tonumber(data:match("^DCT1(%d+):"))] then
+      for id in pairs(S.players) do if id ~= peer then send_pieces(id, "TOWN", data) end end
+    end
+  elseif peer == 0 then
+    take_town(data, 0)
+  end
+end
+
+local function watch_editing()
+  local w = try(game.world.get)
+  if type(w) == "table" and w.editing then
+    editing_town = w.town_map
+    return
+  end
+  if editing_town == nil then return end
+  local town = editing_town
+  editing_town = nil
+  local export = try(game.georama and game.georama.town_export, {town_id = town})
+  if not (export and export.data) then return end
+  if S.role == "host" then
+    for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
+  elseif S.role == "guest" then
+    send_pieces(0, "TOWN", export.data)
+  end
+end
+
+-- A town that came while its player was busy is tried again (the host sent it on when it first came).
+local function retry_towns()
+  for _, w in pairs(waiting_towns) do take_town(w.data, w.from) end
+end
+
 local function stop(reason)
   try(game.net.leave)
   forget_all()
@@ -304,6 +363,11 @@ local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
   if not kind then return end
   if kind == "P" then hear_position(peer, rest) return end
+  if kind == "TOWN" then
+    local whole = take_piece(peer, kind, rest)
+    if whole then town_from(peer, whole) end
+    return
+  end
   if S.role == "host" then
     if kind == "HELLO" then
       local id, name = rest:match("^(%S+) ?(.*)$")
@@ -367,6 +431,10 @@ moonmod.on("game.tick", function(e)
   if S.role and S.code and S.frame % SEND_EVERY == 0 then
     send_position()
     show_others()
+  end
+  if S.role and S.code and S.frame % 30 == 0 then
+    watch_editing()
+    retry_towns()
   end
   if S.role == "guest" and S.guest and S.guest.visiting then
     local every = math.max(15, math.min(600, setting("keep_every", 60))) * 60

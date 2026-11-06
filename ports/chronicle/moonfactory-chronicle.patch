@@ -3240,10 +3240,10 @@ index 00000000..40e98c14
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_save.hpp b/port/include/moonmod/coop_save.hpp
 new file mode 100644
-index 00000000..33bc37cc
+index 00000000..8fccf5a3
 --- /dev/null
 +++ b/port/include/moonmod/coop_save.hpp
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,54 @@
 +#pragma once
 +
 +// Co-op's split of a save (save.world_export/import, save.player_export/import): a visit plays the host's world with
@@ -3271,6 +3271,11 @@ index 00000000..33bc37cc
 +bool        ImportWorld(std::string_view text, dc::game::CSaveData &save, std::string &error);
 +std::string ExportPlayer(const dc::game::CSaveData &save);
 +bool        ImportPlayer(std::string_view text, dc::game::CSaveData &save, std::string &error);
++
++// One town's Georama (georama.town_export/import): its record and its chips, for co-op to carry a town edited in one
++// game to the others. "DCT1", the town's number, then the bytes, base64.
++std::string ExportTown(const dc::game::CSaveData &save, int town);
++bool        ImportTown(std::string_view text, int town, dc::game::CSaveData &save, std::string &error);
 +
 +// The host's guests (save.account_*): each guest's own things, kept in the host's save, as coop_accounts.json in its
 +// slot folder beside the save, written with every save of the slot and read with its load. A new game has none.
@@ -27673,10 +27678,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..19fae87b
+index 00000000..52d82a65
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,662 @@
+@@ -0,0 +1,664 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -27794,6 +27799,8 @@ index 00000000..19fae87b
 +    {"world.ghost_get", "world", "ghost_get", "simulation", "game.read", "The player's last five seconds on this dungeon floor, to keep for a ghost."},
 +    {"world.ghost_play", "world", "ghost_play", "simulation", "game.write", "Play kept frames back on a pale, see-through hero."},
 +    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor as their hero and weapon, easing to where they are."},
++    {"georama.town_export", "georama", "town_export", "any", "game.read", "Co-op: one town's Georama (its record and chips) as text."},
++    {"georama.town_import", "georama", "town_import", "any", "game.write", "Co-op: take a town's Georama from georama.town_export; a player walking in it is walked into it again."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
 +    {"messages.post", "messages", "post", "any", "storage.write", "Leave a short message at a place this mod names, for the players who share the messages folder."},
 +    {"messages.list", "messages", "list", "any", "storage.read", "The messages this mod's players left at some places, best rated first."},
@@ -29201,10 +29208,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..8467efd7
+index 00000000..380514c9
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17096 @@
+@@ -0,0 +1,17120 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -31972,6 +31979,11 @@ index 00000000..8467efd7
 +        result["room_bonus_percent"] = DngRoomBonusPercent;
 +        result["monster_bonus_percent"] = DngMonsterBonusPercent;
 +        result["chest_bonus_percent"] = DngChestBonusPercent;
++    }
++    if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT) {
++        // A town: its map, and whether the player is in Georama's edit mode (co-op sends a town once it's left).
++        result["town_map"] = MapNo;
++        result["editing"] = GameMode == ED_MODE_GEORAMA || GameMode == ED_MODE_GEORAMA_MENU_INIT || GameMode == ED_MODE_GEORAMA_MENU;
 +    }
 +    return {ApiCallStatus::Ok, std::move(result), {}};
 +}
@@ -42759,6 +42771,24 @@ index 00000000..8467efd7
 +        }
 +    }
 +    // world.ghost_get: {character, frames = {{x, y, z, heading, motion}, ...}} oldest first, every other frame.
++    // georama.town_export / town_import: one town's Georama for co-op (moonmod/coop_save.hpp). A town open in Georama's
++    // edit mode isn't imported over; a town the player walks in is walked into again, so it shows what came.
++    if (operation.path == "georama.town_export" || operation.path == "georama.town_import") {
++        const bool importing = operation.path == "georama.town_import";
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(importing ? "expected {town_id = 0-4, data}" : "expected {town_id = 0-4}");
++        int town = 0;
++        if (!ReadBoundedInt(args[0], "town_id", 0, TOWN_COUNT - 1, town)) return Invalid("town_id must be 0-" + std::to_string(TOWN_COUNT - 1));
++        if (SaveData == nullptr) return Failed("the game has no save data yet");
++        if (!importing) return {ApiCallStatus::Ok, {{"town_id", town}, {"data", moonmod::coop::ExportTown(*SaveData, town)}}, {}};
++        if (!args[0].contains("data") || !args[0]["data"].is_string()) return Invalid("data must be georama.town_export text");
++        const bool here = mode == GAME_MODE_EDIT && MapNo == town;
++        if (here && GameMode != ED_MODE_WALK) return Failed("busy: the player is editing or in a menu in that town; try again in a moment");
++        std::string error;
++        if (!moonmod::coop::ImportTown(args[0]["data"].get_ref<const std::string &>(), town, *SaveData, error)) return Invalid(error);
++        const bool reload = here && NextMapNo < 0;
++        if (reload) MapJump(town, -1);
++        return {ApiCallStatus::Ok, {{"town_id", town}, {"imported", true}, {"reloaded", reload}}, {}};
++    }
 +    // world.avatar_set / avatar_clear: co-op's remote players on the dungeon floor (moonmod/coop_avatars.hpp).
 +    if (operation.path == "world.avatar_set") {
 +        static constexpr const char *kUsage =
@@ -46032,7 +46062,8 @@ index 00000000..8467efd7
 +    for (const char *path : {"title.mode_register", "title.mode_set", "title.mode_remove",
 +                             "session.get", "session.start", "session.finish", "save.world_export", "save.world_import",
 +                             "save.player_export", "save.player_import", "save.account_get", "save.account_set",
-+                             "save.account_list", "save.account_remove", "world.avatar_set", "world.avatar_clear"}) {
++                             "save.account_list", "save.account_remove", "world.avatar_set", "world.avatar_clear",
++                             "georama.town_export", "georama.town_import"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
 +    config.api_resource_override_removal_guard = ChronicleModelOverrideRemovalGuard;
@@ -47276,10 +47307,10 @@ index 00000000..49a66f75
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_save_moonmod.cpp b/port/src/moonmod/coop_save_moonmod.cpp
 new file mode 100644
-index 00000000..dcc80587
+index 00000000..b5982614
 --- /dev/null
 +++ b/port/src/moonmod/coop_save_moonmod.cpp
-@@ -0,0 +1,284 @@
+@@ -0,0 +1,311 @@
 +// Co-op's split of a save into the host's world and a player's own things (moonmod/coop_save.hpp).
 +
 +#include "moonmod/coop_save.hpp"
@@ -47335,6 +47366,14 @@ index 00000000..dcc80587
 +            {24, &dng.res_limit_zone_id, sizeof(dng.res_limit_zone_id)},
 +            {25, &dng.party_size, sizeof(dng.party_size)},
 +            {26, &dng.skill_owned.data, sizeof(dng.skill_owned.data)}, // the story gives these
++        };
++    }
++
++    static constexpr int kTowns = static_cast<int>(sizeof(CSaveData::georama) / sizeof(CSaveData::georama[0]));
++    static std::vector<Field> Town(CSaveData &save, int town) {
++        return {
++            {1, &save.georama[town], sizeof(save.georama[town])},
++            {2, &save.elem_data[town], sizeof(save.elem_data[town])},
 +        };
 +    }
 +
@@ -47418,12 +47457,11 @@ index 00000000..dcc80587
 +// Reads every field first and writes none unless all of them fit: a refused import changes nothing.
 +bool Import(const char *tag, std::string_view text, const std::vector<Field> &fields, std::string &error) {
 +    if (!text.starts_with(tag)) {
-+        error = std::string("not ") + (tag == kWorldTag ? "a world" : "a player") + " from save." +
-+                (tag == kWorldTag ? "world_export" : "player_export");
++        error = std::string("not ") + (tag == kWorldTag ? "a world from save.world_export" : tag == kPlayerTag ? "a player from save.player_export" : "that town's georama.town_export");
 +        return false;
 +    }
 +    std::string bytes;
-+    if (!Unbase64(text.substr(4), bytes)) {
++    if (!Unbase64(text.substr(std::strlen(tag)), bytes)) {
 +        error = "the data is damaged (not base64)";
 +        return false;
 +    }
@@ -47465,6 +47503,26 @@ index 00000000..dcc80587
 +
 +bool ImportWorld(std::string_view text, CSaveData &save, std::string &error) {
 +    return Import(kWorldTag, text, SaveAccess::World(save), error);
++}
++
++std::string ExportTown(const CSaveData &save, int town) {
++    constexpr int kTowns = SaveAccess::kTowns;
++    if (town < 0 || town >= kTowns) return {};
++    return Export(("DCT1" + std::to_string(town) + ":").c_str(), SaveAccess::Town(const_cast<CSaveData &>(save), town));
++}
++
++bool ImportTown(std::string_view text, int town, CSaveData &save, std::string &error) {
++    constexpr int kTowns = SaveAccess::kTowns;
++    if (town < 0 || town >= kTowns) {
++        error = "no such town";
++        return false;
++    }
++    const std::string tag = "DCT1" + std::to_string(town) + ":";
++    if (!text.starts_with(tag)) {
++        error = "not this town's georama.town_export";
++        return false;
++    }
++    return Import(tag.c_str(), text, SaveAccess::Town(save, town), error);
 +}
 +
 +std::string ExportPlayer(const CSaveData &save) { return Export(kPlayerTag, SaveAccess::Player(const_cast<CSaveData &>(save))); }
@@ -68294,10 +68352,10 @@ index 00000000..4ac4f6c9
 +}
 diff --git a/port/src/tests/moonmod_coop_save_test.cpp b/port/src/tests/moonmod_coop_save_test.cpp
 new file mode 100644
-index 00000000..ebbaeab3
+index 00000000..d076e884
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_save_test.cpp
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,156 @@
 +// Co-op's split of a save (moonmod/coop_save.hpp): the world and a player's own things go across whole, each without
 +// the other, and a damaged or foreign one changes nothing.
 +#include <gtest/gtest.h>
@@ -68377,6 +68435,22 @@ index 00000000..ebbaeab3
 +    other[4 + 3] = other[4 + 3] == 'A' ? 'B' : 'A';
 +    EXPECT_FALSE(moonmod::coop::ImportWorld(other, guest->save(), error));
 +    EXPECT_EQ(moonmod::coop::ExportWorld(guest->save()) + moonmod::coop::ExportPlayer(guest->save()), before);
++}
++
++TEST(MoonModCoopSave, OneTownsGeoramaCrossesAlone) {
++    auto editor = std::make_unique<RawSave>(0x70);
++    auto other = std::make_unique<RawSave>(0x08);
++    const std::string before_world = moonmod::coop::ExportWorld(other->save());
++    const std::string town = moonmod::coop::ExportTown(editor->save(), 2);
++    ASSERT_TRUE(town.starts_with("DCT12:"));
++    std::string error;
++    EXPECT_FALSE(moonmod::coop::ImportTown(town, 3, other->save(), error)); // another town's
++    EXPECT_FALSE(moonmod::coop::ImportTown(town, 9, other->save(), error));
++    EXPECT_EQ(moonmod::coop::ExportWorld(other->save()), before_world);
++    ASSERT_TRUE(moonmod::coop::ImportTown(town, 2, other->save(), error)) << error;
++    EXPECT_EQ(moonmod::coop::ExportTown(other->save(), 2), town);
++    EXPECT_NE(moonmod::coop::ExportTown(other->save(), 1), moonmod::coop::ExportTown(editor->save(), 1)); // only town 2 came
++    EXPECT_TRUE(moonmod::coop::ExportTown(other->save(), 7).empty());
 +}
 +
 +struct TempDir {

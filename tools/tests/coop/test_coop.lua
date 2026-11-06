@@ -18,7 +18,8 @@ local function make_game(name)
              net_events = {}, net = nil, session = {kind = "story"}, accounts = {}, frame = 0, keys = {},
              world = "DCW1" .. string.rep("w", 30000) .. name, things = "DCP1" .. string.rep("p", 20000) .. name,
              map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {},
-             avatars = {}, seeds = {}, player = {character = "toan"}}
+             avatars = {}, seeds = {}, player = {character = "toan"},
+             towns = {[0] = "DCT10:start", "DCT11:start", "DCT12:start", "DCT13:start", "DCT14:start"}}
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
     on = function(event, fn) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], fn) end,
@@ -47,6 +48,14 @@ local function make_game(name)
     },
     player = {get = function() return S.player end},
     dungeons = {set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end},
+    georama = {
+      town_export = function(a) return {town_id = a.town_id, data = S.towns[a.town_id]} end,
+      town_import = function(a)
+        if S.busy_town == a.town_id then return nil, {code = "failed", message = "busy: the player is editing"} end
+        S.towns[a.town_id] = a.data
+        return {town_id = a.town_id, imported = true, reloaded = S.map.town_map == a.town_id}
+      end,
+    },
     session = {
       get = function() return S.session end,
       start = function(args)
@@ -242,6 +251,50 @@ do
   check(h.avatars[1] == nil, "a guest who leaves is taken away")
   h.keys.leave_key = true
   h.tick()
+end
+
+print("Georama: the host's world")
+do
+  relay.rooms = {}
+  local h, g, k = make_game("Toan"), make_game("Xiao"), make_game("Goro")
+  local function all(n) for _ = 1, n or 1 do h.tick(); g.tick(); k.tick() end end
+  h.keys.host_key = true
+  all(2)
+  for _, guest in ipairs({g, k}) do
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if guest.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+        guest.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+    guest.emit("game.title.selected", {entry = "join"})
+    all(8)
+  end
+  -- Xiao edits Matataki's Georama, then leaves the editor
+  g.map = {context = "georama", map_id = 1, town_map = 1, editing = true}
+  all(30)
+  g.towns[1] = "DCT11:" .. string.rep("x", 20000) .. " Xiao's new mill"
+  g.map = {context = "georama", map_id = 1, town_map = 1, editing = false}
+  all(40)
+  check(h.towns[1] == g.towns[1], "a guest's Georama edit reaches the host's world (in pieces)")
+  check(k.towns[1] == g.towns[1], "and the host sends it on to the other guest")
+  check(find_toast(h, "Xiao changed Matataki"), "the host is told who changed which town")
+  -- the host edits Norune while Goro stands in Norune's Georama editor: Goro's game waits, then takes it
+  k.map = {context = "georama", map_id = 0, town_map = 0, editing = false}
+  k.busy_town = 0
+  h.map = {context = "georama", map_id = 0, town_map = 0, editing = true}
+  all(30)
+  h.towns[0] = "DCT10: the host's new house"
+  h.map = {context = "georama", map_id = 0, town_map = 0, editing = false}
+  all(40)
+  check(g.towns[0] == h.towns[0], "the host's own edit goes straight to the guests")
+  check(k.towns[0] == "DCT10:start", "a guest busy in that town doesn't have it changed under them")
+  k.busy_town = nil
+  all(40)
+  check(k.towns[0] == h.towns[0], "and takes it once free")
+  check(find_toast(k, "The host changed Norune; back to its entrance"), "walked back to the entrance of the town that changed")
+  h.keys.leave_key = true
+  all(2)
 end
 
 print("Refusals")
