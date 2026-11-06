@@ -43,7 +43,7 @@ index 00000000..2147797e
 +
 +Regression suites: `DungeonAerialCache`, `DungeonAerialProjection`, `DungeonVisibility`, and `PlatformConfig.AerialMap`.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 5a0b2fc1..54e78b90 100644
+index 5a0b2fc1..5c8fb1e1 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -9,6 +9,32 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -106,7 +106,19 @@ index 5a0b2fc1..54e78b90 100644
  # Flatpak builds have no network: their single-file libraries are staged in audio_decoders/ and stb_truetype/; others fetch them.
  set(KZ_PORT_VENDOR_DIRS ${CMAKE_SOURCE_DIR}/audio_decoders ${CMAKE_SOURCE_DIR}/stb_truetype)
  # The Flatpak also stages each library Kazarov's FetchContent_Declare downloads, in flatpak-deps/<name>
-@@ -168,6 +207,30 @@ if(NINTENDO_SWITCH)
+@@ -65,7 +104,10 @@ set(GAME_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/game)
+ set(PORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+ file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS ${GAME_DIR}/*.cpp)
+ file(GLOB_RECURSE PORT_SOURCES CONFIGURE_DEPENDS ${PORT_DIR}/*.cpp)
+-list(FILTER PORT_SOURCES EXCLUDE REGEX "/tests/|^${GAME_DIR}/")
++# The game's own units are dc_ps2's. Removed by name, not by a regex built from the path: a checkout under a
++# folder with regex characters in its name (Program Files (x86)) would keep them, and every one would be linked twice.
++list(REMOVE_ITEM PORT_SOURCES ${GAME_SOURCES})
++list(FILTER PORT_SOURCES EXCLUDE REGEX "/tests/")
+ if(NINTENDO_SWITCH)
+     list(FILTER PORT_SOURCES EXCLUDE REGEX "/platform/(discord|firstrun)\.cpp$")
+ endif()
+@@ -168,6 +210,30 @@ if(NINTENDO_SWITCH)
      dc_switch_port(dc_port)
  endif()
  target_link_libraries(dc_port PRIVATE dc_options SDL3::SDL3 Vulkan::Vulkan nlohmann_json::nlohmann_json fastgltf::fastgltf kz_port_headers)
@@ -137,7 +149,7 @@ index 5a0b2fc1..54e78b90 100644
  # port/src, the generated headers, dcdata's header-only core and the stb directories: captionfont.cpp
  # rasterizes with stb_truetype and platform/png_image.cpp decodes with stb_image, which Kazarov stages
  # (or fetches) for dc_host.
-@@ -182,6 +245,7 @@ function(dc_port_includes target)
+@@ -182,6 +248,7 @@ function(dc_port_includes target)
  endfunction()
  dc_port_includes(dc_port)
  dc_port_includes(dc_ps2)
@@ -145,7 +157,7 @@ index 5a0b2fc1..54e78b90 100644
  # The game's headers trip a few warnings that only describe how MWCC's source
  # was written, not a problem in the port.
  target_compile_options(dc_port PRIVATE -Wall -Wno-mismatched-tags -Wno-unused-label
-@@ -212,7 +276,8 @@ endif()
+@@ -212,7 +279,8 @@ endif()
  
  function(dc_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:dc_port> $<TARGET_OBJECTS:dc_ps2>)
