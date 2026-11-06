@@ -2497,6 +2497,31 @@ to four players and keeps no game state: the host's game is the world, and the m
 The web build uses the browser's WebSocket, Windows WinHTTP, Linux and macOS libcurl; a build without libcurl reports
 `net.*` unsupported.
 
+## Co-op: the host's world, a guest's things, visits (`save.*`, `session.start {visit}`, Chronicle)
+
+Co-op splits a save in two (`moonmod/coop_save.hpp`): the **world**, which is the host's (Georama in every town, the
+story and map flags, the day and time, dungeon progress, and the party the story has brought), and a **player's own
+things** (each character's life, defense, water, weapons and equipped weapon; the item pack, quick slots, stored
+items and stock; Gilda; fishing points). Both travel as text a mod passes along.
+
+- `save.world_export()` and `save.player_export()` give `{data}`: `"DCW1..."` and `"DCP1..."`, about 64 KB and 37 KB.
+- `save.world_import({data})` and `save.player_import({data})` work only during this mod's own visit, so no mod can
+  write another game's world or things into a player's save. Data from another build (a field sized differently) is
+  refused whole, and a refused import changes nothing.
+- `save.account_get({id})`, `save.account_set({id, name?, data})`, `save.account_list()`, `save.account_remove({id})`:
+  the guests the host's save keeps, each a player's things under the id the guest's game made (8-64 of `a-z 0-9 -`),
+  at most 64. They are written as `coop_accounts.json` in the slot's folder with every save of the slot, read with its
+  load, and gone with the slot; a new game has none. Not during a visit.
+- `session.start({visit = {world, player?, map}})`, from the mod's open title mode screen, starts a **visit**: a new
+  game takes the host's world and the guest's things (without `player`, a new account keeps the new game's), every
+  character in the host's party has a weapon, and it walks into town `map` (0-4). A visit goes wherever the world goes;
+  the way to the title (or `session.finish`, from a town or a dungeon) ends it. It never writes a save slot: saving
+  refuses, and autosave skips it. `session.get()`, `game.session.started` and `game.session.ended` say
+  `kind = "visit"`; `game.session.failed` `{kind = "visit", reason}` comes to the mod when the data didn't fit.
+
+The bundled Online Co-op mod (`mods/moonmod.coop`) is built on these and `net.*`; `docs/COOP_PLAN.md` has what is
+built and what comes next.
+
 ## Permissions and ownership
 
 Permissions are declared in `mod.json` and checked by the runtime for each operation: `game.read`, `game.write`, `content.register`, and `scripts.override` cover game adapters; `debug.inspect` gates diagnostics; `storage.read` and `storage.write` cover per-mod storage. Enabling a local package enables its declared Lua permissions. A package that declares `native.extension` also needs a package-relative native library and a separate local trust confirmation before that library loads. Lua does not get direct filesystem, process, network, native code, or arbitrary memory access. `storage.*` is sandboxed to a fixed JSON file under that mod's user-data directory. `net.session` lets a mod play online through `net.*`: it talks only to the co-op relay, in text messages to the other players in its room, never to an address of its own choosing beyond a `wss://` relay. Trusted native code runs in-process and is outside the Lua sandbox; see [Native SDK](NATIVE_SDK.md).

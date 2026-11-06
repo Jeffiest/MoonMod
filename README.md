@@ -70,6 +70,7 @@ its address for `--index`.
   | `moonmod.autosave` Autosave | Controls Chronicle's guarded town autosave slot |
   | `moonmod.expanded-town` Expanded Town Camera | Toggles the legacy overhead camera while walking in towns |
   | `moonmod.hub` MoonMod Hub | Quick links to the other mods' pages in the manager |
+  | `moonmod.coop` Online Co-op | Up to four play together online: the host's world, story and Georama, with each guest's own weapons, items and Gilda kept in the host's save (in progress: [plan](docs/COOP_PLAN.md)) |
 
   More than one mod can be on at once; the manager lists dependency order and conflicts.
 

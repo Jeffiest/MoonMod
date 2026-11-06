@@ -2154,6 +2154,30 @@ index 06d1e88e..17cff03e 100644
 +int *MonsterScriptGlobal(int bank, int index);
 +
  } // namespace dc::game
+diff --git a/port/include/game/savedata.hpp b/port/include/game/savedata.hpp
+index 53b34f73..c8c6a7aa 100644
+--- a/port/include/game/savedata.hpp
++++ b/port/include/game/savedata.hpp
+@@ -7,6 +7,10 @@
+ #include "dngstatusdata.hpp"
+ #include "stockitem.hpp"
+ 
++namespace moonmod::coop {
++struct SaveAccess;
++}
++
+ namespace dc::game {
+ 
+ /**
+@@ -107,6 +111,8 @@ class CSaveData {
+     friend void EdMoveChara();
+     // The fish exchange debug shortcut records a Mardan Garayan catch.
+     friend int FishingExchangeKey();
++    // MoonMod co-op (moonmod/coop_save.hpp) splits a save into the host's world and a guest's own things.
++    friend struct ::moonmod::coop::SaveAccess;
+ 
+     s32             config[18];        /**< Contains the configuration values. */
+     s16             chara_name[6][32]; /**< Contains the name of each character, as sixteen-bit characters. */
 diff --git a/port/include/game/shop.hpp b/port/include/game/shop.hpp
 index 8b8bbb67..af0aab94 100644
 --- a/port/include/game/shop.hpp
@@ -3175,6 +3199,61 @@ index 00000000..d857f227
 +void MoonModCompanionDraw(bool shadow);
 +void MoonModCompanionDrawShots();
 +} // namespace dc::game
+diff --git a/port/include/moonmod/coop_save.hpp b/port/include/moonmod/coop_save.hpp
+new file mode 100644
+index 00000000..33bc37cc
+--- /dev/null
++++ b/port/include/moonmod/coop_save.hpp
+@@ -0,0 +1,49 @@
++#pragma once
++
++// Co-op's split of a save (save.world_export/import, save.player_export/import): a visit plays the host's world with
++// the guest's own things. The world is what the host's save says of the story and the places: Georama in every town,
++// the story and map flags, the day and time, dungeon progress (the deepest floors, the Atla still to find, the kills)
++// and who has joined the party. A player's own things are what each character has and carries: life, defense and
++// water, weapons and the one equipped, the item pack and quick slots, the stored items and the stock, Gilda and the
++// fishing points. The host's save keeps each guest's things; the guest's own save is never written while visiting.
++//
++// Both travel as text: a tag ("DCW1" a world, "DCP1" a player), then each field's number, size and bytes, base64. A
++// field whose size differs from this build's (another build's layout) refuses the whole import.
++
++#include <filesystem>
++#include <string>
++#include <string_view>
++#include <vector>
++
++namespace dc::game {
++class CSaveData;
++}
++
++namespace moonmod::coop {
++
++std::string ExportWorld(const dc::game::CSaveData &save);
++bool        ImportWorld(std::string_view text, dc::game::CSaveData &save, std::string &error);
++std::string ExportPlayer(const dc::game::CSaveData &save);
++bool        ImportPlayer(std::string_view text, dc::game::CSaveData &save, std::string &error);
++
++// The host's guests (save.account_*): each guest's own things, kept in the host's save, as coop_accounts.json in its
++// slot folder beside the save, written with every save of the slot and read with its load. A new game has none.
++struct Account {
++    std::string id;     // the guest's game's own id for its player
++    std::string name;
++    std::string player; // save.player_export text
++};
++inline constexpr std::size_t kAccountsMax = 64;
++inline constexpr std::size_t kAccountMax = 256 * 1024; // bytes of one account's text
++
++const Account             *AccountGet(std::string_view id);
++bool                       AccountSet(Account account, std::string &error);
++bool                       AccountRemove(std::string_view id);
++std::vector<const Account *> Accounts();
++void                       AccountsClear();
++bool                       AccountsSave(const std::filesystem::path &save_directory);
++void                       AccountsLoad(const std::filesystem::path &save_directory);
++void                       AccountsDelete(const std::filesystem::path &save_directory);
++bool                       ValidAccountId(std::string_view id);
++
++} // namespace moonmod::coop
 diff --git a/port/include/moonmod/dungeon_npc.hpp b/port/include/moonmod/dungeon_npc.hpp
 new file mode 100644
 index 00000000..e400ae75
@@ -5030,10 +5109,10 @@ index 00000000..cbe60255
 +} // namespace dc::game
 diff --git a/port/include/moonmod/title_modes.hpp b/port/include/moonmod/title_modes.hpp
 new file mode 100644
-index 00000000..19f1cfea
+index 00000000..4b2e1444
 --- /dev/null
 +++ b/port/include/moonmod/title_modes.hpp
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,175 @@
 +#pragma once
 +
 +// Mod title modes and sandbox sessions (Chronicle).
@@ -5173,11 +5252,18 @@ index 00000000..19f1cfea
 +    int floor = -1;         // native floor number
 +    int party_size = 1;
 +    int character = 0;      // the active character at the start, 0 (Toan) to 5
++    // A co-op visit (session.start {visit = ...}): the host's world and the guest's own things in a fresh game, which
++    // starts in a town and may go anywhere; nothing of it is written to the guest's saves.
++    bool visit = false;
++    int map = -1;           // the town map a visit starts in
++    std::string world;      // save.world_export text
++    std::string player;     // save.player_export text, or empty for a new account
 +};
 +struct SandboxSession {
 +    std::string owner;
 +    std::string mode_id;
 +    int started_frame = 0;
++    bool visit = false;
 +};
 +
 +// session.start validates the caller, then queues the request; the title loop fades out and the game loop
@@ -5187,6 +5273,8 @@ index 00000000..19f1cfea
 +std::optional<SandboxRequest> TakeSandboxRequest();
 +void BeginSandboxSession(const SandboxRequest &request);
 +bool SandboxActive();
++// A co-op visit is running: the game must not write a save slot.
++bool VisitActive();
 +const SandboxSession *ActiveSandbox();
 +// Records why the session is ending ("defeat", "ended", "left_dungeon", "loaded_save"); the first reason wins.
 +void NoteSandboxEnding(std::string_view reason);
@@ -21725,7 +21813,7 @@ index f6a3551a..2248ddfc 100644
  }
  
 diff --git a/port/src/game/memorycardaccess.cpp b/port/src/game/memorycardaccess.cpp
-index 4d57067c..1b8ed057 100644
+index 4d57067c..07179a2a 100644
 --- a/port/src/game/memorycardaccess.cpp
 +++ b/port/src/game/memorycardaccess.cpp
 @@ -6,6 +6,7 @@
@@ -21736,17 +21824,19 @@ index 4d57067c..1b8ed057 100644
  #include <memory>
  #include <print>
  #include <span>
-@@ -13,6 +14,9 @@
+@@ -13,6 +14,11 @@
  #include <system_error>
  #include <vector>
  
 +#include "chara_extras_save.hpp"
++#include "moonmod/coop_save.hpp"
++#include "moonmod/title_modes.hpp"
 +#include "charm_slots.hpp"
 +#include "gear.hpp"
  #include "dngstatusdata.hpp"
  #include "menu_draw.hpp"
  #include "menu_save.hpp"
-@@ -89,9 +93,22 @@ SaveState CurrentState() {
+@@ -89,9 +95,22 @@ SaveState CurrentState() {
      return state;
  }
  
@@ -21769,7 +21859,7 @@ index 4d57067c..1b8ed057 100644
      GameOptionsClear(*save);
      save->ConvertConfig(&sys_config);
      std::span<char, kImageSize> bytes(image, kImageSize);
-@@ -340,7 +357,12 @@ int CMemoryCardAccess::LoadSysConfig() {
+@@ -340,7 +359,12 @@ int CMemoryCardAccess::LoadSysConfig() {
  }
  
  int CMemoryCardAccess::SaveSysConfig() {
@@ -21783,7 +21873,18 @@ index 4d57067c..1b8ed057 100644
  }
  
  // The card's write test and the copy out of the NTSC 1.0 directory have nothing to work on.
-@@ -454,20 +476,43 @@ int CMemoryCardAccess::SaveToMc(int file_no) {
+@@ -418,6 +442,10 @@ int CMemoryCardAccess::CheckFileNo(int file_no) {
+ // another copy of the game or by hand since the list was read sends the save to the next free
+ // folder instead, and file_no is then the file written.
+ int CMemoryCardAccess::SaveToMc(int file_no) {
++    // A co-op visit plays the host's world: the host keeps the guest's things, and the guest's own saves stay as they were.
++    if (moonmod::VisitActive()) {
++        return -1;
++    }
+     if (file_no < 0 || file_no >= 999999999) {
+         return -1;
+     }
+@@ -454,20 +482,45 @@ int CMemoryCardAccess::SaveToMc(int file_no) {
      this->card[this->port].dir_exists = 1;
      // The quests' progress goes beside the save; a failure is reported, and the save stands.
      QuestHostSave(SaveSlotDirectory(file_no));
@@ -21792,6 +21893,7 @@ index 4d57067c..1b8ed057 100644
 +    CharaExtrasSave(SaveSlotDirectory(file_no), *SaveData->GetDngStatus());
 +    CharmSlotsSave(SaveSlotDirectory(file_no)); // and the charm slots (charm_slots.hpp)
 +    GearSave(SaveSlotDirectory(file_no));       // and the gear (gear.hpp)
++    moonmod::coop::AccountsSave(SaveSlotDirectory(file_no)); // and the co-op guests' things (moonmod/coop_save.hpp)
 +    SaveState state;
 +    SaveStateRead(SaveStatePath(), state);
 +    const SaveState current = CurrentState();
@@ -21826,16 +21928,18 @@ index 4d57067c..1b8ed057 100644
 +    CharaExtrasLoad(SaveSlotDirectory(file_no), *SaveData->GetDngStatus());
 +    CharmSlotsLoad(SaveSlotDirectory(file_no));
 +    GearLoad(SaveSlotDirectory(file_no));
++    moonmod::coop::AccountsLoad(SaveSlotDirectory(file_no));
  
      // The save screen keeps starting at the last numbered save.
      if (file_no == kSaveSlotAutosave) {
-@@ -499,8 +544,15 @@ int CMemoryCardAccess::DeleteFile(int file_no) {
+@@ -499,8 +552,16 @@ int CMemoryCardAccess::DeleteFile(int file_no) {
      }
  
      QuestHostDelete(SaveSlotDirectory(file_no));
 +    CharaExtrasDelete(SaveSlotDirectory(file_no));
 +    CharmSlotsDelete(SaveSlotDirectory(file_no));
 +    GearDelete(SaveSlotDirectory(file_no));
++    moonmod::coop::AccountsDelete(SaveSlotDirectory(file_no));
      fs::remove(SaveSlotDirectory(file_no), error);
 -    return 1;
 +    if (error) return -1;
@@ -21846,13 +21950,14 @@ index 4d57067c..1b8ed057 100644
  }
  
  int CMemoryCardAccess::McError(int result) {
-@@ -564,7 +616,48 @@ bool SaveSlotWriteAutosave() {
+@@ -564,7 +625,49 @@ bool SaveSlotWriteAutosave() {
          return false;
      }
      QuestHostSave(SaveSlotDirectory(kSaveSlotAutosave));
 +    CharaExtrasSave(SaveSlotDirectory(kSaveSlotAutosave), *SaveData->GetDngStatus());
 +    CharmSlotsSave(SaveSlotDirectory(kSaveSlotAutosave));
 +    GearSave(SaveSlotDirectory(kSaveSlotAutosave));
++    moonmod::coop::AccountsSave(SaveSlotDirectory(kSaveSlotAutosave));
      return true;
  }
  
@@ -24884,18 +24989,20 @@ index 18534f69..dde8c629 100644
      auto *stack = reinterpret_cast<RS_STACKDATA *>(arena->Alloc(64));
  
 diff --git a/port/src/game/savedata.cpp b/port/src/game/savedata.cpp
-index 324f9eb6..63216d89 100644
+index 324f9eb6..07383707 100644
 --- a/port/src/game/savedata.cpp
 +++ b/port/src/game/savedata.cpp
-@@ -11,6 +11,7 @@
+@@ -10,7 +10,9 @@
+ #include <utility>
  
  #include "editatra.hpp"
++#include "moonmod/coop_save.hpp"
  #include "object.hpp"
 +#include "playable_chara.hpp"
  
  namespace dc::game {
  
-@@ -38,6 +39,13 @@ CMenuCursor *CSaveData::GetMenuCursor() {
+@@ -38,6 +40,13 @@ CMenuCursor *CSaveData::GetMenuCursor() {
  }
  
  s16 *CSaveData::GetCharaName(int chara_no) {
@@ -24909,6 +25016,15 @@ index 324f9eb6..63216d89 100644
      if (chara_no < 0 || chara_no >= 6) {
          return nullptr;
      }
+@@ -504,6 +513,8 @@ void CMenuCursor::InitPos() {
+ 
+ void CSaveData::Initialize() {
+     std::memset(static_cast<void *>(this), 0, sizeof(CSaveData));
++    // MoonMod co-op: a new game keeps no guests (a loaded save's come with it, moonmod/coop_save.hpp).
++    moonmod::coop::AccountsClear();
+     this->unk_1CC = -1;
+     this->now_time = 0.0f;
+ 
 diff --git a/port/src/game/shop.cpp b/port/src/game/shop.cpp
 index 65af951a..eab6cd0d 100644
 --- a/port/src/game/shop.cpp
@@ -27514,10 +27630,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..76226712
+index 00000000..e72bb1cd
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,652 @@
+@@ -0,0 +1,660 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -27802,6 +27918,14 @@ index 00000000..76226712
 +    {"save.get", "save", "get", "any", "game.read", "Read namespaced save data and migration version."},
 +    {"save.slot_id", "save", "slot_id", "any", "game.read", "Read the active numbered save slot and its persistent generation in Chronicle."},
 +    {"save.set", "save", "set", "simulation", "game.write", "Write bounded namespaced save data."},
++    {"save.world_export", "save", "world_export", "any", "game.read", "Co-op: the save's world (Georama, story and map flags, dungeon progress, the party) as text."},
++    {"save.world_import", "save", "world_import", "any", "game.write", "Co-op: during this mod's visit, take a world from save.world_export."},
++    {"save.player_export", "save", "player_export", "any", "game.read", "Co-op: the player's own things (life, weapons, items, Gilda, the stock) as text."},
++    {"save.player_import", "save", "player_import", "any", "game.write", "Co-op: during this mod's visit, take a player's things from save.player_export."},
++    {"save.account_get", "save", "account_get", "any", "game.read", "Co-op host: a guest's things this save keeps, by the guest's id, or {}."},
++    {"save.account_set", "save", "account_set", "any", "game.write", "Co-op host: keep a guest's things (save.player_export text) in this save; written with its next save."},
++    {"save.account_list", "save", "account_list", "any", "game.read", "Co-op host: the guests this save keeps, as {id, name}."},
++    {"save.account_remove", "save", "account_remove", "any", "game.write", "Co-op host: forget a guest's things in this save."},
 +    {"save.migrate", "save", "migrate", "load", "game.write", "Run an owned save migration at the save-load boundary."},
 +    {"save.autosave_set", "save", "autosave_set", "any", "game.write", "Enable or disable Chronicle's guarded native autosave writer."},
 +    {"input.bind", "input", "bind", "any", "game.write", "Bind a namespaced action to a keyboard or controller input."},
@@ -29032,10 +29156,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..0835c3f1
+index 00000000..55619b84
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,16917 @@
+@@ -0,0 +1,17046 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -29056,6 +29180,7 @@ index 00000000..0835c3f1
 +#include "moonmod/companion.hpp"
 +#include "moonmod/ghost.hpp"
 +#include "moonmod/net_session.hpp"
++#include "moonmod/coop_save.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
@@ -42167,11 +42292,46 @@ index 00000000..0835c3f1
 +}
 +
 +// Sandbox sessions (title modes): session.start from the mod's open title mode screen, session.finish in play.
++// session.start {visit = {world, player?, map}}: a co-op visit to the host's world (moonmod/coop_save.hpp).
++ApiCallResult StartVisitSession(std::string_view mod_id, const Json &visit) {
++    if (!visit.is_object()) return Invalid("visit must be {world, player?, map}");
++    for (auto field = visit.begin(); field != visit.end(); ++field) {
++        if (field.key() != "world" && field.key() != "player" && field.key() != "map") return Invalid("visit accepts only world, player and map");
++    }
++    if (mode != GAME_MODE_TITLE) return Failed("a visit starts from the title screen");
++    const TitleMode *open = OpenTitleModeScreenMode();
++    if (open == nullptr || open->owner != mod_id) return Failed("start the visit from this mod's open title mode screen");
++    if (SandboxRequestPending()) return Failed("a session is already starting");
++    if (!visit.contains("world") || !visit["world"].is_string() || !visit["world"].get_ref<const std::string &>().starts_with("DCW1")) {
++        return Invalid("world must be the host's save.world_export text");
++    }
++    if (visit.contains("player") && (!visit["player"].is_string() || !visit["player"].get_ref<const std::string &>().starts_with("DCP1"))) {
++        return Invalid("player must be save.player_export text, or left out for a new account");
++    }
++    int map = 0;
++    if (!visit.contains("map") || !ReadBoundedInt(visit, "map", 0, TOWN_COUNT - 1, map)) {
++        return Invalid("map must be the town map to start in, 0-" + std::to_string(TOWN_COUNT - 1));
++    }
++    SandboxRequest queued;
++    queued.owner = std::string(mod_id);
++    queued.mode_id = open->id;
++    queued.visit = true;
++    queued.map = map;
++    queued.world = visit["world"].get<std::string>();
++    if (visit.contains("player")) queued.player = visit["player"].get<std::string>();
++    QueueSandboxRequest(std::move(queued));
++    return {ApiCallStatus::Ok, {{"queued", true}, {"visit", true}, {"map", map}, {"new_account", !visit.contains("player")}}, {}};
++}
++
 +ApiCallResult StartSandboxSession(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
-+        return Invalid("expected {floor = registered floor id, party_size = 1..7, character = optional id}");
++        return Invalid("expected {floor = registered floor id, party_size = 1..7, character = optional id}, or {visit = ...}");
 +    }
 +    const Json &request = args[0];
++    if (request.contains("visit")) {
++        if (request.size() != 1) return Invalid("a visit takes only visit = {world, player?, map}");
++        return StartVisitSession(mod_id, request["visit"]);
++    }
 +    for (auto field = request.begin(); field != request.end(); ++field) {
 +        if (field.key() != "floor" && field.key() != "party_size" && field.key() != "character") {
 +            return Invalid("session.start accepts only floor, party_size and character");
@@ -42232,7 +42392,8 @@ index 00000000..0835c3f1
 +    const SandboxSession *session = ActiveSandbox();
 +    if (session == nullptr) return Failed("no sandbox session is running");
 +    if (session->owner != mod_id) return Failed("only the mod that started the sandbox session can end it");
-+    if (mode != GAME_MODE_DUNGEON) return Failed("a sandbox session ends from its dungeon");
++    if (!session->visit && mode != GAME_MODE_DUNGEON) return Failed("a sandbox session ends from its dungeon");
++    if (session->visit && mode != GAME_MODE_DUNGEON && mode != GAME_MODE_EDIT) return Failed("a visit ends from a town or a dungeon");
 +    if (NextMapNo >= 0) return Failed("a native map transition is already pending");
 +    NoteSandboxEnding("ended");
 +    MapJump(800, -1);
@@ -42722,6 +42883,57 @@ index 00000000..0835c3f1
 +    if (operation.path == "title.mode_register") return RegisterTitleMode(mod_id, args);
 +    if (operation.path == "title.mode_set") return SetTitleMode(mod_id, args);
 +    if (operation.path == "title.mode_remove") return RemoveTitleMode(mod_id, args);
++    // save.world_export / player_export and their imports: co-op's split of a save (moonmod/coop_save.hpp). Importing
++    // is a visit's alone, so no mod can write another game's world or things into a player's own save.
++    if (operation.path == "save.world_export" || operation.path == "save.player_export") {
++        if (!args.is_array() || !args.empty()) return Invalid(std::string(operation.path) + " takes no arguments");
++        if (SaveData == nullptr) return Failed("the game has no save data yet");
++        const bool world = operation.path == "save.world_export";
++        return {ApiCallStatus::Ok, {{"data", world ? moonmod::coop::ExportWorld(*SaveData) : moonmod::coop::ExportPlayer(*SaveData)}}, {}};
++    }
++    // save.account_*: the host's guests' things, kept in the host's save (moonmod/coop_save.hpp). Not during a visit: the
++    // guests' things belong to the host's game.
++    if (operation.path.starts_with("save.account")) {
++        if (VisitActive()) return Failed("a visit keeps no guests; the host's game does");
++        const Json  empty = Json::object();
++        const Json &request = args.is_array() && args.size() == 1 && args[0].is_object() ? args[0] : empty;
++        if (!args.is_array() || args.size() > 1 || (args.size() == 1 && !args[0].is_object())) return Invalid("expected one table, or none");
++        const std::string id = request.contains("id") && request["id"].is_string() ? request["id"].get<std::string>() : std::string();
++        if (operation.path == "save.account_list") {
++            Json list = Json::array();
++            for (const moonmod::coop::Account *account : moonmod::coop::Accounts()) list.push_back({{"id", account->id}, {"name", account->name}});
++            return {ApiCallStatus::Ok, {{"accounts", std::move(list)}}, {}};
++        }
++        if (!moonmod::coop::ValidAccountId(id)) return Invalid("id must be 8-64 of a-z, 0-9 and -");
++        if (operation.path == "save.account_get") {
++            const moonmod::coop::Account *account = moonmod::coop::AccountGet(id);
++            if (account == nullptr) return {ApiCallStatus::Ok, Json::object(), {}};
++            return {ApiCallStatus::Ok, {{"id", account->id}, {"name", account->name}, {"data", account->player}}, {}};
++        }
++        if (operation.path == "save.account_remove") return {ApiCallStatus::Ok, {{"removed", moonmod::coop::AccountRemove(id)}}, {}};
++        if (operation.path == "save.account_set") {
++            if (!request.contains("data") || !request["data"].is_string()) return Invalid("data must be save.player_export text");
++            std::string error;
++            if (!moonmod::coop::AccountSet({id, request.value("name", std::string()), request["data"].get<std::string>()}, error)) return Invalid(error);
++            return {ApiCallStatus::Ok, {{"kept", true}}, {}};
++        }
++        return Invalid("unknown save.account operation");
++    }
++    if (operation.path == "save.world_import" || operation.path == "save.player_import") {
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 || !args[0].contains("data") ||
++            !args[0]["data"].is_string()) {
++            return Invalid("expected {data = the export's text}");
++        }
++        const SandboxSession *session = ActiveSandbox();
++        if (session == nullptr || !session->visit || session->owner != mod_id) return Failed("only this mod's co-op visit imports");
++        if (SaveData == nullptr) return Failed("the game has no save data yet");
++        std::string error;
++        const std::string &data = args[0]["data"].get_ref<const std::string &>();
++        const bool ok = operation.path == "save.world_import" ? moonmod::coop::ImportWorld(data, *SaveData, error)
++                                                              : moonmod::coop::ImportPlayer(data, *SaveData, error);
++        if (!ok) return Invalid(error);
++        return {ApiCallStatus::Ok, {{"imported", true}}, {}};
++    }
 +    if (operation.path == "session.get") {
 +        if (!args.is_array() || !args.empty()) return Invalid("session.get takes no arguments");
 +        return {ApiCallStatus::Ok, SessionJson(mode == GAME_MODE_TITLE), {}};
@@ -43107,12 +43319,42 @@ index 00000000..0835c3f1
 +    g_thirst_baseline = false;
 +}
 +
++// A co-op visit begins: the new game's save takes the host's world and the guest's own things (a new account keeps the
++// new game's), every character in the host's party gets a weapon if it has none, and the game walks into the town.
++bool StartChronicleVisit(const SandboxRequest &request) {
++    CDngStatusData *status = CurrentStatus();
++    std::string     error;
++    if (status == nullptr || SaveData == nullptr || request.map < 0 || request.map >= TOWN_COUNT ||
++        !moonmod::coop::ImportWorld(request.world, *SaveData, error) ||
++        (!request.player.empty() && !moonmod::coop::ImportPlayer(request.player, *SaveData, error))) {
++        std::fprintf(stderr, "MoonMod: the visit could not start: %s\n", error.c_str());
++        SharedRuntime().PublishToMod(request.owner, "game.session.failed", {{"kind", "visit"}, {"reason", error}});
++        CloseTitleModeScreen();
++        return false;
++    }
++    constexpr int kStarterWeapons[6] = {ITEM_WEAPON_DAGGER, ITEM_WEAPON_WOODEN_SLINGSHOT, ITEM_WEAPON_MALLET,
++                                        ITEM_WEAPON_GOLD_RING, ITEM_WEAPON_FIGHTING_STICK, ITEM_WEAPON_MACHINE_GUN};
++    const int party = std::clamp<int>(status->party_size, 1, CharaCount());
++    for (int character = 0; character < party; ++character) {
++        if (status->equipped_weapon_slot[character] >= 0 && status->chara_weapons[character][status->equipped_weapon_slot[character]].item_no >= ITEM_WEAPON_START) continue;
++        WEAPON_HAVE &owned = status->chara_weapons[character][0];
++        if (owned.item_no < ITEM_WEAPON_START) WepDataListToHaveCopy(kStarterWeapons[CombatChara(character)], &owned);
++        status->equipped_weapon_slot[character] = 0;
++    }
++    status->cur_chara = 0;
++    status->cur_georama = static_cast<s8>(request.map);
++    BeginSandboxSession(request);
++    MapJump(request.map, -1);
++    return true;
++}
++
 +bool StartPendingChronicleSandbox() {
 +    std::optional<SandboxRequest> request = TakeSandboxRequest();
 +    if (!request) {
 +        CloseTitleModeScreen();
 +        return false;
 +    }
++    if (request->visit) return StartChronicleVisit(*request);
 +    CDngStatusData *status = CurrentStatus();
 +    if (status == nullptr || request->dungeon_id < 0 || request->dungeon_id >= DUNGEON_COUNT || request->floor < 0 ||
 +        request->floor >= maxFloorTbl__3[request->dungeon_id]) {
@@ -43142,6 +43384,15 @@ index 00000000..0835c3f1
 +
 +bool RedirectChronicleSandboxMapJump() {
 +    if (!SandboxActive() || NextMapNo < 0) return false;
++    // A visit goes wherever the host's world goes; only the way to the title ends it.
++    if (VisitActive()) {
++        if (NextMapNo == 800) {
++            g_pending_dungeon_floor_entry.reset();
++            EndSandboxSession("left");
++            return true;
++        }
++        return false;
++    }
 +    if (NextMapNo >= 200 && NextMapNo < 300) return false; // another floor or dungeon: the session goes on
 +    NextMapNo = 800;
 +    g_pending_dungeon_floor_entry.reset();
@@ -45684,7 +45935,9 @@ index 00000000..0835c3f1
 +    config.api_capabilities.push_back({"dungeons.set_modifiers", true, {}});
 +    config.api_capabilities.push_back({"combat.register_player_formula", true, {}});
 +    for (const char *path : {"title.mode_register", "title.mode_set", "title.mode_remove",
-+                             "session.get", "session.start", "session.finish"}) {
++                             "session.get", "session.start", "session.finish", "save.world_export", "save.world_import",
++                             "save.player_export", "save.player_import", "save.account_get", "save.account_set",
++                             "save.account_list", "save.account_remove"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
 +    config.api_resource_override_removal_guard = ChronicleModelOverrideRemovalGuard;
@@ -46668,6 +46921,296 @@ index 00000000..ae25e54b
 +}
 +
 +} // namespace dc::game
+diff --git a/port/src/moonmod/coop_save_moonmod.cpp b/port/src/moonmod/coop_save_moonmod.cpp
+new file mode 100644
+index 00000000..dcc80587
+--- /dev/null
++++ b/port/src/moonmod/coop_save_moonmod.cpp
+@@ -0,0 +1,284 @@
++// Co-op's split of a save into the host's world and a player's own things (moonmod/coop_save.hpp).
++
++#include "moonmod/coop_save.hpp"
++
++#include <algorithm>
++#include <cstdint>
++#include <cstring>
++#include <fstream>
++#include <iterator>
++#include <map>
++#include <cstdio>
++#include <vector>
++
++#include <nlohmann/json.hpp>
++
++#include "game/savedata.hpp"
++#include "platform/files.hpp"
++
++namespace moonmod::coop {
++
++using dc::game::CDngStatusData;
++using dc::game::CSaveData;
++
++// One field of the save: its number in the text, and where it is.
++struct Field {
++    std::uint16_t id;
++    void         *data;
++    std::size_t   size;
++};
++
++struct SaveAccess {
++    // Numbers are for good: a new field takes a new number, and a field that goes keeps its number unused.
++    static std::vector<Field> World(CSaveData &save) {
++        CDngStatusData &dng = save.dng_status;
++        return {
++            {1, &save.georama, sizeof(save.georama)},
++            {2, &save.elem_data, sizeof(save.elem_data)},
++            {3, &save.special_npc, sizeof(save.special_npc)},
++            {4, &save.game_flags, sizeof(save.game_flags)},
++            {5, &save.game_int_flag, sizeof(save.game_int_flag)},
++            {6, &save.map_flags, sizeof(save.map_flags)},
++            {7, &save.map_init_flags, sizeof(save.map_init_flags)},
++            {8, &save.visit_map, sizeof(save.visit_map)},
++            {9, &save.quest_dungeon, sizeof(save.quest_dungeon)},
++            {10, &save.quest_dungeon_total, sizeof(save.quest_dungeon_total)},
++            {11, &save.mardan_garayan_caught, sizeof(save.mardan_garayan_caught)},
++            {12, &save.now_time, sizeof(save.now_time)},
++            {13, &save.day, sizeof(save.day)},
++            {20, &dng.atra_grid, sizeof(dng.atra_grid)},
++            {21, &dng.atra_registry, sizeof(dng.atra_registry)},
++            {22, &dng.kills, sizeof(dng.kills)},
++            {23, &dng.floor_reached, sizeof(dng.floor_reached)},
++            {24, &dng.res_limit_zone_id, sizeof(dng.res_limit_zone_id)},
++            {25, &dng.party_size, sizeof(dng.party_size)},
++            {26, &dng.skill_owned.data, sizeof(dng.skill_owned.data)}, // the story gives these
++        };
++    }
++
++    static std::vector<Field> Player(CSaveData &save) {
++        CDngStatusData &dng = save.dng_status;
++        return {
++            {1, &dng.max_hp.data, sizeof(dng.max_hp.data)},
++            {2, &dng.hp.data, sizeof(dng.hp.data)},
++            {3, &dng.defense.data, sizeof(dng.defense.data)},
++            {4, &dng.water_max.data, sizeof(dng.water_max.data)},
++            {5, &dng.water_now.data, sizeof(dng.water_now.data)},
++            {6, &dng.chara_weapons.data, sizeof(dng.chara_weapons.data)},
++            {7, &dng.equipped_weapon_slot.data, sizeof(dng.equipped_weapon_slot.data)},
++            {8, &dng.money, sizeof(dng.money)},
++            {9, &dng.item_pack, sizeof(dng.item_pack)},
++            {10, &dng.active_item, sizeof(dng.active_item)},
++            {11, &dng.active_item_vol, sizeof(dng.active_item_vol)},
++            {12, &dng.consumable_items, sizeof(dng.consumable_items)},
++            {13, &save.stock_item, sizeof(save.stock_item)},
++            {14, &save.fishing_point, sizeof(save.fishing_point)},
++            {15, &save.fish_data, sizeof(save.fish_data)},
++        };
++    }
++};
++
++namespace {
++
++constexpr char kWorldTag[] = "DCW1";
++constexpr char kPlayerTag[] = "DCP1";
++
++std::string Base64(std::string_view bytes) {
++    static constexpr char kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++    std::string out;
++    out.reserve((bytes.size() + 2) / 3 * 4);
++    for (std::size_t i = 0; i < bytes.size(); i += 3) {
++        const auto     at = [&bytes](std::size_t k) { return static_cast<unsigned>(static_cast<unsigned char>(bytes[k])); };
++        const unsigned v = (at(i) << 16) | ((i + 1 < bytes.size() ? at(i + 1) : 0) << 8) | (i + 2 < bytes.size() ? at(i + 2) : 0);
++        out.push_back(kTable[(v >> 18) & 63]);
++        out.push_back(kTable[(v >> 12) & 63]);
++        out.push_back(i + 1 < bytes.size() ? kTable[(v >> 6) & 63] : '=');
++        out.push_back(i + 2 < bytes.size() ? kTable[v & 63] : '=');
++    }
++    return out;
++}
++
++bool Unbase64(std::string_view text, std::string &out) {
++    out.clear();
++    unsigned value = 0;
++    int      bits = 0;
++    for (const char c : text) {
++        int digit;
++        if (c >= 'A' && c <= 'Z') digit = c - 'A';
++        else if (c >= 'a' && c <= 'z') digit = c - 'a' + 26;
++        else if (c >= '0' && c <= '9') digit = c - '0' + 52;
++        else if (c == '+') digit = 62;
++        else if (c == '/') digit = 63;
++        else if (c == '=') break;
++        else return false;
++        value = (value << 6) | static_cast<unsigned>(digit);
++        bits += 6;
++        if (bits >= 8) {
++            bits -= 8;
++            out.push_back(static_cast<char>((value >> bits) & 0xFF));
++        }
++    }
++    return true;
++}
++
++std::string Export(const char *tag, const std::vector<Field> &fields) {
++    std::string bytes;
++    for (const Field &field : fields) {
++        const std::uint32_t size = static_cast<std::uint32_t>(field.size);
++        bytes.push_back(static_cast<char>(field.id & 0xFF));
++        bytes.push_back(static_cast<char>(field.id >> 8));
++        for (int shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<char>((size >> shift) & 0xFF));
++        bytes.append(static_cast<const char *>(field.data), field.size);
++    }
++    return std::string(tag) + Base64(bytes);
++}
++
++// Reads every field first and writes none unless all of them fit: a refused import changes nothing.
++bool Import(const char *tag, std::string_view text, const std::vector<Field> &fields, std::string &error) {
++    if (!text.starts_with(tag)) {
++        error = std::string("not ") + (tag == kWorldTag ? "a world" : "a player") + " from save." +
++                (tag == kWorldTag ? "world_export" : "player_export");
++        return false;
++    }
++    std::string bytes;
++    if (!Unbase64(text.substr(4), bytes)) {
++        error = "the data is damaged (not base64)";
++        return false;
++    }
++    std::vector<std::pair<const Field *, std::size_t>> found; // field, offset of its bytes
++    std::size_t                                      at = 0;
++    while (at < bytes.size()) {
++        if (bytes.size() - at < 6) {
++            error = "the data is damaged (cut short)";
++            return false;
++        }
++        const auto     byte = [&bytes](std::size_t k) { return static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[k])); };
++        const auto     id = static_cast<std::uint16_t>(byte(at) | (byte(at + 1) << 8));
++        std::uint32_t  size = 0;
++        for (int k = 0; k < 4; ++k) size |= byte(at + 2 + k) << (8 * k);
++        at += 6;
++        if (bytes.size() - at < size) {
++            error = "the data is damaged (cut short)";
++            return false;
++        }
++        const auto field = std::ranges::find(fields, id, &Field::id);
++        if (field == fields.end() || field->size != size) {
++            error = "the data comes from another build of the game; play on the same build";
++            return false;
++        }
++        found.emplace_back(&*field, at);
++        at += size;
++    }
++    if (found.size() != fields.size()) {
++        error = "the data comes from another build of the game; play on the same build";
++        return false;
++    }
++    for (const auto &[field, offset] : found) std::memcpy(field->data, bytes.data() + offset, field->size);
++    return true;
++}
++
++} // namespace
++
++std::string ExportWorld(const CSaveData &save) { return Export(kWorldTag, SaveAccess::World(const_cast<CSaveData &>(save))); }
++
++bool ImportWorld(std::string_view text, CSaveData &save, std::string &error) {
++    return Import(kWorldTag, text, SaveAccess::World(save), error);
++}
++
++std::string ExportPlayer(const CSaveData &save) { return Export(kPlayerTag, SaveAccess::Player(const_cast<CSaveData &>(save))); }
++
++bool ImportPlayer(std::string_view text, CSaveData &save, std::string &error) {
++    return Import(kPlayerTag, text, SaveAccess::Player(save), error);
++}
++
++namespace {
++
++constexpr char kAccountsFile[] = "coop_accounts.json";
++std::map<std::string, Account, std::less<>> g_accounts;
++
++} // namespace
++
++bool ValidAccountId(std::string_view id) {
++    return id.size() >= 8 && id.size() <= 64 &&
++           std::ranges::all_of(id, [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
++}
++
++const Account *AccountGet(std::string_view id) {
++    const auto found = g_accounts.find(id);
++    return found == g_accounts.end() ? nullptr : &found->second;
++}
++
++bool AccountSet(Account account, std::string &error) {
++    if (!ValidAccountId(account.id)) {
++        error = "an account id is 8-64 of a-z, 0-9 and -";
++        return false;
++    }
++    if (!account.player.starts_with("DCP1") || account.player.size() > kAccountMax) {
++        error = "an account holds save.player_export text";
++        return false;
++    }
++    if (account.name.size() > 24) account.name.resize(24);
++    if (!g_accounts.contains(account.id) && g_accounts.size() >= kAccountsMax) {
++        error = "this save keeps " + std::to_string(kAccountsMax) + " guests at most; remove one first";
++        return false;
++    }
++    const std::string id = account.id;
++    g_accounts.insert_or_assign(id, std::move(account));
++    return true;
++}
++
++bool AccountRemove(std::string_view id) {
++    const auto found = g_accounts.find(id);
++    if (found == g_accounts.end()) return false;
++    g_accounts.erase(found);
++    return true;
++}
++
++std::vector<const Account *> Accounts() {
++    std::vector<const Account *> out;
++    for (const auto &[id, account] : g_accounts) out.push_back(&account);
++    return out;
++}
++
++void AccountsClear() { g_accounts.clear(); }
++
++void AccountsDelete(const std::filesystem::path &save_directory) {
++    std::error_code error;
++    std::filesystem::remove(save_directory / kAccountsFile, error);
++}
++
++bool AccountsSave(const std::filesystem::path &save_directory) {
++    if (g_accounts.empty()) {
++        AccountsDelete(save_directory);
++        return true;
++    }
++    nlohmann::json accounts = nlohmann::json::object();
++    for (const auto &[id, account] : g_accounts) accounts[id] = {{"name", account.name}, {"player", account.player}};
++    const std::string text = nlohmann::json{{"format", 1}, {"accounts", std::move(accounts)}}.dump();
++    if (::FilesWrite(save_directory / kAccountsFile, text.data(), text.size(), true) != ::FilesResult::kWritten) {
++        std::fprintf(stderr, "co-op: could not write %s\n", (save_directory / kAccountsFile).string().c_str());
++        return false;
++    }
++    return true;
++}
++
++void AccountsLoad(const std::filesystem::path &save_directory) {
++    g_accounts.clear();
++    std::string text;
++    if (std::ifstream stream(save_directory / kAccountsFile, std::ios::binary); stream) {
++        text.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
++    }
++    if (text.empty()) return;
++    const nlohmann::json file = nlohmann::json::parse(text, nullptr, false);
++    if (!file.is_object() || file.value("format", 0) != 1 || !file.contains("accounts") || !file["accounts"].is_object()) {
++        std::fprintf(stderr, "co-op: %s could not be read; this save keeps no guests\n", (save_directory / kAccountsFile).string().c_str());
++        return;
++    }
++    for (const auto &[id, entry] : file["accounts"].items()) {
++        if (!entry.is_object()) continue;
++        std::string error;
++        AccountSet({id, entry.value("name", std::string()), entry.value("player", std::string())}, error);
++    }
++}
++
++} // namespace moonmod::coop
 diff --git a/port/src/moonmod/dungeon_npc_moonmod.cpp b/port/src/moonmod/dungeon_npc_moonmod.cpp
 new file mode 100644
 index 00000000..30ee95d5
@@ -59879,10 +60422,10 @@ index 00000000..c790c2e2
 +} // namespace dc::game
 diff --git a/port/src/moonmod/title_modes.cpp b/port/src/moonmod/title_modes.cpp
 new file mode 100644
-index 00000000..9c21ba3f
+index 00000000..134f271f
 --- /dev/null
 +++ b/port/src/moonmod/title_modes.cpp
-@@ -0,0 +1,620 @@
+@@ -0,0 +1,621 @@
 +#include "moonmod/title_modes.hpp"
 +
 +#include <algorithm>
@@ -60447,16 +60990,17 @@ index 00000000..9c21ba3f
 +}
 +
 +void BeginSandboxSession(const SandboxRequest &request) {
-+    g_sandbox = SandboxSession{request.owner, request.mode_id, static_cast<int>(SharedRuntime().Frame())};
++    g_sandbox = SandboxSession{request.owner, request.mode_id, static_cast<int>(SharedRuntime().Frame()), request.visit};
 +    g_sandbox_ending.clear();
 +    g_open_mode.reset();
 +    SharedRuntime().Publish("game.session.started",
-+                               {{"kind", "sandbox"}, {"owner", request.owner}, {"mode", request.mode_id},
-+                                {"floor", request.floor_id}, {"party_size", request.party_size},
-+                                {"frame", SharedRuntime().Frame()}});
++                               {{"kind", request.visit ? "visit" : "sandbox"}, {"owner", request.owner}, {"mode", request.mode_id},
++                                {"floor", request.visit ? Json(nullptr) : Json(request.floor_id)}, {"party_size", request.party_size},
++                                {"map", request.visit ? Json(request.map) : Json(nullptr)}, {"frame", SharedRuntime().Frame()}});
 +}
 +
 +bool SandboxActive() { return g_sandbox.has_value(); }
++bool VisitActive() { return g_sandbox.has_value() && g_sandbox->visit; }
 +const SandboxSession *ActiveSandbox() { return g_sandbox ? &*g_sandbox : nullptr; }
 +
 +void NoteSandboxEnding(std::string_view reason) {
@@ -60472,7 +61016,7 @@ index 00000000..9c21ba3f
 +    if (reopen_mode && FindTitleMode(ended.mode_id) != nullptr) g_title_mode_return = ended.mode_id;
 +    // Published now, so mods hear the end before the title reopens the mode screen (game.title.opened).
 +    SharedRuntime().Publish("game.session.ended",
-+                               {{"kind", "sandbox"}, {"owner", ended.owner}, {"mode", ended.mode_id},
++                               {{"kind", ended.visit ? "visit" : "sandbox"}, {"owner", ended.owner}, {"mode", ended.mode_id},
 +                                {"reason", reason}, {"frame", SharedRuntime().Frame()}});
 +    return reason;
 +}
@@ -60485,7 +61029,7 @@ index 00000000..9c21ba3f
 +
 +Json SessionJson(bool in_title) {
 +    if (g_sandbox) {
-+        return {{"kind", "sandbox"}, {"owner", g_sandbox->owner}, {"mode", g_sandbox->mode_id},
++        return {{"kind", g_sandbox->visit ? "visit" : "sandbox"}, {"owner", g_sandbox->owner}, {"mode", g_sandbox->mode_id},
 +                {"ending", g_sandbox_ending.empty() ? Json(nullptr) : Json(g_sandbox_ending)}};
 +    }
 +    return {{"kind", in_title ? "title" : "story"}, {"owner", nullptr}, {"mode", nullptr},
@@ -67383,6 +67927,152 @@ index 00000000..4ac4f6c9
 +    EXPECT_TRUE(moonmod::ManagerActions("test.commands-permission").empty());
 +    moonmod::SharedRuntime().Stop();
 +}
+diff --git a/port/src/tests/moonmod_coop_save_test.cpp b/port/src/tests/moonmod_coop_save_test.cpp
+new file mode 100644
+index 00000000..ebbaeab3
+--- /dev/null
++++ b/port/src/tests/moonmod_coop_save_test.cpp
+@@ -0,0 +1,140 @@
++// Co-op's split of a save (moonmod/coop_save.hpp): the world and a player's own things go across whole, each without
++// the other, and a damaged or foreign one changes nothing.
++#include <gtest/gtest.h>
++
++#include <chrono>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <memory>
++#include <random>
++#include <string>
++
++#include "game/savedata.hpp"
++#include "moonmod/coop_save.hpp"
++
++namespace {
++
++using dc::game::CSaveData;
++
++// A save as raw bytes: the split reads and writes fields only, so no constructor is needed.
++struct RawSave {
++    alignas(CSaveData) unsigned char bytes[sizeof(CSaveData)];
++    explicit RawSave(unsigned char fill) { std::memset(bytes, fill, sizeof(bytes)); }
++    CSaveData       &save() { return *reinterpret_cast<CSaveData *>(bytes); }
++    dc::game::CDngStatusData &dng() { return *save().GetDngStatus(); }
++};
++
++TEST(MoonModCoopSave, TheWorldCrossesWithoutThePlayersThings) {
++    auto host = std::make_unique<RawSave>(0x11);
++    auto guest = std::make_unique<RawSave>(0x22);
++    host->dng().floor_reached[0] = 9;
++    host->dng().party_size = 4;
++    host->dng().money = 1234;
++    guest->dng().money = 77;
++    guest->dng().party_size = 1;
++    const std::string world = moonmod::coop::ExportWorld(host->save());
++    ASSERT_TRUE(world.starts_with("DCW1"));
++    std::string error;
++    ASSERT_TRUE(moonmod::coop::ImportWorld(world, guest->save(), error)) << error;
++    EXPECT_EQ(guest->dng().floor_reached[0], 9);
++    EXPECT_EQ(guest->dng().party_size, 4); // the host's party: the characters the story has brought
++    EXPECT_EQ(guest->dng().money, 77);     // the guest keeps their own Gilda
++    EXPECT_EQ(moonmod::coop::ExportWorld(guest->save()), world);
++}
++
++TEST(MoonModCoopSave, APlayersThingsCrossWithoutTheWorld) {
++    auto first = std::make_unique<RawSave>(0x33);
++    auto second = std::make_unique<RawSave>(0x44);
++    first->dng().money = 500;
++    first->dng().max_hp[2] = 180;
++    first->dng().equipped_weapon_slot[1] = 3;
++    second->dng().floor_reached[3] = 5;
++    const std::string player = moonmod::coop::ExportPlayer(first->save());
++    ASSERT_TRUE(player.starts_with("DCP1"));
++    std::string error;
++    ASSERT_TRUE(moonmod::coop::ImportPlayer(player, second->save(), error)) << error;
++    EXPECT_EQ(second->dng().money, 500);
++    EXPECT_EQ(second->dng().max_hp[2], 180);
++    EXPECT_EQ(second->dng().equipped_weapon_slot[1], 3);
++    EXPECT_EQ(second->dng().floor_reached[3], 5); // the world stays the receiver's
++    EXPECT_EQ(moonmod::coop::ExportPlayer(second->save()), player);
++}
++
++TEST(MoonModCoopSave, DamagedOrMistakenDataChangesNothing) {
++    auto host = std::make_unique<RawSave>(0x55);
++    auto guest = std::make_unique<RawSave>(0x66);
++    const std::string world = moonmod::coop::ExportWorld(host->save());
++    const std::string player = moonmod::coop::ExportPlayer(host->save());
++    const std::string before = moonmod::coop::ExportWorld(guest->save()) + moonmod::coop::ExportPlayer(guest->save());
++    std::string error;
++    EXPECT_FALSE(moonmod::coop::ImportWorld(player, guest->save(), error)); // a player is not a world
++    EXPECT_FALSE(moonmod::coop::ImportPlayer(world, guest->save(), error));
++    EXPECT_FALSE(moonmod::coop::ImportWorld(world.substr(0, world.size() / 2), guest->save(), error)); // cut short
++    EXPECT_FALSE(moonmod::coop::ImportWorld("DCW1***", guest->save(), error));
++    // A field another build sized differently: the first field's size, one byte more.
++    std::string other = world;
++    other[4 + 3] = other[4 + 3] == 'A' ? 'B' : 'A';
++    EXPECT_FALSE(moonmod::coop::ImportWorld(other, guest->save(), error));
++    EXPECT_EQ(moonmod::coop::ExportWorld(guest->save()) + moonmod::coop::ExportPlayer(guest->save()), before);
++}
++
++struct TempDir {
++    std::filesystem::path path = std::filesystem::temp_directory_path() /
++                                 ("moonmod-coop-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
++                                  std::to_string(std::random_device{}()));
++    TempDir() { std::filesystem::create_directories(path); }
++    ~TempDir() {
++        std::error_code ignored;
++        std::filesystem::remove_all(path, ignored);
++    }
++};
++
++TEST(MoonModCoopSave, TheHostsSaveKeepsItsGuestsThings) {
++    using namespace moonmod::coop;
++    auto save = std::make_unique<RawSave>(0x10);
++    save->dng().money = 900;
++    const std::string things = ExportPlayer(save->save());
++    AccountsClear();
++    std::string error;
++    ASSERT_TRUE(AccountSet({"guest-0001", "Xiao", things}, error)) << error;
++    ASSERT_TRUE(AccountSet({"guest-0002", "Goro but a much longer name than fits", things}, error)) << error;
++    EXPECT_FALSE(AccountSet({"Bad Id", "x", things}, error));
++    EXPECT_FALSE(AccountSet({"guest-0003", "x", "not a player"}, error));
++    ASSERT_EQ(Accounts().size(), 2u);
++    EXPECT_EQ(AccountGet("guest-0002")->name.size(), 24u);
++
++    TempDir slot;
++    ASSERT_TRUE(AccountsSave(slot.path));
++    AccountsClear();
++    EXPECT_EQ(AccountGet("guest-0001"), nullptr);
++    AccountsLoad(slot.path);
++    ASSERT_NE(AccountGet("guest-0001"), nullptr);
++    EXPECT_EQ(AccountGet("guest-0001")->name, "Xiao");
++    EXPECT_EQ(AccountGet("guest-0001")->player, things);
++
++    EXPECT_TRUE(AccountRemove("guest-0001"));
++    EXPECT_TRUE(AccountRemove("guest-0002"));
++    ASSERT_TRUE(AccountsSave(slot.path)); // none left: the file goes
++    EXPECT_FALSE(std::filesystem::exists(slot.path / "coop_accounts.json"));
++    AccountsLoad(slot.path);
++    EXPECT_TRUE(Accounts().empty());
++
++    std::ofstream(slot.path / "coop_accounts.json") << "{not json";
++    AccountsLoad(slot.path); // a damaged file keeps no guests, and says so
++    EXPECT_TRUE(Accounts().empty());
++}
++
++TEST(MoonModCoopSave, ASaveKeepsSixtyFourGuestsAtMost) {
++    using namespace moonmod::coop;
++    auto save = std::make_unique<RawSave>(0x10);
++    const std::string things = ExportPlayer(save->save());
++    AccountsClear();
++    std::string error;
++    for (std::size_t i = 0; i < kAccountsMax; ++i) ASSERT_TRUE(AccountSet({"guest-" + std::to_string(1000 + i), "", things}, error));
++    EXPECT_FALSE(AccountSet({"guest-newcomer", "", things}, error));
++    EXPECT_TRUE(AccountSet({"guest-1000", "again", things}, error)); // an old guest is updated
++    AccountsClear();
++}
++
++} // namespace
 diff --git a/port/src/tests/moonmod_debug_inspect_test.cpp b/port/src/tests/moonmod_debug_inspect_test.cpp
 new file mode 100644
 index 00000000..467a995d
