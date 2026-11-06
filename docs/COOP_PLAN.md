@@ -43,4 +43,4 @@ shared pause and doors.
 2. **Georama, finer.** Two players editing one town at once are told so (the last to leave the editor keeps their
    changes); merging the two edits chip by chip would keep both.
 3. **Accounts, wider.** The host's view of its guests in the Mod Manager (list, forget).
-4. **Joining.** A picker for the code on a keyboard; the server setting on the title page.
+4. **Joining.** A picker for the code on a keyboard (typing it).

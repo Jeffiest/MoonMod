@@ -738,6 +738,10 @@ local function page()
     "Cross on a letter steps it on; Square steps it back.",
     S.status or ("You are " .. (my_name() or "nameless (set a name in the mod's settings)") .. "."),
   }
+  -- which server: the public relay, or the private one the settings name (its host only)
+  local server = setting("server", "")
+  lines[#lines + 1] = server == "" and "Server: the public relay." or
+                      ("Server: " .. (server:match("^wss?://([^/]+)") or server):sub(1, 48) .. " (private).")
   return {title = "ONLINE CO-OP", subtitle = "Visit a friend's Dark Cloud", root = true, hint = "", lines = lines,
           entries = entries}
 end

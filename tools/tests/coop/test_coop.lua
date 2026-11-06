@@ -164,6 +164,13 @@ print("A first visit")
 local host = make_game("Toan")
 local guest = make_game("Xiao")
 check(guest.title and guest.title.title == "ONLINE CO-OP", "the title screen has Online Co-op")
+check(guest.title.lines[4] == "Server: the public relay.", "and says which server it uses", guest.title.lines[4])
+do
+  local private = make_game("Pip")
+  private.settings.server = "wss://coop.example.net/room"
+  private.emit("game.title.opened", {})
+  check(private.title.lines[4] == "Server: coop.example.net (private).", "a private server by its host", private.title.lines[4])
+end
 check(guest.storage.me and guest.storage.me.id:match("^p%x+$") and guest.storage.me.id ~= host.storage.me.id, "each game makes its own player id")
 host.keys.host_key = true
 both(host, guest, 2)
