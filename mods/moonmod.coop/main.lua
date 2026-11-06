@@ -55,7 +55,7 @@ local function my_name()
 end
 
 -- The session: role "host" or "guest" (nil when none), the room code, the players by id, and the pieces arriving.
-local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame = 0, kept_at = 0}
+local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame = 0, kept_at = 0, names = {}}
 local code = moonmod.storage.get("code") or "-----" -- the code being typed on the title page
 
 local function net_open(kind, args)
@@ -95,10 +95,20 @@ local function take_piece(from, kind, rest)
 end
 
 local function show_room()
-  if not S.role then hud(nil) return end
+  if not S.role then
+    hud(nil)
+    try(game.render.layer_remove, {id = "coop_who"})
+    return
+  end
   local count = 1
   for _ in pairs(S.players) do count = count + 1 end
   hud(string.format("CO-OP %s  %d of 4", S.code or "....", count))
+  -- the others in the room, by name, under it
+  local names = {}
+  for _, name in pairs(S.names) do names[#names + 1] = name end
+  table.sort(names)
+  if #names > 0 then try(game.render.layer_register, {id = "coop_who", text = table.concat(names, ", "):sub(1, 48)})
+  else try(game.render.layer_remove, {id = "coop_who"}) end
 end
 
 -- Seeing each other ------------------------------------------------------------------------------------------------
@@ -172,13 +182,16 @@ local function hear_name(peer, rest)
   others[peer] = o
   local first = o.name == nil
   o.name = rest ~= "" and rest:sub(1, 24) or nil
+  S.names[peer] = o.name or ("Player " .. peer)
   if first then say_name(peer) end
+  show_room()
 end
 
 local function forget(peer)
   local o = others[peer]
   if o and o.slot then try(game.world and game.world.avatar_clear, {slot = o.slot}) end
   others[peer] = nil
+  S.names[peer] = nil
 end
 
 local function forget_all()
@@ -465,7 +478,7 @@ local function stop(reason)
   door.log, door.done, door.waiting = {}, {}, {}
   builders = {}
   if reason then toast("Co-op: " .. reason) end
-  S.role, S.code, S.players, S.pieces, S.guest = nil, nil, {}, {}, nil
+  S.role, S.code, S.players, S.pieces, S.guest, S.names = nil, nil, {}, {}, nil, {}
   show_room()
 end
 

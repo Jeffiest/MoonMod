@@ -32,7 +32,7 @@ shared pause and doors.
 | Monsters | The host's game runs each floor's monsters: they wake for and chase the nearest player, a remote one too, and a blow, shot or spell on a guest's hero goes to that guest as a monster's blow (`combat.strike_player`, so guard and dodge work; a small hit flinches, a blow knocks back). A guest's monsters are copies of the host's (`monsters.puppet_set`), fifteen reports a second; a guest's blow (a weapon's, a bomb's, a thrown item's) goes to the host's monster (`monsters.mirror_hit`); a kill on the host is a death on every game. Loot stays each game's own: a chest or a drop is every player's to take, in their own game |
 | Doors | A door, gate or switch one player opens (a script that changes the floor without leaving it) opens in every game on that floor (`dungeons.shared_events_get/run`), the key taken as given; each game keeps the floor's opened doors for a player who arrives later |
 | Towns | Players walking in the same town see each other there, as the town's hero each walks as; one in a menu or a talk still stands where they were |
-| Names | Each player's name over their hero on the floor or in town (the mod's "name" setting), the guests' in blue |
+| Names | Each player's name over their hero on the floor or in town, and the others' names on the HUD under the room's code (the mod's "name" setting), the guests' in blue |
 | Pausing | A pause or menu holds only that player's game. The host's holds the floor's monsters for everyone (the guests' copies wait where they are); a guest's holds nothing of the others' |
 | Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`) and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
 
@@ -42,4 +42,4 @@ shared pause and doors.
 2. **Georama, finer.** Two players editing one town at once are told so (the last to leave the editor keeps their
    changes); merging the two edits chip by chip would keep both.
 3. **Accounts, wider.** Mods' levels (RPG, Ascension) in a guest's things, as the gear and charms are; the host's view of its guests in the Mod Manager (list, forget).
-4. **Joining.** A picker for the code on a keyboard; the server setting on the title page; friends' names on the HUD.
+4. **Joining.** A picker for the code on a keyboard; the server setting on the title page.

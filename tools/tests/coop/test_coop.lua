@@ -186,6 +186,8 @@ check(guest.started and guest.started.player == nil and guest.started.map == 2, 
       guest.started and guest.started.map)
 check(find_toast(host, "Xiao joins for the first time"), "the host hears who joined")
 check(host.layers.coop == "CO-OP ABCDE  2 of 4", "the host's HUD counts two", host.layers.coop)
+check(host.layers.coop_who == "Xiao" and guest.layers.coop_who == "Toan", "and each HUD names the others",
+      tostring(host.layers.coop_who) .. "/" .. tostring(guest.layers.coop_who))
 check(find_toast(guest, "host's world"), "the guest is told it is in the host's world")
 
 print("The guest's things go to the host")
