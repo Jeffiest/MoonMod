@@ -735,7 +735,7 @@ local function page()
   entries[#entries + 1] = {id = "clear", label = "Clear the code"}
   local lines = {
     "Join a friend's world with their room's five letters.",
-    "Cross on a letter steps it on; Square steps it back.",
+    "Type the letters, or Cross on one steps it on, Square back.",
     S.status or ("You are " .. (my_name() or "nameless (set a name in the mod's settings)") .. "."),
   }
   -- which server: the public relay, or the private one the settings name (its host only)
@@ -768,11 +768,51 @@ local function step(i, way)
   moonmod.storage.set("code", code)
 end
 
-moonmod.on("game.title.opened", function() S.status = nil; show(0) end)
+-- Typing the code: on this page a letter or digit key fills the next letter, Backspace takes the last one back. (The
+-- keyboard's E is also Square, which steps a letter back here: a Square while E is down is the typing's, not a step.)
+local typing = {open = false, at = 1}
+for i = 1, #LETTERS do
+  local c = LETTERS:sub(i, i)
+  try(game.input.bind, {id = "type_" .. c, keys = {c}})
+end
+try(game.input.bind, {id = "type_back", keys = {"Backspace"}})
+moonmod.on("game.tick", function()
+  for i = 1, #LETTERS do
+    local c = LETTERS:sub(i, i)
+    local key = try(game.input.consume, {id = "type_" .. c})
+    if key and key.pressed and typing.open and not S.role then
+      code = code:sub(1, typing.at - 1) .. c .. code:sub(typing.at + 1)
+      moonmod.storage.set("code", code)
+      typing.at = typing.at % 5 + 1
+      show(code:find("-", 1, true) and typing.at - 1 or 5) -- all five typed: on Join
+    end
+  end
+  local back = try(game.input.consume, {id = "type_back"})
+  if back and back.pressed and typing.open and not S.role then
+    typing.at = typing.at == 1 and 5 or typing.at - 1
+    code = code:sub(1, typing.at - 1) .. "-" .. code:sub(typing.at + 1)
+    moonmod.storage.set("code", code)
+    show(typing.at - 1)
+  end
+end)
+moonmod.on("game.session.started", function() typing.open = false end)
+
+moonmod.on("game.title.opened", function()
+  S.status = nil
+  typing.open = true
+  typing.at = code:find("-", 1, true) or 1
+  show(0)
+end)
 moonmod.on("game.title.selected", function(e)
   local entry = e and e.entry
   local i = entry and tonumber(entry:match("^c(%d)$"))
+  if entry == "back" then typing.open = false end
+  if i and e.action == "square" then
+    local held = try(game.input.state, {id = "type_E"})
+    if held and held.down then show(typing.at - 1) return end
+  end
   if i then
+    typing.at = i
     step(i, e.action == "square" and -1 or 1)
     show(i - 1)
   elseif entry == "join" then
@@ -781,6 +821,7 @@ moonmod.on("game.title.selected", function(e)
   elseif entry == "clear" then
     code = "-----"
     moonmod.storage.set("code", code)
+    typing.at = 1
     show(0)
   end
 end)

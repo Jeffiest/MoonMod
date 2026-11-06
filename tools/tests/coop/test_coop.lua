@@ -41,7 +41,8 @@ local function make_game(name)
   env.game = {
     ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end, register = function() return true end},
     render = {layer_register = function(l) S.layers[l.id] = l.text end, layer_remove = function(l) S.layers[l.id] = nil end},
-    input = {bind = function() return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end},
+    input = {bind = function() return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end,
+             state = function(a) return {down = S.keys[a.id] == true} end},
     title = {mode_register = function(d) S.title = d; return true end, mode_set = function(d) S.title = d; return true end},
     world = {
       get = function() return S.map end,
@@ -471,6 +472,21 @@ do
   check(find_toast(k, "The host changed Norune; back to its entrance"), "walked back to the entrance of the town that changed")
   h.keys.leave_key = true
   all(2)
+end
+
+print("Typing the code")
+do
+  local t = make_game("Typer")
+  t.emit("game.title.opened", {})
+  for c in ("QR7KM"):gmatch(".") do t.keys["type_" .. c] = true; t.tick() end
+  check(t.title.entries[6].label == "Join room QR7KM", "a code typed on the keyboard fills the letters", t.title.entries[6].label)
+  t.keys.type_back = true; t.tick()
+  t.keys.type_back = true; t.tick()
+  t.keys.type_Z = true; t.tick()
+  check(t.title.entries[6].label == "Join room QR7Z-", "Backspace takes letters back, and typing goes on from there", t.title.entries[6].label)
+  t.keys.type_E = true -- a key that is also Square: no letter steps, only the typing
+  t.emit("game.title.selected", {entry = "c4", action = "square"})
+  check(t.title.entries[6].label == "Join room QR7Z-", "Square with E down is typing, not a step back", t.title.entries[6].label)
 end
 
 print("Refusals")
