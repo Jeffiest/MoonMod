@@ -388,6 +388,24 @@ function door.hear(rest)
   table.insert(door.waiting, {scene = scene, text = text})
 end
 
+-- The clock: the host's ------------------------------------------------------------------------------------------
+-- Every ten seconds the host sends where its day is ("C fraction"); a guest whose clock has drifted from it is set to
+-- it (world.set_time), so the towns' light and their people's hours match.
+local CLOCK_EVERY = 600
+local function send_clock()
+  local w = try(game.world.get)
+  if type(w) == "table" and type(w.time) == "table" and w.time.fraction then
+    send("all", "C", string.format("%.4f", w.time.fraction))
+  end
+end
+local function hear_clock(rest)
+  local host = tonumber(rest)
+  local w = try(game.world.get)
+  if not host or host < 0 or host >= 1 or type(w) ~= "table" or type(w.time) ~= "table" or not w.time.fraction then return end
+  local drift = math.abs(host - w.time.fraction)
+  if math.min(drift, 1 - drift) > 0.005 then try(game.world.set_time, {fraction = host}) end
+end
+
 -- Georama: the host's world -----------------------------------------------------------------------------------------
 -- When a player leaves Georama's edit mode, their game sends that town (georama.town_export) to the host, which takes
 -- it into its world and sends it on to everyone else; the host's own edits go straight out. Each game takes the town
@@ -584,6 +602,7 @@ local function message(peer, data)
   if kind == "P" then hear_position(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
+  if kind == "C" then if S.role == "guest" and peer == 0 then hear_clock(rest) end return end
   if kind == "M" then mon.hear(peer, rest) return end
   if kind == "E" then door.hear(rest) return end
   if kind == "H" then if S.role == "host" then mon.hit_on_host(peer, rest) end return end
@@ -662,6 +681,7 @@ moonmod.on("game.tick", function(e)
   end
   if S.role and S.code then mon.tick() end
   if S.role and S.code and S.frame % 10 == 0 then door.step() end
+  if S.role == "host" and S.code and S.frame % CLOCK_EVERY == 0 then send_clock() end
   if S.role and S.code and S.frame % 30 == 0 then
     watch_editing()
     retry_towns()

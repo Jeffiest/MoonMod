@@ -45,7 +45,13 @@ local function make_game(name)
              state = function(a) return {down = S.keys[a.id] == true} end},
     title = {mode_register = function(d) S.title = d; return true end, mode_set = function(d) S.title = d; return true end},
     world = {
-      get = function() return S.map end,
+      get = function()
+        local w = {}
+        for k, v in pairs(S.map) do w[k] = v end
+        w.time = {fraction = S.clock or 0.25}
+        return w
+      end,
+      set_time = function(a) S.clock = a.fraction; S.clock_sets = (S.clock_sets or 0) + 1; return {time = {fraction = a.fraction}} end,
       avatar_set = function(a) S.avatars[a.slot] = a; return {slot = a.slot, shown = true} end,
       avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
     },
@@ -472,6 +478,30 @@ do
   check(find_toast(k, "The host changed Norune; back to its entrance"), "walked back to the entrance of the town that changed")
   h.keys.leave_key = true
   all(2)
+end
+
+print("The host's clock")
+do
+  relay.rooms = {}
+  local h, g = make_game("Toan"), make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  h.clock, g.clock = 0.62, 0.40
+  both(h, g, 610)
+  check(g.clock == 0.62, "a guest's clock is set to the host's", g.clock)
+  local sets = g.clock_sets
+  both(h, g, 610)
+  check(g.clock_sets == sets, "and left alone while it keeps time")
+  h.keys.leave_key = true
+  both(h, g, 2)
 end
 
 print("Typing the code")
