@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 1
+local PROTOCOL = 2
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -196,6 +196,95 @@ moonmod.on("game.dungeon.generating", function(e)
   try(game.dungeons and game.dungeons.set_seed, {seed = floor_seed(e.dungeon_id or 0, e.floor_id or 0)})
 end)
 
+-- Monsters: the host's -------------------------------------------------------------------------------------------
+-- The host's game runs a floor's monsters for everyone. There they see every player on the floor and go for the
+-- nearest; a blow that lands on another player comes back from monsters.mirror_get and goes to that player's game
+-- ("D damage kind flags"), which takes it as a monster's blow (combat.strike_player), guard and dodge and all. Fifteen
+-- times a second the host sends where its monsters are ("M scene slot,kind,state,hp,max_hp,x,y,z,heading,motion;..."),
+-- and a guest on that floor makes its own monsters copies of them (monsters.puppet_set): they stand, move and die as
+-- the host's do. A guest's blow on one goes to the host ("H slot damage"), whose monster takes it.
+
+local MIRROR_EVERY = 4    -- frames between the host's monster reports
+local MIRROR_QUIET = 60   -- frames without one before a guest's monsters think for themselves again
+local mon = {puppets = false, heard = 0}
+
+function mon.peer_with_avatar(slot)
+  for peer, o in pairs(others) do if o.slot == slot then return peer end end
+  return nil
+end
+
+function mon.host_step()
+  local anyone = false
+  for _, o in pairs(others) do if o.slot then anyone = true break end end
+  if not anyone or not my_scene then return end
+  local got = try(game.monsters and game.monsters.mirror_get)
+  if type(got) ~= "table" then return end
+  local parts = {}
+  for _, m in ipairs(got.monsters or {}) do
+    parts[#parts + 1] = string.format("%d,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.3f,%d", m.slot, m.kind, m.state, m.hp, m.max_hp,
+                                      m.x, m.y, m.z, m.heading, m.motion)
+  end
+  send("all", "M", my_scene .. " " .. (#parts > 0 and table.concat(parts, ";") or "-"))
+  for _, hit in ipairs(got.hits or {}) do
+    local peer = mon.peer_with_avatar(hit.avatar)
+    if peer then send(peer, "D", string.format("%d %d %d", hit.damage, hit.kind or 0, hit.flags or 0)) end
+  end
+end
+
+function mon.release()
+  if mon.puppets then try(game.monsters and game.monsters.puppet_clear) end
+  mon.puppets = false
+end
+
+function mon.hear(peer, rest)
+  if S.role ~= "guest" or peer ~= 0 then return end
+  local scene, list = rest:match("^(%S+) (%S+)$")
+  if not scene or scene ~= my_scene then mon.release() return end
+  local monsters = {}
+  if list ~= "-" then
+    for item in list:gmatch("[^;]+") do
+      local f = {}
+      for v in item:gmatch("[^,]+") do f[#f + 1] = tonumber(v) end
+      if #f == 10 then
+        monsters[#monsters + 1] = {slot = math.floor(f[1]), kind = math.floor(f[2]), state = math.floor(f[3]),
+                                   hp = math.floor(f[4]), max_hp = math.floor(f[5]), x = f[6], y = f[7], z = f[8],
+                                   heading = f[9], motion = math.floor(f[10])}
+      end
+    end
+  end
+  if try(game.monsters and game.monsters.puppet_set, {monsters = monsters}) then
+    mon.puppets = true
+    mon.heard = S.frame
+  end
+end
+
+-- A guest's blow on a copy of the host's monster: the host's takes it.
+function mon.hit_on_host(peer, rest)
+  local o = others[peer]
+  if not (o and o.scene and o.scene == my_scene) then return end
+  local slot, damage = rest:match("^(%d+) (%d+)$")
+  if slot then try(game.monsters and game.monsters.mirror_hit, {slot = tonumber(slot), damage = tonumber(damage)}) end
+end
+
+-- The host's monster struck this guest.
+function mon.struck(rest)
+  local damage, kind, flags = rest:match("^(%d+) (%-?%d+) (%-?%d+)$")
+  local p = try(game.player and game.player.get)
+  if not (damage and my_scene and p and p.position) then return end
+  try(game.combat and game.combat.strike_player, {x = p.position.x, y = p.position.y + 20, z = p.position.z, radius = 30,
+      damage = math.min(9999, tonumber(damage)), kind = tonumber(flags) ~= 0 and "heavy" or "light"})
+end
+
+function mon.tick()
+  if S.role == "host" and S.frame % MIRROR_EVERY == 0 then mon.host_step() end
+  if S.role == "guest" and mon.puppets and (S.frame - mon.heard > MIRROR_QUIET or not my_scene) then mon.release() end
+end
+
+moonmod.on("game.enemy_hit", function(e)
+  if S.role ~= "guest" or not mon.puppets or type(e) ~= "table" or not e.slot or not e.damage then return end
+  send(0, "H", string.format("%d %d", e.slot, math.floor(e.damage)))
+end)
+
 -- Georama: the host's world -----------------------------------------------------------------------------------------
 -- When a player leaves Georama's edit mode, their game sends that town (georama.town_export) to the host, which takes
 -- it into its world and sends it on to everyone else; the host's own edits go straight out. Each game takes the town
@@ -258,6 +347,7 @@ end
 local function stop(reason)
   try(game.net.leave)
   forget_all()
+  mon.release()
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest = nil, nil, {}, {}, nil
   show_room()
@@ -363,6 +453,9 @@ local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
   if not kind then return end
   if kind == "P" then hear_position(peer, rest) return end
+  if kind == "M" then mon.hear(peer, rest) return end
+  if kind == "H" then if S.role == "host" then mon.hit_on_host(peer, rest) end return end
+  if kind == "D" then if S.role == "guest" and peer == 0 then mon.struck(rest) end return end
   if kind == "TOWN" then
     local whole = take_piece(peer, kind, rest)
     if whole then town_from(peer, whole) end
@@ -432,6 +525,7 @@ moonmod.on("game.tick", function(e)
     send_position()
     show_others()
   end
+  if S.role and S.code then mon.tick() end
   if S.role and S.code and S.frame % 30 == 0 then
     watch_editing()
     retry_towns()

@@ -19,6 +19,7 @@ local function make_game(name)
              world = "DCW1" .. string.rep("w", 30000) .. name, things = "DCP1" .. string.rep("p", 20000) .. name,
              map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {},
              avatars = {}, seeds = {}, player = {character = "toan"},
+             monsters = {}, avatar_hits = {}, puppets = nil, mirror_hits = {}, strikes = {},
              towns = {[0] = "DCT10:start", "DCT11:start", "DCT12:start", "DCT13:start", "DCT14:start"}}
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
@@ -47,6 +48,17 @@ local function make_game(name)
       avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
     },
     player = {get = function() return S.player end},
+    monsters = {
+      mirror_get = function()
+        local hits = S.avatar_hits
+        S.avatar_hits = {}
+        return {monsters = S.monsters, hits = hits}
+      end,
+      puppet_set = function(a) S.puppets = a.monsters; return {followed = {}, refused = {}} end,
+      puppet_clear = function() S.puppets = nil; return {cleared = true} end,
+      mirror_hit = function(a) S.mirror_hits[#S.mirror_hits + 1] = a; return {slot = a.slot, damage = a.damage} end,
+    },
+    combat = {strike_player = function(a) S.strikes[#S.strikes + 1] = a; return {} end},
     dungeons = {set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end},
     georama = {
       town_export = function(a) return {town_id = a.town_id, data = S.towns[a.town_id]} end,
@@ -251,6 +263,57 @@ do
   check(h.avatars[1] == nil, "a guest who leaves is taken away")
   h.keys.leave_key = true
   h.tick()
+end
+
+print("Monsters: the host's")
+do
+  relay.rooms = {}
+  local h = make_game("Toan")
+  local g = make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 7}
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 7}
+  h.player = {character = "toan", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "xiao", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
+  h.monsters = {{slot = 0, kind = 3, state = 2, hp = 40, max_hp = 60, x = 10.5, y = 0, z = -20, heading = 1.25, motion = 4},
+                {slot = 5, kind = 7, state = 1, hp = 90, max_hp = 90, x = 300, y = 5, z = 80, heading = 0, motion = 0}}
+  both(h, g, 16)
+  local p = g.puppets
+  check(p and #p == 2 and p[1].slot == 0 and p[1].hp == 40 and p[1].x == 10.5 and p[1].motion == 4 and p[2].kind == 7,
+        "a guest on the host's floor copies the host's monsters", p and #p)
+  h.monsters = {}
+  both(h, g, 8)
+  check(g.puppets and #g.puppets == 0, "the host's last monster gone, the guest's copies go too")
+  -- a guest's blow on a copy reaches the host's monster
+  h.monsters = {{slot = 0, kind = 3, state = 2, hp = 40, max_hp = 60, x = 10, y = 0, z = 0, heading = 0, motion = 0}}
+  both(h, g, 8)
+  g.emit("game.enemy_hit", {slot = 0, damage = 17, attacker = 1})
+  both(h, g, 2)
+  check(h.mirror_hits[1] and h.mirror_hits[1].slot == 0 and h.mirror_hits[1].damage == 17, "a guest's blow lands on the host's monster")
+  -- the host's monster strikes the guest's hero
+  h.avatar_hits = {{avatar = 1, slot = 0, damage = 12, kind = 0, flags = 1}}
+  both(h, g, 6)
+  local strike = g.strikes[1]
+  check(strike and strike.damage == 12 and strike.kind == "heavy" and strike.x == 50, "a monster's blow on a guest's hero strikes the guest", strike and strike.damage)
+  check(#g.strikes == 1, "once")
+  -- the guest goes down the stairs: its monsters are its own again
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 8}
+  both(h, g, 12)
+  check(g.puppets == nil, "on another floor the guest's monsters think for themselves")
+  g.emit("game.enemy_hit", {slot = 0, damage = 5})
+  both(h, g, 2)
+  check(#h.mirror_hits == 1, "and its blows there stay its own")
+  h.keys.leave_key = true
+  both(h, g, 2)
 end
 
 print("Georama: the host's world")

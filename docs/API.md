@@ -2527,6 +2527,17 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   dungeon frame and let go out of the dungeon (the slot is kept for the next floor). `world.avatar_clear({slot})`
   takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays.
 
+- `monsters.mirror_get()` (co-op's host) gives the floor's monsters, `{monsters = {{slot, kind, state, hp, max_hp, x,
+  y, z, heading, motion}, ...}, hits}`, and the blows its monsters landed on other players' heroes since the last call,
+  `hits = {{avatar, slot, damage, kind, flags}, ...}` (`avatar` as `world.avatar_set` numbers it). While heroes are on
+  the floor, the host's monsters see them as players: each wakes for the nearest player and chases it.
+  `monsters.puppet_set({monsters})` (a guest) makes this floor's monsters copies of those, by slot: a copy has no
+  thoughts or blows of its own and stands, turns and moves as the host's does; a slot left out, or one with `hp` 0, is
+  gone on the host, and a copy still up dies, its own death and drops playing out. A slot holding another kind here is
+  `refused`. `monsters.puppet_clear()` gives them their own thoughts back (leaving the floor does too).
+  `monsters.mirror_hit({slot, damage})` (the host) lands another player's blow on a monster: the life goes, and a kill
+  dies on the host as the host's own would.
+
 - `georama.town_export({town_id})` gives one town's Georama (its record and chips) as `{data}` text, and
   `georama.town_import({town_id, data})` takes it. A town open in Georama's editor or a menu is not imported over: the
   call fails with a reason starting `busy`, to be tried again. A player walking in that town is walked into it again,
