@@ -25,7 +25,7 @@ shared pause and doors.
 | Relay | Cloudflare Worker and private server (`server.mjs`, Docker), one protocol (`coop/relay/README.md`); tested |
 | `net.*` | Rooms by code, text messages, 4 players; web WebSocket, Windows WinHTTP, Linux/macOS libcurl; tested against both relays (Windows compiled, not run) |
 | The save's split | `save.world_export/import`, `save.player_export/import`; tested |
-| Accounts | `save.account_*`, kept in the host's slot folder with each save; tested |
+| Accounts | `save.account_*`, kept in the host's slot folder with each save; a guest's things carry their gear and charm slots; tested |
 | Visits | `session.start {visit}`: the host's world and the guest's things in a fresh game, in the host's town; no save writes |
 | The mod: joining | Host (F8 or Mod Manager), join from the title screen's Online Co-op by code; the world and the account cross in pieces; a new account for someone new; the guest's things go to the host every minute and on leaving (F10); the host leaving ends the visits. `tools/tests/coop/test_coop.lua` |
 | Seeing each other | `world.avatar_set`: up to three other players on the dungeon floor, with their weapons, easing between reports sent ten times a second; the host in its own colours, guests in blue; only on the same floor; gone after three quiet seconds. Every game builds each floor from the room's seed, so floors match whoever arrives first |
@@ -41,6 +41,5 @@ shared pause and doors.
 1. **Seeing each other in Georama's edit mode** (walking in a town is done): the editor's camera and cursor.
 2. **Georama, finer.** Two players editing one town at once are told so (the last to leave the editor keeps their
    changes); merging the two edits chip by chip would keep both.
-3. **Accounts, wider.** Gear and charm slots (MoonMod's own, beside the save) in a guest's things; mods' levels
-   (RPG, Ascension) the same way; the host's view of its guests in the Mod Manager (list, forget).
+3. **Accounts, wider.** Mods' levels (RPG, Ascension) in a guest's things, as the gear and charms are; the host's view of its guests in the Mod Manager (list, forget).
 4. **Joining.** A picker for the code on a keyboard; the server setting on the title page; friends' names on the HUD.

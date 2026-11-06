@@ -2505,6 +2505,9 @@ things** (each character's life, defense, water, weapons and equipped weapon; th
 items and stock; Gilda; fishing points). Both travel as text a mod passes along.
 
 - `save.world_export()` and `save.player_export()` give `{data}`: `"DCW1..."` and `"DCP1..."`, about 64 KB and 37 KB.
+  A player's things carry MoonMod's own beside the save after them (`|DCX1` and a JSON object): the gear and the charm
+  slots, as `gear.json` and `charms.json` hold them; an import without them leaves none. A visit for a new account
+  (no `player`) starts with no gear or charms.
 - `save.world_import({data})` and `save.player_import({data})` work only during this mod's own visit, so no mod can
   write another game's world or things into a player's save. Data from another build (a field sized differently) is
   refused whole, and a refused import changes nothing.
