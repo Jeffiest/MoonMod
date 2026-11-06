@@ -256,8 +256,12 @@ end
 local slot_key, slot = nil, nil
 local active = nil
 local function all_slots() local d = moonmod.storage.get("slots"); return type(d) == "table" and d or {} end
+-- A co-op visit (moonmod.coop): the levels are the guest's own, kept with their things in the host's save
+-- (save.player_extra_get/set), never in this game's slots.
+local visiting = false
 local function save_slot()
   if not slot_key or not slot then return end
+  if slot_key == "visit" then try(game.save.player_extra_set, {data = slot}) return end
   local data = all_slots()
   data[slot_key] = slot
   moonmod.storage.set("slots", data)
@@ -459,6 +463,7 @@ local function load_slot()
   local key = identity and identity.slot_id and (tostring(identity.slot_id) .. ":" .. tostring(identity.slot_generation)) or nil
   local player = try(game.player.get)
   if not key and not player then key = nil elseif not key then key = "unsaved" end
+  if visiting then key = "visit" end
   if key == slot_key then return end
   local previous = slot_key
   slot_key, active, hud = key, nil, {}
@@ -468,11 +473,12 @@ local function load_slot()
     return
   end
   local data = all_slots()
-  if previous == "unsaved" and key ~= "unsaved" and type(data[key]) ~= "table" and type(data.unsaved) == "table" then
+  if previous == "unsaved" and key ~= "unsaved" and key ~= "visit" and type(data[key]) ~= "table" and type(data.unsaved) == "table" then
     data[key], data.unsaved = data.unsaved, nil
     moonmod.storage.set("slots", data)
   end
   local saved = data[key]
+  if key == "visit" then saved = (try(game.save.player_extra_get) or {}).data end
   slot = type(saved) == "table" and saved or {}
   slot.mastery = type(slot.mastery) == "table" and slot.mastery or {}
   if type(slot.chars) ~= "table" then
@@ -927,9 +933,16 @@ local function set_sandbox(now)
   in_sandbox = now
   if now then stand_down() else register_weapon_formulas(); load_slot() end
 end
-moonmod.on("game.session.started", function() set_sandbox(true) end)
-moonmod.on("game.session.ended", function() set_sandbox(false) end)
+moonmod.on("game.session.started", function(e)
+  if type(e) == "table" and e.kind == "visit" then visiting = true; load_slot() return end
+  set_sandbox(true)
+end)
+moonmod.on("game.session.ended", function(e)
+  if visiting then visiting = false; load_slot() return end
+  set_sandbox(false)
+end)
 local session = try(game.session.get)
+visiting = type(session) == "table" and session.kind == "visit"
 set_sandbox(type(session) == "table" and session.kind == "sandbox")
 if not in_sandbox then load_slot() end
 moonmod.log("info", "RPG: Character Paths ready" .. (TUNING and " (engine tuning on)" or " (engine tuning not available yet: Quick Blade, Sure Footing, Evasion, Fleet Foot, Keen Eyes wait)"))

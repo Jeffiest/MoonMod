@@ -64,7 +64,9 @@ local function boot(storage)
       end,
       set_rank = function(a) S.ranks[a.id] = a.rank; return {rank = a.rank} end,
     },
-    save = {slot_id = function() return {slot_id = 1, slot_generation = 1} end},
+    save = {slot_id = function() return {slot_id = 1, slot_generation = 1} end,
+            player_extra_get = function() return S.extra ~= nil and {data = S.extra} or {} end,
+            player_extra_set = function(a) S.extra = a.data; S.extra_sets = (S.extra_sets or 0) + 1; return {kept = true} end},
     player = {
       get = function() return {character = S.active, hp = S.hp, max_hp = S.max_hp, position = {x = 0, y = 0, z = 0},
                                weapon = {id = "w", item_no = 258, slot = 0, attack = 20, speed = 10, durability = 30, durability_max = 30}} end,
@@ -242,6 +244,22 @@ S = boot({slots = {["1:1"] = {chars = {toan = {level = 10, xp = 0, ranks = {["sw
 S.tick(10)
 check(S.ranks[ID .. ":swordsman.keen_edge"] == 5, "Toan's RPG 1 ranks are read from the save")
 check(math.abs(S.formulas.level.value - (1 + 0.025 * 9) * 1.15) < 1e-6, "and still work", S.formulas.level.value)
+
+print("A co-op visit")
+S = boot({slots = {["1:1"] = {chars = {toan = {level = 10, xp = 0, ranks = {}}}, mastery = {}}}})
+S.tick(10)
+local own = S.formulas.level.value
+S.extra = {chars = {toan = {level = 4, xp = 0, ranks = {}}}, mastery = {}}
+S.emit("game.session.started", {kind = "visit", owner = "moonmod.coop", map = 0})
+S.tick(40)
+check(S.formulas.level.value < own and math.abs(S.formulas.level.value - (1 + 0.025 * 3)) < 1e-6,
+      "in the host's world the guest's own level (4) counts, not this game's save (10)", S.formulas.level.value)
+S.levels("toan", 2)
+check(S.extra.chars.toan.level > 4, "levels earned there go with the guest's things", S.extra.chars.toan.level)
+check(S.storage.slots["1:1"].chars.toan.level == 10 and S.storage.slots.visit == nil, "and never into this game's saves")
+S.emit("game.session.ended", {kind = "visit"})
+S.tick(40)
+check(math.abs(S.formulas.level.value - own) < 1e-6, "back home, the save's own level again")
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.modern-cloud",
   "name": "Modern Cloud",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Jeffiest",
   "description": "Quality of life for the story game, each part its own setting: thirst down to none, slower weapon wear, a weapon guard that warns, repairs from your Repair Powder or never lets a weapon break, the floor map and monsters shown, quicker character switches, a quicker walk, and keys 1, 2 and 3 for the quick item slots.",
   "framework_api": 1,

@@ -142,7 +142,8 @@ local function set_sandbox(now)
   in_sandbox = now
   apply()
 end
-moonmod.on("game.session.started", function() set_sandbox(true) end)
+-- A co-op visit (moonmod.coop) is the story game in the host's world: this mod plays on.
+moonmod.on("game.session.started", function(e) if not (type(e) == "table" and e.kind == "visit") then set_sandbox(true) end end)
 moonmod.on("game.session.ended", function() set_sandbox(false) end)
 moonmod.on("settings.changed", function() bind_keys(); apply() end)
 

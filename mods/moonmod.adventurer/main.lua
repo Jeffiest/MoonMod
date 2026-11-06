@@ -94,8 +94,12 @@ end
 local slot_key, slot = nil, nil
 local active = nil      -- active character id
 local function all_slots() local d = moonmod.storage.get("slots"); return type(d) == "table" and d or {} end
+-- A co-op visit (moonmod.coop): the levels are the guest's own, kept with their things in the host's save
+-- (save.player_extra_get/set), never in this game's slots.
+local visiting = false
 local function save_slot()
   if not slot_key or not slot then return end
+  if slot_key == "visit" then try(game.save.player_extra_set, {data = slot}) return end
   local data = all_slots()
   data[slot_key] = slot
   moonmod.storage.set("slots", data)
@@ -210,10 +214,12 @@ register_weapon_formulas()
 local function load_slot()
   local identity = try(game.save.slot_id)
   local key = identity and identity.slot_id and (tostring(identity.slot_id) .. ":" .. tostring(identity.slot_generation)) or nil
+  if visiting then key = "visit" end
   if key == slot_key then return end
   slot_key, active, hud = key, nil, {}
   if not key then slot = nil; try(game.render.bar_remove, {id = "xp"}); try(game.render.bar_remove, {id = "focus"}); return end
   local saved = all_slots()[key]
+  if key == "visit" then saved = (try(game.save.player_extra_get) or {}).data end
   slot = type(saved) == "table" and saved or {}
   slot.mastery = type(slot.mastery) == "table" and slot.mastery or {}
   if type(slot.chars) ~= "table" then
@@ -510,9 +516,16 @@ local function set_sandbox(now)
   in_sandbox = now
   if now then stand_down() else register_weapon_formulas(); load_slot() end
 end
-moonmod.on("game.session.started", function() set_sandbox(true) end)
-moonmod.on("game.session.ended", function() set_sandbox(false) end)
+moonmod.on("game.session.started", function(e)
+  if type(e) == "table" and e.kind == "visit" then visiting = true; load_slot() return end
+  set_sandbox(true)
+end)
+moonmod.on("game.session.ended", function(e)
+  if visiting then visiting = false; load_slot() return end
+  set_sandbox(false)
+end)
 local session = try(game.session.get)
+visiting = type(session) == "table" and session.kind == "visit"
 set_sandbox(type(session) == "table" and session.kind == "sandbox")
 if not in_sandbox then load_slot() end
 moonmod.log("info", "Ascension 3 ready")

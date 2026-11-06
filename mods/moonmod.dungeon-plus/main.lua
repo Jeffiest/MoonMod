@@ -550,7 +550,8 @@ local function set_sandbox(now)
     apply_generation(default_tier())
   end
 end
-moonmod.on("game.session.started", function() set_sandbox(true) end)
+-- A co-op visit (moonmod.coop) is the story game in the host's world: this mod plays on.
+moonmod.on("game.session.started", function(e) if not (type(e) == "table" and e.kind == "visit") then set_sandbox(true) end end)
 moonmod.on("game.session.ended", function() set_sandbox(false) end)
 apply_mutator_formulas(nil)
 apply_generation(default_tier())

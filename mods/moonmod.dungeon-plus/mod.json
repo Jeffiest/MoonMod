@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.dungeon-plus",
   "name": "Dungeon+",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "Jeffiest",
   "description": "Champions with themed loot. Replay floors at Tiers 1-5 (Square/Triangle on the floor list), floor mutators, a bounty on every floor, kill streaks, a bestiary and trophies (Journal), enemies that get back up, and the DarkCloud-Expanded weapon, price and shop data.",
   "framework_api": 1,

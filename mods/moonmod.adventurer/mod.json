@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.adventurer",
   "name": "Ascension",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "author": "Jeffiest",
   "description": "Each character levels up on their own: more HP, damage and toughness, and skill points for a 17-skill tree (K). Hold L2 + Square / Triangle / Circle for Shockwave, Second Wind and Berserk, paid with Focus. Weapon mastery, crits, loot rolls and the DarkCloud-Expanded weapon abilities.",
   "framework_api": 1,

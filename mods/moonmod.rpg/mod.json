@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.rpg",
   "name": "RPG: Character Paths",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Jeffiest",
   "description": "A real character build for every hero. Kills give XP, levels give HP, damage, toughness and skill points. Each of the six heroes spends them on three paths of their own in the Journal's Character page, each path ending in a power: Toan's Swordsman, Survivor and Explorer, Xiao's Hunter, Nimble and Forager, Goro's Might, Stone and Appetite, Ruby's Arcana, Grace and Fortune, Ungaga's Spearman, Shaman and Champion, Osmond's Gunner, Armor and Surveyor. Weapon mastery, loot rolls and the DarkCloud-Expanded weapon abilities stay.",
   "framework_api": 1,

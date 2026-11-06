@@ -2508,6 +2508,11 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   A player's things carry MoonMod's own beside the save after them (`|DCX1` and a JSON object): the gear and the charm
   slots, as `gear.json` and `charms.json` hold them; an import without them leaves none. A visit for a new account
   (no `player`) starts with no gear or charms.
+- `save.player_extra_set({data})` keeps a value of this mod's (any table or value, 32 KB as JSON at most; `{}` drops
+  it) with the player's things, so it travels with them: a co-op guest's levels go to the host's save with the rest,
+  and come back on the next visit, where `save.player_extra_get()` gives `{data}` (or `{}`). A visit for a new account
+  starts with none. The bundled RPG and Adventurer keep a guest's levels this way during a visit, and never in the
+  guest's own slots.
 - `save.world_import({data})` and `save.player_import({data})` work only during this mod's own visit, so no mod can
   write another game's world or things into a player's save. Data from another build (a field sized differently) is
   refused whole, and a refused import changes nothing.
