@@ -105,6 +105,12 @@ local function make_game(name)
       player_export = function() return {data = S.things} end,
       account_get = function(a) local x = S.accounts[a.id]; return x and {id = a.id, name = x.name, data = x.data} or {} end,
       account_set = function(a) S.accounts[a.id] = {name = a.name, data = a.data}; return {kept = true} end,
+      account_list = function()
+        local out = {}
+        for id, x in pairs(S.accounts) do out[#out + 1] = {id = id, name = x.name or ""} end
+        return {accounts = out}
+      end,
+      account_remove = function(a) local had = S.accounts[a.id] ~= nil; S.accounts[a.id] = nil; return {removed = had} end,
     },
     net = {
       host = function(a)
@@ -502,6 +508,18 @@ do
   check(g.clock_sets == sets, "and left alone while it keeps time")
   h.keys.leave_key = true
   both(h, g, 2)
+end
+
+print("The host's guests")
+do
+  local h = make_game("Toan")
+  h.accounts = {["p1111111111111111"] = {name = "Xiao", data = "DCP1x"}, ["p2222222222222222"] = {name = "Goro", data = "DCP1y"}}
+  h.emit("ui.action", {id = "guests"})
+  check(h.last_toast() == "Co-op: this save keeps 2 guests: Goro, Xiao", "the host sees the guests its save keeps", h.last_toast())
+  h.emit("ui.action", {id = "forget"})
+  check(h.accounts["p1111111111111111"] ~= nil and h.last_toast():find("press again"), "forgetting asks for a second press")
+  h.emit("ui.action", {id = "forget"})
+  check(next(h.accounts) == nil and h.last_toast():find("2 guests forgotten"), "and then forgets them", h.last_toast())
 end
 
 print("Typing the code")

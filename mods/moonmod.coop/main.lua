@@ -730,10 +730,47 @@ end
 for _, a in ipairs({
   {"host", "Host a co-op room", "Open a room for friends to join with its code (F8)"},
   {"leave", "Leave or close co-op", "A guest's things go to the host first (F10)"},
+  {"guests", "Guests this save keeps", "The friends whose things this save keeps, by name"},
+  {"forget", "Forget guests not here", "Press twice: this save stops keeping the things of guests not in the room now"},
 }) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
+
+-- The host's guests: listed, and forgotten (all but those in the room) on a second press within five seconds.
+local forget_armed = -1000
+local function guests_here()
+  local here = {}
+  for _, p in pairs(S.players) do if p.id then here[p.id] = true end end
+  return here
+end
+local function list_guests()
+  local got = try(game.save.account_list)
+  local accounts = type(got) == "table" and got.accounts or nil
+  if not accounts then toast("Co-op: no save's guests to show (a visit keeps none)") return end
+  if #accounts == 0 then toast("Co-op: this save keeps no guests yet") return end
+  local names = {}
+  for _, a in ipairs(accounts) do names[#names + 1] = a.name ~= "" and a.name or a.id:sub(1, 8) end
+  table.sort(names)
+  toast(string.format("Co-op: this save keeps %d guest%s: %s", #accounts, #accounts == 1 and "" or "s", table.concat(names, ", ")))
+end
+local function forget_guests()
+  local got = try(game.save.account_list)
+  local accounts = type(got) == "table" and got.accounts or {}
+  local here, gone = guests_here(), {}
+  for _, a in ipairs(accounts) do if not here[a.id] then gone[#gone + 1] = a end end
+  if #gone == 0 then toast("Co-op: no guests to forget") return end
+  if S.frame - forget_armed > 300 then
+    forget_armed = S.frame
+    toast(string.format("Co-op: press again to forget %d guest%s (their things go when the game is saved)", #gone, #gone == 1 and "" or "s"))
+    return
+  end
+  forget_armed = -1000
+  for _, a in ipairs(gone) do try(game.save.account_remove, {id = a.id}) end
+  toast(string.format("Co-op: %d guest%s forgotten; save to make it last", #gone, #gone == 1 and "" or "s"))
+end
+
 moonmod.on("ui.action", function(a)
   if not a then return end
-  if a.id == "host" then host() elseif a.id == "leave" then leave() end
+  if a.id == "host" then host() elseif a.id == "leave" then leave()
+  elseif a.id == "guests" then list_guests() elseif a.id == "forget" then forget_guests() end
 end)
 try(game.input.bind, {id = "host_key", keys = {"F8"}})
 try(game.input.bind, {id = "leave_key", keys = {"F10"}})
