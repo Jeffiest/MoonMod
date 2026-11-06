@@ -56714,10 +56714,10 @@ index 00000000..e29c7329
 +} // namespace moonmod
 diff --git a/port/src/moonmod/net_session.cpp b/port/src/moonmod/net_session.cpp
 new file mode 100644
-index 00000000..e4df5bc6
+index 00000000..4765c069
 --- /dev/null
 +++ b/port/src/moonmod/net_session.cpp
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,255 @@
 +// Online play's session (moonmod/net_session.hpp): the relay's protocol over whatever socket the platform gives.
 +
 +#include "moonmod/net_session.hpp"
@@ -56789,9 +56789,10 @@ index 00000000..e4df5bc6
 +
 +bool ValidRelay(const std::string &url) {
 +    if (url.size() > 200 || url.find_first_of(" ?#\\\"'<>") != std::string::npos) return false;
++    // wss:// anywhere; plain ws:// too, for a private server on a home network or a VPN (README.md in coop/relay).
++    // Browsers refuse ws:// from an https page, so web players need wss://.
 +    if (url.starts_with("wss://")) return url.size() > 6;
-+    // Plain ws:// only to this machine, for a relay under wrangler dev.
-+    return url.starts_with("ws://127.0.0.1:") || url.starts_with("ws://localhost:");
++    return url.starts_with("ws://") && url.size() > 5;
 +}
 +
 +std::string RelayAddress(const std::string &asked) {
@@ -56815,7 +56816,7 @@ index 00000000..e4df5bc6
 +        return false;
 +    }
 +    if (!ValidRelay(relay)) {
-+        error = relay.empty() ? "no relay address: this build has none, so pass one" : "the relay address must be wss://...";
++        error = relay.empty() ? "no relay address: this build has none, so pass one" : "the relay address must be wss://... or ws://...";
 +        return false;
 +    }
 +    std::string url = relay + (code.empty() ? std::string("/v1/host") : "/v1/join/" + code) + "?game=" + Escape(game) +
@@ -72665,10 +72666,10 @@ index 00000000..eeff1dcd
 +}
 diff --git a/port/src/tests/moonmod_net_test.cpp b/port/src/tests/moonmod_net_test.cpp
 new file mode 100644
-index 00000000..451cbce5
+index 00000000..4f7c2e47
 --- /dev/null
 +++ b/port/src/tests/moonmod_net_test.cpp
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,187 @@
 +// Online play's session (moonmod/net_session.hpp) over a scripted transport: the relay's protocol, the event queue
 +// and the checks on what a mod sends. The real sockets are tested against a relay by coop/relay/test.
 +#include <gtest/gtest.h>
@@ -72808,7 +72809,7 @@ index 00000000..451cbce5
 +    Session     session(Fake(wire));
 +    std::string error;
 +    EXPECT_FALSE(session.Start("coop", "https://relay.example", "", "", "chronicle", 1, error));
-+    EXPECT_FALSE(session.Start("coop", "ws://relay.example", "", "", "chronicle", 1, error));
++    EXPECT_FALSE(session.Start("coop", "ftp://relay.example", "", "", "chronicle", 1, error));
 +    EXPECT_FALSE(session.Start("coop", "", "", "", "chronicle", 1, error));
 +    ASSERT_TRUE(session.Start("coop", "ws://127.0.0.1:8787", "", "", "chronicle", 1, error)) << error;
 +    EXPECT_FALSE(session.Start("coop", "wss://relay.example", "", "", "chronicle", 1, error));
@@ -72849,6 +72850,8 @@ index 00000000..451cbce5
 +    EXPECT_FALSE(ValidUtf8("\xF5\x80\x80\x80"));
 +    EXPECT_EQ(Escape("a b/c?\xC3\xA9"), "a%20b%2Fc%3F%C3%A9");
 +    EXPECT_TRUE(ValidRelay("wss://chronicle-coop-relay.example.workers.dev"));
++    EXPECT_TRUE(ValidRelay("ws://192.168.1.20:7777")); // a private server at home
++    EXPECT_FALSE(ValidRelay("ws://"));
 +    EXPECT_FALSE(ValidRelay("wss://relay.example/?inject"));
 +    EXPECT_EQ(RelayAddress("wss://relay.example//"), "wss://relay.example");
 +}

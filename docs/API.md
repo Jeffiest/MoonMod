@@ -2479,8 +2479,9 @@ to four players and keeps no game state: the host's game is the world, and the m
 
 - `net.host({version, name?, relay?})` opens a room; `net.join({code, version, name?, relay?})` joins one by its five
   letters and digits (any case). `version` (1-9999) is the mod's message protocol: a room takes only players on the
-  same number, so change it when the messages change. `name` is at most 24 bytes. `relay` is a `wss://` address
-  (`ws://` only to this machine, for a relay under `wrangler dev`); without it the game uses `DC_COOP_RELAY` from its
+  same number, so change it when the messages change. `name` is at most 24 bytes. `relay` is a `wss://` or `ws://` address (a
+  private server, DC_Web's `coop/relay/server.mjs`, may be plain `ws://` on a home network or a VPN; browsers need
+  `wss://`); without it the game uses `DC_COOP_RELAY` from its
   environment, else the one the build names (`DC_COOP_RELAY_DEFAULT`). Both return the status at once; the result
   arrives through `net.receive`.
 - `net.receive({max?})` takes waiting events, oldest first (256 by default, up to 1024): `connected` `{peer = this
