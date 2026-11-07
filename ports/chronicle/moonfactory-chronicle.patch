@@ -47784,10 +47784,10 @@ index 00000000..ae25e54b
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_avatars_moonmod.cpp b/port/src/moonmod/coop_avatars_moonmod.cpp
 new file mode 100644
-index 00000000..1741b554
+index 00000000..9fb83a89
 --- /dev/null
 +++ b/port/src/moonmod/coop_avatars_moonmod.cpp
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,329 @@
 +// Co-op's remote players (moonmod/coop_avatars.hpp). Each avatar loads like the companion (its own file and model
 +// arenas, its own texture blocks, the weapon referenced to the hand) and is moved like the ghost (placed each frame),
 +// but from reports that come a few times a second: it eases toward the last one.
@@ -47816,6 +47816,7 @@ index 00000000..1741b554
 +#include "main.hpp"
 +#include "mglib.hpp"
 +#include "playable_chara.hpp"
++#include "render/draw3d.hpp"
 +#include "texture.hpp"
 +#include "ui/framework.hpp"
 +#include "userstatus.hpp"
@@ -47889,6 +47890,14 @@ index 00000000..1741b554
 +    return motion >= 0 && motion < 11 ? kMap[motion] : motion;
 +}
 +
++// The renderer keeps a record for each model block it has built, keyed by the block's address, and reads the block
++// to see whether it is still there: one in an arena about to be freed must go first (freed memory may be unmapped,
++// and the next frame's sweep crashed when another player left the place).
++void ForgetArenas(Avatar &a) {
++    if (a.models) dc::render::Draw3DForgetVisuals(a.models.get(), a.models.get() + kModelBytes + 64);
++    if (a.files) dc::render::Draw3DForgetVisuals(a.files.get(), a.files.get() + kFileBytes + 64);
++}
++
 +void Unload(int slot) {
 +    Avatar &a = g_avatars[slot];
 +    if (a.loaded_character < 0) return;
@@ -47901,6 +47910,7 @@ index 00000000..1741b554
 +    a.loaded_character = a.loaded_weapon = -1;
 +    a.motion = -1;
 +    a.placed = false;
++    ForgetArenas(a);
 +    a.files.reset();
 +    a.models.reset();
 +}
@@ -47938,6 +47948,7 @@ index 00000000..1741b554
 +    a.body.InitializeTexAnime(a.anime, 64);
 +    a.body.LoadPackData2(pack, const_cast<char *>("base.cfg"), &a.arena, a.BodyBlock(slot), &a.arena, 0);
 +    if (a.body.frame == nullptr) {
++        ForgetArenas(a);
 +        a.files.reset();
 +        a.models.reset();
 +        return false;
@@ -63683,7 +63694,7 @@ index 392dac1b..ec278a24 100644
      clip[2][0] = kx * centre_x + ox;
      clip[1][1] = ky * info.scale[1];
 diff --git a/port/src/render/draw3d.hpp b/port/src/render/draw3d.hpp
-index 03cc13a7..5f284c2a 100644
+index 03cc13a7..a9d43f7d 100644
 --- a/port/src/render/draw3d.hpp
 +++ b/port/src/render/draw3d.hpp
 @@ -4,6 +4,7 @@
@@ -63735,8 +63746,21 @@ index 03cc13a7..5f284c2a 100644
  };
  
  /**
+@@ -272,6 +300,12 @@ Draw3DVisual &Draw3DRegisterVisual(unsigned int *block, bool transient);
+  */
+ void Draw3DSweepVisuals();
+ 
++/**
++ * Releases every record whose block lies in [begin, end). Call it before freeing memory that held visuals (a heap
++ * arena of MoonMod's own): the sweep and lookups read a block's tag, and freed memory may be unmapped.
++ */
++void Draw3DForgetVisuals(const void *begin, const void *end);
++
+ /**
+  * Uploads the record's vertices and indices as a mesh, or keeps them for immediate draws.
+  */
 diff --git a/port/src/render/draw3d_visual.cpp b/port/src/render/draw3d_visual.cpp
-index bee702b5..4b82cd8d 100644
+index bee702b5..37e86f9f 100644
 --- a/port/src/render/draw3d_visual.cpp
 +++ b/port/src/render/draw3d_visual.cpp
 @@ -11,6 +11,7 @@
@@ -63755,7 +63779,32 @@ index bee702b5..4b82cd8d 100644
      if (visual.mesh != gfx::kNullMesh) {
          gfx::DestroyMesh(visual.mesh);
          visual.mesh = gfx::kNullMesh;
-@@ -296,7 +298,9 @@ void Draw3DDrawVisual(const Draw3DVisual &visual, const float model[4][4], const
+@@ -120,6 +122,24 @@ void Draw3DSweepVisuals() {
+     });
+ }
+ 
++void Draw3DForgetVisuals(const void *begin, const void *end) {
++    if (begin == nullptr || end <= begin) {
++        return;
++    }
++    const auto *lo = static_cast<const unsigned char *>(begin);
++    const auto *hi = static_cast<const unsigned char *>(end);
++    const auto inside = [lo, hi](auto &entry) {
++        const auto *block = static_cast<const unsigned char *>(entry.first);
++        if (block < lo || block >= hi) {
++            return false;
++        }
++        Release(*entry.second);
++        return true;
++    };
++    std::erase_if(g_visuals, inside);
++    std::erase_if(g_transient, inside);
++}
++
+ void Draw3DFinishVisual(Draw3DVisual &visual) {
+     const dc::platform::load_profile::Span profile(dc::platform::load_profile::Kind::Mesh);
+     if (visual.immediate) {
+@@ -296,7 +316,9 @@ void Draw3DDrawVisual(const Draw3DVisual &visual, const float model[4][4], const
  
  Draw3DIdentityScope::Draw3DIdentityScope(const void *object, float teleport_distance, bool blend_vertices)
      : key(gfx::CurrentInterpKey()), no_interpolation(gfx::CurrentNoInterpolation()) {
@@ -64035,6 +64084,37 @@ index b0cc8035..74b60223 100644
 +set_tests_properties(Smoke.MoonModHeadlessPreflight PROPERTIES
 +    PASS_REGULAR_EXPRESSION "MOONFACTORY_PREFLIGHT_OK"
 +    TIMEOUT 120 RUN_SERIAL TRUE LABELS gpu)
+diff --git a/port/src/tests/animated_visual_test.cpp b/port/src/tests/animated_visual_test.cpp
+index 218930ec..b34455c5 100644
+--- a/port/src/tests/animated_visual_test.cpp
++++ b/port/src/tests/animated_visual_test.cpp
+@@ -240,4 +240,26 @@ TEST(ChroniclePresentation, MdtRemakeTracksMaterialChangesAndAlwaysUpdatesVertic
+     Draw3DSweepVisuals();
+ }
+ 
++// A heap arena of MoonMod's own (a co-op avatar's models) is freed while its blocks are still registered: forgetting
++// the range first means neither a lookup nor the sweep reads the freed blocks (it crashed when a player left town).
++TEST(ChroniclePresentation, ForgottenArenaVisualsAreNotReadAgain) {
++    auto arena = std::make_unique<unsigned int[]>(kDraw3DBlockQuads * std::size_t{4} * 2);
++    auto keep = std::make_unique<unsigned int[]>(kDraw3DBlockQuads * std::size_t{4});
++    unsigned int *first = arena.get(), *second = arena.get() + kDraw3DBlockQuads * 4;
++    Draw3DRegisterVisual(first, false);
++    Draw3DRegisterVisual(second, false);
++    Draw3DRegisterVisual(keep.get(), false);
++    ASSERT_NE(Draw3DFindVisual(first), nullptr);
++    Draw3DForgetVisuals(arena.get(), arena.get() + kDraw3DBlockQuads * 4 * 2);
++    // the tags are still there, so only the forget can have dropped them
++    EXPECT_EQ(Draw3DFindVisual(first), nullptr);
++    EXPECT_EQ(Draw3DFindVisual(second), nullptr);
++    EXPECT_NE(Draw3DFindVisual(keep.get()), nullptr);
++    arena.reset();
++    for (int i = 0; i < 32; ++i) Draw3DSweepVisuals();
++    EXPECT_NE(Draw3DFindVisual(keep.get()), nullptr);
++    keep[8] = 0;
++    Draw3DSweepVisuals();
++}
++
+ } // namespace dc::test
 diff --git a/port/src/tests/battle_menu_manager_pointer_test.cpp b/port/src/tests/battle_menu_manager_pointer_test.cpp
 new file mode 100644
 index 00000000..e3e4fa9d
