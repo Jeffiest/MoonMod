@@ -22,7 +22,7 @@ shared pause and doors.
 
 | | |
 | :-- | :-- |
-| Relay | Cloudflare Worker and private server (`server.mjs`, Docker), one protocol (`coop/relay/README.md`); tested |
+| Relay | Cloudflare Worker and private server (`server.mjs`, Docker), one protocol (`coop/relay/README.md`); live at `wss://chronicle-coop-relay.jeffery-s-rose.workers.dev`, the builds' default; tested |
 | `net.*` | Rooms by code, text messages, 4 players; web WebSocket, Windows WinHTTP, Linux/macOS libcurl; tested against both relays (Windows compiled, not run) |
 | The save's split | `save.world_export/import`, `save.player_export/import`; tested |
 | Accounts | `save.account_*`, kept in the host's slot folder with each save; the Mod Manager lists them and forgets those not in the room (two presses); a guest's things carry their gear and charm slots, and mods' own (`save.player_extra_*`): RPG's and Adventurer's levels; tested |

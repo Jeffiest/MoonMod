@@ -43,7 +43,7 @@ index 00000000..2147797e
 +
 +Regression suites: `DungeonAerialCache`, `DungeonAerialProjection`, `DungeonVisibility`, and `PlatformConfig.AerialMap`.
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index 5a0b2fc1..5c8fb1e1 100644
+index 5a0b2fc1..a21dcdf6 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
 @@ -9,6 +9,32 @@ if(NOT CMAKE_CXX_COMPILER)
@@ -118,7 +118,7 @@ index 5a0b2fc1..5c8fb1e1 100644
  if(NINTENDO_SWITCH)
      list(FILTER PORT_SOURCES EXCLUDE REGEX "/platform/(discord|firstrun)\.cpp$")
  endif()
-@@ -168,6 +210,30 @@ if(NINTENDO_SWITCH)
+@@ -168,6 +210,31 @@ if(NINTENDO_SWITCH)
      dc_switch_port(dc_port)
  endif()
  target_link_libraries(dc_port PRIVATE dc_options SDL3::SDL3 Vulkan::Vulkan nlohmann_json::nlohmann_json fastgltf::fastgltf kz_port_headers)
@@ -126,7 +126,8 @@ index 5a0b2fc1..5c8fb1e1 100644
 +# Online play's socket (moonmod/net_session.hpp, coop/relay): the browser's WebSocket on the web (web.cmake links
 +# Emscripten's), WinHTTP on Windows, libcurl's TLS connection on Linux and macOS where it is found. Without one,
 +# net.* reports itself unsupported. DC_COOP_RELAY_DEFAULT is the relay a mod's net.host/join use unless it names one.
-+set(DC_COOP_RELAY_DEFAULT "" CACHE STRING "The co-op relay (wss://...) online play uses by default")
++# The public relay coop-relay.yml deploys (coop/relay/README.md); a build for a private server sets its own.
++set(DC_COOP_RELAY_DEFAULT "wss://chronicle-coop-relay.jeffery-s-rose.workers.dev" CACHE STRING "The co-op relay (wss://...) online play uses by default")
 +target_compile_definitions(dc_port PRIVATE DC_COOP_RELAY_DEFAULT="${DC_COOP_RELAY_DEFAULT}")
 +set(DC_NET_LIBS)
 +if(WIN32)
@@ -149,7 +150,7 @@ index 5a0b2fc1..5c8fb1e1 100644
  # port/src, the generated headers, dcdata's header-only core and the stb directories: captionfont.cpp
  # rasterizes with stb_truetype and platform/png_image.cpp decodes with stb_image, which Kazarov stages
  # (or fetches) for dc_host.
-@@ -182,6 +248,7 @@ function(dc_port_includes target)
+@@ -182,6 +249,7 @@ function(dc_port_includes target)
  endfunction()
  dc_port_includes(dc_port)
  dc_port_includes(dc_ps2)
@@ -157,7 +158,7 @@ index 5a0b2fc1..5c8fb1e1 100644
  # The game's headers trip a few warnings that only describe how MWCC's source
  # was written, not a problem in the port.
  target_compile_options(dc_port PRIVATE -Wall -Wno-mismatched-tags -Wno-unused-label
-@@ -212,7 +279,8 @@ endif()
+@@ -212,7 +280,8 @@ endif()
  
  function(dc_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:dc_port> $<TARGET_OBJECTS:dc_ps2>)
