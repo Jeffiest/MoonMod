@@ -457,6 +457,7 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | Hurt a monster from script | `combat.damage` |
 | Poison, freeze, ... a monster | `combat.status_add` |
 | Change a monster's HP, defence, rewards | `entities.set_stats` |
+| Make a script-invincible monster (a roaming King's Curse) take blows | `entities.set_stats({entity, vulnerable = true})` |
 | Colour, size, a shove | `entities.tint`, `entities.scale_set`, `entities.knockback` |
 | A flash or burst | `effects.burst({kind, position, scale})` |
 | A roll or heavy pressed a little early still comes out | `player.tuning_set({input_buffer = 12})` |

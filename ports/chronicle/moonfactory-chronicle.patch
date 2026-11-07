@@ -3816,10 +3816,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..9a132fe7
+index 00000000..cd11cff4
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,312 @@
 +#pragma once
 +
 +/**
@@ -4093,6 +4093,9 @@ index 00000000..9a132fe7
 +float ChronicleMonsterHitReach(CMonstorUnit *unit, int slot);
 +// entities.set_stats hit_share: each body sphere of the monster in `slot` takes its best character's share of a blow.
 +bool  ChronicleMonsterHitShare(CMonstorUnit *unit, int slot);
++// entities.set_stats vulnerable: blows land on the monster in `slot` through its own script's invincibility (MUTEKI),
++// and a body sphere no hero's blow hurts takes them whole.
++bool  ChronicleMonsterVulnerable(CMonstorUnit *unit, int slot);
 +void  ChronicleMonstersCleared(CMonstorUnit *unit);
 +void  QueueChronicleMonsterDamageResult(CMonstorUnit *unit, int slot, int result);
 +int   TakeChronicleMonsterDamageResult(CMonstorUnit *unit, int slot);
@@ -4305,10 +4308,10 @@ index 00000000..3cda6e5d
 +} // namespace moonmod
 diff --git a/port/include/moonmod/manifest.hpp b/port/include/moonmod/manifest.hpp
 new file mode 100644
-index 00000000..00c145b0
+index 00000000..e61dee85
 --- /dev/null
 +++ b/port/include/moonmod/manifest.hpp
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,68 @@
 +#pragma once
 +
 +#include <filesystem>
@@ -4356,6 +4359,7 @@ index 00000000..00c145b0
 +    std::string author;
 +    std::string description;
 +    std::string entry;
++    std::string coop = "required"; // online co-op: required, host_only, or local
 +    int         schema_version = 1;
 +    int         framework_api = 1;
 +    std::vector<std::string> games;
@@ -5033,10 +5037,10 @@ index 00000000..a9f3a8b3
 +} // namespace moonmod
 diff --git a/port/include/moonmod/runtime.hpp b/port/include/moonmod/runtime.hpp
 new file mode 100644
-index 00000000..261fc66f
+index 00000000..60ca8f4f
 --- /dev/null
 +++ b/port/include/moonmod/runtime.hpp
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,133 @@
 +#pragma once
 +
 +#include <filesystem>
@@ -5112,6 +5116,8 @@ index 00000000..261fc66f
 +    ScriptFunctionCallHandler script_function_handler;
 +    ScriptFunctionListHandler script_function_list_handler;
 +    ScriptHookOriginalCallHandler script_hook_original_call_handler;
++    // mods.* (the runtime sets it): path, the target mod's id (empty: every mod, for an overlay clear), its values.
++    std::function<ApiCallResult(std::string_view path, std::string_view mod_id, const Json &values)> mods_handler;
 +    std::function<std::string(std::string_view mod_id, const Json &arguments)> api_resource_override_removal_guard;
 +    std::function<void(std::string_view mod_id)> api_owner_unloaded;
 +    std::function<void(std::string_view level, std::string_view mod_id, std::string_view message)> log;
@@ -5143,6 +5149,12 @@ index 00000000..261fc66f
 +    bool                      SetEnabled(std::string_view id, bool enabled, std::string &error);
 +    bool                      SetNativeTrusted(std::string_view id, bool trusted, std::string &error);
 +    Json                      Setting(std::string_view mod_id, std::string_view setting_id) const;
++    // mods.*: the loaded mods (id, name, version, author, coop role), a mod's effective settings, and session-only
++    // setting values (co-op's, the host's) that are never saved and end with the session.
++    Json                      ModList() const;
++    ApiCallResult             ModSettings(std::string_view mod_id) const;
++    ApiCallResult             OverlayModSettings(std::string_view mod_id, const Json &values);
++    void                      ClearModSettingsOverlay(std::string_view mod_id);
 +    ApiCallResult              Quests(std::string_view mod_id) const;
 +    ApiCallResult              Skills(std::string_view mod_id) const;
 +    Json                        CombatDamageBonuses() const;
@@ -23785,7 +23797,7 @@ index 00000000..e7817877
 +
 +} // namespace dc::game
 diff --git a/port/src/game/monstorunit.cpp b/port/src/game/monstorunit.cpp
-index d645aa5a..69a42811 100644
+index d645aa5a..05ad7cce 100644
 --- a/port/src/game/monstorunit.cpp
 +++ b/port/src/game/monstorunit.cpp
 @@ -1,7 +1,11 @@
@@ -24067,7 +24079,17 @@ index d645aa5a..69a42811 100644
              }
  
              chara[current_monster][0].GetPosition(poison_position);
-@@ -1214,7 +1290,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1198,7 +1274,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+         }
+     }
+ 
+-    if (monster[current_monster].invincible_timer > 0) {
++    // MoonMod: entities.set_stats vulnerable lands blows through the monster's script invincibility
++    if (monster[current_monster].invincible_timer > 0 && !moonmod::ChronicleMonsterVulnerable(this, current_monster)) {
+         return result;
+     }
+ 
+@@ -1214,7 +1291,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
              }
  
              if (active) {
@@ -24078,7 +24100,7 @@ index d645aa5a..69a42811 100644
                  int rejected = 0;
  
                  if (hit != -1) {
-@@ -1378,6 +1456,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1378,6 +1457,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      const float mark_spread = 1.0f / 2.0f;
                      HitMark[hitCnt].Set(effect[current_monster].position[i], hit_direction, HIT_MARK_HIT, mark_spread, 0.01f, 0.02f, mark_scale, 32, monster[current_monster].ground_y);
                      HitPointMark[hitCnt].Set(effect[current_monster].position[i]);
@@ -24087,7 +24109,7 @@ index d645aa5a..69a42811 100644
  
                      if (hitCnt == 15) {
                          hitCnt = 0;
-@@ -1528,6 +1608,10 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1528,6 +1609,12 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      if (owner != -1) {
                          float old_damage = damage;
                          int   multiplier = effect[index].parameter[i][owner];
@@ -24095,10 +24117,12 @@ index d645aa5a..69a42811 100644
 +                        if (moonmod::ChronicleMonsterHitShare(this, index)) {
 +                            for (int c = 0; c < 6; ++c) multiplier = std::max(multiplier, effect[index].parameter[i][c]);
 +                        }
++                        // MoonMod: entities.set_stats vulnerable (a sphere no hero hurts takes the blow whole)
++                        if (multiplier <= 0 && moonmod::ChronicleMonsterVulnerable(this, index)) multiplier = 100;
                          auto  damage_scale = static_cast<float>(multiplier);
                          damage = damage / 100.0f * damage_scale;
  
-@@ -1559,6 +1643,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1559,6 +1646,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          damage = 0;
                      }
  
@@ -24116,7 +24140,7 @@ index d645aa5a..69a42811 100644
                      auto amount = static_cast<int>(damage);
  
                      if (!(damage - static_cast<float>(amount) <= 0.0f)) {
-@@ -1578,12 +1673,26 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1578,12 +1676,26 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          amount = monster[current_monster].hp;
                      }
  
@@ -24143,7 +24167,7 @@ index d645aa5a..69a42811 100644
  
                      if (monster[current_monster].hp <= 0) {
                          monster[current_monster].last_attacker = owner;
-@@ -1622,6 +1731,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1622,6 +1734,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      }
  
                      if (result == MonsterDamageResult::Killed) {
@@ -24151,7 +24175,7 @@ index d645aa5a..69a42811 100644
                          return MonsterDamageResult::Killed;
                      }
  
-@@ -1658,7 +1768,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
+@@ -1658,7 +1771,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
      float upper = top[1];
      float lower = end[1];
  
@@ -24160,7 +24184,7 @@ index d645aa5a..69a42811 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              if (effect3[i].count == 0) {
                  CCharacter *character = &chara[i][0];
-@@ -1828,7 +1938,7 @@ void CMonstorUnit::MoveChecMonster() {
+@@ -1828,7 +1941,7 @@ void CMonstorUnit::MoveChecMonster() {
      sceVu0CopyVector(flat_next, next_position);
      flat_next[1] = 1;
  
@@ -24169,7 +24193,7 @@ index d645aa5a..69a42811 100644
          if (monster[i].state == 2 && i != current_monster) {
              CCharacter *other = &chara[i][0];
              other->GetPosition(other_position);
-@@ -1880,7 +1990,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1880,7 +1993,7 @@ void CMonstorUnit::Step(int pause) {
      }
  
      if (paused != 0) {
@@ -24178,7 +24202,7 @@ index d645aa5a..69a42811 100644
              if (monster[i].state == 2) {
                  monster[i].requested_motion_flags &= ~4;
  
-@@ -1921,9 +2031,10 @@ void CMonstorUnit::Step(int pause) {
+@@ -1921,9 +2034,10 @@ void CMonstorUnit::Step(int pause) {
  
      BtActStatus.monstor_target = -1;
  
@@ -24190,7 +24214,7 @@ index d645aa5a..69a42811 100644
  
              if (monster[current_monster].motion_reset_pending != 0) {
                  monster[current_monster].requested_motion_flags &= ~4;
-@@ -1974,7 +2085,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1974,7 +2088,7 @@ void CMonstorUnit::Step(int pause) {
                  box.min[1] = position[1] - 80.0f;
                  box.min[2] = position[2] - 30.0f;
  
@@ -24199,7 +24223,7 @@ index d645aa5a..69a42811 100644
                      if (j != current_monster && monster[j].state == 2) {
                          chara[j][0].GetPosition(other_position);
                          collision->SetPosition(other_position);
-@@ -1992,11 +2103,15 @@ void CMonstorUnit::Step(int pause) {
+@@ -1992,11 +2106,15 @@ void CMonstorUnit::Step(int pause) {
                      case MonsterDamageResult::None:
                          break;
                      case MonsterDamageResult::Hit:
@@ -24218,7 +24242,7 @@ index d645aa5a..69a42811 100644
                          script_state[current_monster] = 1;
                          break;
                  }
-@@ -2008,15 +2123,36 @@ void CMonstorUnit::Step(int pause) {
+@@ -2008,15 +2126,36 @@ void CMonstorUnit::Step(int pause) {
                          monster[current_monster].invincible_timer--;
                      }
                  } else {
@@ -24258,7 +24282,7 @@ index d645aa5a..69a42811 100644
                      } else {
                          interpreter[current_monster].resume();
  
-@@ -2092,6 +2228,28 @@ void CMonstorUnit::Step(int pause) {
+@@ -2092,6 +2231,28 @@ void CMonstorUnit::Step(int pause) {
                          }
                      }
  
@@ -24287,7 +24311,7 @@ index d645aa5a..69a42811 100644
                      monster[current_monster].ground_distance = 0.0f;
                      chara[current_monster][0].GetPosition(position);
                      position[1] += 10.0f;
-@@ -2289,8 +2447,9 @@ void CMonstorUnit::Step(int pause) {
+@@ -2289,8 +2450,9 @@ void CMonstorUnit::Step(int pause) {
  }
  
  void CMonstorUnit::CleanViewMonstor(int back_floor) {
@@ -24298,7 +24322,7 @@ index d645aa5a..69a42811 100644
          monster[i].stop_timer = 0;
          monster[i].poison_timer = 0;
          monster[i].anger_timer = 0;
-@@ -2379,10 +2538,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
+@@ -2379,10 +2541,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
  
      back_dungeon = back_floor;
      alive_count = 0;
@@ -24315,7 +24339,7 @@ index d645aa5a..69a42811 100644
      CFrameAttr     attr;
      int            file_size = 0;
      attr.fog_enable = true;
-@@ -2424,6 +2588,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2424,6 +2591,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  
          if (entry == -1) {
              std::println("******* ShotEntry Error !!***********");
@@ -24323,7 +24347,7 @@ index d645aa5a..69a42811 100644
          } else {
              model[slot].shot_effect[0] = entry;
          }
-@@ -2434,11 +2599,13 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2434,11 +2602,13 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  
          if (entry == -1) {
              std::println("******* ShotEntry Error !!***********");
@@ -24337,7 +24361,7 @@ index d645aa5a..69a42811 100644
      model_count++;
      return 1;
  }
-@@ -2446,7 +2613,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2446,7 +2616,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag) {
      current_monster = -1;
  
@@ -24346,7 +24370,7 @@ index d645aa5a..69a42811 100644
          if (monster[i].state == -1) {
              current_monster = i;
              break;
-@@ -2461,6 +2628,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2461,6 +2631,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      BtSetEventScript(&interpreter[current_monster], script_data[model_no], script[current_monster]);
      chara[current_monster][0] = base_chara[model_no][0];
      chara[current_monster][0].motion[0] = &chara[current_monster][0].motion_type;
@@ -24354,7 +24378,7 @@ index d645aa5a..69a42811 100644
      chara[current_monster][0].SetPosition(position);
      chara[current_monster][0].SetRotation(0.0f, 0.0f, 0.0f);
  
-@@ -2480,6 +2648,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2480,6 +2651,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      monster[current_monster].state = 1;
@@ -24362,7 +24386,7 @@ index d645aa5a..69a42811 100644
      monster[current_monster].base_model = model_no;
      monster[current_monster].max_hp = model[model_no].max_hp;
      monster[current_monster].hp = model[model_no].max_hp;
-@@ -2536,11 +2705,13 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2536,11 +2708,13 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      if (interpreter[current_monster].check_program(1) != 0) {
@@ -28005,10 +28029,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..a82f2598
+index 00000000..55cddcc9
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,672 @@
+@@ -0,0 +1,677 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -28145,6 +28169,10 @@ index 00000000..a82f2598
 +    {"net.status", "net", "status", "any", "net.session", "The online session: state, this player's id, the room code and the other players."},
 +    {"net.send", "net", "send", "any", "net.session", "Send text (at most 16 KiB) to one player, by id, or to all the others."},
 +    {"net.receive", "net", "receive", "any", "net.session", "Take what came: connected, joined, left, message and closed events, oldest first."},
++    {"mods.list", "mods", "list", "any", "game.read", "The mods loaded this session, in load order: id, name, version, author and co-op role (required, host_only or local)."},
++    {"mods.settings_get", "mods", "settings_get", "any", "game.read", "A loaded mod's effective setting values; another mod's need mods.settings."},
++    {"mods.settings_overlay", "mods", "settings_overlay", "any", "mods.settings", "Give a loaded mod setting values for this session only (co-op: the host's): never saved, gone when the session ends."},
++    {"mods.settings_overlay_clear", "mods", "settings_overlay_clear", "any", "mods.settings", "Drop session-only setting values: one mod's, or every mod's."},
 +    {"world.dungeon_npc_clear", "world", "dungeon_npc_clear", "simulation", "game.write", "Take this mod's figure off the dungeon floor."},
 +    {"ui.run_menu_set", "ui", "run_menu_set", "simulation", "game.write", "Set this mod's Chronicle run menu: tabs of rows, opened from Start in a dungeon in place of the pause."},
 +    {"ui.run_menu_clear", "ui", "run_menu_clear", "simulation", "game.write", "Take back this mod's run menu; Start pauses as retail does again."},
@@ -28480,9 +28508,9 @@ index 00000000..a82f2598
 +    {"skills.unlocked", "skills", "both", "A skill's rank first became positive."},
 +};
 +
-+constexpr std::array<std::string_view, 9> kKnownPermissions = {
++constexpr std::array<std::string_view, 10> kKnownPermissions = {
 +    "storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override",
-+    "debug.inspect", "native.extension", "net.session",
++    "debug.inspect", "native.extension", "net.session", "mods.settings",
 +};
 +
 +} // namespace
@@ -28496,7 +28524,8 @@ index 00000000..a82f2598
 +}
 +
 +bool IsCoreApiOperation(std::string_view path) {
-+    return path == "info.get" || path == "compat.list" || path == "compat.supports" ||
++    return path == "mods.list" || path == "mods.settings_get" || path == "mods.settings_overlay" ||
++           path == "mods.settings_overlay_clear" || path == "info.get" || path == "compat.list" || path == "compat.supports" ||
 +           path == "api.list" || path == "api.supports" || path == "api.call" ||
 +           path == "events.list" || path == "events.subscribe" || path == "events.unsubscribe" ||
 +           path == "save.get" || path == "save.set" ||
@@ -29543,10 +29572,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..cf31a8cc
+index 00000000..9c0bfb9e
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17339 @@
+@@ -0,0 +1,17398 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -30302,6 +30331,9 @@ index 00000000..cf31a8cc
 +// entities.set_stats hit_share: each body sphere takes from every character the share of a blow it takes from the
 +// character it suits best (a story boss hurt only by the hero the story brought, met by any party). Reset as above.
 +std::array<bool, MONSTOR_SLOT_MAX> g_monster_hit_share{};
++// entities.set_stats vulnerable: hits land through the monster's script invincibility (a roaming boss part that its
++// own fight keeps invincible). A new actor in the slot, or a new floor, clears it.
++std::array<bool, MONSTOR_SLOT_MAX> g_monster_vulnerable{};
 +std::array<int, MONSTOR_MODEL_MAX> g_loaded_monster_model_ids = [] {
 +    std::array<int, MONSTOR_MODEL_MAX> ids{};
 +    ids.fill(-1);
@@ -34160,14 +34192,14 @@ index 00000000..cf31a8cc
 +ApiCallResult SetEntityStats(const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("entity")) {
 +        return Invalid("expected {entity = generation_checked_handle, hp?, max_hp?, defense?, reward_exp?, reward_money?, drop_item?, "
-+                       "damage_scale?, hit_reach?, hit_share?}");
++                       "damage_scale?, hit_reach?, hit_share?, vulnerable?}");
 +    }
 +    const Json &request = args[0];
 +    for (auto field = request.begin(); field != request.end(); ++field) {
 +        if (field.key() != "entity" && field.key() != "hp" && field.key() != "max_hp" &&
 +            field.key() != "defense" && field.key() != "reward_exp" && field.key() != "reward_money" &&
 +            field.key() != "drop_item" && field.key() != "damage_scale" && field.key() != "hit_reach" &&
-+            field.key() != "hit_share") {
++            field.key() != "hit_share" && field.key() != "vulnerable") {
 +            return Invalid("entities.set_stats contains an unsupported field");
 +        }
 +    }
@@ -34206,6 +34238,9 @@ index 00000000..cf31a8cc
 +    const bool set_hit_share = request.contains("hit_share");
 +    if (set_hit_share && !request["hit_share"].is_boolean()) return Invalid("hit_share must be true or false");
 +    const bool requested_hit_share = set_hit_share && request["hit_share"].get<bool>();
++    const bool set_vulnerable = request.contains("vulnerable");
++    if (set_vulnerable && !request["vulnerable"].is_boolean()) return Invalid("vulnerable must be true or false");
++    const bool requested_vulnerable = set_vulnerable && request["vulnerable"].get<bool>();
 +    int requested_hp = 0, requested_max_hp = 0, requested_defense = 0;
 +    int requested_exp = 0, requested_money = 0;
 +    int requested_drop = -1;
@@ -34249,6 +34284,7 @@ index 00000000..cf31a8cc
 +    const float damage_scale_before = g_monster_damage_scales[slot];
 +    const float hit_reach_before = g_monster_hit_reach[slot];
 +    const bool hit_share_before = g_monster_hit_share[slot];
++    const bool vulnerable_before = g_monster_vulnerable[slot];
 +    const int final_max_hp = set_max_hp ? requested_max_hp : monster.max_hp;
 +    if (set_hp && requested_hp > final_max_hp) return Invalid("hp cannot exceed the enemy's resulting max_hp");
 +    int final_hp = monster.hp;
@@ -34268,20 +34304,22 @@ index 00000000..cf31a8cc
 +    if (set_damage_scale) g_monster_damage_scales[slot] = requested_damage_scale;
 +    if (set_hit_reach) g_monster_hit_reach[slot] = requested_hit_reach;
 +    if (set_hit_share) g_monster_hit_share[slot] = requested_hit_share;
++    if (set_vulnerable) g_monster_vulnerable[slot] = requested_vulnerable;
 +    const bool changed = hp_before != monster.hp || max_hp_before != monster.max_hp ||
 +                         defense_before != monster.defense || exp_before != monster.exp || money_before != monster.money ||
 +                         drop_before != monster.drop_item || damage_scale_before != g_monster_damage_scales[slot] ||
-+                         hit_reach_before != g_monster_hit_reach[slot] || hit_share_before != g_monster_hit_share[slot];
++                         hit_reach_before != g_monster_hit_reach[slot] || hit_share_before != g_monster_hit_share[slot] ||
++                         vulnerable_before != g_monster_vulnerable[slot];
 +    return {ApiCallStatus::Ok,
 +            {{"entity", handle}, {"changed", changed},
 +             {"previous", {{"hp", hp_before}, {"max_hp", max_hp_before}, {"defense", defense_before},
 +                           {"reward_exp", exp_before}, {"reward_money", money_before}, {"drop_item", drop_before},
 +                           {"damage_scale", damage_scale_before}, {"hit_reach", hit_reach_before},
-+                           {"hit_share", hit_share_before}}},
++                           {"hit_share", hit_share_before}, {"vulnerable", vulnerable_before}}},
 +             {"current", {{"hp", monster.hp}, {"max_hp", monster.max_hp}, {"defense", monster.defense},
 +                           {"reward_exp", monster.exp}, {"reward_money", monster.money}, {"drop_item", monster.drop_item},
 +                           {"damage_scale", g_monster_damage_scales[slot]}, {"hit_reach", g_monster_hit_reach[slot]},
-+                           {"hit_share", g_monster_hit_share[slot]}}}}, {}};
++                           {"hit_share", g_monster_hit_share[slot]}, {"vulnerable", g_monster_vulnerable[slot]}}}}, {}};
 +}
 +
 +// A boss cast's shared script integers (SET_GLOBAL_INT), through a live member: what a part of the fight would have
@@ -34862,7 +34900,7 @@ index 00000000..cf31a8cc
 +    if (monster.state != 2 || monster.hp <= 0 || monster.max_hp <= 0 || monster.hp > monster.max_hp) {
 +        return Failed("the selected entity is not a live, valid enemy");
 +    }
-+    if (monster.invincible_timer > 0 || monster.revealed == 0) {
++    if ((monster.invincible_timer > 0 && !g_monster_vulnerable[slot]) || monster.revealed == 0) {
 +        return {ApiCallStatus::Ok,
 +                {{"entity", handle}, {"hp_before", monster.hp}, {"hp_after", monster.hp},
 +                 {"damage", 0}, {"changed", false}, {"blocked", true}},
@@ -35119,6 +35157,7 @@ index 00000000..cf31a8cc
 +    g_monster_damage_scales.fill(1.0f);
 +    g_monster_hit_reach.fill(0.0f);
 +    g_monster_hit_share.fill(false);
++    g_monster_vulnerable.fill(false);
 +    g_loaded_monster_model_ids.fill(-1);
 +    for (int slot = 0; slot < static_cast<int>(g_monster_handle_generations.size()); ++slot) {
 +        AdvanceMonsterHandleGeneration(slot);
@@ -38937,6 +38976,8 @@ index 00000000..cf31a8cc
 +bool        g_backroom_stay = false;
 +std::vector<std::string> g_backroom_lines;
 +int         g_backroom_key = 0, g_backroom_key_count = 0, g_backroom_key_frames = 0;
++// where the taken key comes back: below (going down) or above (going back up)
++bool        g_backroom_key_below = true;
 +// Set when the player chose to go down from the entrance's panel; the next frame of play starts the swap, and once
 +// below the party is stood at the back floor's own way in (the entrance's script, which would place it, never runs).
 +bool        g_backroom_descend = false, g_backroom_place = false;
@@ -44188,6 +44229,7 @@ index 00000000..cf31a8cc
 +    g_monster_damage_scales[slot] = 1.0f;
 +    g_monster_hit_reach[slot] = 0.0f;
 +    g_monster_hit_share[slot] = false;
++    g_monster_vulnerable[slot] = false;
 +    g_monster_idle_generation[slot] = 0;
 +}
 +
@@ -44198,6 +44240,10 @@ index 00000000..cf31a8cc
 +
 +bool ChronicleMonsterHitShare(dc::game::CMonstorUnit *unit, int slot) {
 +    return unit != nullptr && unit == g_monster_handle_unit && slot >= 0 && slot < MONSTOR_SLOT_MAX && g_monster_hit_share[slot];
++}
++
++bool ChronicleMonsterVulnerable(dc::game::CMonstorUnit *unit, int slot) {
++    return unit != nullptr && unit == g_monster_handle_unit && slot >= 0 && slot < MONSTOR_SLOT_MAX && g_monster_vulnerable[slot];
 +}
 +
 +int ChronicleMonsterHitDamage(int damage, int owner, int monster_no) {
@@ -44497,6 +44543,7 @@ index 00000000..cf31a8cc
 +        g_loaded_monster_model_ids.fill(-1);
 +    }
 +    g_arena_slots.fill({});
++    g_monster_vulnerable.fill(false);
 +    for (int slot = 0; slot < static_cast<int>(g_monster_handle_generations.size()); ++slot) {
 +        AdvanceMonsterHandleGeneration(slot);
 +    }
@@ -46107,7 +46154,42 @@ index 00000000..cf31a8cc
 +    return dc::game::MoonModChoiceOpen(std::move(choice));
 +}
 +
++// A free back floor's stairs up: the script's key window becomes "go back up?", and the key it wants is handed over
++// (and given back once the party is above). Without it the way back read as locked.
++bool ChronicleBackroomUpAsk() {
++    if (g_backroom_owner.empty() || BtUraDongeon == 0 || NowDngMap == nullptr || BtEventInfo.item_select_result == 0 ||
++        PortItemSelectResult == nullptr || BtEventInfo.item_select_list[0] <= 0 || !NearBackroomEntrance()) {
++        return false;
++    }
++    const int key = BtEventInfo.item_select_list[0];
++    dc::game::MoonModChoice choice;
++    choice.owner = g_backroom_owner;
++    choice.id = "backroom_up";
++    choice.title = "GO BACK UP?";
++    choice.subtitle = "The stairs lead back to the floor above.";
++    choice.cancel = true;
++    choice.options.push_back({"Go up", "Back to the floor above", {{"The way down stays open.", 3}}});
++    choice.options.push_back({"Not now", "Stay down here", {{"The stairs stay open.", 3}}});
++    choice.resume_task = GAME_TASK_SCRIPT_RUN;
++    const std::string owner = g_backroom_owner;
++    choice.done = [key, owner](int index) {
++        CDngStatusData *status = CurrentStatus();
++        if (index == 0 && status != nullptr) {
++            g_backroom_key = key;
++            g_backroom_key_count = status->CheckItemGet(key);
++            g_backroom_key_frames = 1800;
++            g_backroom_key_below = false;
++            if (g_backroom_key_count <= 0) status->GetItem(key, 0);
++        }
++        PortItemSelectResult->i = index == 0 ? key : -1;
++        BtEventInfo.item_select_result = 0;
++        SharedRuntime().PublishToMod(owner, "game.dungeon.backroom", {{"entered", false}, {"left", index == 0}, {"frame", SharedRuntime().Frame()}});
++    };
++    return dc::game::MoonModChoiceOpen(std::move(choice));
++}
++
 +bool ChronicleBackroomAsk() {
++    if (ChronicleBackroomUpAsk()) return true;
 +    if (g_backroom_owner.empty() || BtUraDongeon != 0 || NowDngMap == nullptr || BtEventInfo.item_select_result == 0 ||
 +        PortItemSelectResult == nullptr) {
 +        return false;
@@ -46147,6 +46229,7 @@ index 00000000..cf31a8cc
 +            g_backroom_key = key;
 +            g_backroom_key_count = status->CheckItemGet(key);
 +            g_backroom_key_frames = 1800;
++            g_backroom_key_below = true;
 +            if (g_backroom_key_count <= 0) status->GetItem(key, 0);
 +        }
 +        PortItemSelectResult->i = index == 0 && !stay ? key : -1;
@@ -46164,8 +46247,10 @@ index 00000000..cf31a8cc
 +        g_backroom_key = 0;
 +        return;
 +    }
-+    if (BtUraDongeon == 0) return;
-+    while (status->CheckItemGet(g_backroom_key) < std::max(1, g_backroom_key_count)) {
++    if ((BtUraDongeon != 0) != g_backroom_key_below) return;
++    // going up gives back only what was held (a key handed over for the stairs alone is not kept)
++    const int want = g_backroom_key_below ? std::max(1, g_backroom_key_count) : g_backroom_key_count;
++    while (status->CheckItemGet(g_backroom_key) < want) {
 +        if (status->GetItem(g_backroom_key, 0) < 0) break;
 +    }
 +    g_backroom_key = 0;
@@ -46187,7 +46272,10 @@ index 00000000..cf31a8cc
 +    CMonstorUnit *unit = NowMonstorUnit;
 +    if (unit == nullptr || slot < 0 || slot >= MONSTOR_SLOT_MAX || amount <= 0) return;
 +    MONSTOR &monster = unit->monster[slot];
-+    if (monster.state != 2 || monster.hp <= 0 || monster.revealed == 0 || monster.invincible_timer > 0) return;
++    if (monster.state != 2 || monster.hp <= 0 || monster.revealed == 0 ||
++        (monster.invincible_timer > 0 && !ChronicleMonsterVulnerable(unit, slot))) {
++        return;
++    }
 +    PrepareMonsterHandleUnit(unit);
 +    const std::uint32_t generation = EnsureMonsterHandleGeneration(unit, slot);
 +    // A helper's blow, not a second hero's: 60% of its weapon's attack, less the monster's defence as a hit takes it.
@@ -50338,10 +50426,10 @@ index 00000000..a267d5ec
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..71f501c1
+index 00000000..a60dfa79
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3600 @@
+@@ -0,0 +1,3635 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/symlinks.hpp"
 +#include "moonmod/manager_ui.hpp"
@@ -52590,6 +52678,40 @@ index 00000000..71f501c1
 +    }
 +
 +
++    // mods.*: what this session loaded, and other mods' settings (co-op's required mods and the host's values).
++    ApiCallResult ModsApi(std::string_view path, const Json &arguments) {
++        const Json none = Json::object();
++        if (!arguments.is_array() || arguments.size() > 1 || (arguments.size() == 1 && !arguments[0].is_object())) {
++            return {ApiCallStatus::InvalidArgument, nullptr, std::string(path) + " takes one table or nothing"};
++        }
++        const Json &args = arguments.empty() ? none : arguments[0];
++        if (!config.mods_handler) return {ApiCallStatus::Unsupported, nullptr, "this runtime lists no mods"};
++        if (path == "mods.list") return config.mods_handler(path, {}, none);
++        const auto id_field = args.find("id");
++        const bool has_id = id_field != args.end();
++        if (has_id && (!id_field->is_string() || !IsValidModId(id_field->get_ref<const std::string &>()))) {
++            return {ApiCallStatus::InvalidArgument, nullptr, "id must be a mod id"};
++        }
++        const std::string id = has_id ? id_field->get<std::string>() : std::string();
++        if (path == "mods.settings_get") {
++            const std::string target = id.empty() ? manifest.id : id;
++            if (target != manifest.id && !HasPermission(manifest, "mods.settings")) {
++                return {ApiCallStatus::PermissionDenied, nullptr, "manifest permission is required: mods.settings"};
++            }
++            return config.mods_handler(path, target, none);
++        }
++        if (path == "mods.settings_overlay") {
++            if (id.empty()) return {ApiCallStatus::InvalidArgument, nullptr, "settings_overlay needs the mod's id"};
++            const auto values = args.find("values");
++            if (values == args.end()) return {ApiCallStatus::InvalidArgument, nullptr, "settings_overlay needs values"};
++            return config.mods_handler(path, id, *values);
++        }
++        if (path == "mods.settings_overlay_clear") {
++            return config.mods_handler(path, id, none);
++        }
++        return {ApiCallStatus::Unsupported, nullptr, "unknown API operation"};
++    }
++
 +    ApiCallResult InvokeApi(std::string_view path, const Json &arguments) {
 +        const ApiOperationSpec *operation = FindApiOperation(path);
 +        if (operation == nullptr) {
@@ -52613,6 +52735,7 @@ index 00000000..71f501c1
 +                               {"day", static_cast<unsigned>(today.day())}}}},
 +                    {}};
 +        }
++        if (path.starts_with("mods.")) return ModsApi(path, arguments);
 +        if (path == "events.list") {
 +            if (!arguments.is_array() || !arguments.empty()) {
 +                return {ApiCallStatus::InvalidArgument, nullptr, "events.list does not accept arguments"};
@@ -54982,10 +55105,10 @@ index 00000000..35f9485d
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manifest.cpp b/port/src/moonmod/manifest.cpp
 new file mode 100644
-index 00000000..8252bc57
+index 00000000..d94cba06
 --- /dev/null
 +++ b/port/src/moonmod/manifest.cpp
-@@ -0,0 +1,431 @@
+@@ -0,0 +1,440 @@
 +#include "moonmod/manifest.hpp"
 +
 +#include "moonmod/api.hpp"
@@ -55274,7 +55397,8 @@ index 00000000..8252bc57
 +    }
 +    if (!RejectUnknownFields(document, {"schema_version", "id", "name", "version", "author", "description",
 +                                        "framework_api", "games", "entry", "dependencies", "optional_dependencies",
-+                                        "load_after", "load_before", "permissions", "settings", "native_extension"}, error)) {
++                                        "load_after", "load_before", "permissions", "settings", "native_extension", "coop"},
++                            error)) {
 +        return std::nullopt;
 +    }
 +
@@ -55290,7 +55414,15 @@ index 00000000..8252bc57
 +        !ReadString(document, "version", manifest.version, 64, true, error) ||
 +        !ReadString(document, "author", manifest.author, 96, false, error) ||
 +        !ReadString(document, "description", manifest.description, 1024, false, error) ||
-+        !ReadString(document, "entry", manifest.entry, 128, true, error)) {
++        !ReadString(document, "entry", manifest.entry, 128, true, error) ||
++        !ReadString(document, "coop", manifest.coop, 16, false, error)) {
++        return std::nullopt;
++    }
++    // Online co-op: "required" (the default) every player has the mod at the host's version and the host's settings;
++    // "host_only" only the host needs it; "local" each player's own, never asked for.
++    if (manifest.coop.empty()) manifest.coop = "required";
++    if (manifest.coop != "required" && manifest.coop != "host_only" && manifest.coop != "local") {
++        error = "coop must be required, host_only, or local";
 +        return std::nullopt;
 +    }
 +    if (!IsValidModId(manifest.id)) {
@@ -60138,10 +60270,10 @@ index 00000000..a32cd35f
 +} // namespace dc::game
 diff --git a/port/src/moonmod/runtime.cpp b/port/src/moonmod/runtime.cpp
 new file mode 100644
-index 00000000..b9dac855
+index 00000000..1ac0ed1b
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
-@@ -0,0 +1,1407 @@
+@@ -0,0 +1,1517 @@
 +#include <chrono>
 +#include "moonmod/runtime.hpp"
 +#include "moonmod/symlinks.hpp"
@@ -60488,6 +60620,9 @@ index 00000000..b9dac855
 +            it->second->Unload();
 +        }
 +        modules.clear();
++        // Session-only setting values die with the mods that set them (mods unload together, here).
++        setting_overlay.clear();
++        pending_setting_events.clear();
 +    }
 +
 +    void Discover() {
@@ -60724,38 +60859,77 @@ index 00000000..b9dac855
 +        return found == record.manifest.settings.end() ? nullptr : &*found;
 +    }
 +
-+    Json SettingValue(const ModRecord &record, const SettingDefinition &setting) const {
-+        const auto mod_settings = profile["settings"].find(record.id);
-+        if (mod_settings == profile["settings"].end() || !mod_settings->is_object()) return setting.default_value;
-+        const auto value = mod_settings->find(setting.id);
-+        if (value == mod_settings->end()) return setting.default_value;
-+        const Json &candidate = *value;
++    // A value the setting accepts, or nullptr.
++    static Json ValidSettingValue(const SettingDefinition &setting, const Json &candidate) {
 +        switch (setting.type) {
 +            case SettingType::Boolean:
-+                return candidate.is_boolean() ? candidate : setting.default_value;
++                return candidate.is_boolean() ? candidate : Json(nullptr);
 +            case SettingType::Integer:
 +                if (candidate.is_number_integer()) {
 +                    const double number = candidate.get<double>();
 +                    if (number >= setting.minimum && number <= setting.maximum) return candidate;
 +                }
-+                return setting.default_value;
++                return nullptr;
 +            case SettingType::Number:
 +                if (candidate.is_number() && std::isfinite(candidate.get<double>()) &&
 +                    candidate.get<double>() >= setting.minimum && candidate.get<double>() <= setting.maximum) {
 +                    return candidate;
 +                }
-+                return setting.default_value;
++                return nullptr;
 +            case SettingType::String:
-+                return candidate.is_string() && candidate.get_ref<const std::string &>().size() <= 256
-+                           ? candidate
-+                           : setting.default_value;
++                return candidate.is_string() && candidate.get_ref<const std::string &>().size() <= 256 ? candidate
++                                                                                                        : Json(nullptr);
 +            case SettingType::Choice:
 +                return candidate.is_string() &&
 +                               std::ranges::find(setting.choices, candidate.get<std::string>()) != setting.choices.end()
 +                           ? candidate
-+                           : setting.default_value;
++                           : Json(nullptr);
 +        }
-+        return setting.default_value;
++        return nullptr;
++    }
++
++    Json SettingValue(const ModRecord &record, const SettingDefinition &setting) const {
++        // Another game's values for this session (co-op: the host's), never saved, come first.
++        if (const auto held = setting_overlay.find(record.id); held != setting_overlay.end()) {
++            if (const auto value = held->second.find(setting.id); value != held->second.end()) return *value;
++        }
++        const auto mod_settings = profile["settings"].find(record.id);
++        if (mod_settings == profile["settings"].end() || !mod_settings->is_object()) return setting.default_value;
++        const auto value = mod_settings->find(setting.id);
++        if (value == mod_settings->end()) return setting.default_value;
++        Json valid = ValidSettingValue(setting, *value);
++        return valid.is_null() ? setting.default_value : valid;
++    }
++
++    // Session-only setting values by mod id (mods.settings_overlay), and the settings.changed each change owes its mod.
++    std::map<std::string, Json, std::less<>> setting_overlay;
++    std::vector<std::pair<std::string, Json>> pending_setting_events;
++
++    void ClearSettingOverlay(std::string_view mod_id) {
++        for (auto it = setting_overlay.begin(); it != setting_overlay.end();) {
++            if (!mod_id.empty() && it->first != mod_id) {
++                ++it;
++                continue;
++            }
++            const std::string id = it->first;
++            const Json held = std::move(it->second);
++            it = setting_overlay.erase(it);
++            const ModRecord *record = Find(id);
++            if (record == nullptr) continue;
++            for (const auto &[setting_id, value] : held.items()) {
++                const SettingDefinition *setting = FindSetting(*record, setting_id);
++                if (setting == nullptr) continue;
++                Json now = SettingValue(*record, *setting);
++                if (now != value) pending_setting_events.push_back({id, {{"id", setting_id}, {"value", now}}});
++            }
++        }
++    }
++
++    void DrainSettingEvents() {
++        if (pending_setting_events.empty()) return;
++        auto events = std::move(pending_setting_events);
++        pending_setting_events.clear();
++        for (const auto &[mod_id, payload] : events) EmitTo(mod_id, "settings.changed", payload);
 +    }
 +
 +    bool PersistSetting(const ModRecord &record, const SettingDefinition &setting, Json value, std::string &error) {
@@ -61109,6 +61283,16 @@ index 00000000..b9dac855
 +                                                                              std::string_view hook_id) {
 +        return runtime->CallNativeScriptOriginal(caller_id, hook_id);
 +    };
++    impl_->config.mods_handler = [this](std::string_view path, std::string_view mod_id, const Json &values) {
++        if (path == "mods.list") return ApiCallResult{ApiCallStatus::Ok, {{"mods", ModList()}}, {}};
++        if (path == "mods.settings_get") return ModSettings(mod_id);
++        if (path == "mods.settings_overlay") return OverlayModSettings(mod_id, values);
++        if (path == "mods.settings_overlay_clear") {
++            ClearModSettingsOverlay(mod_id);
++            return ApiCallResult{ApiCallStatus::Ok, {{"cleared", true}}, {}};
++        }
++        return ApiCallResult{ApiCallStatus::Unsupported, nullptr, "unknown API operation"};
++    };
 +    impl_->frame = 0;
 +    impl_->observed_world_location = nullptr;
 +    std::string profile_error;
@@ -61142,6 +61326,7 @@ index 00000000..b9dac855
 +    AdvanceManagerUi();
 +    ++impl_->frame;
 +    impl_->ObserveWorldLocation();
++    impl_->DrainSettingEvents();
 +    impl_->DrainQueuedEvents();
 +    impl_->Emit("game.tick", {{"frame", impl_->frame}});
 +}
@@ -61149,6 +61334,8 @@ index 00000000..b9dac855
 +void Runtime::Publish(std::string_view event_name, const Json &payload) {
 +    if (!impl_ || !impl_->running || event_name.empty()) return;
 +    impl_->Emit(event_name, payload);
++    // A session's borrowed settings (co-op's, the host's) end with it.
++    if (event_name == "game.session.ended" || event_name == "game.session.failed") impl_->ClearSettingOverlay({});
 +}
 +
 +void Runtime::ObserveWorldLocationNow() {
@@ -61239,6 +61426,61 @@ index 00000000..b9dac855
 +    impl_->Discover();
 +    impl_->LoadEnabled();
 +    return true;
++}
++
++Json Runtime::ModList() const {
++    Json mods = Json::array();
++    if (!impl_) return mods;
++    for (const std::string &id : LoadedModOrder()) {
++        const ModRecord *record = impl_->Find(id);
++        if (record == nullptr || !record->valid_manifest) continue;
++        mods.push_back({{"id", record->id}, {"name", record->manifest.name}, {"version", record->manifest.version},
++                        {"author", record->manifest.author}, {"coop", record->manifest.coop}});
++    }
++    return mods;
++}
++
++ApiCallResult Runtime::ModSettings(std::string_view mod_id) const {
++    const ModRecord *record = impl_ ? impl_->Find(mod_id) : nullptr;
++    if (record == nullptr || !record->valid_manifest) return {ApiCallStatus::Failed, nullptr, "no such mod"};
++    Json values = Json::object();
++    for (const SettingDefinition &setting : record->manifest.settings) {
++        values[setting.id] = impl_->SettingValue(*record, setting);
++    }
++    const bool overlaid = impl_->setting_overlay.contains(record->id);
++    return {ApiCallStatus::Ok, {{"id", record->id}, {"values", std::move(values)}, {"overlaid", overlaid}}, {}};
++}
++
++ApiCallResult Runtime::OverlayModSettings(std::string_view mod_id, const Json &values) {
++    const ModRecord *record = impl_ ? impl_->Find(mod_id) : nullptr;
++    if (record == nullptr || !record->valid_manifest) return {ApiCallStatus::Failed, nullptr, "no such mod"};
++    if (!values.is_object()) {
++        return {ApiCallStatus::InvalidArgument, nullptr, "values must be a table of setting id = value"};
++    }
++    Json taken = Json::object();
++    Json refused = Json::array();
++    for (const auto &[setting_id, value] : values.items()) {
++        const SettingDefinition *setting = impl_->FindSetting(*record, setting_id);
++        Json valid = setting == nullptr ? Json(nullptr) : Impl::ValidSettingValue(*setting, value);
++        if (valid.is_null()) refused.push_back(setting_id);
++        else taken[setting_id] = std::move(valid);
++    }
++    if (taken.empty()) return {ApiCallStatus::Ok, {{"id", record->id}, {"applied", 0}, {"refused", std::move(refused)}}, {}};
++    for (const auto &[setting_id, value] : taken.items()) {
++        const SettingDefinition *setting = impl_->FindSetting(*record, setting_id);
++        const Json before = impl_->SettingValue(*record, *setting);
++        Json &held = impl_->setting_overlay[record->id];
++        if (!held.is_object()) held = Json::object();
++        held[setting_id] = value;
++        if (before != value) {
++            impl_->pending_setting_events.push_back({record->id, {{"id", setting_id}, {"value", value}}});
++        }
++    }
++    return {ApiCallStatus::Ok, {{"id", record->id}, {"applied", taken.size()}, {"refused", std::move(refused)}}, {}};
++}
++
++void Runtime::ClearModSettingsOverlay(std::string_view mod_id) {
++    if (impl_) impl_->ClearSettingOverlay(mod_id);
 +}
 +
 +Json Runtime::Setting(std::string_view mod_id, std::string_view setting_id) const {
@@ -65713,10 +65955,10 @@ index d0b258b9..83b2ced9 100644
          EXPECT_TRUE(item::ValidId(def->id)) << def->id;
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
-index 00000000..d8185a9a
+index 00000000..e6487710
 --- /dev/null
 +++ b/port/src/tests/moonmod_api_test.cpp
-@@ -0,0 +1,2281 @@
+@@ -0,0 +1,2283 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -66852,7 +67094,9 @@ index 00000000..d8185a9a
 +  ["debug.profile"] = true,
 +  ["ui.navigate"] = true,
 +  ["ui.open_skills"] = true,
-+  ["ui.sheet_set"] = true, ["ui.sheet_clear"] = true, ["ui.sheet_open"] = true
++  ["ui.sheet_set"] = true, ["ui.sheet_clear"] = true, ["ui.sheet_open"] = true,
++  ["mods.list"] = true, ["mods.settings_get"] = true, ["mods.settings_overlay"] = true,
++  ["mods.settings_overlay_clear"] = true
 +}
 +local dispatched = 0
 +for _, operation in ipairs(catalog) do
@@ -68964,10 +69208,10 @@ index 00000000..77be9c70
 +}
 diff --git a/port/src/tests/moonmod_combat_api_test.cpp b/port/src/tests/moonmod_combat_api_test.cpp
 new file mode 100644
-index 00000000..d4a9752b
+index 00000000..02327d29
 --- /dev/null
 +++ b/port/src/tests/moonmod_combat_api_test.cpp
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,338 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -68978,6 +69222,7 @@ index 00000000..d4a9752b
 +#include "monstorunit.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/combat_formula.hpp"
++#include "moonmod/game_hooks.hpp"
 +#include "savedata.hpp"
 +
 +namespace dc::game {}
@@ -69217,6 +69462,27 @@ index 00000000..d4a9752b
 +    ASSERT_EQ(blocked.status, moonmod::ApiCallStatus::Ok) << blocked.message;
 +    EXPECT_TRUE(blocked.value.at("blocked").get<bool>());
 +    EXPECT_EQ(unit->monster[0].hp, 25);
++
++    // entities.set_stats vulnerable: the script's invincibility (MUTEKI) no longer turns the blow away
++    const moonmod::ApiOperationSpec *stats_operation = moonmod::FindApiOperation("entities.set_stats");
++    ASSERT_NE(stats_operation, nullptr);
++    EXPECT_FALSE(moonmod::ChronicleMonsterVulnerable(unit.get(), 0));
++    EXPECT_EQ(config.api_handler("test.moonmod.combat-probe", *stats_operation,
++                                 moonmod::Json::array({moonmod::Json{{"entity", handle}, {"vulnerable", 1}}})).status,
++              moonmod::ApiCallStatus::InvalidArgument);
++    const moonmod::ApiCallResult made_vulnerable = config.api_handler(
++        "test.moonmod.combat-probe", *stats_operation,
++        moonmod::Json::array({moonmod::Json{{"entity", handle}, {"vulnerable", true}}}));
++    ASSERT_EQ(made_vulnerable.status, moonmod::ApiCallStatus::Ok) << made_vulnerable.message;
++    EXPECT_TRUE(made_vulnerable.value.at("current").at("vulnerable").get<bool>());
++    EXPECT_TRUE(moonmod::ChronicleMonsterVulnerable(unit.get(), 0));
++    const moonmod::ApiCallResult landed = config.api_handler(
++        "test.moonmod.combat-probe", *damage_operation,
++        moonmod::Json::array({moonmod::Json{{"entity", handle}, {"amount", 5}}}));
++    ASSERT_EQ(landed.status, moonmod::ApiCallStatus::Ok) << landed.message;
++    EXPECT_FALSE(landed.value.at("blocked").get<bool>());
++    EXPECT_EQ(unit->monster[0].hp, 20);
++    unit->monster[0].hp = 25;
 +    unit->monster[0].invincible_timer = 0;
 +
 +    const moonmod::ApiCallResult healed = config.api_handler(
@@ -69228,12 +69494,16 @@ index 00000000..d4a9752b
 +    EXPECT_EQ(healed.value.at("restored"), 35);
 +
 +    moonmod::ChronicleMonsterActorCreated(unit.get(), 0);
++    EXPECT_FALSE(moonmod::ChronicleMonsterVulnerable(unit.get(), 0)); // a new actor in the slot starts without it
 +    unit->monster[0].hp = 6;
 +    unit->alive_count = 1;
 +    const moonmod::ApiCallResult refreshed = config.api_handler(
 +        "test.moonmod.combat-probe", *combat_operation, moonmod::Json::array());
 +    ASSERT_EQ(refreshed.status, moonmod::ApiCallStatus::Ok) << refreshed.message;
 +    const std::string fresh_handle = refreshed.value.at("enemies")[0].at("entity_id").get<std::string>();
++    ASSERT_EQ(config.api_handler("test.moonmod.combat-probe", *stats_operation,
++                                 moonmod::Json::array({moonmod::Json{{"entity", fresh_handle}, {"vulnerable", true}}})).status,
++              moonmod::ApiCallStatus::Ok);
 +    const moonmod::ApiCallResult stale = config.api_handler(
 +        "test.moonmod.combat-probe", *damage_operation,
 +        moonmod::Json::array({moonmod::Json{{"entity", handle}, {"amount", 2}}}));
@@ -69256,7 +69526,10 @@ index 00000000..d4a9752b
 +        "test.moonmod.combat-probe", *heal_operation,
 +        moonmod::Json::array({moonmod::Json{{"entity", handle}, {"amount", 5}}}));
 +    EXPECT_EQ(stale_heal.status, moonmod::ApiCallStatus::Failed);
++    EXPECT_TRUE(moonmod::ChronicleMonsterVulnerable(unit.get(), 0));
 +    moonmod::ChronicleMonstersCleared(unit.get());
++    // a floor change clears it, so no later monster in the slot inherits it
++    EXPECT_FALSE(moonmod::ChronicleMonsterVulnerable(unit.get(), 0));
 +    moonmod::ResetChronicleCharactersForTests();
 +}
 +
@@ -74495,6 +74768,180 @@ index 00000000..cc93acd5
 +}
 +
 +} // namespace
+diff --git a/port/src/tests/moonmod_mods_api_test.cpp b/port/src/tests/moonmod_mods_api_test.cpp
+new file mode 100644
+index 00000000..663cb2ad
+--- /dev/null
++++ b/port/src/tests/moonmod_mods_api_test.cpp
+@@ -0,0 +1,168 @@
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <chrono>
++#include <filesystem>
++#include <fstream>
++#include <iterator>
++#include <ranges>
++#include <string>
++#include <vector>
++
++#include "moonmod/api.hpp"
++#include "moonmod/runtime.hpp"
++
++// mods.*: the loaded mods with their co-op roles, another mod's settings, and session-only setting values (co-op's,
++// the host's) that are never saved and end with the session.
++
++namespace {
++
++namespace fs = std::filesystem;
++
++struct TempRoot {
++    fs::path path = fs::temp_directory_path() /
++                    ("moonmod-mods-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    ~TempRoot() {
++        std::error_code ignored;
++        fs::remove_all(path, ignored);
++    }
++};
++
++void Write(const fs::path &path, std::string_view content) {
++    fs::create_directories(path.parent_path());
++    std::ofstream out(path, std::ios::binary | std::ios::trunc);
++    out << content;
++}
++
++std::string Manifest(std::string_view id, std::string_view permissions, std::string_view extra) {
++    return "{\"schema_version\":1,\"id\":\"" + std::string(id) + "\",\"name\":\"" + std::string(id) +
++           "\",\"version\":\"1.2.3\",\"framework_api\":1,\"games\":[\"chronicle\"],\"entry\":\"main.lua\","
++           "\"permissions\":[" + std::string(permissions) + "]" + std::string(extra) + "}";
++}
++
++bool Logged(const std::vector<std::string> &logs, std::string_view line) {
++    return std::ranges::find(logs, std::string(line)) != logs.end();
++}
++
++std::string Joined(const std::vector<std::string> &logs) {
++    std::string all;
++    for (const auto &line : logs) all += line + "\n";
++    return all;
++}
++
++} // namespace
++
++TEST(MoonModModsApi, ListsSettingsAndOverlaysThatEndWithTheSession) {
++    TempRoot root;
++    const fs::path mods = root.path / "mods";
++    Write(mods / "test.host" / "mod.json", Manifest("test.host", "\"game.read\",\"mods.settings\"", ""));
++    Write(mods / "test.host" / "main.lua", R"lua(
++local list = game.mods.list()
++local rows = {}
++for _, m in ipairs(list.mods) do rows[#rows + 1] = m.id .. "=" .. m.coop .. "@" .. m.version end
++table.sort(rows)
++moonmod.log("info", "LIST " .. table.concat(rows, ","))
++local s = game.mods.settings_get({id = "test.target"})
++moonmod.log("info", "GET " .. tostring(s.values.level) .. " " .. tostring(s.values.fast) .. " " .. tostring(s.overlaid))
++local r = game.mods.settings_overlay({id = "test.target", values = {level = 7, fast = true, bogus = 1, mode = "nope"}})
++moonmod.log("info", "OVERLAY " .. tostring(r.applied) .. " " .. tostring(#r.refused))
++s = game.mods.settings_get({id = "test.target"})
++moonmod.log("info", "AFTER " .. tostring(s.values.level) .. " " .. tostring(s.values.fast) .. " " .. tostring(s.overlaid))
++local own = game.mods.settings_get()
++moonmod.log("info", "OWN " .. tostring(own.id))
++)lua");
++    Write(mods / "test.target" / "mod.json",
++          Manifest("test.target", "", ",\"coop\":\"host_only\",\"settings\":["
++                   "{\"id\":\"level\",\"name\":\"Level\",\"type\":\"integer\",\"default\":3,\"min\":1,\"max\":10},"
++                   "{\"id\":\"fast\",\"name\":\"Fast\",\"type\":\"boolean\",\"default\":false},"
++                   "{\"id\":\"mode\",\"name\":\"Mode\",\"type\":\"choice\",\"default\":\"a\",\"choices\":[\"a\",\"b\"]}]"));
++    Write(mods / "test.target" / "main.lua", R"lua(
++moonmod.on("settings.changed", function(e) moonmod.log("info", "CHANGED " .. e.id .. "=" .. tostring(e.value)) end)
++moonmod.on("game.tick", function() moonmod.log("info", "SEES " .. tostring(moonmod.settings.get("level"))) end)
++)lua");
++    Write(mods / "test.plain" / "mod.json", Manifest("test.plain", "\"game.read\"", ",\"coop\":\"local\""));
++    Write(mods / "test.plain" / "main.lua", R"lua(
++local v, err = game.mods.settings_get({id = "test.target"})
++moonmod.log("info", "PLAIN GET " .. tostring(v) .. " " .. tostring(err and err.code))
++v, err = game.mods.settings_overlay({id = "test.plain", values = {}})
++moonmod.log("info", "PLAIN OVERLAY " .. tostring(v) .. " " .. tostring(err and err.code))
++)lua");
++    Write(mods / "test.badrole" / "mod.json", Manifest("test.badrole", "", ",\"coop\":\"sometimes\""));
++    Write(mods / "test.badrole" / "main.lua", "");
++    const fs::path profile = root.path / "save" / "moonmod" / "profile.json";
++    Write(profile, "{\"format_version\":1,\"enabled\":{\"test.host\":true,\"test.target\":true,\"test.plain\":true,"
++                   "\"test.badrole\":true},\"settings\":{\"test.target\":{\"level\":4}}}");
++
++    std::vector<std::string> logs;
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    config.game_name = "Chronicle";
++    config.mod_directories = {mods};
++    config.save_root = root.path / "save";
++    config.log = [&](std::string_view, std::string_view, std::string_view message) { logs.emplace_back(message); };
++    moonmod::Runtime runtime;
++    std::string error;
++    ASSERT_TRUE(runtime.Start(config, error)) << error;
++
++    const auto bad = std::ranges::find(runtime.Mods(), "test.badrole", &moonmod::ModRecord::id);
++    ASSERT_NE(bad, runtime.Mods().end());
++    EXPECT_FALSE(bad->valid_manifest) << "an unknown co-op role is refused";
++
++    // The host's view. Load order puts the host first, so the target isn't loaded yet when it lists: run again below.
++    EXPECT_TRUE(Logged(logs, "GET 4 false false")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "OVERLAY 2 2")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "AFTER 7 true true")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "OWN test.host")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "PLAIN GET nil permission_denied")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "PLAIN OVERLAY nil permission_denied")) << Joined(logs);
++
++    const moonmod::Json listed = runtime.ModList();
++    std::vector<std::string> rows;
++    for (const auto &m : listed) rows.push_back(m.at("id").get<std::string>() + "=" + m.at("coop").get<std::string>());
++    std::ranges::sort(rows);
++    EXPECT_EQ(rows, (std::vector<std::string>{"test.host=required", "test.plain=local", "test.target=host_only"}));
++
++    // The target sees the overlay, told once per changed setting.
++    logs.clear();
++    runtime.Pump();
++    EXPECT_TRUE(Logged(logs, "CHANGED level=7")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "CHANGED fast=true")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "SEES 7")) << Joined(logs);
++    EXPECT_EQ(runtime.Setting("test.target", "level"), 7);
++
++    // Never saved.
++    {
++        std::ifstream kept(profile);
++        const std::string text((std::istreambuf_iterator<char>(kept)), std::istreambuf_iterator<char>());
++        EXPECT_EQ(text.find("7"), std::string::npos) << text;
++    }
++
++    // The session ends: the overlay goes, and the target is told its own values again.
++    runtime.Publish("game.session.ended", {{"kind", "visit"}});
++    logs.clear();
++    runtime.Pump();
++    EXPECT_TRUE(Logged(logs, "CHANGED level=4")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "CHANGED fast=false")) << Joined(logs);
++    EXPECT_TRUE(Logged(logs, "SEES 4")) << Joined(logs);
++    EXPECT_FALSE(runtime.ModSettings("test.target").value.at("overlaid").get<bool>());
++
++    // An overlay of one mod is cleared by name; values the setting refuses are refused.
++    const auto applied = runtime.OverlayModSettings("test.target", {{"level", 11}, {"mode", "b"}});
++    ASSERT_EQ(applied.status, moonmod::ApiCallStatus::Ok) << applied.message;
++    EXPECT_EQ(applied.value.at("applied"), 1);
++    EXPECT_EQ(runtime.Setting("test.target", "mode"), "b");
++    EXPECT_EQ(runtime.Setting("test.target", "level"), 4);
++    runtime.ClearModSettingsOverlay("test.target");
++    EXPECT_EQ(runtime.Setting("test.target", "mode"), "a");
++    EXPECT_EQ(runtime.OverlayModSettings("test.nobody", {{"x", 1}}).status, moonmod::ApiCallStatus::Failed);
++    runtime.Stop();
++}
++
++TEST(MoonModModsApi, CatalogHasTheOperationsAsCoreApi) {
++    for (const char *path : {"mods.list", "mods.settings_get", "mods.settings_overlay", "mods.settings_overlay_clear"}) {
++        const moonmod::ApiOperationSpec *operation = moonmod::FindApiOperation(path);
++        ASSERT_NE(operation, nullptr) << path;
++        EXPECT_TRUE(moonmod::IsCoreApiOperation(path)) << path;
++    }
++    EXPECT_EQ(moonmod::FindApiOperation("mods.settings_overlay")->permission, "mods.settings");
++}
 diff --git a/port/src/tests/moonmod_mods_directory_test.cpp b/port/src/tests/moonmod_mods_directory_test.cpp
 new file mode 100644
 index 00000000..2b8d22f8

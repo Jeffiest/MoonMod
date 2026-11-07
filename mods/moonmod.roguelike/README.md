@@ -48,7 +48,9 @@ and the mouse both work it. (The old Journal page is still there as a setting.)
 - **A found weapon pauses for a choice**: two cards, the one in hand and the one found, with what each would be after
   melting the other in. Chests never hold a weapon the party already has, and often a stronger one.
 - **Vaults are free**: the back floor's stairs ask "Enter the Vault?" (enter at your own risk). Below, monsters have
-  2.5x HP and hit 60% harder, and a Vault Warden guards a hoard: Moon Shards, two Diorama tiles and a blessing.
+  2.5x HP and hit 60% harder, and a Vault Warden guards a hoard: Moon Shards, two Diorama tiles and a blessing. The
+  stairs back up ask "Go back up?" and need no key.
+- **Repair Powder to go on**: three in the starter kit, two left behind by each Warden, one at each Rest stop.
 - **Wardens are true bosses**: every Warden floor has a large Warden room (6x6 where it fits), a dead end sealed until
   every monster outside it is dead. Walk in and the doors slam shut behind you as the Warden appears: half the time (a
   setting) the dungeon's own boss (Dran, cut down to fit the room, Master Utan, the Ice Queen with her spells, King's
@@ -92,8 +94,10 @@ his eye to your blows. Beating him wins the run (+12 Moon Shards).
   lead a run.
 - **Bosses on the loose**: on about one floor in four (a setting) one of the dungeons' bosses, with
   its cast, roams as a regular monster: 60-100% of its size with a modest HP pool and three quarters of a Warden's
-  blows, never on a Warden floor.
-- **Character doors and jumps**: only drafted characters' own doors and jump spots appear on a floor.
+  blows, never on a Warden floor. The roaming King's Curse can be struck down where it stalks you (half the pool), and
+  its coffin breaks with it.
+- **Character doors and jumps**: only drafted characters' own doors and jump spots appear on a floor. Ruby's and
+  Osmond's never do: theirs are opened by aiming from the first-person look, which the Gauntlet turns off.
 - **Shuffled floors**: the run starts in Divine Beast Cave, but every later floor before a Warden is in a dungeon drawn
   at random (a setting).
 - **The Confluence**: a floor before a Warden runs through three dungeons (two to four, a setting). It starts in the

@@ -2321,7 +2321,7 @@ local function first_floor_setup()
   if setting("starter_kit", true) and eternal("lean") == 0 then
     try(game.items.give, {id = "chronicle:item:" .. ITEM.bread, count = 2 + (eternal("baker") > 0 and 2 or 0)})
     try(game.items.give, {id = "chronicle:item:" .. ITEM.water, count = 2})
-    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 2 + eternal("kit")})
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 3 + eternal("kit")})
   end
   if eternal("charm") > 0 or eternal("unbreakable") > 0 then try(game.items.give, {id = "chronicle:item:" .. ITEM.auto_repair, count = 1}) end
   if eternal("gem") > 0 then try(game.items.give, {id = "chronicle:item:" .. pick(GEMS), count = 1}) end
@@ -2528,6 +2528,9 @@ local function warden_cleared()
     return
   end
   earn_shards(eternal("tithe") > 0 and 6 or 3)
+  -- a Warden leaves Repair Powder behind: a weapon's wear outlasts the starter kit long before the Lair
+  try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 2})
+  toast("The Warden leaves 2 Repair Powder behind.")
   if (run.heat or 0) >= 5 then run.sigils = (run.sigils or 0) + 1 end
   if floor.dungeon == 4 and not meta.opar_met and ROSTER.registered then
     -- the Moon Sea's Warden: Opar is met, and his star rises in Norune Eternal's Allies (and his Signature sky)
@@ -2742,7 +2745,13 @@ moonmod.on("game.dungeon.generating", function(e)
   -- the doors behind you until it falls.
   try(game.dungeons.set_warden_room, {enabled = hit ~= nil and hit.slot == WARDEN_SLOT, lock_in = true})
   -- A door or jump only one character opens goes on the floor only for a character you have drafted.
-  if hit then try(game.dungeons.set_character_blocks, {characters = run.drafted}) end
+  if hit then
+    local blocks = {}
+    for _, c in ipairs(run.drafted or {}) do
+      if c ~= "ruby" and c ~= "osmond" then blocks[#blocks + 1] = c end
+    end
+    try(game.dungeons.set_character_blocks, {characters = blocks})
+  end
 end)
 
 -- Enemies ------------------------------------------------------------------------------------------------
@@ -3115,7 +3124,20 @@ do
         reward_money = math.floor(clamp(150 * run.pos, 0, 2147483647)),
         damage_scale = boss_damage(kin) * 0.75, hit_share = true})
     try(game.entities.scale_set, {entity = handle, scale = 0.6 + 0.4 * math.random()})
-    spawn_cast(kin, at, boss_damage(kin) * 0.75)
+    local cast = spawn_cast(kin, at, boss_damage(kin) * 0.75)
+    if kin == BOSSES.temple and cast[1] then
+      local curse_hp = math.floor(hp / 2)
+      try(game.entities.set_stats, {entity = cast[1], max_hp = curse_hp, hp = curse_hp,
+          reward_exp = math.floor(clamp(40 * run.pos * abs_multiplier(), 0, 32767)),
+          reward_money = math.floor(clamp(150 * run.pos, 0, 2147483647))})
+      try(game.entities.set_stats, {entity = cast[1], vulnerable = true})
+      -- its coffin takes blows shut as well, and the map flags the room it stands in
+      try(game.entities.set_stats, {entity = handle, vulnerable = true})
+      try(game.dungeons.set_waypoint, {x = math.floor(at.x / 160 + 0.5), y = math.floor(at.z / 160 + 0.5)})
+      floor.kin_curse = cast[1]
+      toast("The King's Curse prowls this floor. Strike it down, or break its coffin (the flag on your map).")
+      return
+    end
     toast(kin.name .. " prowls this floor.")
   end
   -- One of the Genie's forms at `at`: the form, then its share of the helpers. Returns its handle and HP.
@@ -3368,6 +3390,18 @@ moonmod.on("game.enemy_defeated", function(e)
   local p = try(game.player.get)
   if exp > 0 then share_abs(exp, p and p.character) end
   if eternal("luckyfind") > 0 and math.random(100) <= 5 then earn_shards(1) end
+  -- the roaming King's Curse felled: its coffin breaks with it, wherever it stands
+  if floor.kin_curse and e.entity and tostring(e.entity) == tostring(floor.kin_curse) then
+    floor.kin_curse = nil
+    if floor.kin then try(game.combat.damage, {entity = floor.kin, amount = 1000000}) end
+    try(game.dungeons.set_waypoint, {})
+    toast("The King's Curse is broken.")
+  elseif floor.kin_curse and e.entity and tostring(e.entity) == tostring(floor.kin) then
+    -- its coffin broken: the Curse fades with it
+    floor.kin_curse = nil
+    try(game.dungeons.set_waypoint, {})
+    toast("The King's Curse is broken.")
+  end
   if floor.warden and e.entity then
     floor.fallen = floor.fallen or {}
     floor.fallen[tostring(e.entity)] = true
@@ -4025,6 +4059,11 @@ end
 -- first floor and the antechamber's stairs take the Cursed Path there instead (dungeons.set_backrooms stay).
 function REST.arrive()
   floor.rest_keys = floor.rest_keys or {}
+  -- a Repair Powder by the spring, once a stop
+  if not floor.rest_powder then
+    floor.rest_powder = true
+    try(game.items.give, {id = "chronicle:item:" .. ITEM.repair, count = 1})
+  end
   gaffer_arrive(true)
 end
 

@@ -332,6 +332,12 @@ function F.new(opts)
       S.char_blocks = a.characters and deepcopy(a.characters) or nil
       return {characters = a.characters}
     end,
+    set_waypoint = function(a)
+      assert((a.x == nil) == (a.y == nil), "set_waypoint x and y together")
+      assert(a.x == nil or (math.type(a.x) == "integer" and math.type(a.y) == "integer"), "set_waypoint cells")
+      S.waypoint = a.x and {x = a.x, y = a.y} or nil
+      return {}
+    end,
     set_warden_room = function(a)
       for k in pairs(a) do assert(k == "enabled" or k == "lock_in", "set_warden_room field " .. k) end
       assert(type(a.enabled) == "boolean", "set_warden_room enabled")
@@ -704,6 +710,10 @@ function F.new(opts)
           if a.hit_share ~= nil then
             assert(type(a.hit_share) == "boolean", "hit_share boolean")
             m.hit_share = a.hit_share
+          end
+          if a.vulnerable ~= nil then
+            assert(type(a.vulnerable) == "boolean", "vulnerable boolean")
+            m.vulnerable = a.vulnerable
           end
           if a.damage_scale ~= nil then
             assert(type(a.damage_scale) == "number" and a.damage_scale >= 0 and a.damage_scale <= 100, "damage_scale 0-100")
