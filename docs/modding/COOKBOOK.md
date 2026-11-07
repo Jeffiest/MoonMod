@@ -719,3 +719,18 @@ of the house scene in Norune while he is waiting to join, and puts them back aft
   feature is off, and handle the refusal when you can't have it.
 - **Order matters.** `load_after` decides who registers first, which decides native floor numbers and who wins a
   replaced resource. Look things up by stable id, never by number.
+- **Say where your mod belongs in online co-op.** Add `"coop"` to `mod.json`: leave it out (or `"required"`) when
+  your mod changes the world or the rules, so every player in a room must have it at the host's version and plays
+  with the host's settings; `"host_only"` when its state lives in the host's save and guests don't need it;
+  `"local"` for a mod that is each player's own (keys, camera, HUD). Online Co-op does the rest. If your mod reads a
+  setting only at load, also handle `settings.changed`, so a guest follows the host's value during a visit:
+
+  ```lua
+  local level = moonmod.settings.get("level")
+  moonmod.on("settings.changed", function(e) if e.id == "level" then level = e.value end end)
+  ```
+- **See which mods are loaded, and their settings.** `mods.list()` gives each loaded mod's id, version and co-op role;
+  `mods.settings_get({id})` its settings (another mod's need the `mods.settings` permission).
+  `mods.settings_overlay({id, values})` gives a mod values for this session only, never saved, and
+  `mods.settings_overlay_clear` takes them back; co-op uses these for the host's settings
+  (`mods/moonmod.coop/main.lua`, "The room's mods").

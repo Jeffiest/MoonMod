@@ -3,6 +3,7 @@
   "id": "moonmod.expanded-town",
   "name": "Expanded Town Camera",
   "version": "1.0.0",
+  "coop": "local",
   "author": "Jeffiest",
   "description": "Toggle the legacy overhead camera while walking in towns.",
   "framework_api": 1,

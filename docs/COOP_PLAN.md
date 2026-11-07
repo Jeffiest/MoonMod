@@ -26,7 +26,7 @@ shared pause and doors.
 | `net.*` | Rooms by code, text messages, 4 players; web WebSocket, Windows WinHTTP, Linux/macOS libcurl; tested against both relays (Windows compiled, not run) |
 | The save's split | `save.world_export/import`, `save.player_export/import`; tested |
 | Accounts | `save.account_*`, kept in the host's slot folder with each save; the Mod Manager lists them and forgets those not in the room (two presses); a guest's things carry their gear and charm slots, and mods' own (`save.player_extra_*`): RPG's and Adventurer's levels; tested |
-| Other mods in a visit | RPG and Adventurer level the guest from their account; Dungeon Plus and Modern Cloud play on; Randomizer and Living Towns, whose state is the host's save's, sit out |
+| Other mods in a visit | RPG and Adventurer level the guest from their account; Dungeon Plus and Modern Cloud play on; Randomizer and Living Towns, whose state is the host's save's, sit out (`"coop": "host_only"`). Every game in a room plays the same mods at the host's versions and settings: see "The room's mods" |
 | Visits | `session.start {visit}`: the host's world and the guest's things in a fresh game, in the host's town; no save writes |
 | The mod: joining | Host (F8 or Mod Manager), join from the title screen's Online Co-op by code (typed, or letter by letter on a pad); the world and the account cross in pieces; a new account for someone new; the guest's things go to the host every minute and on leaving (F10); the host leaving ends the visits. `tools/tests/coop/test_coop.lua` |
 | Seeing each other | `world.avatar_set`: up to three other players on the dungeon floor, with their weapons, easing between reports sent ten times a second; the host in its own colours, guests in blue; only on the same floor; gone after three quiet seconds. Every game builds each floor from the room's seed, so floors match whoever arrives first |
@@ -37,6 +37,34 @@ shared pause and doors.
 | Names | Each player's name over their hero on the floor or in town, and the others' names on the HUD under the room's code (the mod's "name" setting), the guests' in blue |
 | Pausing | A pause or menu holds only that player's game. The host's holds the floor's monsters for everyone (the guests' copies wait where they are); a guest's holds nothing of the others' |
 | Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`), merged into it (only what they changed, so two building in one town at once both keep their work; they are told of each other), and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
+
+## The room's mods (0.8.0, protocol 6)
+
+Every game in a room plays the same mods, at the same versions, with the host's settings.
+
+- **Roles.** Each mod's manifest says where it belongs in a room (`"coop"`, read through `mods.list`): `required`
+  (the default) every player has it at the host's version; `host_only` only the host needs it (Randomizer and Living
+  Towns, whose state is the host's save's); `local` each player's own (Autosave, Controls, Expanded Town, the Hub).
+- **The check.** A joining game sends its mods (`MODS id version role;...`) before its hello. The host compares
+  them with its own: a required mod the guest lacks (enable), has at another version (the host's version), or a
+  required mod of the guest's that the host doesn't play (turn it off, since it would change the world under the
+  guest). Any of these and the host sends the list (`NEEDMODS`) instead of its world. Host-only and local mods are
+  never asked for. A game whose engine can't list its mods is turned away with "update MoonFactory".
+- **Turned away.** The guest leaves the room and keeps the list. The title page's Online Co-op shows what is still to
+  change ("Room ABCDE needs 2 mod changes (Mod Manager, then restart)") and strikes off what is done; the Mod
+  Manager's "Mods needed to join" says it in full. Enabling a mod takes effect at the next launch, so it is enable,
+  restart, join again. The list is forgotten once a join gets the world.
+- **The host's settings.** With the mods matching, the host sends its values for every required mod but co-op's own
+  (`SETTINGS`, before the world). The guest's game holds them for the visit (`mods.settings_overlay`): never written
+  to the guest's profile, dropped when the visit ends (by the mod, and by the engine on `game.session.ended`). A mod
+  that reads a setting live, or listens to `settings.changed`, follows them at once; one that reads a setting only
+  when it loads keeps the guest's own value for that setting.
+
+What it can't do: enable a mod for the guest (the engine loads only what the player enabled), and co-op inside a
+Gauntlet run or a Vigil World (co-op hosts only from a story save; a visit carries the story save's world, not a
+run's).
+
+Tests: `tools/tests/coop/test_coop.lua` ("The room's mods") and the engine's `moonmod_mods_api_test.cpp`.
 
 ## Next
 

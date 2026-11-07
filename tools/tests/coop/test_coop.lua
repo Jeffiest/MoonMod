@@ -13,7 +13,8 @@ end
 local relay = {rooms = {}}
 local function queue(game_state, event) game_state.net_events[#game_state.net_events + 1] = event end
 
-local function make_game(name)
+local function make_game(name, opts)
+  opts = opts or {}
   local S = {name = name, handlers = {}, storage = {}, settings = {name = name}, toasts = {}, layers = {},
              net_events = {}, net = nil, session = {kind = "story"}, accounts = {}, frame = 0, keys = {},
              world = "DCW1" .. string.rep("w", 30000) .. name, things = "DCP1" .. string.rep("p", 20000) .. name,
@@ -38,7 +39,14 @@ local function make_game(name)
     end
     return {sent = true}
   end
+  S.mods_list, S.mod_settings, S.overlay = opts.mods, opts.mod_settings or {}, {}
   env.game = {
+    mods = opts.mods and {
+      list = function() return {mods = S.mods_list} end,
+      settings_get = function(a) return {id = a.id, values = S.mod_settings[a.id] or {}} end,
+      settings_overlay = function(a) S.overlay[a.id] = a.values; return {id = a.id, applied = true} end,
+      settings_overlay_clear = function() S.overlay = {}; S.overlay_cleared = (S.overlay_cleared or 0) + 1; return {cleared = true} end,
+    } or nil,
     ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end, register = function() return true end},
     render = {layer_register = function(l) S.layers[l.id] = l.text end, layer_remove = function(l) S.layers[l.id] = nil end},
     input = {bind = function() return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end,
@@ -571,6 +579,92 @@ host.tick()
 host.keys.host_key = true
 host.tick()
 check(find_toast(host, "host from your own save"), "a visitor can't host")
+
+print("The room's mods")
+relay.rooms = {}
+local function type_code(g)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+end
+local function mod(id, version, coop)
+  local name = id:gsub("^moonmod%.", ""):gsub("^%l", string.upper)
+  return {id = id, name = name, version = version, coop = coop}
+end
+local host_mods = {mod("moonmod.coop", "0.8.0"), mod("moonmod.roguelike", "0.3.0"), mod("moonmod.vigil", "0.1.0"),
+                   mod("moonmod.randomizer", "1.0.0", "host_only"), mod("moonmod.controls", "1.0.0", "local")}
+local mhost = make_game("Goro", {mods = host_mods, mod_settings = {
+  ["moonmod.roguelike"] = {companion = true, floors = 12, tint = 0.25, motto = "tab\there, 100%"},
+  ["moonmod.vigil"] = {run_cost = 20},
+  ["moonmod.coop"] = {name = "Goro", server = ""},
+  ["moonmod.randomizer"] = {seed = "HOSTONLY"},
+  ["moonmod.controls"] = {hotkeys = false}}})
+local mguest = make_game("Ruby", {mods = {mod("moonmod.coop", "0.8.0"), mod("moonmod.roguelike", "0.2.0"),
+                                          mod("moonmod.controls", "1.0.0", "local"), mod("moonmod.dungeon-plus", "2.1.1")}})
+mhost.keys.host_key = true
+both(mhost, mguest, 2)
+type_code(mguest)
+mguest.emit("game.title.selected", {entry = "join"})
+both(mhost, mguest, 6)
+local kept = mguest.storage.needed
+check(mguest.started == nil, "a guest without the room's mods doesn't get the world")
+check(kept and #kept.list == 3 and kept.code == "ABCDE", "and keeps the room's list", kept and #kept.list)
+local whats = {}
+for _, n in ipairs(kept and kept.list or {}) do whats[n.id] = n.what .. " " .. n.version end
+check(whats["moonmod.vigil"] == "enable 0.1.0", "a mod it lacks: enable, at the host's version", whats["moonmod.vigil"])
+check(whats["moonmod.roguelike"] == "version 0.3.0", "a mod at another version: the host's version", whats["moonmod.roguelike"])
+check(whats["moonmod.dungeon-plus"] == "disable 2.1.1", "a world-changing mod the host doesn't play: turn it off", whats["moonmod.dungeon-plus"])
+check(whats["moonmod.randomizer"] == nil and whats["moonmod.controls"] == nil, "host-only and local mods are never asked for")
+check(find_toast(mguest, "needs mods you don't have: disable Dungeon%-plus"), "the guest is told what to change", mguest.last_toast())
+check(find_toast(mhost, "Ruby can't join yet: 3 mods"), "the host is told why", mhost.last_toast())
+check(mguest.net == nil and mguest.mod.state.role == nil, "and the guest leaves the room")
+local joined = table.concat(mguest.title.lines, "|")
+check(joined:find("Room ABCDE needs 3 mod changes") and joined:find("enable Vigil 0.1.0"), "the title page lists them", joined)
+-- half done: the list shrinks
+mguest.mods_list = {mod("moonmod.coop", "0.8.0"), mod("moonmod.roguelike", "0.3.0"), mod("moonmod.controls", "1.0.0", "local"),
+                    mod("moonmod.dungeon-plus", "2.1.1", "local")}
+mguest.emit("game.title.opened", {})
+joined = table.concat(mguest.title.lines, "|")
+check(joined:find("needs 1 mod change") and joined:find("enable Vigil"), "what's done drops off the list", joined)
+mguest.emit("ui.action", {id = "needed"})
+check(mguest.last_toast():find("room ABCDE needs: enable Vigil"), "the Mod Manager action lists what's left", mguest.last_toast())
+-- all done (a host-only mod the guest also has does no harm)
+mguest.mods_list = {mod("moonmod.coop", "0.8.0"), mod("moonmod.roguelike", "0.3.0"), mod("moonmod.vigil", "0.1.0"),
+                    mod("moonmod.randomizer", "1.0.0"), mod("moonmod.controls", "1.0.0", "local")}
+mguest.emit("game.title.opened", {})
+check(table.concat(mguest.title.lines, "|"):find("all in place"), "the page says when all is in place")
+mguest.emit("game.title.selected", {entry = "join"})
+both(mhost, mguest, 8)
+check(mguest.started ~= nil, "with the room's mods the guest joins")
+check(mguest.storage.needed == nil, "and the list is forgotten")
+local rogue = mguest.overlay["moonmod.roguelike"] or {}
+check(rogue.companion == true and rogue.floors == 12 and math.type(rogue.floors) == "integer" and rogue.tint == 0.25 and
+      rogue.motto == "tab\there, 100%", "the host's settings apply to the guest, types and text intact")
+check((mguest.overlay["moonmod.vigil"] or {}).run_cost == 20, "for every required mod")
+check(mguest.overlay["moonmod.coop"] == nil, "but not co-op's own (name, server)")
+check(mguest.overlay["moonmod.randomizer"] == nil and mguest.overlay["moonmod.controls"] == nil, "nor host-only or local mods' settings")
+check(find_toast(mguest, "the host's settings for 2 mods"), "the guest is told")
+mguest.keys.leave_key = true
+both(mhost, mguest, 3)
+check(next(mguest.overlay) == nil and (mguest.overlay_cleared or 0) >= 1, "leaving the visit drops the host's settings")
+
+-- an engine without game.mods can't join a host that checks
+local old = make_game("Osmond")
+type_code(old)
+old.emit("game.title.selected", {entry = "join"})
+both(mhost, old, 6)
+check(old.started == nil and find_toast(old, "update MoonFactory"), "a game that can't say its mods is turned away")
+
+do
+  local rm = mhost.mod.mods
+  for _, v in ipairs({true, false, 0, -7, 3.5, 1e-9, "", "a\tb\nc%41"}) do
+    local back = rm.decode_value(rm.encode_value(v))
+    check(back == v and math.type(back) == math.type(v), "a setting value crosses intact: " .. tostring(v):gsub("%c", "?"))
+  end
+end
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed > 0 and 1 or 0)
