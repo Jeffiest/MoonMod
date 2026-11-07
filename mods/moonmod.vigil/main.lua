@@ -1391,26 +1391,43 @@ local zones_asked = false
 -- Vigil World belongs to a save (VIGIL_PLAN 9 "Compatibility"): the first time a save goes into a dungeon, Vigil
 -- settles it and keeps it with the save ("world"). A save already holding Vigil World places is one; a save with
 -- dungeon progress and none was started without it and stays a normal Dark Cloud save; a new game takes the
--- setting. Changing the setting later changes only saves not settled yet.
-local function world_save(settle)
+-- setting (on by default). A save settled without it that has been no further than a dungeon's first floor switches
+-- over while the setting is on: nothing it holds belongs to a floor-by-floor dungeon yet.
+local world_save -- (in a block: the main chunk is at Lua's 200 locals)
+do
+local function dungeon_progress()
+  local list = try(game.dungeons.list)
+  for _, d in ipairs(type(list) == "table" and (list.dungeons or list) or {}) do
+    -- the native count is the floor index reached: 0 is the first floor
+    if type(d) == "table" and type(d.deepest_floor_reached) == "number" and d.deepest_floor_reached > 0 then return true end
+  end
+  return false
+end
+
+function world_save(settle)
   local seeds = floor_seeds()
-  if type(seeds.world) == "boolean" then return seeds.world end
+  if seeds.world == true then return true end
+  if seeds.world == false then
+    if not (setting("world_zones", true) and not dungeon_progress()) then return false end
+    -- an early save taking up Vigil World
+    if settle then
+      seeds.world = true
+      if floors.key then try(game.save.set, floors.key, seeds) end
+    end
+    return true
+  end
   local on
   for k, v in pairs(seeds) do
     local key = tostring(k)
     if key:find(":shrines$") or key:find(":gates$") or (key:find(":shape$") and (tostring(v):find("region") or tostring(v):find("zones"))) then on = true end
   end
-  if on == nil then
-    local list = try(game.dungeons.list)
-    for _, d in ipairs(type(list) == "table" and (list.dungeons or list) or {}) do
-      if type(d) == "table" and type(d.deepest_floor_reached) == "number" and d.deepest_floor_reached > 0 then on = false end
-    end
-  end
-  if on == nil then on = setting("world_zones", false) end
+  if on == nil and dungeon_progress() then on = false end
+  if on == nil then on = setting("world_zones", true) end
   if not settle then return on end
   seeds.world = on
   if floors.key then try(game.save.set, floors.key, seeds) end
   return on
+end
 end
 
 local smoke_floor -- the regions', below
@@ -5132,9 +5149,12 @@ moonmod.on("settings.changed", function()
   if in_sandbox then return end
   apply()
   local kept = floor_seeds().world
-  if type(kept) == "boolean" and kept ~= setting("world_zones", false) then
+  local wanted = setting("world_zones", true)
+  if kept == false and wanted and world_save(false) then
+    toast("Vigil: this save hasn't gone past a first floor, so it takes up Vigil World from its next floor.", 360)
+  elseif type(kept) == "boolean" and kept ~= wanted then
     toast(kept and "Vigil: this save was started with Vigil World and keeps it. The setting is for new games."
-               or "Vigil: this save was started without Vigil World and stays a normal save. The setting is for new games.", 360)
+               or "Vigil: this save has gone deeper than a first floor without Vigil World and stays a normal save.", 360)
   end
 end)
 

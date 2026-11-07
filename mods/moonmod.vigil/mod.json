@@ -57,7 +57,7 @@
     {"id": "gear", "name": "Gear: hats, tunics, gloves and boots drop in dungeons; the item page has an Equipment tab", "type": "boolean", "default": true},
     {"id": "charm_slot", "name": "Charm slot beside the shield: an amulet in it guards without taking a quick slot", "type": "boolean", "default": true},
     {"id": "same_floors", "name": "The same floors every visit (each floor keeps its layout in your save)", "type": "boolean", "default": true},
-    {"id": "world_zones", "name": "Vigil World preview for new games: zones, gates and shrines (a save keeps its choice)", "type": "boolean", "default": false},
+    {"id": "world_zones", "name": "Vigil World: each dungeon one big map (new games, and saves still on a first floor)", "type": "boolean", "default": true},
     {"id": "world_regions", "name": "Vigil World preview: each dungeon is one map before its midway boss and one after", "type": "boolean", "default": true},
     {"id": "world_map", "name": "Map screen (Select or L3, M on keys): what you've seen, a waypoint, shrine travel from town", "type": "boolean", "default": true},
     {"id": "world_scaling", "name": "Vigil World preview: monsters scale with depth, and with you, so no zone becomes trivial", "type": "boolean", "default": true},

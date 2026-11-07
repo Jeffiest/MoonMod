@@ -26,6 +26,11 @@ for line in io.lines(MOD_DIR .. "/mod.json") do
   end
 end
 
+-- Vigil World is on by default (mod.json); the floor-by-floor tests here predate that, and those that want Vigil
+-- World ask for it (world_zones = true). Section 18 checks the shipped default.
+local SHIPPED_WORLD_ZONES = defaults.world_zones
+defaults.world_zones = false
+
 local passed, failed = 0, 0
 local function check(cond, label, extra)
   if cond then passed = passed + 1; print("  ok   " .. label)
@@ -1375,10 +1380,11 @@ do
   enter(2, 500)
   check(S.zones == nil and S.zone_calls == nil, "off by default: floors are built as they always were")
   check(S.save_data["floors:1:1"].world == false, "the save is settled as a normal Dark Cloud save")
+  S.game.dungeons.list = function() return {{id = "divine-beast-cave", deepest_floor_reached = 2}} end -- floor 3 reached
   S.set("world_zones", true)
   enter(5, 600)
   check(S.zones == nil, "turning the setting on later leaves it one")
-  check(last_toast(S, "started without Vigil World"), "and says why")
+  check(last_toast(S, "gone deeper than a first floor"), "and says why")
   S = new_game({slot = {slot_id = 1, slot_generation = 1}, settings = {world_zones = true, world_regions = false}}).load()
   enter(5, 600)
   check(S.zones and #S.zones.zones == 2 and S.zones.open == nil, "on: a floor is two zones, its gate locked the first time")
@@ -2038,6 +2044,38 @@ do
   A.emit("game.world.location_changed", {context = "georama"})
   check(A.floor_select == true, "a normal save keeps the floor menu")
   check(A.quick_passage == false, "and its loading card")
+
+  -- on by default
+  check(SHIPPED_WORLD_ZONES == true, "Vigil World is on by default")
+
+  -- a save settled without Vigil World that never went past a first floor takes it up while the setting is on
+  local D = new_game({slot = {slot_id = 1, slot_generation = 1}, settings = {world_zones = true}})
+  D.game.dungeons.list = function() return {{id = "divine-beast-cave", deepest_floor_reached = 0}} end
+  D.save_data["floors:1:1"] = {["0:0"] = 820528809, ["0:0:shape"] = "floor", world = false}
+  D.load()
+  enter(D, 0)
+  check(D.save_data["floors:1:1"].world == true and D.zones ~= nil, "an early save settled without Vigil World switches over")
+  D.emit("game.world.location_changed", {context = "georama"})
+  check(D.floor_select == false and D.quick_passage == true, "and its dungeon entrance goes the Vigil World way")
+
+  local E = new_game({slot = {slot_id = 1, slot_generation = 1}, settings = {world_zones = true}})
+  E.game.dungeons.list = function() return {{id = "divine-beast-cave", deepest_floor_reached = 2}} end
+  E.save_data["floors:1:1"] = {["0:0"] = 7, world = false}
+  E.load()
+  enter(E, 0)
+  check(E.save_data["floors:1:1"].world == false and E.zones == nil, "a save that went deeper without it stays a normal save")
+
+  local F = new_game({slot = {slot_id = 1, slot_generation = 1}, settings = {world_zones = false}})
+  F.game.dungeons.list = function() return {{id = "divine-beast-cave", deepest_floor_reached = 0}} end
+  F.save_data["floors:1:1"] = {["0:0"] = 7, world = false}
+  F.load()
+  enter(F, 0)
+  check(F.save_data["floors:1:1"].world == false and F.zones == nil, "an early save stays normal with the setting off")
+  F.set("world_zones", true)
+  check(F.toasts[#F.toasts] and F.toasts[#F.toasts]:find("takes up Vigil World", 1, true), "turning it on tells an early save it switches",
+    F.toasts[#F.toasts])
+  enter(F, 1)
+  check(F.save_data["floors:1:1"].world == true and F.zones ~= nil, "and its next floor is Vigil World")
 end
 
 print("19. The map's key (playtest 2)")
