@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 6
+local PROTOCOL = 7
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -100,8 +100,11 @@ local function show_room()
     try(game.render.layer_remove, {id = "coop_who"})
     return
   end
-  local count = 1
-  for _ in pairs(S.players) do count = count + 1 end
+  -- everyone in the room: the host knows its guests, a guest the players it has heard from
+  local count, seen = 1, {}
+  for peer in pairs(S.players) do seen[peer] = true end
+  for peer in pairs(S.names) do seen[peer] = true end
+  for _ in pairs(seen) do count = count + 1 end
   hud(string.format("CO-OP %s  %d of 4", S.code or "....", count))
   -- the others in the room, by name, under it
   local names = {}
@@ -130,6 +133,7 @@ local function scene_of(w)
     return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id or -1, tostring(w.floor_seed or "-"))
   end
   if w.town_map then return "T" .. w.town_map end -- walking (or in a menu) in a town
+  if w.map_no then return "H" .. w.map_no end     -- a house (or another of a town's maps)
   return nil
 end
 local function on_floor() return my_scene ~= nil and my_scene:sub(1, 1) == "D" end
@@ -167,7 +171,9 @@ local function hear_position(peer, rest)
   others[peer] = o
   o.heard = S.frame
   if not scene or scene == "-" then o.scene, o.state = nil, nil return end
+  local moved = o.scene ~= scene
   o.scene = scene
+  if moved and S.moved then S.moved(peer, scene) end
   o.state = {character = character, weapon = tonumber(weapon), x = tonumber(x) or 0, y = tonumber(y) or 0,
              z = tonumber(z) or 0, heading = tonumber(heading) or 0, motion = math.floor(tonumber(motion) or 0)}
 end
@@ -411,6 +417,221 @@ local function hear_clock(rest)
   if math.min(drift, 1 - drift) > 0.005 then try(game.world.set_time, {fraction = host}) end
 end
 
+-- Together: joining each other, and giving -------------------------------------------------------------------------
+-- When another player goes somewhere else (another dungeon floor, town or house), a panel asks this player whether to
+-- join them there (setting "follow_offers"); joining walks them in (dungeons.enter_floor, world.enter_map). And any
+-- player can give another Gilda or items from their bag (F7, or the Mod Manager's "Give to a player"): whom, what,
+-- how much. The giver's game takes it first, then sends it ("V g amount" / "V i id count name"); the other game puts it
+-- in its wallet or bag and sends back whatever didn't fit ("V back ..."), which comes back to the giver.
+
+local DUNGEONS = {[0] = "Divine Beast Cave", "Wise Owl Forest", "Shipwreck", "Sun and Moon Temple", "Moon Sea",
+                  "Gallery of Time", "Demon Shaft"}
+local TOWN_NAMES = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
+local together = {queue = {}, open = nil}
+
+function together.name(peer)
+  local o = others[peer]
+  return (o and o.name) or S.names[peer] or (peer == 0 and "The host") or ("Player " .. tostring(peer))
+end
+
+function together.place(scene)
+  local d, f = scene:match("^D(%d+):(%-?%d+):")
+  if d then return string.format("%s, floor %d", DUNGEONS[tonumber(d)] or "a dungeon", tonumber(f) + 1) end
+  local t = scene:match("^T(%d+)$")
+  if t then return TOWN_NAMES[tonumber(t)] or "a town" end
+  if scene:match("^H%d+$") then return "a house" end
+  return "somewhere"
+end
+
+-- One panel at a time, in turn (a follow offer, a step of a gift).
+function together.ask(panel) table.insert(together.queue, panel) end
+function together.tick()
+  if together.open or not together.queue[1] then return end
+  local p = table.remove(together.queue, 1)
+  if p.still and not p.still() then return end -- stale (they moved on, or we're there already)
+  local cards = {}
+  for i, o in ipairs(p.options) do cards[i] = {title = o.title:sub(1, 48), subtitle = o.subtitle and o.subtitle:sub(1, 64) or nil} end
+  local ok, err = call(game.ui.choice_open, {id = "coop_together", title = p.title:sub(1, 64), subtitle = p.subtitle and p.subtitle:sub(1, 96) or nil,
+                                          cancel = true, town = true, options = cards})
+  if ok then together.open = p else moonmod.log("warn", "co-op panel: " .. errmsg(err)) end
+end
+moonmod.on("ui.choice_made", function(e)
+  if type(e) ~= "table" or not tostring(e.id or ""):find("coop_together", 1, true) or not together.open then return end
+  local p = together.open
+  together.open = nil
+  local option = not e.cancelled and e.index and p.options[e.index] or nil
+  if option and option.pick then option.pick() end
+end)
+
+-- Following -----------------------------------------------------------------------------------------------------------
+function together.join(peer, scene)
+  local o = others[peer]
+  if not (o and o.scene == scene) then toast("Co-op: " .. together.name(peer) .. " has moved on") return end
+  local ok, err
+  local d, f = scene:match("^D(%d+):(%-?%d+):")
+  if d then
+    ok, err = call(game.dungeons and game.dungeons.enter_floor, {dungeon_id = tonumber(d), floor_id = tonumber(f)})
+  else
+    local map = tonumber(scene:match("^[TH](%d+)$"))
+    if map then ok, err = call(game.world and game.world.enter_map, {map_no = map}) end
+  end
+  if not ok then toast("Co-op: can't go there right now (" .. errmsg(err):sub(1, 80) .. ")") end
+end
+
+function S.moved(peer, scene)
+  if not scene or scene == my_scene or not setting("follow_offers", true) then return end
+  -- one offer per player: a newer move replaces one not yet shown
+  for i = #together.queue, 1, -1 do
+    if together.queue[i].follow == peer then table.remove(together.queue, i) end
+  end
+  local who = together.name(peer)
+  together.ask({
+    follow = peer, title = who .. " went to " .. together.place(scene), subtitle = "Join them there?",
+    still = function() local o = others[peer]; return o ~= nil and o.scene == scene and scene ~= my_scene end,
+    options = {
+      {title = "Join " .. who, subtitle = together.place(scene), pick = function() together.join(peer, scene) end},
+      {title = "Stay here", subtitle = "You can follow later from the Mod Manager"},
+    },
+  })
+end
+
+-- Joining a player from the Mod Manager: whoever is somewhere else, by name and place.
+function together.follow_menu()
+  if not (S.role and S.code) then toast("Co-op: join or host a room first") return end
+  local options = {}
+  for peer, o in pairs(others) do
+    if o.scene and o.scene ~= my_scene then
+      local scene = o.scene
+      options[#options + 1] = {title = together.name(peer), subtitle = together.place(scene), pick = function() together.join(peer, scene) end}
+    end
+  end
+  if #options == 0 then toast("Co-op: everyone is here, or nowhere to join yet") return end
+  together.ask({title = "Join whom?", options = options})
+end
+
+-- Giving -------------------------------------------------------------------------------------------------------------
+local function peers_here()
+  local ids, seen = {}, {}
+  for peer in pairs(S.names) do if not seen[peer] then seen[peer] = true; ids[#ids + 1] = peer end end
+  for peer in pairs(S.players) do if not seen[peer] then seen[peer] = true; ids[#ids + 1] = peer end end
+  table.sort(ids)
+  return ids
+end
+together.peers = peers_here
+
+local function wallet()
+  local w = try(game.economy and game.economy.get)
+  return type(w) == "table" and tonumber(w.amount) or 0
+end
+
+function together.give_gilda(peer, amount)
+  local spent = 0
+  while spent < amount do
+    local chunk = math.min(32767, amount - spent)
+    if not try(game.economy.spend, {amount = chunk}) then break end
+    spent = spent + chunk
+  end
+  if spent <= 0 then toast("Co-op: you don't have that much Gilda") return end
+  send(peer, "V", "g " .. spent)
+  toast(string.format("Co-op: you gave %s %d Gilda", together.name(peer), spent))
+end
+
+function together.give_item(peer, item, count)
+  local got = try(game.items.remove, {id = item.id, count = count})
+  local removed = type(got) == "table" and tonumber(got.removed) or 0
+  if removed <= 0 then toast("Co-op: you no longer have " .. item.name) return end
+  send(peer, "V", string.format("i %s %d %s", item.id, removed, item.name))
+  toast(string.format("Co-op: you gave %s %d x %s", together.name(peer), removed, item.name))
+end
+
+function together.pick_count(peer, item)
+  local options, seen = {}, {}
+  for _, n in ipairs({1, 5, 10, item.count}) do
+    if n <= item.count and not seen[n] then
+      seen[n] = true
+      options[#options + 1] = {title = n == item.count and ("All " .. n) or tostring(n),
+                               pick = function() together.give_item(peer, item, n) end}
+    end
+  end
+  together.ask({title = "How many " .. item.name .. "?", subtitle = "You have " .. item.count, options = options})
+end
+
+function together.pick_item(peer, page)
+  local got = try(game.items.owned)
+  local items = type(got) == "table" and got.items or {}
+  if #items == 0 then toast("Co-op: your bag is empty") return end
+  local first = (page - 1) * 5 + 1
+  local options = {}
+  for i = first, math.min(#items, first + 4) do
+    local item = items[i]
+    options[#options + 1] = {title = item.name, subtitle = "x" .. item.count, pick = function() together.pick_count(peer, item) end}
+  end
+  if #items > first + 4 then
+    options[#options + 1] = {title = "More...", subtitle = "The next items", pick = function() together.pick_item(peer, page + 1) end}
+  end
+  together.ask({title = "Give " .. together.name(peer) .. " which item?", options = options})
+end
+
+function together.pick_gilda(peer)
+  local have = wallet()
+  if have <= 0 then toast("Co-op: you have no Gilda to give") return end
+  local options = {}
+  for _, n in ipairs({100, 500, 1000, 5000, 10000}) do
+    if n < have then options[#options + 1] = {title = n .. " Gilda", pick = function() together.give_gilda(peer, n) end} end
+  end
+  options[#options + 1] = {title = "All " .. have .. " Gilda", pick = function() together.give_gilda(peer, have) end}
+  together.ask({title = "Give " .. together.name(peer) .. " how much?", subtitle = "You have " .. have .. " Gilda", options = options})
+end
+
+function together.pick_what(peer)
+  together.ask({title = "Give " .. together.name(peer) .. "...", options = {
+    {title = "Gilda", subtitle = "You have " .. wallet(), pick = function() together.pick_gilda(peer) end},
+    {title = "An item", subtitle = "From your bag", pick = function() together.pick_item(peer, 1) end},
+  }})
+end
+
+function together.give()
+  if not (S.role and S.code) then toast("Co-op: join or host a room first") return end
+  local ids = peers_here()
+  if #ids == 0 then toast("Co-op: no one else is in the room") return end
+  if #ids == 1 then together.pick_what(ids[1]) return end
+  local options = {}
+  for _, peer in ipairs(ids) do
+    options[#options + 1] = {title = together.name(peer), pick = function() together.pick_what(peer) end}
+  end
+  together.ask({title = "Give to whom?", options = options})
+end
+
+-- Receiving (and taking back what didn't fit)
+function together.hear(peer, rest)
+  local back, kind, tail = rest:match("^(back) (%a) (.+)$")
+  if not back then kind, tail = rest:match("^(%a) (.+)$") end
+  if kind == "g" then
+    local amount = math.floor(tonumber(tail) or 0)
+    if amount <= 0 or amount > 1000000 then return end
+    local before, left = wallet(), amount
+    while left > 0 do
+      local chunk = math.min(32767, left)
+      if not try(game.economy.add, {amount = chunk}) then break end
+      left = left - chunk
+    end
+    local got = wallet() - before
+    if back then toast(string.format("Co-op: %d Gilda came back (their wallet was full)", got)) return end
+    if got < amount then send(peer, "V", "back g " .. (amount - got)) end
+    toast(string.format("Co-op: %s gave you %d Gilda%s", together.name(peer), got, got < amount and " (your wallet is full)" or ""))
+  elseif kind == "i" then
+    local id, count, name = tail:match("^(%S+) (%d+) ?(.*)$")
+    count = tonumber(count)
+    if not id or not count or count <= 0 or count > 999 then return end
+    local got = try(game.items.give, {id = id, count = count})
+    local added = type(got) == "table" and tonumber(got.added) or 0
+    name = name ~= "" and name or id
+    if back then toast(string.format("Co-op: %d x %s came back (their bag was full)", added, name)) return end
+    if added < count then send(peer, "V", string.format("back i %s %d %s", id, count - added, name)) end
+    toast(string.format("Co-op: %s gave you %d x %s%s", together.name(peer), added, name, added < count and " (your bag is full)" or ""))
+  end
+end
+
 -- Georama: the host's world -----------------------------------------------------------------------------------------
 -- When a player leaves Georama's edit mode, their game sends that town (georama.town_export) to the host, which takes
 -- it into its world and sends it on to everyone else; the host's own edits go straight out. Each game takes the town
@@ -425,6 +646,11 @@ local waiting_towns = {} -- town -> {data, from}
 local function take_town(data, from, base)
   local town = tonumber(data:match("^DCT1(%d+):"))
   if not town then return end
+  if not base then
+    -- already so here (the merged town coming back to the one who built it): nothing to take, no walk back
+    local now = try(game.georama and game.georama.town_export, {town_id = town})
+    if now and now.data == data then waiting_towns[town] = nil return true end
+  end
   local ok, err = call(game.georama and game.georama.town_import, {town_id = town, data = data, base = base})
   if not ok then
     if errmsg(err):find("busy") then waiting_towns[town] = {data = data, from = from, base = base} end
@@ -699,6 +925,7 @@ local function stop(reason)
   builders = {}
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest, S.names, S.guest_mods = nil, nil, {}, {}, nil, {}, {}
+  together.queue = {}
   show_room()
 end
 
@@ -820,6 +1047,7 @@ local function message(peer, data)
   if kind == "P" then hear_position(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
+  if kind == "V" then together.hear(peer, rest) return end
   if kind == "C" then if S.role == "guest" and peer == 0 then hear_clock(rest) end return end
   if kind == "M" then mon.hear(peer, rest) return end
   if kind == "E" then door.hear(rest) return end
@@ -924,6 +1152,7 @@ moonmod.on("game.tick", function(e)
     show_others()
   end
   if S.role and S.code then mon.tick() end
+  if S.role then together.tick() end
   if S.role and S.code and S.frame % 10 == 0 then door.step() end
   if S.role == "host" and S.code and S.frame % CLOCK_EVERY == 0 then send_clock() end
   if S.role and S.code and S.frame % 30 == 0 then
@@ -975,6 +1204,8 @@ for _, a in ipairs({
   {"host", "Host a co-op room", "Open a room for friends to join with its code (F8)"},
   {"leave", "Leave or close co-op", "A guest's things go to the host first (F10)"},
   {"guests", "Guests this save keeps", "The friends whose things this save keeps, by name"},
+  {"give", "Give to a player", "Give another player in the room Gilda or items from your bag (F7)"},
+  {"follow", "Join a player", "Go to where another player in the room is now"},
   {"forget", "Forget guests not here", "Press twice: this save stops keeping the things of guests not in the room now"},
   {"needed", "Mods needed to join", "The mods a room asked this game to enable, update or turn off, still to do"},
 }) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
@@ -1016,6 +1247,7 @@ moonmod.on("ui.action", function(a)
   if not a then return end
   if a.id == "host" then host() elseif a.id == "leave" then leave()
   elseif a.id == "guests" then list_guests() elseif a.id == "forget" then forget_guests()
+  elseif a.id == "give" then together.give() elseif a.id == "follow" then together.follow_menu()
   elseif a.id == "needed" then
     local left, room = rm.needed()
     if not left then toast("Co-op: no room has asked this game for mods")
@@ -1025,6 +1257,11 @@ moonmod.on("ui.action", function(a)
 end)
 try(game.input.bind, {id = "host_key", keys = {"F8"}})
 try(game.input.bind, {id = "leave_key", keys = {"F10"}})
+try(game.input.bind, {id = "give_key", keys = {"F7"}})
+moonmod.on("game.tick", function()
+  local g = try(game.input.consume, {id = "give_key"})
+  if g and g.pressed then together.give() end
+end)
 moonmod.on("game.tick", function()
   local h = try(game.input.consume, {id = "host_key"})
   if h and h.pressed then host() end

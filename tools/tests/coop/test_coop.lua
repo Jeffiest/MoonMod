@@ -22,6 +22,7 @@ local function make_game(name, opts)
              avatars = {}, seeds = {}, player = {character = "toan"},
              monsters = {}, avatar_hits = {}, puppets = nil, mirror_hits = {}, strikes = {},
              doors_out = {}, doors_run = {}, door_busy = false,
+             panel = nil, entered = {}, gilda = 1000, bag = {}, follows = {},
              towns = {[0] = "DCT10:start", "DCT11:start", "DCT12:start", "DCT13:start", "DCT14:start"}}
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
@@ -47,7 +48,8 @@ local function make_game(name, opts)
       settings_overlay = function(a) S.overlay[a.id] = a.values; return {id = a.id, applied = true} end,
       settings_overlay_clear = function() S.overlay = {}; S.overlay_cleared = (S.overlay_cleared or 0) + 1; return {cleared = true} end,
     } or nil,
-    ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end, register = function() return true end},
+    ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end, register = function() return true end,
+          choice_open = function(a) if S.panel then return nil, {message = "a panel is open"} end; S.panel = a; return {} end},
     render = {layer_register = function(l) S.layers[l.id] = l.text end, layer_remove = function(l) S.layers[l.id] = nil end},
     input = {bind = function() return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end,
              state = function(a) return {down = S.keys[a.id] == true} end},
@@ -59,6 +61,7 @@ local function make_game(name, opts)
         w.time = {fraction = S.clock or 0.25}
         return w
       end,
+      enter_map = function(a) S.entered[#S.entered + 1] = "map " .. a.map_no; return {queued = true} end,
       set_time = function(a) S.clock = a.fraction; S.clock_sets = (S.clock_sets or 0) + 1; return {time = {fraction = a.fraction}} end,
       avatar_set = function(a) S.avatars[a.slot] = a; return {slot = a.slot, shown = true} end,
       avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
@@ -79,9 +82,36 @@ local function make_game(name, opts)
       puppet_clear = function() S.puppets = nil; return {cleared = true} end,
       mirror_hit = function(a) S.mirror_hits[#S.mirror_hits + 1] = a; return {slot = a.slot, damage = a.damage} end,
     },
+    items = {
+      owned = function()
+        local out = {}
+        for _, it in ipairs(S.bag) do if it.count > 0 then out[#out + 1] = {id = it.id, name = it.name, count = it.count} end end
+        return {items = out}
+      end,
+      remove = function(a)
+        for _, it in ipairs(S.bag) do
+          if it.id == a.id then local n = math.min(it.count, a.count); it.count = it.count - n; return {removed = n} end
+        end
+        return {removed = 0}
+      end,
+      give = function(a)
+        local cap = S.bag_room or 99
+        local n = math.min(cap, a.count)
+        S.bag_room = cap - n
+        for _, it in ipairs(S.bag) do if it.id == a.id then it.count = it.count + n; return {added = n} end end
+        S.bag[#S.bag + 1] = {id = a.id, name = a.id, count = n}
+        return {added = n}
+      end,
+    },
+    economy = {
+      get = function() return {currency = "gilda", amount = S.gilda, max_amount = 65535} end,
+      add = function(a) local room = 65535 - S.gilda; S.gilda = S.gilda + math.min(room, a.amount); return {} end,
+      spend = function(a) if a.amount > S.gilda then return nil, {message = "not enough"} end; S.gilda = S.gilda - a.amount; return {} end,
+    },
     combat = {strike_player = function(a) S.strikes[#S.strikes + 1] = a; return {} end},
     dungeons = {
       set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end,
+      enter_floor = function(a) S.entered[#S.entered + 1] = "floor " .. a.dungeon_id .. ":" .. a.floor_id; return {queued = true} end,
       shared_events_get = function() local out = S.doors_out; S.doors_out = {}; return {events = out} end,
       shared_event_run = function(a)
         if S.door_busy then return nil, {code = "failed", message = "busy: another player's door is already waiting"} end
@@ -174,6 +204,13 @@ local function make_game(name, opts)
       S.emit("game.tick", {frame = S.frame})
       if S.pending_event then local e = S.pending_event; S.pending_event = nil; S.emit(e[1], e[2]) end
     end
+  end
+  -- the panel on screen: pick an option (index from 1), or back out
+  function S.choose(index)
+    local p = S.panel
+    S.panel = nil
+    S.emit("ui.choice_made", {id = "moonmod.coop:coop_together", index = index, cancelled = index == nil})
+    return p
   end
   function S.last_toast() return S.toasts[#S.toasts] or "" end
   return S
@@ -537,6 +574,80 @@ do
   check(h.accounts["p1111111111111111"] ~= nil and h.last_toast():find("press again"), "forgetting asks for a second press")
   h.emit("ui.action", {id = "forget"})
   check(next(h.accounts) == nil and h.last_toast():find("2 guests forgotten"), "and then forgets them", h.last_toast())
+end
+
+print("Together: joining, and giving")
+do
+  relay.rooms = {}
+  local h, g = make_game("Toan"), make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  check(g.layers.coop == "CO-OP ABCDE  2 of 4", "a guest's HUD counts the host too", g.layers.coop)
+  h.map = {context = "georama", map_id = 0, town_map = 0, map_no = 0, walking = true}
+  g.map = {context = "georama", map_id = 0, town_map = 0, map_no = 0, walking = true}
+  h.player = {character = "toan", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "xiao", position = {x = 5, y = 0, z = 0}, heading = 0, motion = 0}
+  both(h, g, 12)
+  g.panel = nil
+  -- the host goes down into Divine Beast Cave, floor 3
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 11}
+  both(h, g, 12)
+  check(g.panel and g.panel.title == "Toan went to Divine Beast Cave, floor 3", "the guest is asked to join the host on the floor it went to",
+        g.panel and g.panel.title)
+  g.choose(1)
+  both(h, g, 2)
+  check(g.entered[1] == "floor 0:2", "joining walks the guest onto that floor", g.entered[1])
+  -- the host walks into a house; the guest stays
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 11}
+  h.map = {context = "georama", map_id = 0, map_no = 23, walking = true}
+  both(h, g, 12)
+  check(g.panel and g.panel.title == "Toan went to a house", "a house too", g.panel and g.panel.title)
+  g.choose(2)
+  both(h, g, 2)
+  check(#g.entered == 1, "staying stays")
+  g.emit("ui.action", {id = "follow"})
+  both(h, g, 2)
+  g.choose(1)
+  both(h, g, 2)
+  check(g.entered[2] == "map 23", "and the Mod Manager can join them later", g.entered[2])
+
+  -- giving Gilda: the host has 1000, the guest 65000 (its wallet holds 65535)
+  g.gilda = 65000
+  check(h.panel and h.panel.title == "Xiao went to Divine Beast Cave, floor 3", "the host is asked to join the guest too",
+        h.panel and h.panel.title)
+  while h.panel do h.choose(2); both(h, g, 2) end -- stays
+  h.emit("ui.action", {id = "give"})
+  both(h, g, 2)
+  check(h.panel and h.panel.title == "Give Xiao...", "with one other player the gift goes straight to them", h.panel and h.panel.title)
+  h.choose(1)                -- Gilda
+  both(h, g, 2)
+  h.choose(#h.panel.options) -- all 1000
+  both(h, g, 6)
+  check(h.gilda == 465 and g.gilda == 65535, "what doesn't fit in the other's wallet comes back", h.gilda .. "/" .. g.gilda)
+  check(find_toast(g, "Toan gave you 535 Gilda"), "the other is told what came", g.toasts[#g.toasts])
+
+  -- giving an item: 3 of 4 Breads
+  h.bag = {{id = "chronicle:item:148", name = "Bread", count = 4}, {id = "chronicle:item:146", name = "Tasty Water", count = 1}}
+  h.emit("ui.action", {id = "give"})
+  both(h, g, 2)
+  h.choose(2)                -- an item
+  both(h, g, 2)
+  check(h.panel and h.panel.options[1].title == "Bread", "the bag's items, by name", h.panel and h.panel.options[1].title)
+  h.choose(1)                -- Bread
+  both(h, g, 2)
+  h.choose(1)                -- 1
+  both(h, g, 6)
+  check(h.bag[1].count == 3 and g.bag[1] and g.bag[1].count == 1 and find_toast(g, "Toan gave you 1 x Bread"), "an item goes from one bag to the other")
+  h.keys.leave_key = true
+  both(h, g, 2)
 end
 
 print("Typing the code")

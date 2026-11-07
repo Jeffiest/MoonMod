@@ -2615,10 +2615,10 @@ index 00000000..55226749
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..da314d5e
+index 00000000..79686014
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,219 @@
 +#pragma once
 +
 +#include <array>
@@ -2782,6 +2782,10 @@ index 00000000..da314d5e
 +void ChronicleTick();
 +void ApplyChronicleTownCamera();
 +void LoadChronicleTownCharacter();
++// Co-op: a town imported into the save while the player stands in it (georama.town_import) is newer than the town the
++// editor holds; leaving it must not write the old one back over it. Cleared when the town is loaded again.
++bool ChronicleTownSaveHeld(int map_no);
++void ChronicleTownLoaded(int map_no);
 +void ApplyChronicleTownPartySwitch();
 +int ChronicleTownMotionRemap(CCharacter *character, int motion_no);
 +int RefreshChronicleWheelMode();
@@ -19890,7 +19894,7 @@ index c00195f0..a54e8ef8 100644
          }
  
 diff --git a/port/src/game/editloop.cpp b/port/src/game/editloop.cpp
-index 12cad0dd..14cf4dc6 100644
+index 12cad0dd..96232934 100644
 --- a/port/src/game/editloop.cpp
 +++ b/port/src/game/editloop.cpp
 @@ -1,3 +1,4 @@
@@ -19950,7 +19954,25 @@ index 12cad0dd..14cf4dc6 100644
  CEditArea   *EditArea;
  CMapParts   *ObjParts;
  CMapParts   *RiverParts;
-@@ -853,6 +882,111 @@ void FormatInto(char (&buffer)[N], std::format_string<Args...> format, Args &&..
+@@ -574,7 +603,8 @@ int FadeOutToEvent(int event_no, int level) {
+ void EditSave() {
+     int map_no = MapNo;
+ 
+-    if (map_no < TOWN_COUNT && map_no >= 0) {
++    // MoonMod co-op: unless another player's change to this town came in since it loaded (it is in the save already).
++    if (map_no < TOWN_COUNT && map_no >= 0 && !moonmod::ChronicleTownSaveHeld(map_no)) {
+         pEditGround->Save(NowEditMap, SaveData);
+         EditPartsInfo.Save(NowEditMap, SaveData);
+     }
+@@ -593,6 +623,7 @@ void EditLoad() {
+     if (MapNo < TOWN_COUNT) {
+         EditPartsInfo.Load(NowEditMap, SaveData, 0);
+         pEditGround->Load(NowEditMap, SaveData);
++        moonmod::ChronicleTownLoaded(MapNo);
+     }
+ 
+     EditPartsObjectOnOff();
+@@ -853,6 +884,111 @@ void FormatInto(char (&buffer)[N], std::format_string<Args...> format, Args &&..
  }
  } // namespace
  
@@ -20062,7 +20084,7 @@ index 12cad0dd..14cf4dc6 100644
  int EditInit(void * /*param*/) {
      std::string map_path;
      std::string save_path;
-@@ -896,6 +1030,25 @@ int EditInit(void * /*param*/) {
+@@ -896,6 +1032,25 @@ int EditInit(void * /*param*/) {
  
      bgm_play_flag = 0;
      bgm_play_start = 0;
@@ -20088,7 +20110,7 @@ index 12cad0dd..14cf4dc6 100644
      InitializeDataBuffer();
      SetDataBuffer(&VisualData, 100);
      SetDataBuffer(&EtcDataBuffer, 40000);
-@@ -905,7 +1058,7 @@ int EditInit(void * /*param*/) {
+@@ -905,7 +1060,7 @@ int EditInit(void * /*param*/) {
      SetDataBuffer(&EdScriptBuffer, 16000);
  #endif
      SetDataBuffer(&EPartsInfoBuff, 8000);
@@ -20097,7 +20119,7 @@ index 12cad0dd..14cf4dc6 100644
      SetDataBuffer(&TextureData, 10);
      SetDataBuffer(&MotionData, 7900);
      SetDataBuffer(&EdMesBuffer, 13000);
-@@ -917,7 +1070,8 @@ int EditInit(void * /*param*/) {
+@@ -917,7 +1072,8 @@ int EditInit(void * /*param*/) {
      EPartsInfoBuff.used = 0;
      EditArea = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CEditArea>(4)))) CEditArea[4];
      pEditGround = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CEditGround>(1)))) CEditGround;
@@ -20107,7 +20129,7 @@ index 12cad0dd..14cf4dc6 100644
      MotionParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CCharacter>(4)))) CCharacter[4];
      RiverParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CMapParts>(16)))) CMapParts[16];
      RoadParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CMapParts>(6)))) CMapParts[6];
-@@ -964,39 +1118,7 @@ int EditInit(void * /*param*/) {
+@@ -964,39 +1120,7 @@ int EditInit(void * /*param*/) {
          interior_name[row][0] = '\0';
      }
  
@@ -20148,7 +20170,7 @@ index 12cad0dd..14cf4dc6 100644
      EdEventInfo.world_coord_enable = false;
      EdEventInfo.main_character = Chara;
      EdEventInfo.main_texture_animation = CharaTexAnimeData;
-@@ -1112,6 +1234,10 @@ int EditInit(void * /*param*/) {
+@@ -1112,6 +1236,10 @@ int EditInit(void * /*param*/) {
      EdVillagerBuffer.base = reinterpret_cast<u_char *>(free_start);
      EdVillagerBuffer.limit = free_quads - 4;
      EdVillagerBuffer.used = 0;
@@ -20159,7 +20181,7 @@ index 12cad0dd..14cf4dc6 100644
      EdNPCReadBuffer = reinterpret_cast<u_long128 *>(EdNPCBuffer.base + EdNPCBuffer.used * 16 + (free_quads >> 1) * 16);
      const auto read_address = reinterpret_cast<std::uintptr_t>(EdNPCReadBuffer);
      EdNPCReadBuffer = reinterpret_cast<u_long128 *>(read_address + ((0x40 - (read_address & 0x3F)) & 0x3F));
-@@ -1119,13 +1245,17 @@ int EditInit(void * /*param*/) {
+@@ -1119,13 +1247,17 @@ int EditInit(void * /*param*/) {
      EdCreateVillagerTable(EditMapInfo);
      EdInitVillagerControl();
      EdInitVillagerTable(NowTime, EditMapInfo);
@@ -20179,7 +20201,7 @@ index 12cad0dd..14cf4dc6 100644
      Chara->SetPosition(start_position);
      Chara->SetRotation(start_rotation);
      float yaw = start_rotation[1] - PI_SHORT;
-@@ -1202,64 +1332,48 @@ int EditInit(void * /*param*/) {
+@@ -1202,64 +1334,48 @@ int EditInit(void * /*param*/) {
      CommonMenuMes1.SetBuff_system(SystemMes);
      CommonMenuMes2.SetBuff_system(SystemMes);
      CommonMenuMes3.SetBuff_system(SystemMes);
@@ -20283,7 +20305,7 @@ index 12cad0dd..14cf4dc6 100644
  /**
   * Returns the sum of the editor category indices from zero through nine.
   */
-@@ -1287,8 +1401,19 @@ struct ED_GRD_DATA {
+@@ -1287,8 +1403,19 @@ struct ED_GRD_DATA {
  /**
   * Runs one frame of the editor and reports what it is to do next.
   */
@@ -20303,7 +20325,7 @@ index 12cad0dd..14cf4dc6 100644
  
      // Pausing is a walking action: an event must not open the pause menu, which reads state only
      // valid outside an event, over itself.
-@@ -1427,6 +1552,23 @@ int EditLoop() {
+@@ -1427,6 +1554,23 @@ int EditLoop() {
  
      EdInteriorFlag = 0;
  
@@ -20327,7 +20349,7 @@ index 12cad0dd..14cf4dc6 100644
      if (interior_test != 0) {
          static int             select = 0;
          std::array<char *, 64> menu{};
-@@ -1534,6 +1676,29 @@ int EditLoop() {
+@@ -1534,6 +1678,29 @@ int EditLoop() {
  
              break;
          case ED_MODE_WALK:
@@ -20357,7 +20379,7 @@ index 12cad0dd..14cf4dc6 100644
              if (loop_counter > 0) {
                  TownMouseBegin(&MainCamera, pEditGround, MapNo, GameMode);
                  if (EdCheckViewMode() == 0) {
-@@ -1808,6 +1973,8 @@ int EditLoop() {
+@@ -1808,6 +1975,8 @@ int EditLoop() {
  
      TownZoomEnd();
      TownMouseApply(NowCamera, pEditGround, MapNo, GameMode);
@@ -20366,7 +20388,7 @@ index 12cad0dd..14cf4dc6 100644
  
      sceVu0FMATRIX view;
      sceVu0FVECTOR eye;
-@@ -1815,6 +1982,7 @@ int EditLoop() {
+@@ -1815,6 +1984,7 @@ int EditLoop() {
      NowCamera->GetCameraMatrix(view);
      NowCamera->GetPos(eye);
      MGSetViewMatrix(view, eye);
@@ -20374,7 +20396,7 @@ index 12cad0dd..14cf4dc6 100644
  
      if (GameMode != ED_MODE_GEORAMA && GameMode != ED_MODE_GEORAMA_MENU_INIT && GameMode != ED_MODE_RETURN_MENU_GEORAMA) {
          if (move_count > 0) {
-@@ -1968,6 +2136,19 @@ int EditLoop() {
+@@ -1968,6 +2138,19 @@ int EditLoop() {
          }
      }
  
@@ -20394,7 +20416,7 @@ index 12cad0dd..14cf4dc6 100644
      if (GameMode == ED_MODE_WALK && (EdPadDown(0x10, 1) != 0 || goto_menu != 0 || (SystemMesCheck() == 0 && EdCheckItemOver() != 0))) {
          int menu_no = ED_MENU_BATTLE;
  
-@@ -2104,8 +2285,15 @@ int EditLoop() {
+@@ -2104,8 +2287,15 @@ int EditLoop() {
      if (GameMode != ED_MODE_EVENT) {
          auto *player = static_cast<CMainChara *>(Chara);
  
@@ -20411,7 +20433,7 @@ index 12cad0dd..14cf4dc6 100644
              player->move_info.ground_poly.attr.ground_kind = 0;
          }
      }
-@@ -2311,6 +2499,38 @@ bool EdDrawBeyondRetailReach(int *far_marks, const GameDrawTrace &draw_trace) {
+@@ -2311,6 +2501,38 @@ bool EdDrawBeyondRetailReach(int *far_marks, const GameDrawTrace &draw_trace) {
      return drawn;
  }
  
@@ -20450,7 +20472,7 @@ index 12cad0dd..14cf4dc6 100644
  /**
   * Draws the editor's world for one frame (retail's MainDraw).
   */
-@@ -2320,6 +2540,7 @@ void EditMainDraw() {
+@@ -2320,6 +2542,7 @@ void EditMainDraw() {
      bool                far_drawn = false;
  
      if (EdDrawOffFlag == 0) {
@@ -20458,7 +20480,7 @@ index 12cad0dd..14cf4dc6 100644
          if (EdPauseFlag != 0 || GameMode == ED_MODE_RETURN_MENU_WALK || GameMode == ED_MODE_RETURN_MENU_GEORAMA) {
              CTextureAnime::stop_anime = 1;
          } else {
-@@ -2429,6 +2650,11 @@ void EditMainDraw() {
+@@ -2429,6 +2652,11 @@ void EditMainDraw() {
  
              pEditGround->DrawRipple(0x15);
              draw_trace.Finish(GameDrawPhase::Water, water_start);
@@ -20470,7 +20492,7 @@ index 12cad0dd..14cf4dc6 100644
  
              if (depth_of_field != 0) {
                  const auto far_dof_start = draw_trace.Start();
-@@ -2463,6 +2689,14 @@ void EditMainDraw() {
+@@ -2463,6 +2691,14 @@ void EditMainDraw() {
          }
  
          switch (GameMode) {
@@ -20485,7 +20507,7 @@ index 12cad0dd..14cf4dc6 100644
              case ED_MODE_RETURN_MENU_WALK:
              case ED_MODE_MENU_INIT: {
                  const auto step_start = draw_trace.Start();
-@@ -2578,6 +2812,8 @@ void EditMainDraw() {
+@@ -2578,6 +2814,8 @@ void EditMainDraw() {
                  draw_trace.Finish(GameDrawPhase::CharacterLights, lights_start);
                  const auto draw_start = draw_trace.Start();
                  EdDrawCharacter(Chara, detail, 0xA, EdVillager, marks, shadow_on, event);
@@ -20494,7 +20516,7 @@ index 12cad0dd..14cf4dc6 100644
                  draw_trace.Finish(GameDrawPhase::CharacterDraw, draw_start);
                  break;
              }
-@@ -3295,6 +3531,9 @@ void DrawSysGra() {
+@@ -3295,6 +3533,9 @@ void DrawSysGra() {
              set2DSprite(GetVif1Packet(), pause, screen, texel, 0x80);
          }
      }
@@ -20504,7 +20526,7 @@ index 12cad0dd..14cf4dc6 100644
  }
  
  // Kept in the window's top right corner.
-@@ -3542,6 +3781,12 @@ void MainEditMode() {
+@@ -3542,6 +3783,12 @@ void MainEditMode() {
      char night_window[10] = "win2";
  
      for (level = 0; level < 4; level++) {
@@ -20517,7 +20539,7 @@ index 12cad0dd..14cf4dc6 100644
          CMapParts *obj = &ObjParts[parts];
          CFrame    *frame = obj->frame[level];
  
-@@ -3551,7 +3796,7 @@ void MainEditMode() {
+@@ -3551,7 +3798,7 @@ void MainEditMode() {
  
      parts++;
  
@@ -20526,7 +20548,7 @@ index 12cad0dd..14cf4dc6 100644
          parts = 0;
      }
  
-@@ -3914,6 +4159,18 @@ void MoveChara() {
+@@ -3914,6 +4161,18 @@ void MoveChara() {
      EdMoveCharaInfo.fishing = (GameMode == ED_MODE_FISHING);
      EdMoveChara();
  
@@ -20545,7 +20567,7 @@ index 12cad0dd..14cf4dc6 100644
      if (EdMoveCharaInfo.system_event_no > 0) {
          RunSystemEvent(EdMoveCharaInfo.system_event_no, &MainCamera);
      } else if (EdMoveCharaInfo.event_no > 0) {
-@@ -3923,7 +4180,15 @@ void MoveChara() {
+@@ -3923,7 +4182,15 @@ void MoveChara() {
  
          if (param->kind == ED_EVENT_POINT_DOOR) {
              if (std::string_view(param->point->destination) == "dungeon") {
@@ -20562,7 +20584,7 @@ index 12cad0dd..14cf4dc6 100644
              } else if (EdPadDown(0x40, 1) != 0 && EdCheckViewMode() == 0 && key_lock == 0) {
                  ED_EVENT_POINT *point = param->point;
  
-@@ -4832,6 +5097,9 @@ void LoadGroundData() {
+@@ -4832,6 +5099,9 @@ void LoadGroundData() {
  
      EditPartsInfo.Initialize(NowEditMap);
      LoadObjectParts();
@@ -28029,10 +28051,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..55cddcc9
+index 00000000..19def084
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,677 @@
+@@ -0,0 +1,679 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -28150,6 +28172,7 @@ index 00000000..55cddcc9
 +    {"world.ghost_get", "world", "ghost_get", "simulation", "game.read", "The player's last five seconds on this dungeon floor, to keep for a ghost."},
 +    {"world.ghost_play", "world", "ghost_play", "simulation", "game.write", "Play kept frames back on a pale, see-through hero."},
 +    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor as their hero and weapon, easing to where they are."},
++    {"world.enter_map", "world", "enter_map", "simulation", "game.write", "Co-op: walk into a town or one of its houses by map number (world.get().map_no), from a town or a dungeon floor."},
 +    {"georama.town_export", "georama", "town_export", "any", "game.read", "Co-op: one town's Georama (its record and chips) as text."},
 +    {"georama.town_import", "georama", "town_import", "any", "game.write", "Co-op: take a town's Georama from georama.town_export; a player walking in it is walked into it again."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
@@ -28269,6 +28292,7 @@ index 00000000..55cddcc9
 +    {"items.give", "items", "give", "simulation", "game.write", "Give a built-in or registered item to an inventory."},
 +    {"items.remove", "items", "remove", "simulation", "game.write", "Remove a quantity of an item from an inventory."},
 +    {"items.use", "items", "use", "simulation", "game.write", "Use an owned item through validated native item rules."},
++    {"items.owned", "items", "owned", "any", "game.read", "The items the player carries (the bag and the quick slots), each with its id, name and count."},
 +    {"items.quick_slots", "items", "quick_slots", "any", "game.read", "Read the three native quick-item slots and their counts."},
 +    {"items.charm_slots", "items", "charm_slots", "any", "game.read", "Read the item page's charm slots: how many are open and the amulet in each."},
 +    {"items.charm_slots_set", "items", "charm_slots_set", "simulation", "game.write", "Open 0-4 charm slots on the item page, where an amulet guards without taking a quick slot."},
@@ -29572,10 +29596,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..9c0bfb9e
+index 00000000..7f371ac6
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17398 @@
+@@ -0,0 +1,17467 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -29642,6 +29666,8 @@ index 00000000..9c0bfb9e
 +#include "btmisc.hpp"
 +#include "btactstatus.hpp"
 +#include "battlemenu.hpp"
++#include "text/gametext.hpp"
++#include "menuetc.hpp"
 +#include "savedata.hpp"
 +#include "main.hpp"
 +#include "mainselect.hpp"
@@ -29764,6 +29790,7 @@ index 00000000..9c0bfb9e
 +std::vector<std::pair<std::string, int>> g_wheel_mode_requests;
 +int g_town_character = CHARA_TOAN;
 +int g_town_loaded_character = CHARA_TOAN;
++std::array<bool, TOWN_COUNT> g_town_save_held{}; // co-op: a town newer in the save than on screen (ChronicleTownSaveHeld)
 +bool g_town_character_reload = false;
 +std::vector<std::pair<std::string, int>> g_enemy_survival_requests;
 +std::array<std::uint32_t, MONSTOR_SLOT_MAX> g_enemy_survival_attempted_generation{};
@@ -31199,7 +31226,7 @@ index 00000000..9c0bfb9e
 +        CharaMain.GetRotation(rotation);
 +        if (std::isfinite(rotation[1])) result["heading"] = rotation[1]; // the way the player faces: (sin, cos) in (x, z)
 +        result["motion"] = CharaMain.motion_no; // the motion the hero plays (co-op's avatars play it on other screens)
-+    } else if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT && GameMode == ED_MODE_WALK && Chara != nullptr &&
++    } else if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < DUNGEON_MAP_BASE && GameMode == ED_MODE_WALK && Chara != nullptr &&
 +               Chara->frame != nullptr) {
 +        // Walking in a town: where the town's hero is, and which one it is (party.town_set_active).
 +        float position[4]{}, rotation[4]{};
@@ -32405,6 +32432,7 @@ index 00000000..9c0bfb9e
 +        result["monster_bonus_percent"] = DngMonsterBonusPercent;
 +        result["chest_bonus_percent"] = DngChestBonusPercent;
 +    }
++    if (mode == GAME_MODE_EDIT && MapNo >= 0) result["map_no"] = MapNo; // the town, house or field the player is in
 +    if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT) {
 +        // A town: its map, and whether the player is in Georama's edit mode (co-op sends a town once it's left).
 +        result["town_map"] = MapNo;
@@ -37109,6 +37137,28 @@ index 00000000..9c0bfb9e
 +             {"synthesis_count", target->synthesis_count}, {"upgraded", true},
 +             {"changed", true}, {"ready", true}},
 +            {}};
++}
++
++// An item's name as its menus show it (the system messages, as the battle menu decodes it), or "Item n".
++std::string OwnedItemName(int item_no) {
++    std::string name;
++    if (SystemMes != nullptr) {
++        if (const COM_ITEM_INFO *info = GetCommonItemInfo(item_no); info != nullptr && info->msg > 0) {
++            short *saved = CommonMenuMes3.buff;
++            CommonMenuMes3.buff = SystemMes;
++            const short *codes = CommonMenuMes3.GetTextLineDataTop(info->msg + 0x64);
++            CommonMenuMes3.buff = saved;
++            if (codes != nullptr) name = dc::text::GameTextDecode(codes);
++        }
++    }
++    for (std::size_t at = 0; (at = name.find('{', at)) != std::string::npos;) {
++        const std::size_t end = name.find('}', at);
++        if (end == std::string::npos) break;
++        name.erase(at, end - at + 1);
++    }
++    if (const std::size_t newline = name.find('\n'); newline != std::string::npos) name.resize(newline);
++    while (!name.empty() && (name.back() == ' ' || name.back() == '\r')) name.pop_back();
++    return name.empty() ? "Item " + std::to_string(item_no) : name;
 +}
 +
 +ApiCallResult GiveItems(const Json &args) {
@@ -43208,6 +43258,21 @@ index 00000000..9c0bfb9e
 +    // world.ghost_get: {character, frames = {{x, y, z, heading, motion}, ...}} oldest first, every other frame.
 +    // georama.town_export / town_import: one town's Georama for co-op (moonmod/coop_save.hpp). A town open in Georama's
 +    // edit mode isn't imported over; a town the player walks in is walked into again, so it shows what came.
++    // world.enter_map({map_no}): walk into a town or one of its houses (as world.get's map_no names it), from walking in a
++    // town or playing on a dungeon floor; co-op's way to join another player there.
++    if (operation.path == "world.enter_map") {
++        int target = -1;
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !ReadBoundedInt(args[0], "map_no", 0, DUNGEON_MAP_BASE - 1, target)) {
++            return Invalid("expected {map_no = a town or house's map number (world.get().map_no)}");
++        }
++        const bool walking = mode == GAME_MODE_EDIT && GameMode == ED_MODE_WALK;
++        const bool playing = mode == GAME_MODE_DUNGEON && gameTask == GAME_TASK_PLAY && BtGameModeFlag == BT_GAME_MODE_PLAY;
++        if (!walking && !playing) return Failed("busy: the player isn't walking in a town or playing on a floor");
++        if (NextMapNo >= 0) return Failed("busy: a map change is already on its way");
++        if (mode == GAME_MODE_EDIT && MapNo == target) return {ApiCallStatus::Ok, {{"map_no", target}, {"queued", false}}, {}};
++        MapJump(target, -1);
++        return {ApiCallStatus::Ok, {{"map_no", target}, {"queued", true}}, {}};
++    }
 +    if (operation.path == "georama.town_export" || operation.path == "georama.town_import") {
 +        const bool importing = operation.path == "georama.town_import";
 +        if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(importing ? "expected {town_id = 0-4, data, base = optional}" : "expected {town_id = 0-4}");
@@ -43228,6 +43293,8 @@ index 00000000..9c0bfb9e
 +                    : !moonmod::coop::ImportTown(data, town, *SaveData, error)) {
 +            return Invalid(error);
 +        }
++        // The town on screen is the old one: leaving it (EditSave) must not write it back over what came.
++        if (here) g_town_save_held[town] = true;
 +        const bool reload = here && NextMapNo < 0;
 +        if (reload) MapJump(town, -1);
 +        return {ApiCallStatus::Ok, {{"town_id", town}, {"imported", true}, {"merged", merging}, {"reloaded", reload}}, {}};
@@ -43692,6 +43759,27 @@ index 00000000..9c0bfb9e
 +    if (operation.path == "items.icon_set") return SetBuiltinItemIcon(mod_id, args);
 +    if (operation.path == "items.use") return UseItem(args);
 +    if (operation.path == "items.quick_slots") return GetQuickItemSlots(args);
++    // items.owned: the items the player carries (the bag and the quick slots), each with its name, as a trade lists them.
++    if (operation.path == "items.owned") {
++        if (!args.is_array() || !args.empty()) return Invalid("items.owned takes no arguments");
++        CDngStatusData *status = CurrentStatus();
++        if (status == nullptr) return Failed("the game has no active save inventory");
++        std::vector<int> seen;
++        const auto note = [&seen](int item_no) {
++            if (item_no >= ITEM_DUNGEON_START && item_no < ITEM_WEAPON_START && std::ranges::find(seen, item_no) == seen.end()) seen.push_back(item_no);
++        };
++        const int capacity = std::clamp<int>(status->item_pack.num, 0, 103);
++        for (int index = 0; index < capacity; ++index) note(status->item_pack.item[index]);
++        for (int index = 0; index < 3; ++index) note(status->item_pack.quick_item_slot[index]);
++        Json items = Json::array();
++        for (const int item_no : seen) {
++            const int count = GetNowItemNum(static_cast<short>(item_no), &status->item_pack);
++            if (count <= 0) continue;
++            items.push_back({{"id", ItemStableId(item_no)}, {"item_no", item_no}, {"count", count},
++                             {"name", OwnedItemName(item_no)}});
++        }
++        return {ApiCallStatus::Ok, {{"items", std::move(items)}}, {}};
++    }
 +    if (operation.path == "items.charm_slots") return GetCharmSlots(args);
 +    if (operation.path == "items.charm_slots_set") return SetCharmSlots(args);
 +    if (operation.path == "items.gear") return GetGear(args);
@@ -43787,6 +43875,11 @@ index 00000000..9c0bfb9e
 +    const int effective = requested == 0 && live_dungeon_play ? 0 : 1;
 +    InputSetWheelMode(effective);
 +    return effective;
++}
++
++bool ChronicleTownSaveHeld(int map_no) { return map_no >= 0 && map_no < TOWN_COUNT && g_town_save_held[map_no]; }
++void ChronicleTownLoaded(int map_no) {
++    if (map_no >= 0 && map_no < TOWN_COUNT) g_town_save_held[map_no] = false;
 +}
 +
 +void LoadChronicleTownCharacter() {
@@ -46645,7 +46738,7 @@ index 00000000..9c0bfb9e
 +                             "models.remove", "animations.register", "animations.play", "animations.stop", "debug.inspect", "debug.overlay_register",
 +                             "entities.get", "entities.set_stats", "entities.scale_set", "entities.script_int_set", "entities.spawn", "entities.despawn", "entities.set_active_limit", "characters.spawn",
 +                             "physics.query", "physics.velocity_get", "physics.velocity_set",
-+                             "items.list", "items.get", "items.register", "items.give", "items.remove", "items.icon_set", "items.use", "items.quick_slots", "items.quick_slot_select", "items.quick_slot_use", "items.charm_slots", "items.charm_slots_set", "items.gear", "items.gear_give", "items.gear_stock_set", "items.gear_page_set", "items.gear_equip", "items.gear_unequip", "items.gear_remove",
++                             "items.list", "items.get", "items.register", "items.give", "items.remove", "items.icon_set", "items.use", "items.quick_slots", "items.owned", "items.quick_slot_select", "items.quick_slot_use", "items.charm_slots", "items.charm_slots_set", "items.gear", "items.gear_give", "items.gear_stock_set", "items.gear_page_set", "items.gear_equip", "items.gear_unequip", "items.gear_remove",
 +                             "content.list", "content.register", "content.unregister"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
@@ -46705,7 +46798,7 @@ index 00000000..9c0bfb9e
 +                             "save.player_extra_get", "save.player_extra_set",
 +                             "monsters.mirror_get", "monsters.puppet_set", "monsters.puppet_clear", "monsters.mirror_hit",
 +                             "dungeons.shared_events_get", "dungeons.shared_event_run",
-+                             "georama.town_export", "georama.town_import"}) {
++                             "georama.town_export", "georama.town_import", "world.enter_map"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
 +    config.api_resource_override_removal_guard = ChronicleModelOverrideRemovalGuard;
@@ -47691,10 +47784,10 @@ index 00000000..ae25e54b
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_avatars_moonmod.cpp b/port/src/moonmod/coop_avatars_moonmod.cpp
 new file mode 100644
-index 00000000..a1bce15b
+index 00000000..1741b554
 --- /dev/null
 +++ b/port/src/moonmod/coop_avatars_moonmod.cpp
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,318 @@
 +// Co-op's remote players (moonmod/coop_avatars.hpp). Each avatar loads like the companion (its own file and model
 +// arenas, its own texture blocks, the weapon referenced to the hand) and is moved like the ghost (placed each frame),
 +// but from reports that come a few times a second: it eases toward the last one.
@@ -47714,6 +47807,7 @@ index 00000000..a1bce15b
 +#include "dataalloc.hpp"
 +#include "dataread.hpp"
 +#include "dun/gameloop.hpp"
++#include "dungeon.h"
 +#include "editground.hpp"
 +#include "editloop.hpp"
 +#include "editmapscript.hpp"
@@ -47769,7 +47863,8 @@ index 00000000..a1bce15b
 +}
 +
 +bool InTown() {
-+    return mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT && Chara != nullptr && Chara->frame != nullptr &&
++    // a town or one of its houses (the dungeons' maps start at DUNGEON_MAP_BASE)
++    return mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < DUNGEON_MAP_BASE && Chara != nullptr && Chara->frame != nullptr &&
 +           (GameMode == ED_MODE_WALK || GameMode == ED_MODE_TALK || GameMode == ED_MODE_EVENT || GameMode == ED_MODE_FISHING ||
 +            GameMode == ED_MODE_TIME_CHANGE || GameMode == ED_MODE_DOOR_OPEN || GameMode == ED_MODE_RETURN_MENU_WALK ||
 +            GameMode == ED_MODE_MENU_INIT || Editing());
