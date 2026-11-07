@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 5
+local PROTOCOL = 6
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -55,7 +55,7 @@ local function my_name()
 end
 
 -- The session: role "host" or "guest" (nil when none), the room code, the players by id, and the pieces arriving.
-local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame = 0, kept_at = 0, names = {}}
+local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame = 0, kept_at = 0, names = {}, guest_mods = {}}
 local code = moonmod.storage.get("code") or "-----" -- the code being typed on the title page
 
 local function net_open(kind, args)
@@ -511,14 +511,194 @@ local function retry_towns()
   end
 end
 
+-- The room's mods ---------------------------------------------------------------------------------------------------
+-- Every game in a room plays the same mods at the same versions, and the guests play them with the host's settings.
+-- A mod's manifest says where it belongs (its "coop" key, through game.mods.list):
+--   "required"   (the default) every player has it enabled at the host's version; the host's settings apply to all
+--   "host_only"  only the host needs it (its state lives in the host's save); a guest may have it or not
+--   "local"      each player's own (controls, the camera, autosave): never asked for, never sent
+-- The guest says its mods first ("MODS id version role;..."), then hello. The host compares: anything missing, at
+-- another version, or a world-changing mod the host doesn't play is sent back as "NEEDMODS" (one "what\tid\tversion
+-- \tname" a line: what is enable, version or disable), and the world is not sent. Otherwise "SETTINGS" (the host's
+-- values for its required mods, one "id\tkey\tvalue" a line, value typed "b:", "i:", "n:" or "s:") comes before the
+-- world, and the guest's game holds them for the visit only (game.mods.settings_overlay): never saved, dropped when
+-- the visit ends. A guest turned away keeps the list (storage "needed") and the title page shows it until it joins.
+local rm = {}
+
+function rm.loaded()
+  local got = try(game.mods and game.mods.list)
+  if type(got) ~= "table" or type(got.mods) ~= "table" then return nil end
+  local out = {}
+  for _, m in ipairs(got.mods) do
+    if type(m) == "table" and type(m.id) == "string" then
+      local role = m.coop
+      if role ~= "host_only" and role ~= "local" then role = "required" end
+      out[m.id] = {id = m.id, version = tostring(m.version or "?"), name = tostring(m.name or m.id), role = role}
+    end
+  end
+  return out
+end
+
+function rm.encode_list(mods)
+  local parts = {}
+  for id, m in pairs(mods) do parts[#parts + 1] = id .. " " .. m.version .. " " .. m.role end
+  table.sort(parts)
+  return table.concat(parts, ";")
+end
+
+function rm.decode_list(text)
+  local out = {}
+  for entry in tostring(text):gmatch("[^;]+") do
+    local id, version, role = entry:match("^(%S+) (%S+) (%S+)$")
+    if id then out[id] = {id = id, version = version, role = role} end
+  end
+  return out
+end
+
+-- What the guest must change before it can join: a list of {what, id, version, name}, sorted, empty when none.
+function rm.compare(host_mods, guest_mods)
+  local need = {}
+  for id, m in pairs(host_mods) do
+    if m.role == "required" then
+      local g = guest_mods[id]
+      if not g then need[#need + 1] = {what = "enable", id = id, version = m.version, name = m.name}
+      elseif g.version ~= m.version then need[#need + 1] = {what = "version", id = id, version = m.version, name = m.name, have = g.version} end
+    end
+  end
+  for id, g in pairs(guest_mods) do
+    if g.role == "required" and not host_mods[id] then
+      need[#need + 1] = {what = "disable", id = id, version = g.version, name = id}
+    end
+  end
+  table.sort(need, function(a, b) if a.what ~= b.what then return a.what < b.what end return a.id < b.id end)
+  return need
+end
+
+local function clean(text) return (tostring(text):gsub("[\t\n]", " ")) end
+
+function rm.encode_need(need)
+  local lines = {}
+  for _, n in ipairs(need) do
+    lines[#lines + 1] = table.concat({n.what, n.id, n.version, clean(n.name)}, "\t")
+  end
+  return table.concat(lines, "\n")
+end
+
+function rm.decode_need(text)
+  local out = {}
+  for line in tostring(text):gmatch("[^\n]+") do
+    local what, id, version, name = line:match("^(%a+)\t([^\t]+)\t([^\t]+)\t(.*)$")
+    if what then out[#out + 1] = {what = what, id = id, version = version, name = name} end
+  end
+  return out
+end
+
+local function escape(s) return (s:gsub("[%%\t\n]", function(c) return string.format("%%%02X", c:byte()) end)) end
+local function unescape(s) return (s:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)) end
+
+function rm.encode_value(v)
+  if type(v) == "boolean" then return "b:" .. tostring(v) end
+  if type(v) == "number" then
+    if math.type and math.type(v) == "integer" then return "i:" .. tostring(v) end
+    return "n:" .. string.format("%.17g", v)
+  end
+  if type(v) == "string" then return "s:" .. escape(v) end
+  return nil
+end
+
+function rm.decode_value(text)
+  local t, rest = tostring(text):match("^(%a):(.*)$")
+  if t == "b" then return rest == "true" end
+  if t == "i" then return math.tointeger and math.tointeger(tonumber(rest)) or tonumber(rest) end
+  if t == "n" then return tonumber(rest) end
+  if t == "s" then return unescape(rest) end
+  return nil
+end
+
+-- The host's settings for the mods every guest plays (its own, this mod, stay each player's).
+function rm.host_settings(host_mods)
+  local lines, ids = {}, {}
+  for id, m in pairs(host_mods) do if m.role == "required" and id ~= "moonmod.coop" then ids[#ids + 1] = id end end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local got = try(game.mods.settings_get, {id = id})
+    local values = type(got) == "table" and got.values or nil
+    if type(values) == "table" then
+      local keys = {}
+      for k in pairs(values) do keys[#keys + 1] = k end
+      table.sort(keys)
+      for _, k in ipairs(keys) do
+        local v = rm.encode_value(values[k])
+        if v then lines[#lines + 1] = id .. "\t" .. k .. "\t" .. v end
+      end
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+-- A guest takes the host's settings for the visit. Returns how many mods took them.
+rm.overlaid = false
+function rm.apply_settings(text)
+  local by_mod = {}
+  for line in tostring(text):gmatch("[^\n]+") do
+    local id, key, value = line:match("^([^\t]+)\t([^\t]+)\t(.*)$")
+    if id and id ~= "moonmod.coop" then
+      local v = rm.decode_value(value)
+      if v ~= nil then by_mod[id] = by_mod[id] or {}; by_mod[id][key] = v end
+    end
+  end
+  local count = 0
+  for id, values in pairs(by_mod) do
+    local ok, err = call(game.mods and game.mods.settings_overlay, {id = id, values = values})
+    if ok then count = count + 1; rm.overlaid = true
+    else moonmod.log("warn", "co-op: the host's settings for " .. id .. ": " .. errmsg(err)) end
+  end
+  return count
+end
+
+function rm.clear_settings()
+  if not rm.overlaid then return end
+  rm.overlaid = false
+  try(game.mods and game.mods.settings_overlay_clear, {})
+end
+
+-- The list a turned-away guest keeps, struck off as this game's mods come to match it.
+function rm.needed()
+  local kept = moonmod.storage.get("needed")
+  if type(kept) ~= "table" or type(kept.list) ~= "table" or #kept.list == 0 then return nil end
+  local mods = rm.loaded() or {}
+  local left = {}
+  for _, n in ipairs(kept.list) do
+    local have = mods[n.id]
+    local done
+    if n.what == "disable" then done = not (have and have.role == "required")
+    else done = have ~= nil and have.version == n.version end
+    if not done then left[#left + 1] = n end
+  end
+  return left, kept.code
+end
+
+function rm.describe(n)
+  if n.what == "enable" then return "enable " .. n.name .. " " .. n.version end
+  if n.what == "version" then return n.name .. ": version " .. n.version .. " needed" end
+  return "disable " .. n.name
+end
+
+function rm.summary(list)
+  local parts = {}
+  for _, n in ipairs(list) do parts[#parts + 1] = rm.describe(n) end
+  return table.concat(parts, "; ")
+end
+
 local function stop(reason)
+  rm.clear_settings()
   try(game.net.leave)
   forget_all()
   mon.release()
   door.log, door.done, door.waiting = {}, {}, {}
   builders = {}
   if reason then toast("Co-op: " .. reason) end
-  S.role, S.code, S.players, S.pieces, S.guest, S.names = nil, nil, {}, {}, nil, {}
+  S.role, S.code, S.players, S.pieces, S.guest, S.names, S.guest_mods = nil, nil, {}, {}, nil, {}, {}
   show_room()
 end
 
@@ -551,6 +731,22 @@ local function welcome(peer, hello)
   if type(id) ~= "string" or not id:match("^[a-z0-9-]+$") then send(peer, "REFUSE", "your game sent no player id") return end
   local name = type(hello.name) == "string" and hello.name ~= "" and hello.name or ("Player " .. (peer + 1))
   S.players[peer] = {id = id, name = name}
+  -- the room's mods first: a guest without them is sent the list instead of the world
+  local host_mods = rm.loaded()
+  if host_mods then
+    local guest_mods = S.guest_mods[peer]
+    if not guest_mods then
+      send(peer, "REFUSE", "your game didn't say which mods it plays; update MoonFactory and the co-op mod")
+      return
+    end
+    local need = rm.compare(host_mods, guest_mods)
+    if #need > 0 then
+      send_pieces(peer, "NEEDMODS", rm.encode_need(need))
+      toast(string.format("Co-op: %s can't join yet: %d mod%s to change", name, #need, #need == 1 and "" or "s"))
+      return
+    end
+    send_pieces(peer, "SETTINGS", rm.host_settings(host_mods))
+  end
   local world = try(game.save.world_export)
   if not world or not world.data then send(peer, "REFUSE", "the host's game can't share its world right now") return end
   local account = try(game.save.account_get, {id = id})
@@ -635,7 +831,10 @@ local function message(peer, data)
     return
   end
   if S.role == "host" then
-    if kind == "HELLO" then
+    if kind == "MODS" then
+      local whole = take_piece(peer, kind, rest)
+      if whole then S.guest_mods[peer] = rm.decode_list(whole) end
+    elseif kind == "HELLO" then
       local id, name = rest:match("^(%S+) ?(.*)$")
       welcome(peer, {id = id, name = name})
     elseif kind == "KEEP" then
@@ -644,7 +843,27 @@ local function message(peer, data)
     end
   elseif S.role == "guest" and peer == 0 then
     local g = S.guest
-    if kind == "WORLD" then g.world = take_piece(peer, kind, rest) or g.world
+    if kind == "NEEDMODS" then
+      local whole = take_piece(peer, kind, rest)
+      if whole then
+        local list = rm.decode_need(whole)
+        local mine = rm.loaded() or {}
+        for _, n in ipairs(list) do if n.what == "disable" and mine[n.id] then n.name = mine[n.id].name end end
+        moonmod.storage.set("needed", {list = list, code = S.code})
+        S.status = string.format("This room needs %d mod change%s first.", #list, #list == 1 and "" or "s")
+        stop("this room needs mods you don't have: " .. rm.summary(list))
+        S.refresh_title = true
+      end
+      return
+    elseif kind == "SETTINGS" then
+      local whole = take_piece(peer, kind, rest)
+      if whole then
+        local n = rm.apply_settings(whole)
+        if n > 0 then toast(string.format("Co-op: the host's settings for %d mod%s, for this visit", n, n == 1 and "" or "s")) end
+      end
+    elseif kind == "WORLD" then
+      g.world = take_piece(peer, kind, rest) or g.world
+      if g.world then moonmod.storage.set("needed", nil) end
     elseif kind == "PLAYER" then g.player = take_piece(peer, kind, rest) or g.player
     elseif kind == "NEW" then g.new = true
     elseif kind == "START" then g.map = tonumber(rest)
@@ -665,7 +884,9 @@ local function pump()
       if S.role == "host" then
         toast("Co-op room " .. tostring(e.code) .. ": friends join with this code from the title screen")
       else
-        -- "HELLO id name": the player id first, then the name, which may hold spaces
+        -- the mods this game plays, then "HELLO id name": the player id first, then the name, which may hold spaces
+        local mine = rm.loaded()
+        if mine then send_pieces(0, "MODS", rm.encode_list(mine)) end
         send(0, "HELLO", me.id .. " " .. (my_name() or ""))
         S.status = "Joined " .. tostring(e.code) .. "; the host is sending their world..."
       end
@@ -676,6 +897,7 @@ local function pump()
     elseif e.kind == "left" then
       local p = S.players[e.peer]
       S.players[e.peer] = nil
+      S.guest_mods[e.peer] = nil
       forget(e.peer)
       builders[e.peer] = nil
       if S.role == "host" and p then toast("Co-op: " .. tostring(p.name or "a player") .. " left") end
@@ -754,6 +976,7 @@ for _, a in ipairs({
   {"leave", "Leave or close co-op", "A guest's things go to the host first (F10)"},
   {"guests", "Guests this save keeps", "The friends whose things this save keeps, by name"},
   {"forget", "Forget guests not here", "Press twice: this save stops keeping the things of guests not in the room now"},
+  {"needed", "Mods needed to join", "The mods a room asked this game to enable, update or turn off, still to do"},
 }) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
 
 -- The host's guests: listed, and forgotten (all but those in the room) on a second press within five seconds.
@@ -792,7 +1015,13 @@ end
 moonmod.on("ui.action", function(a)
   if not a then return end
   if a.id == "host" then host() elseif a.id == "leave" then leave()
-  elseif a.id == "guests" then list_guests() elseif a.id == "forget" then forget_guests() end
+  elseif a.id == "guests" then list_guests() elseif a.id == "forget" then forget_guests()
+  elseif a.id == "needed" then
+    local left, room = rm.needed()
+    if not left then toast("Co-op: no room has asked this game for mods")
+    elseif #left == 0 then toast("Co-op: the mods room " .. tostring(room) .. " needed are all in place")
+    else toast("Co-op: room " .. tostring(room) .. " needs: " .. rm.summary(left)) end
+  end
 end)
 try(game.input.bind, {id = "host_key", keys = {"F8"}})
 try(game.input.bind, {id = "leave_key", keys = {"F10"}})
@@ -821,6 +1050,16 @@ local function page()
   local server = setting("server", "")
   lines[#lines + 1] = server == "" and "Server: the public relay." or
                       ("Server: " .. (server:match("^wss?://([^/]+)") or server):sub(1, 48) .. " (private).")
+  -- a room that turned this game away: what is still to change, enabled in the Mod Manager and the game restarted
+  local left, room = rm.needed()
+  if left and #left > 0 then
+    lines[#lines + 1] = string.format("Room %s needs %d mod change%s (Mod Manager, then restart):", tostring(room or "?"),
+                                      #left, #left == 1 and "" or "s")
+    for i = 1, math.min(#left, 4) do lines[#lines + 1] = "  " .. rm.describe(left[i]):sub(1, 56) end
+    if #left > 4 then lines[#lines + 1] = string.format("  ...and %d more (Mod Manager > Online Co-op > Mods needed)", #left - 4) end
+  elseif left then
+    lines[#lines + 1] = "The mods the room needed are all in place: join again."
+  end
   return {title = "ONLINE CO-OP", subtitle = "Visit a friend's Dark Cloud", root = true, hint = "", lines = lines,
           entries = entries}
 end
@@ -907,7 +1146,8 @@ end)
 -- While waiting on the title page, the status line follows the join.
 moonmod.on("game.tick", function()
   if S.role == "guest" and S.guest and not S.guest.visiting and S.frame % 30 == 0 then show(5) end
+  if S.refresh_title then S.refresh_title = false; show(5) end
 end)
 
 -- For the tests: the state, and the pieces' size.
-return {state = S, me = me, piece = PIECE}
+return {state = S, me = me, piece = PIECE, mods = rm}

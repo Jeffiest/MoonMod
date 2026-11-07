@@ -2580,9 +2580,41 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
 The bundled Online Co-op mod (`mods/moonmod.coop`) is built on these and `net.*`; `docs/COOP_PLAN.md` has what is
 built and what comes next.
 
+## Mods in a session and their co-op roles (`mods.*`, both games)
+
+```lua
+for _, m in ipairs(game.mods.list().mods) do print(m.id, m.version, m.coop) end   -- what this session loaded
+local s = game.mods.settings_get({id = "moonmod.roguelike"})                      -- {id, values, overlaid}
+game.mods.settings_overlay({id = "moonmod.roguelike", values = {companion = true}}) -- for this session only
+game.mods.settings_overlay_clear({})                                              -- every mod's, or {id = ...}
+```
+
+- `mods.list()` (`game.read`) gives `{mods = {{id, name, version, author, coop}}}`: the Lua mods loaded this session,
+  in load order. A mod enabled in the Mod Manager since the game started is not listed until the next launch.
+- `coop` comes from the mod's manifest key of that name: `"required"` (the default when the key is absent) every
+  player in an online room has the mod at the host's version and plays with the host's settings; `"host_only"` only
+  the host needs it (a mod whose state lives in the host's save, such as Randomizer and Living Towns); `"local"` each
+  player's own, never asked for and never sent (controls, the camera, autosave, the hub). Any other value refuses the
+  manifest.
+- `mods.settings_get({id?})` (`game.read`) gives `{id, values, overlaid}`: each declared setting's effective value
+  (an overlay's, else the profile's, else the default). Without `id` it reads the caller's own; another mod's need the
+  `mods.settings` permission.
+- `mods.settings_overlay({id, values})` (`mods.settings`) gives a mod setting values for this session only. Each value
+  is checked against its setting (type, range, choices); those refused are named in `refused`, the rest returned as
+  `applied`. The values are never written to the profile, and the Mod Manager's own changes stay underneath them.
+  The mod gets `settings.changed {id, value}` at the next tick for each setting whose value changed, and
+  `moonmod.settings.get` returns the overlay's value at once. A mod that reads a setting only when it loads should
+  also listen to `settings.changed` to follow an overlay.
+- `mods.settings_overlay_clear({id?})` (`mods.settings`) drops one mod's overlay, or every mod's; each mod is told
+  its own values again through `settings.changed`. Every overlay also ends by itself when `game.session.ended` or
+  `game.session.failed` is published (a visit ends) and when the runtime stops or reloads its mods.
+
+Online Co-op uses these to make every game in a room play the same mods with the host's settings: see
+`docs/COOP_PLAN.md`, "The room's mods".
+
 ## Permissions and ownership
 
-Permissions are declared in `mod.json` and checked by the runtime for each operation: `game.read`, `game.write`, `content.register`, and `scripts.override` cover game adapters; `debug.inspect` gates diagnostics; `storage.read` and `storage.write` cover per-mod storage. Enabling a local package enables its declared Lua permissions. A package that declares `native.extension` also needs a package-relative native library and a separate local trust confirmation before that library loads. Lua does not get direct filesystem, process, network, native code, or arbitrary memory access. `storage.*` is sandboxed to a fixed JSON file under that mod's user-data directory. `net.session` lets a mod play online through `net.*`: it talks only to the co-op relay, in text messages to the other players in its room, never to an address of its own choosing beyond a `wss://` relay. Trusted native code runs in-process and is outside the Lua sandbox; see [Native SDK](NATIVE_SDK.md).
+Permissions are declared in `mod.json` and checked by the runtime for each operation: `game.read`, `game.write`, `content.register`, and `scripts.override` cover game adapters; `debug.inspect` gates diagnostics; `storage.read` and `storage.write` cover per-mod storage. Enabling a local package enables its declared Lua permissions. A package that declares `native.extension` also needs a package-relative native library and a separate local trust confirmation before that library loads. Lua does not get direct filesystem, process, network, native code, or arbitrary memory access. `storage.*` is sandboxed to a fixed JSON file under that mod's user-data directory. `net.session` lets a mod play online through `net.*`: it talks only to the co-op relay, in text messages to the other players in its room, never to an address of its own choosing beyond a `wss://` relay. `mods.settings` lets a mod read other mods' settings and give them session-only values (`mods.*`); it never writes another mod's saved settings. Trusted native code runs in-process and is outside the Lua sandbox; see [Native SDK](NATIVE_SDK.md).
 
 ## Native extension surface
 

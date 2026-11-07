@@ -3,6 +3,7 @@
   "id": "moonmod.living-towns",
   "name": "Living Towns",
   "version": "1.0.0",
+  "coop": "host_only",
   "author": "Jeffiest",
   "description": "The towns ask things of you after their houses are rebuilt. Each day the villagers post three bounties on the board (hunt in a dungeon, open its chests, go deeper, or bring them something), sized to how far your story has gone. A villager waits by the exit gate on a bounty's floors and pays you there. And the general stores stock better goods as each new dungeon is reached.",
   "framework_api": 1,

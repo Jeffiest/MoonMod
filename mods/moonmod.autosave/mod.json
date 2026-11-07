@@ -3,6 +3,7 @@
   "id": "moonmod.autosave",
   "name": "Autosave",
   "version": "1.0.0",
+  "coop": "local",
   "author": "Jeffiest",
   "description": "Controls Chronicle's guarded native town autosave slot.",
   "framework_api": 1,
