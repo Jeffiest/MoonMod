@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.coop",
   "name": "Online Co-op",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": "Jeffiest",
   "description": "Play Dark Cloud together online, up to four. The host plays their own save and opens a room; friends join it from the title screen's Online Co-op with its code and walk into the host's world: the host's story, towns, Georama and dungeons, with their own weapons, items and Gilda, which the host's save keeps for them. A friend's own save is never touched. Needs the MoonFactory engine with online play (net.*) and visits.",
   "framework_api": 1,
@@ -12,6 +12,7 @@
   "settings": [
     {"id": "name", "name": "Your name, as the others see it", "type": "string", "default": ""},
     {"id": "server", "name": "Server (blank: the public relay; or ws://... / wss://... for a private server)", "type": "string", "default": ""},
+    {"id": "follow_offers", "name": "Ask to join another player when they go to another floor, town or house", "type": "boolean", "default": true},
     {"id": "shared_doors", "name": "Doors, gates and switches one player opens open for everyone on the floor", "type": "boolean", "default": true},
     {"id": "keep_every", "name": "A guest's things go to the host every this many seconds", "type": "integer", "default": 60, "min": 15, "max": 600}
   ]

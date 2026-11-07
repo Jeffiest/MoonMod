@@ -2562,6 +2562,12 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   place, once the player is free (not in a menu, a script or held still; it waits up to half a minute), the key it asks
   for taken as given. One waits at a time: another fails `busy` until it is taken.
 
+- `world.enter_map({map_no})` walks the player into a town or one of its houses by its map number, as `world.get()`
+  reports it (`map_no`, in a town or house), from walking in a town or playing on a dungeon floor. `items.owned()` lists
+  what the player carries (the bag and the quick slots) as `{items = {{id, item_no, name, count}, ...}}`, names as the
+  menus show them. A town imported while the player stands in it is no longer written back over by the town on screen
+  when they leave it.
+
 - `georama.town_export({town_id})` gives one town's Georama (its record and chips) as `{data}` text, and
   `georama.town_import({town_id, data, base?})` takes it. With `base` (the town as the editing game had it when its
   player opened the editor), only what they changed comes across, merged into this game's town: a plot, villager,
