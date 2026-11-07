@@ -1011,6 +1011,9 @@ local function join()
     S.status = "Set the room's five letters first."
     return
   end
+  -- another room's list of mods needed is that room's: joining this one starts afresh
+  local kept = moonmod.storage.get("needed")
+  if type(kept) == "table" and kept.code ~= code then moonmod.storage.set("needed", nil) end
   local ok, err = net_open("join", {code = code})
   if not ok then S.status = "Can't join: " .. errmsg(err):sub(1, 60) return end
   S.role = "guest"
@@ -1289,6 +1292,7 @@ local function page()
                       ("Server: " .. (server:match("^wss?://([^/]+)") or server):sub(1, 48) .. " (private).")
   -- a room that turned this game away: what is still to change, enabled in the Mod Manager and the game restarted
   local left, room = rm.needed()
+  if room ~= nil and room ~= code then left = nil end -- the list is another room's, not the one about to be joined
   if left and #left > 0 then
     lines[#lines + 1] = string.format("Room %s needs %d mod change%s (Mod Manager, then restart):", tostring(room or "?"),
                                       #left, #left == 1 and "" or "s")

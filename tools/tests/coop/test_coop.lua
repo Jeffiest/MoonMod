@@ -742,6 +742,13 @@ joined = table.concat(mguest.title.lines, "|")
 check(joined:find("needs 1 mod change") and joined:find("enable Vigil"), "what's done drops off the list", joined)
 mguest.emit("ui.action", {id = "needed"})
 check(mguest.last_toast():find("room ABCDE needs: enable Vigil"), "the Mod Manager action lists what's left", mguest.last_toast())
+-- another room's list isn't the typed room's (a friend's new room, after an older one turned this game away)
+local real = mguest.storage.needed
+mguest.storage.needed = {list = real.list, code = "ZZZZZ"}
+mguest.emit("game.title.opened", {})
+check(not table.concat(mguest.title.lines, "|"):find("needs"), "another room's list isn't shown for the code typed",
+      table.concat(mguest.title.lines, "|"))
+mguest.storage.needed = real
 -- all done (a host-only mod the guest also has does no harm)
 mguest.mods_list = {mod("moonmod.coop", "0.8.0"), mod("moonmod.roguelike", "0.3.0"), mod("moonmod.vigil", "0.1.0"),
                     mod("moonmod.randomizer", "1.0.0"), mod("moonmod.controls", "1.0.0", "local")}
