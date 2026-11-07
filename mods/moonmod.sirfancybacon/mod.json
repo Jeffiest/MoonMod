@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.sirfancybacon",
+  "name": "SirFancyBacon Mod Pack",
+  "version": "0.1.0",
+  "author": "SirFancyBacon (ported to MoonMod by Jeffiest)",
+  "description": "Quality-of-life ideas from SirFancyBacon's Chronicle branches (qol-pack, floor-select), as a MoonMod mod. An Auto Repair Powder in your bag saves a weapon about to break, as one in a quick slot does. T mends the active weapon with a Repair Powder from the bag. The dungeon's floor list warns, before you go in, of a floor that lets only one character in, locks your weapon, or dries you out faster. Each part has its own setting.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write"],
+  "settings": [
+    {"id": "auto_repair", "name": "Auto Repair Powder works from the bag", "type": "boolean", "default": true},
+    {"id": "repair_key", "name": "T mends the weapon with a Repair Powder from the bag", "type": "boolean", "default": true},
+    {"id": "limit_warning", "name": "The floor list warns of limited floors", "type": "boolean", "default": true}
+  ]
+}

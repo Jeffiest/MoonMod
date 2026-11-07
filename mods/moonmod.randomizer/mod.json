@@ -3,6 +3,7 @@
   "id": "moonmod.randomizer",
   "name": "Randomizer",
   "version": "1.0.0",
+  "coop": "host_only",
   "author": "Jeffiest",
   "description": "A new Dark Cloud from one seed: shop stock, weapon stats, monster drops and steals, chest contents and floor layouts, all shuffled. A save keeps the seed it started with. Daily seeds come from the date, so everyone playing that day has the same game; the share code on the Check action lets a friend play yours.",
   "framework_api": 1,

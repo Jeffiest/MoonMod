@@ -19,7 +19,8 @@
     "optional_dependencies": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "load_after": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
     "load_before": {"type": "array", "maxItems": 64, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"}, "uniqueItems": true},
-    "permissions": {"type": "array", "maxItems": 64, "items": {"enum": ["storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override", "debug.inspect", "native.extension", "net.session"]}, "uniqueItems": true},
+    "permissions": {"type": "array", "maxItems": 64, "items": {"enum": ["storage.read", "storage.write", "game.read", "game.write", "content.register", "scripts.override", "debug.inspect", "native.extension", "net.session", "mods.settings"]}, "uniqueItems": true},
+    "coop": {"enum": ["required", "host_only", "local"], "description": "Online co-op: required (the default) every player has the mod at the host's version and plays with the host's settings; host_only only the host needs it; local each player's own, never asked for."},
     "native_extension": {
       "type": "object",
       "additionalProperties": false,

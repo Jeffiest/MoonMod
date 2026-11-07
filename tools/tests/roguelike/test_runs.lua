@@ -88,7 +88,7 @@ run_floor(S, {atla = true})
 local run = S.storage.run
 check(run.phase == "active" and run.depth == 1, "run active at depth 1")
 check(S.hp.xiao == 0 and S.hp.ruby == 0 and S.hp.toan > 0, "undrafted allies start knocked out")
-check((S.items["chronicle:item:177"] or 0) == 2, "starter kit given in the fresh save")
+check((S.items["chronicle:item:177"] or 0) == 3, "starter kit given in the fresh save")
 check(S.monsters[1].exp == 36, "ABS x6 on floor I", S.monsters[1].exp)
 check(S.floor_label == "1-1" and S.floor_number == 1 and not S.layers.gauntlet and next(S.hud_icons) == nil,
       "the floor plate reads 1-1 and the card B1, no text line", S.floor_label)
@@ -117,8 +117,13 @@ S.monsters[2].alive = true; S.monsters[2].exp = 40; S.kill(S.monsters[2]); S.tic
 check(S.weapons[ally][0].abs + S.weapons[ally][0].level * 1000 > before, "benched ally's weapon gained shared ABS")
 -- an undrafted, knocked-out character cannot be switched to; a drafted one bounces back
 S.exit_gate(); run_floor(S)
-check(S.char_blocks and #S.char_blocks == 2 and S.char_blocks[2] == run.drafted[2],
+local aims = (run.drafted[2] == "ruby" or run.drafted[2] == "osmond")
+check(S.char_blocks and (aims and #S.char_blocks == 1 or #S.char_blocks == 2 and S.char_blocks[2] == run.drafted[2]),
       "a floor holds only the drafted characters' own doors and jumps", S.char_blocks and table.concat(S.char_blocks, ","))
+-- Ruby's and Osmond's doors are opened by aiming from the first-person look, which the Gauntlet turns off
+local aim_door = false
+for _, c in ipairs(S.char_blocks or {}) do aim_door = aim_door or c == "ruby" or c == "osmond" end
+check(not aim_door, "no aim doors (Ruby's, Osmond's) go on a floor", S.char_blocks and table.concat(S.char_blocks, ","))
 local cache_at; for i, t in ipairs(S.toasts) do if t:find("^Miracle cache!") then cache_at = i end end
 check(cache_at and S.toast_icons[cache_at] == "moonmod/roguelike/hud/cache.png", "cursed floor paid a Miracle cache on exit, with the chest")
 S.input_pressed["curse_key"] = true; S.tick(1)
@@ -453,7 +458,7 @@ S11.select("back")
 start_run(S11)
 local starter11 = S11.weapons.toan[S11.equipped.toan]
 check(starter11.durability == 30 + 20 and starter11.durability_f == 50, "Whetstone 2/3: +20 durability, full", starter11.durability)
-check((S11.items["chronicle:item:177"] or 0) == 3, "Repair Kit 1/2: a third Repair Powder", S11.items["chronicle:item:177"])
+check((S11.items["chronicle:item:177"] or 0) == 4, "Repair Kit 1/2: a fourth Repair Powder", S11.items["chronicle:item:177"])
 
 -- 11. The Moon Shard table: a fall in the third biome pays about 15 ------------------------------------
 print("Scenario 11: Moon Shards for a fall in the third biome")
@@ -872,6 +877,36 @@ do
   check(SK.active_limit == 12, "a run keeps 12 monsters awake, not retail's 4", SK.active_limit)
   SK.game_over(); SK.tick(30)
   check(SK.active_limit == 4, "the run's end puts retail's 4 back", SK.active_limit)
+end
+
+print("Scenario 22c: the roaming King's Curse can be killed")
+do
+  local SC, coffin, curse
+  for seed = 1, 60 do
+    SC = boot({seed = seed, overrides = {roaming_bosses = 100}})
+    start_run(SC); SC.tick(20); SC.reveal_all(); SC.tick(400)
+    coffin, curse = nil, nil
+    for _, m in ipairs(SC.spawned or {}) do
+      if m.model == 81 and m.arena_slot == 0 then coffin = m end
+      if m.model == 82 then curse = m end
+    end
+    if coffin then break end
+  end
+  check(coffin and curse, "a seed brings the King's Curse to roam", coffin and coffin.model)
+  if coffin and curse then
+    check(curse.vulnerable == true and coffin.vulnerable == true and curse.max_hp < coffin.max_hp,
+          "the Curse and its coffin take blows through the Curse's invincibility, the Curse on half the pool",
+          tostring(curse.vulnerable) .. " " .. tostring(coffin.vulnerable) .. " " .. tostring(curse.max_hp) .. "/" .. tostring(coffin.max_hp))
+    check(SC.waypoint ~= nil and SC.find_toast("break its coffin"), "the map flags the coffin's room, and the toast says so")
+    local cm, km
+    for _, m in ipairs(SC.monsters) do
+      if m.handle == curse.handle then cm = m end
+      if m.handle == coffin.handle then km = m end
+    end
+    SC.kill(cm); SC.tick(2)
+    check(km and km.alive == false and SC.waypoint == nil and SC.find_toast("King's Curse is broken"),
+          "striking the Curse down breaks its coffin and takes the flag away")
+  end
 end
 
 -- 24. New moves --------------------------------------------------------------------------------------------------

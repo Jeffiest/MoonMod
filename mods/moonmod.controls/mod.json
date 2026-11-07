@@ -3,6 +3,7 @@
   "id": "moonmod.controls",
   "name": "Controls",
   "version": "1.0.0",
+  "coop": "local",
   "author": "Jeffiest",
   "description": "Dungeon quick-item hotkeys, party shortcuts, and first-person toggle using MoonFactory input actions.",
   "framework_api": 1,
