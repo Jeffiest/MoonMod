@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.vigil",
   "name": "Vigil",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Jeffiest",
   "description": "Souls-lite combat for the story game, first prototype (S1). L2 evades (a roll, or a backstep at rest) spend the weapon gauge, so stamina gates them. Enemies hit harder, and a hit stuns you for less time and so protects you for less. Toan gains a heavy attack, combo finishers and lunges. Enemies with a brain circle you, track you through a wind-up, feint, punish a whiffed swing and take turns attacking. Holding the guard slows the gauge's recovery. See VIGIL_PLAN.md.",
   "framework_api": 1,
