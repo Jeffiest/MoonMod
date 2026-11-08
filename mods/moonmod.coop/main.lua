@@ -1,4 +1,4 @@
--- Online Co-op (moonmod.coop): play together, up to four, through the co-op relay (game.net.*).
+-- Online Co-op (moonmod.coop): play Dark Cloud or Dark Cloud 2 together, up to four, through the co-op relay (game.net.*).
 --
 -- The host plays their own save and opens a room (Mod Manager > Online Co-op > Host, or F8); the relay gives it a
 -- five-letter code. A friend picks Online Co-op on the title screen, sets the code and joins. Their game says hello
@@ -14,7 +14,6 @@
 local PROTOCOL = 7
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
-local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
 local LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 local function try(fn, ...)
@@ -23,6 +22,23 @@ local function try(fn, ...)
   if ok then return value end
   return nil
 end
+
+-- Which game this is: Dark Cloud (Chronicle) or Dark Cloud 2 (Chronicle Two). The messages are the same; the names,
+-- the towns each dungeon is reached from and the save texts' tags differ.
+local GAME = (function()
+  local info = try(game.info and game.info.get)
+  return type(info) == "table" and info.id == "chronicle-two" and "chronicle-two" or "chronicle"
+end)()
+local DC2 = GAME == "chronicle-two"
+local GAME_NAME = DC2 and "Dark Cloud 2" or "Dark Cloud"
+local TOWN_TAG = DC2 and "DCT2" or "DCT1" -- georama.town_export's tag: "DCT1<town>:" or "DCT2<town>:"
+local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from (both games: seven dungeons, five towns)
+local DUNGEONS = DC2 and {[0] = "Underground Channel", "Rainbow Butterfly Wood", "Starlight Canyon", "Ocean's Roar Cave", "Mount Gundor",
+                          "Moon Flower Palace", "Zelmite Mine"}
+                     or {[0] = "Divine Beast Cave", "Wise Owl Forest", "Shipwreck", "Sun and Moon Temple", "Moon Sea",
+                         "Gallery of Time", "Demon Shaft"}
+local TOWN_NAMES = DC2 and {[0] = "Palm Brinks", "Sindain", "Balance Valley", "Veniccio", "Heim Rada"}
+                       or {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
 local function call(fn, ...)
   if type(fn) ~= "function" then return nil, {code = "unsupported", message = "this engine has no such operation"} end
   local ok, value, err = pcall(fn, ...)
@@ -424,9 +440,6 @@ end
 -- how much. The giver's game takes it first, then sends it ("V g amount" / "V i id count name"); the other game puts it
 -- in its wallet or bag and sends back whatever didn't fit ("V back ..."), which comes back to the giver.
 
-local DUNGEONS = {[0] = "Divine Beast Cave", "Wise Owl Forest", "Shipwreck", "Sun and Moon Temple", "Moon Sea",
-                  "Gallery of Time", "Demon Shaft"}
-local TOWN_NAMES = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
 local together = {queue = {}, open = nil}
 
 function together.name(peer)
@@ -638,13 +651,13 @@ end
 -- (georama.town_import); a player walking in it is walked into it again, at the town's entrance, so no one stands in
 -- a house that just went up. A town arriving while its player is busy in it (editing, a menu) waits and is tried again.
 
-local TOWNS = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
+local TOWNS = TOWN_NAMES
 local editing_town = nil
 local editing_base = nil  -- that town when the editor opened
 local waiting_towns = {} -- town -> {data, from}
 
 local function take_town(data, from, base)
-  local town = tonumber(data:match("^DCT1(%d+):"))
+  local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
   if not town then return end
   if not base then
     -- already so here (the merged town coming back to the one who built it): nothing to take, no walk back
@@ -676,7 +689,7 @@ local function town_from(peer, payload)
   local cut = payload:find("\n", 1, true)
   local data = cut and payload:sub(1, cut - 1) or payload
   local base = cut and payload:sub(cut + 1) or nil
-  local town = tonumber(data:match("^DCT1(%d+):"))
+  local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
   if S.role == "host" then
     if take_town(data, peer, base) and town then send_merged(town) end
   elseif peer == 0 then
@@ -944,12 +957,15 @@ local function host()
   toast("Co-op: opening a room...")
 end
 
--- The town a guest arrives in: the host's, or the one its dungeon is reached from.
+-- The town a guest arrives in: the host's, or the one its dungeon is reached from. Chronicle names a town by its map
+-- (0-4); Chronicle Two by its area (world.get().town_map), its maps being numbered across the whole game.
 local function arrival_town()
   local w = try(game.world.get) or {}
   if w.context == "dungeon" and w.dungeon_id then return DUNGEON_TOWN[w.dungeon_id] or 0 end
+  local town = tonumber(w.town_map)
+  if town and town >= 0 and town <= 4 then return town end
   local map = tonumber(w.map_id)
-  if map and map >= 0 and map <= 4 then return map end
+  if not DC2 and map and map >= 0 and map <= 4 then return map end
   return 0
 end
 
@@ -1297,7 +1313,7 @@ local function page()
   elseif left then
     lines[#lines + 1] = "The mods the room needed are all in place: join again."
   end
-  return {title = "ONLINE CO-OP", subtitle = "Visit a friend's Dark Cloud", root = true, hint = "", lines = lines,
+  return {title = "ONLINE CO-OP", subtitle = "Visit a friend's " .. GAME_NAME, root = true, hint = "", lines = lines,
           entries = entries}
 end
 
@@ -1386,5 +1402,5 @@ moonmod.on("game.tick", function()
   if S.refresh_title then S.refresh_title = false; show(5) end
 end)
 
--- For the tests: the state, and the pieces' size.
-return {state = S, me = me, piece = PIECE, mods = rm}
+-- For the tests: the state, the game, and the pieces' size.
+return {state = S, me = me, piece = PIECE, mods = rm, game = GAME, town_tag = TOWN_TAG, dungeons = DUNGEONS, towns = TOWN_NAMES}

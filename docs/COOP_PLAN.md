@@ -1,6 +1,6 @@
 # Online Co-op: plan
 
-Up to four play Dark Cloud together online, web and PC alike, through the co-op relay (DC_Web's `coop/relay`: the
+Up to four play Dark Cloud, or Dark Cloud 2 (Chronicle Two), together online, web and PC alike, through the co-op relay (DC_Web's `coop/relay`: the
 public Cloudflare Worker, or anyone's private server). The engine's side is `net.*` (online play), `save.*`'s split and
 accounts, and visits (`docs/API.md`); the game's side is the Online Co-op mod, `mods/moonmod.coop`. It ports the co-op
 of Jeffiest/Chronicle's `windows` branch (`win/docs/MULTIPLAYER.md`): ghosts, shared floors, mirrored monsters, the
@@ -67,7 +67,18 @@ run's).
 
 Tests: `tools/tests/coop/test_coop.lua` ("The room's mods") and the engine's `moonmod_mods_api_test.cpp`.
 
+## Chronicle Two (Dark Cloud 2)
+
+The mod lists both games (`"games": ["chronicle", "chronicle-two"]`) and asks `game.info.get` which it is in: the
+messages are the same (protocol 7), the names, the town each dungeon is reached from and the save texts' tags differ
+(`DCW2`/`DCP2`/`DCT2`). A guest arrives in a town by its area (`world.get().town_map`, 0-4), since Chronicle Two
+numbers its maps across the whole game. The engine side is ChronicleTwo's `port/src/moonmod/coop_*_moonmod.cpp`
+(`port/docs/COOP.md` there lists what is mirrored, what each side owns and what is not finished: blows on avatars,
+weapons on avatars, names over heads, the panel not pausing the game). Tests: `tools/tests/coop/test_coop.lua`
+("Chronicle Two: the same mod in Dark Cloud 2") and the engine's `MoonModNet*` / `MoonModCoop*` cases, plus
+ChronicleTwo's `tools/coop/two_games.py`, two headless games meeting through the relay.
+
 ## Next
 
-Playing it: everything above is built and tested in the mod's script tests and the engine's unit tests, not yet in two
-real games together.
+Playing it: everything above is built and tested in the mod's script tests and the engine's unit tests, and (for
+Chronicle Two) in two headless games through the relay, not yet by two people on real data.

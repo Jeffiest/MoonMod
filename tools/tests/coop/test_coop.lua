@@ -15,15 +15,22 @@ local function queue(game_state, event) game_state.net_events[#game_state.net_ev
 
 local function make_game(name, opts)
   opts = opts or {}
+  -- opts.game: "chronicle" (Dark Cloud, the default) or "chronicle-two" (Dark Cloud 2), as game.info.get names it.
+  local dc2 = opts.game == "chronicle-two"
   local S = {name = name, handlers = {}, storage = {}, settings = {name = name}, toasts = {}, layers = {},
              net_events = {}, net = nil, session = {kind = "story"}, accounts = {}, frame = 0, keys = {},
-             world = "DCW1" .. string.rep("w", 30000) .. name, things = "DCP1" .. string.rep("p", 20000) .. name,
-             map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {},
+             world = (dc2 and "DCW2" or "DCW1") .. string.rep("w", 30000) .. name,
+             things = (dc2 and "DCP2" or "DCP1") .. string.rep("p", 20000) .. name,
+             map = dc2 and {context = "georama", map_id = 23, town_map = 2} or {context = "georama", map_id = 2},
+             title = nil, started = nil, imported = {},
              avatars = {}, seeds = {}, player = {character = "toan"},
              monsters = {}, avatar_hits = {}, puppets = nil, mirror_hits = {}, strikes = {},
              doors_out = {}, doors_run = {}, door_busy = false,
              panel = nil, entered = {}, gilda = 1000, bag = {}, follows = {},
              towns = {[0] = "DCT10:start", "DCT11:start", "DCT12:start", "DCT13:start", "DCT14:start"}}
+  if dc2 then
+    S.towns = {[0] = "DCT20:start", "DCT21:start", "DCT22:start", "DCT23:start", "DCT24:start"}
+  end
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
     on = function(event, fn) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], fn) end,
@@ -42,6 +49,7 @@ local function make_game(name, opts)
   end
   S.mods_list, S.mod_settings, S.overlay = opts.mods, opts.mod_settings or {}, {}
   env.game = {
+    info = {get = function() return {id = opts.game or "chronicle", name = dc2 and "Chronicle Two" or "Chronicle", api_major = 1} end},
     mods = opts.mods and {
       list = function() return {mods = S.mods_list} end,
       settings_get = function(a) return {id = a.id, values = S.mod_settings[a.id] or {}} end,
@@ -775,6 +783,59 @@ do
     local back = rm.decode_value(rm.encode_value(v))
     check(back == v and math.type(back) == math.type(v), "a setting value crosses intact: " .. tostring(v):gsub("%c", "?"))
   end
+end
+
+print("Chronicle Two: the same mod in Dark Cloud 2")
+do
+  relay.rooms = {}
+  local h = make_game("Max", {game = "chronicle-two"})
+  local g = make_game("Monica", {game = "chronicle-two"})
+  check(h.mod.game == "chronicle-two" and h.mod.town_tag == "DCT2", "the mod knows which game it is in", h.mod.game)
+  check(h.mod.dungeons[0] == "Underground Channel" and h.mod.towns[4] == "Heim Rada", "and names Dark Cloud 2's dungeons and towns")
+  check(g.title.subtitle == "Visit a friend's Dark Cloud 2", "the title page says whose world", g.title.subtitle)
+  h.keys.host_key = true
+  both(h, g, 2)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 6)
+  check(g.started and g.started.world == h.world and g.started.world:sub(1, 4) == "DCW2", "the guest's visit takes the host's Dark Cloud 2 world",
+        g.started and g.started.world:sub(1, 4))
+  check(g.started and g.started.map == 2, "and arrives in the host's town by its area (world.get().town_map), not its map number",
+        g.started and g.started.map)
+  check(h.layers.coop_who == "Monica" and g.layers.coop_who == "Max", "the HUDs name each other")
+  -- the host in a dungeon: the guest arrives in the town that dungeon is reached from
+  local k = make_game("Donny", {game = "chronicle-two"})
+  h.map = {context = "dungeon", dungeon_id = 5, floor_id = 2, floor_seed = 77, map_no = 40}
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if k.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      k.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  k.emit("game.title.selected", {entry = "join"})
+  both(h, k, 6)
+  check(k.started and k.started.map == 4, "Moon Flower Palace is reached from Heim Rada (area 4)", k.started and k.started.map)
+  -- a Dark Cloud 2 town goes across with its own tag
+  g.map = {context = "georama", map_id = 23, town_map = 2, editing = true}
+  both(h, g, 31)
+  g.towns[2] = "DCT22:" .. "a windmill"
+  g.map = {context = "georama", map_id = 23, town_map = 2, editing = false}
+  both(h, g, 31)
+  check(h.towns[2] == "DCT22:a windmill" and h.last_base == "DCT22:start", "the guest's edit of Balance Valley reaches the host, merged over the town as it was",
+        tostring(h.towns[2]))
+  check(find_toast(h, "changed Balance Valley"), "and the host is told by the town's name")
+  -- the follow offer names Dark Cloud 2's places (the offer for the host's earlier move is answered first)
+  g.settings.follow_offers = true
+  if g.panel then g.choose(nil) end
+  h.map = {context = "dungeon", dungeon_id = 6, floor_id = 9, floor_seed = 1, map_no = 40}
+  h.player = {character = "max", weapon = {item_no = 300}, position = {x = 10, y = 0, z = 20}, heading = 0.5, motion = 1}
+  both(h, g, 12)
+  check(g.panel and g.panel.title:find("Zelmite Mine, floor 10", 1, true) ~= nil, "a follow offer names the Zelmite Mine floor", g.panel and g.panel.title)
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))
