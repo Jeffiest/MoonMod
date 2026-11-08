@@ -111,7 +111,10 @@ local function make_game(name, opts)
     combat = {strike_player = function(a) S.strikes[#S.strikes + 1] = a; return {} end},
     dungeons = {
       set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end,
-      enter_floor = function(a) S.entered[#S.entered + 1] = "floor " .. a.dungeon_id .. ":" .. a.floor_id; return {queued = true} end,
+      enter_floor = function(a)
+        if S.busy then return nil, {code = "failed", message = "busy: the player isn't walking in a town or playing on a floor"} end
+        S.entered[#S.entered + 1] = "floor " .. a.dungeon_id .. ":" .. a.floor_id; return {queued = true}
+      end,
       shared_events_get = function() local out = S.doors_out; S.doors_out = {}; return {events = out} end,
       shared_event_run = function(a)
         if S.door_busy then return nil, {code = "failed", message = "busy: another player's door is already waiting"} end
@@ -318,7 +321,7 @@ do
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 4242}
   h.player = {character = "toan", weapon = {item_no = 258}, position = {x = 100, y = 0, z = 200}, heading = 1.5, motion = 2}
   g.player = {character = "xiao", position = {x = 160, y = 0, z = 220}, heading = 0.5, motion = 0}
-  both(h, g, 12)
+  both(h, g, 48)
   local seen = g.avatars[1]
   check(seen and seen.character == "toan" and seen.weapon == 258 and seen.x == 100 and seen.z == 200 and seen.motion == 2 and
         seen.tint == nil, "the guest sees the host on the floor, with its weapon, in the host's own colours")
@@ -328,26 +331,26 @@ do
   check(seen and seen.name == "Toan" and host_sees and host_sees.name == "Xiao", "each hero has its player's name over it",
         tostring(seen and seen.name) .. "/" .. tostring(host_sees and host_sees.name))
   h.player.position = {x = 300, y = 0, z = 200}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.avatars[1] and g.avatars[1].x == 300, "the host's moves reach the guest")
   -- the guest goes down a floor: each is out of the other's sight
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 99}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.avatars[1] == nil and h.avatars[1] == nil, "on different floors neither sees the other")
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 4242}
-  both(h, g, 12)
+  both(h, g, 48)
   check(h.avatars[1] ~= nil, "back on the same floor, the host sees the guest again")
   -- the guest's game goes quiet (a lost connection the relay hasn't noticed yet)
   for _ = 1, 200 do h.tick() end
   check(h.avatars[1] == nil, "a player quiet for three seconds is taken away")
-  both(h, g, 12)
+  both(h, g, 48)
   check(h.avatars[1] ~= nil, "and comes back when heard again")
   -- both walk in Norune: the town's heroes
   h.map = {context = "georama", map_id = 0, town_map = 0, editing = false, walking = true}
   g.map = {context = "georama", map_id = 0, town_map = 0, editing = false, walking = true}
   h.player = {character = "toan", town_character = "goro", position = {x = 5, y = 0, z = 6}, heading = 0, motion = 1}
   g.player = {character = "xiao", position = {x = 9, y = 0, z = 6}, heading = 0, motion = 0}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.avatars[1] and g.avatars[1].character == "goro" and g.avatars[1].x == 5, "in town each sees the other, as the town's hero they walk as")
   -- the host opens a menu: no position, but it still stands there
   h.player = {character = "toan"}
@@ -355,7 +358,7 @@ do
   check(g.avatars[1] and g.avatars[1].x == 5, "a player in a menu still stands where they were")
   h.map = {context = "georama", map_id = 1, town_map = 1, editing = false, walking = true}
   h.player = {character = "toan", position = {x = 5, y = 0, z = 6}, heading = 0, motion = 0}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.avatars[1] == nil, "in another town they don't")
   g.keys.leave_key = true
   both(h, g, 3)
@@ -385,7 +388,7 @@ do
   g.player = {character = "xiao", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
   h.monsters = {{slot = 0, kind = 3, state = 2, hp = 40, max_hp = 60, x = 10.5, y = 0, z = -20, heading = 1.25, motion = 4},
                 {slot = 5, kind = 7, state = 1, hp = 90, max_hp = 90, x = 300, y = 5, z = 80, heading = 0, motion = 0}}
-  both(h, g, 16)
+  both(h, g, 48)
   local p = g.puppets
   check(p and #p == 2 and p[1].slot == 0 and p[1].hp == 40 and p[1].x == 10.5 and p[1].motion == 4 and p[2].kind == 7,
         "a guest on the host's floor copies the host's monsters", p and #p)
@@ -413,17 +416,17 @@ do
   check(g.puppets ~= nil, "while the host is paused the guest's monsters stay held as the host's")
   -- the host goes back to town: the guest's monsters think for themselves
   h.map = {context = "town", map_id = 0}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.puppets == nil, "the host off the floor, the guest's monsters are its own")
   h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 7}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.puppets ~= nil, "and copies again when the host is back")
   -- the guest goes down the stairs: its monsters are its own again
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 8}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.puppets == nil, "on another floor the guest's monsters think for themselves")
   g.puppet_hits = {{slot = 0, damage = 5}}
-  both(h, g, 12)
+  both(h, g, 48)
   check(#h.mirror_hits == 2, "and its blows there stay its own")
   h.keys.leave_key = true
   both(h, g, 2)
@@ -453,7 +456,7 @@ do
   end
   k.map = {context = "dungeon", dungeon_id = 1, floor_id = 3, floor_seed = 76}
   k.player = {character = "goro", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
-  all(25)
+  all(60)
   -- Xiao opens a gate with a key
   g.doors_out = {{script = 31, mode = 1, ext = 0, pos = {120.5, 0, -40}, dir = {0, 0, 1}}}
   all(25)
@@ -595,20 +598,37 @@ do
   g.map = {context = "georama", map_id = 0, town_map = 0, map_no = 0, walking = true}
   h.player = {character = "toan", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
   g.player = {character = "xiao", position = {x = 5, y = 0, z = 0}, heading = 0, motion = 0}
-  both(h, g, 12)
+  both(h, g, 48)
   g.panel = nil
+  -- the host changes floors: on the way the game passes through a floor only loading (its number and seed not
+  -- settled), and no one is asked to follow there
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 0, floor_seed = 3, walking = false}
+  both(h, g, 90)
+  check(g.panel == nil, "a floor still loading is offered to no one", g.panel and g.panel.title)
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 3, walking = true}
+  both(h, g, 10)
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 11, walking = true}
+  both(h, g, 10)
+  check(g.panel == nil, "nor one held only a moment", g.panel and g.panel.title)
   -- the host goes down into Divine Beast Cave, floor 3
   h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 11}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.panel and g.panel.title == "Toan went to Divine Beast Cave, floor 3", "the guest is asked to join the host on the floor it went to",
         g.panel and g.panel.title)
+  -- the guest is in a talk when it says yes: it goes once it's free
+  g.busy = true
   g.choose(1)
   both(h, g, 2)
-  check(g.entered[1] == "floor 0:2", "joining walks the guest onto that floor", g.entered[1])
+  check(#g.entered == 0 and find_toast(g, "as soon as you're free"), "a busy guest's join waits", g.toasts[#g.toasts])
+  both(h, g, 60)
+  check(#g.entered == 0, "while it's busy")
+  g.busy = false
+  both(h, g, 32)
+  check(g.entered[1] == "floor 0:2", "joining walks the guest onto that floor once it can", g.entered[1])
   -- the host walks into a house; the guest stays
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 11}
   h.map = {context = "georama", map_id = 0, map_no = 23, walking = true}
-  both(h, g, 12)
+  both(h, g, 48)
   check(g.panel and g.panel.title == "Toan went to a house", "a house too", g.panel and g.panel.title)
   g.choose(2)
   both(h, g, 2)

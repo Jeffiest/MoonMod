@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "coopdrive",
+  "name": "Co-op live test driver",
+  "version": "0.1.0",
+  "author": "MoonMod tests",
+  "description": "Plays one game of a live co-op test from a script (tools/tests/coop/live): waits, walks into places, strikes monsters, leaves, and logs what it sees. Only the live harness installs it.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "coop": "local",
+  "permissions": ["game.read", "game.write", "storage.read", "storage.write"]
+}

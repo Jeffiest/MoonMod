@@ -35,7 +35,10 @@ local function setting(id, fallback)
   if type(value) ~= type(fallback) then return fallback end
   return value
 end
-local function toast(message) try(game.ui.notify, {message = tostring(message):sub(1, 196), duration_frames = 300}) end
+local function toast(message)
+  try(game.ui.notify, {message = tostring(message):sub(1, 196), duration_frames = 300})
+  moonmod.log("info", "toast " .. tostring(message):sub(1, 196)) -- in the log too, for bug reports and the live tests
+end
 local function hud(text)
   if text then try(game.render.layer_register, {id = "coop", text = text:sub(1, 48)})
   else try(game.render.layer_remove, {id = "coop"}) end
@@ -57,6 +60,10 @@ end
 -- The session: role "host" or "guest" (nil when none), the room code, the players by id, and the pieces arriving.
 local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame = 0, kept_at = 0, names = {}, guest_mods = {}}
 local code = moonmod.storage.get("code") or "-----" -- the code being typed on the title page
+-- A live test run (tools/tests/coop/live) puts its wishes here: {role = "host"|"guest", code?, follow?, where?, at?}. Players never
+-- have it: nothing but that harness writes this storage key.
+local AUTOTEST = moonmod.storage.get("autotest")
+if type(AUTOTEST) ~= "table" then AUTOTEST = nil end
 
 local function net_open(kind, args)
   args.version = PROTOCOL
@@ -130,7 +137,9 @@ local my_scene = nil
 local function scene_of(w)
   if type(w) ~= "table" then return nil end
   if w.context == "dungeon" and w.dungeon_id then
-    return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id or -1, tostring(w.floor_seed or "-"))
+    -- in transit (the floor select, a floor not built yet): nowhere yet, so no one is offered to follow there
+    if not w.floor_id or w.floor_id < 0 or not w.floor_seed or w.floor_seed == 0 then return nil end
+    return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id, tostring(w.floor_seed))
   end
   if w.town_map then return "T" .. w.town_map end -- walking (or in a menu) in a town
   if w.map_no then return "H" .. w.map_no end     -- a house (or another of a town's maps)
@@ -205,11 +214,25 @@ local function forget_all()
   try(game.world and game.world.avatar_clear)
 end
 
+-- A new place counts once the player has stood there SETTLE frames, playing (where the game says so): changing floors
+-- passes through a floor that is only loading (its number and seed not settled), and no one should follow there.
+local SETTLE = 30
+local settling = {scene = nil, since = 0}
+local function settled_scene(w)
+  local scene = scene_of(w)
+  if scene == nil or scene == my_scene then settling.scene = nil return scene end
+  if scene:sub(1, 1) == "D" and type(w) == "table" and w.walking == false then settling.scene = nil return nil end
+  if settling.scene ~= scene then settling.scene, settling.since = scene, S.frame end
+  if S.frame - settling.since < SETTLE then return nil end
+  settling.scene = nil
+  return scene
+end
+
 local last_sent = nil
 local function send_position()
   if not S.role or not S.code then return end
   local w = try(game.world.get)
-  my_scene = scene_of(w)
+  my_scene = settled_scene(w)
   local text = "-"
   if my_scene then
     local p = try(game.player and game.player.get)
@@ -273,6 +296,9 @@ function mon.host_step()
                                       m.x, m.y, m.z, m.heading, m.motion)
   end
   send("all", "M", my_scene .. " " .. (#parts > 0 and table.concat(parts, ";") or "-"))
+  local alive = 0
+  for _, m in ipairs(got.monsters or {}) do if m.hp > 0 then alive = alive + 1 end end
+  mon.count = alive -- for the live tests' report
   for _, hit in ipairs(got.hits or {}) do
     local peer = mon.peer_with_avatar(hit.avatar)
     if peer then send(peer, "D", string.format("%d %d %d", hit.damage, hit.kind or 0, hit.flags or 0)) end
@@ -301,6 +327,9 @@ function mon.hear(peer, rest)
     end
   end
   local got = try(game.monsters and game.monsters.puppet_set, {monsters = monsters})
+  local alive = 0
+  for _, m in ipairs(monsters) do if m.hp > 0 then alive = alive + 1 end end
+  mon.count = alive -- for the live tests' report
   if got then
     mon.puppets = true
     mon.scene = scene
@@ -449,6 +478,12 @@ function together.tick()
   if together.open or not together.queue[1] then return end
   local p = table.remove(together.queue, 1)
   if p.still and not p.still() then return end -- stale (they moved on, or we're there already)
+  if AUTOTEST and p.follow then
+    local yes = AUTOTEST.follow ~= false
+    moonmod.log("info", "COOPTEST offer " .. p.title .. (yes and " -> join" or " -> stay"))
+    if yes and p.options[1].pick then p.options[1].pick() end
+    return
+  end
   local cards = {}
   for i, o in ipairs(p.options) do cards[i] = {title = o.title:sub(1, 48), subtitle = o.subtitle and o.subtitle:sub(1, 64) or nil} end
   local ok, err = call(game.ui.choice_open, {id = "coop_together", title = p.title:sub(1, 64), subtitle = p.subtitle and p.subtitle:sub(1, 96) or nil,
@@ -464,22 +499,55 @@ moonmod.on("ui.choice_made", function(e)
 end)
 
 -- Following -----------------------------------------------------------------------------------------------------------
-function together.join(peer, scene)
+-- A join the game can't do yet (busy: a talk, a menu, a floor still loading) waits and is tried again for a while.
+local JOIN_WAIT = 1800 -- frames: half a minute
+function together.join(peer, scene, waiting)
   local o = others[peer]
-  if not (o and o.scene == scene) then toast("Co-op: " .. together.name(peer) .. " has moved on") return end
+  if not (o and o.scene == scene) then
+    if not waiting then toast("Co-op: " .. together.name(peer) .. " has moved on") end
+    together.waiting = nil
+    return
+  end
   local ok, err
   local d, f = scene:match("^D(%d+):(%-?%d+):")
   if d then
-    ok, err = call(game.dungeons and game.dungeons.enter_floor, {dungeon_id = tonumber(d), floor_id = tonumber(f)})
+    -- arrive beside them (their cell, 160 units to a cell), in the escape light rather than down the stairs; a cell
+    -- that can't be stood on falls back to the stairs
+    local at = o.state
+    local where = {dungeon_id = tonumber(d), floor_id = tonumber(f)}
+    if at and at.x and at.z and (at.x ~= 0 or at.z ~= 0) then
+      where.x, where.y, where.teleport = math.floor(at.x / 160 + 0.5), math.floor(at.z / 160 + 0.5), true
+    end
+    ok, err = call(game.dungeons and game.dungeons.enter_floor, where)
+    if not ok and where.x and not errmsg(err):find("busy", 1, true) then
+      ok, err = call(game.dungeons.enter_floor, {dungeon_id = where.dungeon_id, floor_id = where.floor_id})
+    end
   else
     local map = tonumber(scene:match("^[TH](%d+)$"))
     if map then ok, err = call(game.world and game.world.enter_map, {map_no = map}) end
   end
-  if not ok then toast("Co-op: can't go there right now (" .. errmsg(err):sub(1, 80) .. ")") end
+  if ok then together.waiting = nil return end
+  local why = errmsg(err)
+  local busy = why:find("busy", 1, true) or why:find("not in a dungeon or a town", 1, true)
+  if busy and not waiting then
+    together.waiting = {peer = peer, scene = scene, since = S.frame}
+    toast("Co-op: joining " .. together.name(peer) .. " as soon as you're free")
+  elseif busy and S.frame - waiting.since < JOIN_WAIT then
+    return -- still busy: tried again shortly
+  else
+    together.waiting = nil
+    toast("Co-op: can't go there right now (" .. why:sub(1, 80) .. ")")
+  end
+end
+function together.retry()
+  local w = together.waiting
+  if w and S.frame % 30 == 0 then together.join(w.peer, w.scene, w) end
 end
 
 function S.moved(peer, scene)
   if not scene or scene == my_scene or not setting("follow_offers", true) then return end
+  -- a guest still on the title page (its visit not begun) has nowhere to follow from
+  if S.role == "guest" and not (S.guest and S.guest.visiting) then return end
   -- one offer per player: a newer move replaces one not yet shown
   for i = #together.queue, 1, -1 do
     if together.queue[i].follow == peer then table.remove(together.queue, i) end
@@ -1155,7 +1223,7 @@ moonmod.on("game.tick", function(e)
     show_others()
   end
   if S.role and S.code then mon.tick() end
-  if S.role then together.tick() end
+  if S.role then together.tick(); together.retry() end
   if S.role and S.code and S.frame % 10 == 0 then door.step() end
   if S.role == "host" and S.code and S.frame % CLOCK_EVERY == 0 then send_clock() end
   if S.role and S.code and S.frame % 30 == 0 then
@@ -1389,6 +1457,91 @@ moonmod.on("game.tick", function()
   if S.role == "guest" and S.guest and not S.guest.visiting and S.frame % 30 == 0 then show(5) end
   if S.refresh_title then S.refresh_title = false; show(5) end
 end)
+
+-- Live tests (tools/tests/coop/live): the harness's game hosts or joins by itself, and says what it sees once a
+-- second as "COOPTEST" lines in the log, which the harness reads.
+if AUTOTEST then
+  local said = {}
+  local function report()
+    local w = try(game.world.get) or {}
+    local p = try(game.player and game.player.get) or {}
+    local peers = {}
+    for peer, o in pairs(others) do
+      peers[#peers + 1] = string.format("%d:%s:%s:%d:%s", peer, tostring(o.scene or "-"), o.state and "seen" or "-",
+                                        S.frame - (o.heard or 0), o.slot and ("slot" .. o.slot) or "-")
+    end
+    table.sort(peers)
+    local pos = p.position and string.format("%.0f,%.0f,%.0f", p.position.x, p.position.y, p.position.z) or "-"
+    moonmod.log("info", string.format("COOPTEST state frame=%d role=%s code=%s visiting=%s scene=%s context=%s pos=%s puppets=%s mons=%s peers=[%s]",
+      S.frame, tostring(S.role), tostring(S.code), tostring(S.guest and S.guest.visiting or false), tostring(my_scene),
+      tostring(w.context), pos, tostring(mon.puppets), tostring(mon.count or "-"), table.concat(peers, " ")))
+  end
+  moonmod.on("game.tick", function()
+    if S.frame % 60 == 0 then report() end
+    if my_scene ~= said.scene then
+      said.scene = my_scene
+      moonmod.log("info", "COOPTEST scene " .. tostring(my_scene) .. " frame=" .. S.frame)
+    end
+    if S.code and not said[S.code] then
+      said[S.code] = true
+      moonmod.log("info", "COOPTEST room " .. tostring(S.code) .. " role=" .. tostring(S.role))
+    end
+    if S.status and S.status ~= said.status then
+      said.status = S.status
+      moonmod.log("info", "COOPTEST status " .. S.status)
+    end
+    -- a guest that should leave: once it has been on a dungeon floor this long, it leaves as a player does (F10)
+    if AUTOTEST.leave_after and S.role == "guest" and S.guest and S.guest.visiting and on_floor() then
+      said.floor_since = said.floor_since or S.frame
+      if S.frame - said.floor_since >= AUTOTEST.leave_after and not said.left then
+        said.left = true
+        moonmod.log("info", "COOPTEST leaving")
+        leave()
+      end
+    end
+    -- a host that should close its room: once a guest has stood on its floor this long, it closes as a player does
+    if AUTOTEST.close_after and S.role == "host" and on_floor() and not said.closed then
+      for _, o in pairs(others) do
+        if o.scene == my_scene then said.host_since = said.host_since or S.frame end
+      end
+      if said.host_since and S.frame - said.host_since >= AUTOTEST.close_after then
+        said.closed = true
+        moonmod.log("info", "COOPTEST closing")
+        leave()
+      end
+    end
+    if S.role or said.started then return end
+    if AUTOTEST.role == "host" and S.frame >= (AUTOTEST.at or 120) then
+      local w = try(game.world.get) or {}
+      local here = AUTOTEST.where == "town" and w.town_map ~= nil and w.walking or
+                   AUTOTEST.where == "dungeon" and w.context == "dungeon" or
+                   AUTOTEST.where == nil and (w.context == "dungeon" or w.town_map or w.map_no)
+      if here then
+        said.started = true
+        moonmod.log("info", "COOPTEST hosting")
+        host()
+      end
+    end
+  end)
+  -- the guest joins once its input has opened this mod's title page (a visit starts only from there)
+  moonmod.on("game.title.opened", function()
+    if AUTOTEST.role ~= "guest" or type(AUTOTEST.code) ~= "string" or S.role or said.started then return end
+    said.started = true
+    code = AUTOTEST.code
+    moonmod.log("info", "COOPTEST joining " .. code)
+    join()
+    show(5)
+  end)
+  moonmod.on("game.session.started", function(e)
+    moonmod.log("info", "COOPTEST session " .. tostring(type(e) == "table" and e.kind) .. " " .. tostring(type(e) == "table" and e.owner))
+  end)
+  moonmod.on("game.session.ended", function(e)
+    moonmod.log("info", "COOPTEST session_ended " .. tostring(type(e) == "table" and e.kind))
+  end)
+  moonmod.on("game.session.failed", function(e)
+    moonmod.log("info", "COOPTEST session_failed " .. tostring(type(e) == "table" and e.reason))
+  end)
+end
 
 -- For the tests: the state, and the pieces' size.
 return {state = S, me = me, piece = PIECE, mods = rm}
