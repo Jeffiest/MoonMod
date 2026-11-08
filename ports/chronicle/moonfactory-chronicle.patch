@@ -1910,7 +1910,7 @@ index 00000000..d79785b8
 +
 +} // namespace dc::game
 diff --git a/port/include/game/monstorunit.hpp b/port/include/game/monstorunit.hpp
-index 2af9ea35..1db5092a 100644
+index 2af9ea35..e5bf031d 100644
 --- a/port/include/game/monstorunit.hpp
 +++ b/port/include/game/monstorunit.hpp
 @@ -290,34 +290,44 @@ STATIC_ASSERT(sizeof(MONSTOR_GUARD_WINDOW) == 0x20);
@@ -1984,7 +1984,21 @@ index 2af9ea35..1db5092a 100644
  
  /**
   * Animation frame and phase of one rendered bee.
-@@ -584,6 +596,10 @@ void InitBee(CFrame *frame, int count);
+@@ -546,9 +558,12 @@ STATIC_ASSERT(sizeof(BEE_STATE) == 8);
+ /** Animation state of every bee drawn around the bee monster. */
+ extern BEE_STATE BeeTbl[800];
+ 
+-/** Number of floors in each dungeon. */
++/** Number of floors in each dungeon, with any floors a mod appended (dungeons.register). */
+ extern int maxFloorTbl__3[7];
+ 
++/** Whether a floor is a dungeon's last: its boss floor as the game ships it, or the last floor a mod appended. */
++bool IsLastFloor(int dungeon, int floor);
++
+ /** Texture animations shared by every monster model. */
+ extern CTexAnimeData MonsterTexAnim[320];
+ 
+@@ -584,6 +599,10 @@ void InitBee(CFrame *frame, int count);
  /** Model, script and combat parameters of every kind of monster. */
  extern "C" MONSTOR_MODEL MonstorTable[167];
  
@@ -19625,7 +19639,7 @@ index d84b3a67..688da9ad 100644
 +
  } // namespace dc::game
 diff --git a/port/src/game/dungeonparts.cpp b/port/src/game/dungeonparts.cpp
-index bd9c1093..f328590a 100644
+index bd9c1093..b9171040 100644
 --- a/port/src/game/dungeonparts.cpp
 +++ b/port/src/game/dungeonparts.cpp
 @@ -24,6 +24,7 @@
@@ -19636,11 +19650,14 @@ index bd9c1093..f328590a 100644
  
  namespace dc::game {
  
-@@ -1528,13 +1529,12 @@ constexpr std::array<const int *, 6> noEntryTbl = {noEntryTbl00, noEntryTbl01, n
+@@ -1527,14 +1528,15 @@ constexpr std::array<const int *, 6> noEntryTbl = {noEntryTbl00, noEntryTbl01, n
+ /** The floor each dungeon's upper half ends on. */
  constexpr std::array<int, 6> CenterFloorTbl = {8, 9, 9, 9, 8, 13};
  
- /** The number of floors in each dungeon. */
--constexpr std::array<int, 6> MaxFloorTbl = {15, 17, 18, 18, 15, 25};
+-/** The number of floors in each dungeon. */
++/** The number of floors in each dungeon as the game ships them. Atla are spread over these alone: floors a mod
++ * appends (dungeons.register raises maxFloorTbl__3) must not take the game's own Atla. */
+ constexpr std::array<int, 6> MaxFloorTbl = {15, 17, 18, 18, 15, 25};
  
 -/** Most placement boxes SearchiDoPutArea gathers. */
 +/** Most placement boxes SearchiDoPutArea gathers (the game's; MoonMod's zoned maps gather them all, DngPutSpotLimit). */
@@ -19652,7 +19669,7 @@ index bd9c1093..f328590a 100644
  
  /** Side of one grid cell in world units. */
  constexpr float kCellSize = 160.0f;
-@@ -1812,7 +1812,12 @@ int PresetSmallItemNo_Get(int map_no, int floor_no, int special, int small) {
+@@ -1812,7 +1814,12 @@ int PresetSmallItemNo_Get(int map_no, int floor_no, int special, int small) {
  int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float *pos) {
      using Quad = std::array<std::array<float, 3>, 4>;
  
@@ -19666,7 +19683,7 @@ index bd9c1093..f328590a 100644
      std::array<float, 4>  px{};
      std::array<float, 4>  py{};
      std::array<float, 4>  pz{};
-@@ -1824,7 +1829,7 @@ int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float
+@@ -1824,7 +1831,7 @@ int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float
              const int parts_no = cells[(row * kGridWidth) + col].parts_no;
              const int direction = cells[(row * kGridWidth) + col].direction;
  
@@ -19675,7 +19692,7 @@ index bd9c1093..f328590a 100644
                  const ITEM_FREE_AREA &area = areas[area_no];
  
                  if (parts_no != area.parts_no) {
-@@ -1854,6 +1859,7 @@ int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float
+@@ -1854,6 +1861,7 @@ int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float
                      py[2] = py[0];
                      pz[2] = pz[3];
  
@@ -19683,7 +19700,7 @@ index bd9c1093..f328590a 100644
                      Quad &quad = quads[count];
  
                      for (int corner = 0; corner < 4; corner++) {
-@@ -1869,7 +1875,7 @@ int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float
+@@ -1869,7 +1877,7 @@ int SearchiDoPutArea(MAPPARTS *cells, int x, int y, int width, int height, float
  
                      count++;
  
@@ -19692,16 +19709,7 @@ index bd9c1093..f328590a 100644
                          break;
                      }
                  }
-@@ -1910,7 +1916,7 @@ void BtAtraListMake(int dungeon) {
- 
-     const ATRA_APPEAR *appear = AtraAppearData[dungeon];
-     const int          center = CenterFloorTbl[dungeon];
--    const int          floor_count = MaxFloorTbl[dungeon];
-+    const int          floor_count = maxFloorTbl__3[dungeon];
-     int                count = 0;
-     int                upper = 0;
-     int                lower = 0;
-@@ -2067,19 +2073,21 @@ int setCollisionData(CDungeonMap *map, CCPoly *poly, float *position, float radi
+@@ -2067,19 +2075,21 @@ int setCollisionData(CDungeonMap *map, CCPoly *poly, float *position, float radi
          x += offset[0];
          z += offset[1];
  
@@ -19726,7 +19734,7 @@ index bd9c1093..f328590a 100644
  
          if (angle > 3.0f) {
              angle -= 3.0f;
-@@ -2087,7 +2095,10 @@ int setCollisionData(CDungeonMap *map, CCPoly *poly, float *position, float radi
+@@ -2087,7 +2097,10 @@ int setCollisionData(CDungeonMap *map, CCPoly *poly, float *position, float radi
  
          model->SetRotation(0.0f, QuarterTurnAngle(angle), 0.0f);
          model->SetPosition(kCellSize * static_cast<float>(x), 0.0f, kCellSize * static_cast<float>(z));
@@ -19738,7 +19746,7 @@ index bd9c1093..f328590a 100644
      }
  
      for (auto &treasure_box : map->boxes) {
-@@ -2161,7 +2172,10 @@ void CDungeonParts::Draw() {
+@@ -2161,7 +2174,10 @@ void CDungeonParts::Draw() {
          position[2] += frame_offset[i][2];
          position[3] = 1.0f;
          frame[i]->SetPosition(position);
@@ -19749,7 +19757,7 @@ index bd9c1093..f328590a 100644
      }
  }
  
-@@ -2204,6 +2218,7 @@ void CDungeonParts::DrawCalc(int x, int z, int turn, int map_type) {
+@@ -2204,6 +2220,7 @@ void CDungeonParts::DrawCalc(int x, int z, int turn, int map_type) {
  
          collision->SetRotation(0.0f, QuarterTurnAngle(static_cast<float>(model_turn)), 0.0f);
          collision->SetPosition(kCellSize * static_cast<float>(x), 0.0f, kCellSize * static_cast<float>(z));
@@ -22826,7 +22834,7 @@ index b13666a0..b1525a4c 100644
  
                  for (int i = 0; i < 11; i++) {
 diff --git a/port/src/game/menu_dungeon.cpp b/port/src/game/menu_dungeon.cpp
-index 99d3c0cb..50733118 100644
+index 99d3c0cb..78b8a403 100644
 --- a/port/src/game/menu_dungeon.cpp
 +++ b/port/src/game/menu_dungeon.cpp
 @@ -20,6 +20,7 @@
@@ -22916,25 +22924,40 @@ index 99d3c0cb..50733118 100644
                      DEnterMenu.floor_count = max_floor;
  
                      for (int floor = 0; floor < DEnterMenu.floor_count; floor++) {
-@@ -836,7 +844,7 @@ void DunEnterBoard(int x, int y, int alpha) {
+@@ -836,9 +844,8 @@ void DunEnterBoard(int x, int y, int alpha) {
          position = row_y + 4;
          DrawDunEnterFloorName(column_x, position, i + 1, top, bottom, alpha);
          const int dungeon = DEnterMenu.dungeon;
 -        const int max_floor = maxFloorTbl__4[dungeon];
-+        const int max_floor = maxFloorTbl__3[dungeon];
  
-         if (i == max_floor - 1) {
+-        if (i == max_floor - 1) {
++        if (IsLastFloor(dungeon, i)) {
              const int draw_x = column_x + 0x82;
-@@ -880,7 +888,7 @@ void DunEnterBoard(int x, int y, int alpha) {
+             position = row_y + 6;
+             length = 0x18;
+@@ -880,7 +887,7 @@ void DunEnterBoard(int x, int y, int alpha) {
      row_y--;
  
      for (int floor = 0; floor < 100; floor++) {
 -        if (floor == maxFloorTbl__4[DEnterMenu.dungeon] - 1) {
-+        if (floor == maxFloorTbl__3[DEnterMenu.dungeon] - 1) {
++        if (floor >= maxFloorTbl__3[DEnterMenu.dungeon]) {
              break;
          }
  
-@@ -1133,7 +1141,20 @@ void StartQuickChange(u_long128 *buffer, int texture_block, int *positions, int
+@@ -888,6 +895,12 @@ void DunEnterBoard(int x, int y, int alpha) {
+             continue;
+         }
+ 
++        // The boss floor has no Atla board, and floors a mod appended after it keep theirs.
++        if (IsLastFloor(DEnterMenu.dungeon, floor)) {
++            row_y += 0x28;
++            continue;
++        }
++
+         int board_x = x + 0x16E;
+ 
+         if (row_y < bottom) {
+@@ -1133,7 +1146,20 @@ void StartQuickChange(u_long128 *buffer, int texture_block, int *positions, int
          return;
      }
  
@@ -22956,7 +22979,7 @@ index 99d3c0cb..50733118 100644
      ItemVolumeStep.CheckItemVolume();
      ChangeMenu.unk_4c = 0;
      StayTex = TexManager.GetTexture("stayframe", -1);
-@@ -1148,7 +1169,7 @@ void StartQuickChange(u_long128 *buffer, int texture_block, int *positions, int
+@@ -1148,7 +1174,7 @@ void StartQuickChange(u_long128 *buffer, int texture_block, int *positions, int
  
      if (zone < 6 && zone >= 0) {
          ChangeMenu.change_blocked = 1;
@@ -22965,7 +22988,7 @@ index 99d3c0cb..50733118 100644
          ChangeMenu.change_blocked = 2;
      }
  
-@@ -1168,7 +1189,6 @@ void StartQuickChange(u_long128 *buffer, int texture_block, int *positions, int
+@@ -1168,7 +1194,6 @@ void StartQuickChange(u_long128 *buffer, int texture_block, int *positions, int
          }
      }
  
@@ -22973,7 +22996,7 @@ index 99d3c0cb..50733118 100644
      ChangeMenu.reset_on_open = 0;
      float step = TWO_PI / ChangeMenu.party_size;
  
-@@ -1929,17 +1949,18 @@ int CharaChangeKey() {
+@@ -1929,17 +1954,18 @@ int CharaChangeKey() {
                  }
  
                  CDngStatusData *status = ChangeStatusDataPt;
@@ -22996,7 +23019,7 @@ index 99d3c0cb..50733118 100644
  
                      if (ChangeMenu.mode == 1) {
                          ChangeStatusDataPt->LostItem(ITEM_STAND_IN_POWDER);
-@@ -1989,7 +2010,7 @@ int CharaChangeKey() {
+@@ -1989,7 +2015,7 @@ int CharaChangeKey() {
                  ChangeMenu.step = CharaChangeStep::Turning;
                  BreakReadBG();
                  u_long128 *buffer = chara_change_buf;
@@ -23005,7 +23028,7 @@ index 99d3c0cb..50733118 100644
                  ComMenuSePlay(MENU_SOUND_CURSOR);
              }
  
-@@ -2068,23 +2089,37 @@ void CharaChangeDraw() {
+@@ -2068,23 +2094,37 @@ void CharaChangeDraw() {
  
          CTexture *portraits = QuickCharaTex;
  
@@ -23050,7 +23073,7 @@ index 99d3c0cb..50733118 100644
          }
  
          if (ChangeMenu.step != CharaChangeStep::Loaded && ChangeMenu.step != CharaChangeStep::Loading && ChangeMenu.step != CharaChangeStep::Blocked && ChangeMenu.step != CharaChangeStep::Unk4) {
-@@ -2269,6 +2304,23 @@ int DngActiveItemTextureCopy() {
+@@ -2269,6 +2309,23 @@ int DngActiveItemTextureCopy() {
          }
      }
  
@@ -23074,7 +23097,7 @@ index 99d3c0cb..50733118 100644
      return 1;
  }
  
-@@ -2763,3 +2815,39 @@ void DrawItemDataView(int item_no) {
+@@ -2763,3 +2820,39 @@ void DrawItemDataView(int item_no) {
  } // namespace
  
  } // namespace dc::game
@@ -23827,7 +23850,7 @@ index 00000000..e7817877
 +
 +} // namespace dc::game
 diff --git a/port/src/game/monstorunit.cpp b/port/src/game/monstorunit.cpp
-index d645aa5a..05ad7cce 100644
+index d645aa5a..def2f693 100644
 --- a/port/src/game/monstorunit.cpp
 +++ b/port/src/game/monstorunit.cpp
 @@ -1,7 +1,11 @@
@@ -23850,7 +23873,26 @@ index d645aa5a..05ad7cce 100644
  #include "nowload.hpp"
  #include "platform/config.hpp"
  #include "randomitem.hpp"
-@@ -61,7 +66,7 @@ namespace {
+@@ -53,6 +58,18 @@ CTexAnimeData MonsterTexAnim[320];
+ 
+ int maxFloorTbl__3[7] = {15, 17, 18, 18, 15, 25, 100};
+ 
++/** The number of floors each dungeon ships with; maxFloorTbl__3 grows when a mod appends floors. */
++constexpr int kNativeMaxFloorTbl[7] = {15, 17, 18, 18, 15, 25, 100};
++
++bool IsLastFloor(int dungeon, int floor) {
++    if (dungeon < 0 || dungeon >= 7) {
++        return false;
++    }
++
++    // The boss floor stays the boss floor when a mod appends floors after it.
++    return floor + 1 == kNativeMaxFloorTbl[dungeon] || floor + 1 == maxFloorTbl__3[dungeon];
++}
++
+ namespace {
+ 
+ /**
+@@ -61,7 +78,7 @@ namespace {
  float CharaHeight(CUserStatus *status) {
      constexpr std::array<float, 6> chara_height = {16.0f, 14.0f, 16.0f, 16.0f, 18.0f, 15.0f};
  
@@ -23859,7 +23901,7 @@ index d645aa5a..05ad7cce 100644
  }
  
  /**
-@@ -463,9 +468,11 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
+@@ -463,9 +480,11 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
      CRect_i_      clip;
      CTexture     *texture = TexManager.GetTexture("itempack", -1);
  
@@ -23873,7 +23915,7 @@ index d645aa5a..05ad7cce 100644
  
              if (draw) {
                  CCharacter *character = &chara[i][0];
-@@ -474,10 +481,12 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
+@@ -474,10 +493,12 @@ void CMonstorUnit::DrawMapSymbol(float * /*offset*/) {
                  clip.y = 96;
                  clip.width = 8;
                  clip.height = 8;
@@ -23890,7 +23932,7 @@ index d645aa5a..05ad7cce 100644
                  set2DSprite(Vif1Packet, texture, screen, clip);
              }
          }
-@@ -582,9 +591,13 @@ int CMonstorUnit::CheckEventFlag2() {
+@@ -582,9 +603,13 @@ int CMonstorUnit::CheckEventFlag2() {
  }
  
  void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int /*unused*/) {
@@ -23905,7 +23947,7 @@ index d645aa5a..05ad7cce 100644
  
      for (int n = 0; n < count; n++) {
          bool placed = false;
-@@ -597,12 +610,32 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -597,12 +622,32 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                  placed = true;
              }
  
@@ -23940,7 +23982,7 @@ index d645aa5a..05ad7cce 100644
                      if (monster[i].state != -1) {
                          CCharacter *character = &chara[i][0];
                          character->GetPosition(existing);
-@@ -616,7 +649,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -616,7 +661,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                  if (!close) {
                      int nearby = 0;
  
@@ -23949,7 +23991,7 @@ index d645aa5a..05ad7cce 100644
                          if (monster[i].state != -1) {
                              CCharacter *character = &chara[i][0];
                              character->GetPosition(existing);
-@@ -633,6 +666,11 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -633,6 +678,11 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
                          if (model_no == -1) {
                              selected = static_cast<int>(static_cast<float>(model_count) * static_cast<float>(rand()) / 2147483648.0f);
  
@@ -23961,7 +24003,7 @@ index d645aa5a..05ad7cce 100644
                              if (model[selected].kind != MONSTER_KIND_NORMAL && model[selected].kind != MONSTER_KIND_MIMIC_SMALL) {
                                  if (used[selected]) {
                                      continue;
-@@ -651,6 +689,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
+@@ -651,6 +701,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
      }
  
      SetKey();
@@ -23969,7 +24011,7 @@ index d645aa5a..05ad7cce 100644
  }
  
  void CMonstorUnit::AllBin2() {
-@@ -770,7 +809,7 @@ void CMonstorUnit::DrawMonstor() {
+@@ -770,7 +821,7 @@ void CMonstorUnit::DrawMonstor() {
      MGGetAmbient(ambient);
      TexManager.ReloadTexture(Vif1Packet, 42);
  
@@ -23978,7 +24020,7 @@ index d645aa5a..05ad7cce 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              current_monster = i;
              CCharacter *character = &chara[i][0];
-@@ -842,7 +881,7 @@ void CMonstorUnit::DrawMonstor() {
+@@ -842,7 +893,7 @@ void CMonstorUnit::DrawMonstor() {
  void CMonstorUnit::DrawMonstorCursor() {
      sceVu0FVECTOR position;
  
@@ -23987,7 +24029,7 @@ index d645aa5a..05ad7cce 100644
          if (monster[i].view_held != 0) {
              CCharacter *character = &chara[i][0];
              character->GetPosition(position);
-@@ -919,7 +958,7 @@ void CMonstorUnit::DrawShadowMonstor() {
+@@ -919,7 +970,7 @@ void CMonstorUnit::DrawShadowMonstor() {
      sceVu0FVECTOR light = {0.0f, 1.0f, 0.0f, 0.0f};
      const float   detail_distance = ConfigDetailDistance();
  
@@ -23996,7 +24038,7 @@ index d645aa5a..05ad7cce 100644
          const MONSTOR &mon = monster[i];
          const bool     drawn = mon.state == 2 || (mon.state == 1 && mon.player_distance < detail_distance);
  
-@@ -945,16 +984,16 @@ void CMonstorUnit::DrawShadowMonstor() {
+@@ -945,16 +996,16 @@ void CMonstorUnit::DrawShadowMonstor() {
  void CMonstorUnit::CheckViewLevel() {
      sceVu0FVECTOR player_position;
      sceVu0FVECTOR monster_position;
@@ -24017,7 +24059,7 @@ index d645aa5a..05ad7cce 100644
          sorted[i] = -1;
          monster[i].view_held = false;
  
-@@ -966,7 +1005,8 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -966,7 +1017,8 @@ void CMonstorUnit::CheckViewLevel() {
          character->GetPosition(monster_position);
          monster_position[3] = 1;
          player_position[3] = 1;
@@ -24027,16 +24069,21 @@ index d645aa5a..05ad7cce 100644
          monster[i].player_distance = distance;
  
          if (monster[i].state == 1 && distance < monster[i].clip_distance) {
-@@ -989,7 +1029,7 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -989,11 +1041,10 @@ void CMonstorUnit::CheckViewLevel() {
  
      int sorted_count = 0;
  
 -    if (active_count > 4) {
 +    if (active_count > MonstorActiveLimit) {
          int floor = UserStatus->cur_floor;
-         int max_floor = maxFloorTbl__3[selectMapNo];
+-        int max_floor = maxFloorTbl__3[selectMapNo];
  
-@@ -1002,8 +1042,19 @@ void CMonstorUnit::CheckViewLevel() {
+-        if (floor + 1 == max_floor) {
++        if (IsLastFloor(selectMapNo, floor)) {
+             return;
+         }
+ 
+@@ -1002,8 +1053,19 @@ void CMonstorUnit::CheckViewLevel() {
              float distance = 3200.0f;
  
              for (int j = 0; j < active_count; j++) {
@@ -24058,7 +24105,7 @@ index d645aa5a..05ad7cce 100644
                      closest = j;
                  }
              }
-@@ -1015,7 +1066,7 @@ void CMonstorUnit::CheckViewLevel() {
+@@ -1015,7 +1077,7 @@ void CMonstorUnit::CheckViewLevel() {
              }
          }
  
@@ -24067,7 +24114,7 @@ index d645aa5a..05ad7cce 100644
              if (sorted[i] != -1 && monster[sorted[i]].state == 2 && monster[sorted[i]].hp > 0 && monster[sorted[i]].kind != MONSTER_KIND_NO_LOCK_ON) {
                  monster[sorted[i]].state = 1;
                  monster[sorted[i]].view_held = true;
-@@ -1067,6 +1118,29 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1067,6 +1129,29 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
      sceVu0FVECTOR       direction;
      sceVu0FVECTOR       position;
  
@@ -24097,7 +24144,7 @@ index d645aa5a..05ad7cce 100644
      if (monster[current_monster].stop_timer <= 0) {
          for (int i = 0; i < 16; i++) {
              if (effect2[current_monster].active[i] != 0) {
-@@ -1187,9 +1261,11 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1187,9 +1272,11 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
  
              if (monster[current_monster].hp <= 0) {
                  monster[current_monster].hp = 0;
@@ -24109,7 +24156,7 @@ index d645aa5a..05ad7cce 100644
              }
  
              chara[current_monster][0].GetPosition(poison_position);
-@@ -1198,7 +1274,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1198,7 +1285,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
          }
      }
  
@@ -24119,7 +24166,7 @@ index d645aa5a..05ad7cce 100644
          return result;
      }
  
-@@ -1214,7 +1291,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1214,7 +1302,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
              }
  
              if (active) {
@@ -24130,7 +24177,7 @@ index d645aa5a..05ad7cce 100644
                  int rejected = 0;
  
                  if (hit != -1) {
-@@ -1378,6 +1457,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1378,6 +1468,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      const float mark_spread = 1.0f / 2.0f;
                      HitMark[hitCnt].Set(effect[current_monster].position[i], hit_direction, HIT_MARK_HIT, mark_spread, 0.01f, 0.02f, mark_scale, 32, monster[current_monster].ground_y);
                      HitPointMark[hitCnt].Set(effect[current_monster].position[i]);
@@ -24139,7 +24186,7 @@ index d645aa5a..05ad7cce 100644
  
                      if (hitCnt == 15) {
                          hitCnt = 0;
-@@ -1528,6 +1609,12 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1528,6 +1620,12 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      if (owner != -1) {
                          float old_damage = damage;
                          int   multiplier = effect[index].parameter[i][owner];
@@ -24152,7 +24199,7 @@ index d645aa5a..05ad7cce 100644
                          auto  damage_scale = static_cast<float>(multiplier);
                          damage = damage / 100.0f * damage_scale;
  
-@@ -1559,6 +1646,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1559,6 +1657,17 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          damage = 0;
                      }
  
@@ -24170,7 +24217,7 @@ index d645aa5a..05ad7cce 100644
                      auto amount = static_cast<int>(damage);
  
                      if (!(damage - static_cast<float>(amount) <= 0.0f)) {
-@@ -1578,12 +1676,26 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1578,12 +1687,26 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                          amount = monster[current_monster].hp;
                      }
  
@@ -24197,7 +24244,7 @@ index d645aa5a..05ad7cce 100644
  
                      if (monster[current_monster].hp <= 0) {
                          monster[current_monster].last_attacker = owner;
-@@ -1622,6 +1734,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
+@@ -1622,6 +1745,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                      }
  
                      if (result == MonsterDamageResult::Killed) {
@@ -24205,7 +24252,7 @@ index d645aa5a..05ad7cce 100644
                          return MonsterDamageResult::Killed;
                      }
  
-@@ -1658,7 +1771,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
+@@ -1658,7 +1782,7 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
      float upper = top[1];
      float lower = end[1];
  
@@ -24214,7 +24261,7 @@ index d645aa5a..05ad7cce 100644
          if (monster[i].state == 2 && monster[i].revealed != 0) {
              if (effect3[i].count == 0) {
                  CCharacter *character = &chara[i][0];
-@@ -1828,7 +1941,7 @@ void CMonstorUnit::MoveChecMonster() {
+@@ -1828,7 +1952,7 @@ void CMonstorUnit::MoveChecMonster() {
      sceVu0CopyVector(flat_next, next_position);
      flat_next[1] = 1;
  
@@ -24223,7 +24270,7 @@ index d645aa5a..05ad7cce 100644
          if (monster[i].state == 2 && i != current_monster) {
              CCharacter *other = &chara[i][0];
              other->GetPosition(other_position);
-@@ -1880,7 +1993,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1880,7 +2004,7 @@ void CMonstorUnit::Step(int pause) {
      }
  
      if (paused != 0) {
@@ -24232,7 +24279,7 @@ index d645aa5a..05ad7cce 100644
              if (monster[i].state == 2) {
                  monster[i].requested_motion_flags &= ~4;
  
-@@ -1921,9 +2034,10 @@ void CMonstorUnit::Step(int pause) {
+@@ -1921,9 +2045,10 @@ void CMonstorUnit::Step(int pause) {
  
      BtActStatus.monstor_target = -1;
  
@@ -24244,7 +24291,7 @@ index d645aa5a..05ad7cce 100644
  
              if (monster[current_monster].motion_reset_pending != 0) {
                  monster[current_monster].requested_motion_flags &= ~4;
-@@ -1974,7 +2088,7 @@ void CMonstorUnit::Step(int pause) {
+@@ -1974,7 +2099,7 @@ void CMonstorUnit::Step(int pause) {
                  box.min[1] = position[1] - 80.0f;
                  box.min[2] = position[2] - 30.0f;
  
@@ -24253,7 +24300,7 @@ index d645aa5a..05ad7cce 100644
                      if (j != current_monster && monster[j].state == 2) {
                          chara[j][0].GetPosition(other_position);
                          collision->SetPosition(other_position);
-@@ -1992,11 +2106,15 @@ void CMonstorUnit::Step(int pause) {
+@@ -1992,11 +2117,15 @@ void CMonstorUnit::Step(int pause) {
                      case MonsterDamageResult::None:
                          break;
                      case MonsterDamageResult::Hit:
@@ -24272,7 +24319,7 @@ index d645aa5a..05ad7cce 100644
                          script_state[current_monster] = 1;
                          break;
                  }
-@@ -2008,15 +2126,36 @@ void CMonstorUnit::Step(int pause) {
+@@ -2008,15 +2137,36 @@ void CMonstorUnit::Step(int pause) {
                          monster[current_monster].invincible_timer--;
                      }
                  } else {
@@ -24312,7 +24359,7 @@ index d645aa5a..05ad7cce 100644
                      } else {
                          interpreter[current_monster].resume();
  
-@@ -2092,6 +2231,28 @@ void CMonstorUnit::Step(int pause) {
+@@ -2092,6 +2242,28 @@ void CMonstorUnit::Step(int pause) {
                          }
                      }
  
@@ -24341,7 +24388,7 @@ index d645aa5a..05ad7cce 100644
                      monster[current_monster].ground_distance = 0.0f;
                      chara[current_monster][0].GetPosition(position);
                      position[1] += 10.0f;
-@@ -2289,8 +2450,9 @@ void CMonstorUnit::Step(int pause) {
+@@ -2289,8 +2461,9 @@ void CMonstorUnit::Step(int pause) {
  }
  
  void CMonstorUnit::CleanViewMonstor(int back_floor) {
@@ -24352,7 +24399,7 @@ index d645aa5a..05ad7cce 100644
          monster[i].stop_timer = 0;
          monster[i].poison_timer = 0;
          monster[i].anger_timer = 0;
-@@ -2379,10 +2541,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
+@@ -2379,10 +2552,15 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
  
      back_dungeon = back_floor;
      alive_count = 0;
@@ -24369,7 +24416,7 @@ index d645aa5a..05ad7cce 100644
      CFrameAttr     attr;
      int            file_size = 0;
      attr.fog_enable = true;
-@@ -2424,6 +2591,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2424,6 +2602,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  
          if (entry == -1) {
              std::println("******* ShotEntry Error !!***********");
@@ -24377,7 +24424,7 @@ index d645aa5a..05ad7cce 100644
          } else {
              model[slot].shot_effect[0] = entry;
          }
-@@ -2434,11 +2602,13 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2434,11 +2613,13 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  
          if (entry == -1) {
              std::println("******* ShotEntry Error !!***********");
@@ -24391,7 +24438,7 @@ index d645aa5a..05ad7cce 100644
      model_count++;
      return 1;
  }
-@@ -2446,7 +2616,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
+@@ -2446,7 +2627,7 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
  int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag) {
      current_monster = -1;
  
@@ -24400,7 +24447,7 @@ index d645aa5a..05ad7cce 100644
          if (monster[i].state == -1) {
              current_monster = i;
              break;
-@@ -2461,6 +2631,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2461,6 +2642,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      BtSetEventScript(&interpreter[current_monster], script_data[model_no], script[current_monster]);
      chara[current_monster][0] = base_chara[model_no][0];
      chara[current_monster][0].motion[0] = &chara[current_monster][0].motion_type;
@@ -24408,7 +24455,7 @@ index d645aa5a..05ad7cce 100644
      chara[current_monster][0].SetPosition(position);
      chara[current_monster][0].SetRotation(0.0f, 0.0f, 0.0f);
  
-@@ -2480,6 +2651,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2480,6 +2662,7 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      monster[current_monster].state = 1;
@@ -24416,7 +24463,7 @@ index d645aa5a..05ad7cce 100644
      monster[current_monster].base_model = model_no;
      monster[current_monster].max_hp = model[model_no].max_hp;
      monster[current_monster].hp = model[model_no].max_hp;
-@@ -2536,11 +2708,13 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
+@@ -2536,11 +2719,13 @@ int CMonstorUnit::SetupViewMonstor(int model_no, float *position, int event_flag
      }
  
      if (interpreter[current_monster].check_program(1) != 0) {
@@ -25953,7 +26000,7 @@ index 2d592ef2..b278031c 100644
              return index;
          }
 diff --git a/port/src/game/shot_freefuncs.cpp b/port/src/game/shot_freefuncs.cpp
-index 73f3aac2..75874382 100644
+index 73f3aac2..081d2ff4 100644
 --- a/port/src/game/shot_freefuncs.cpp
 +++ b/port/src/game/shot_freefuncs.cpp
 @@ -7,6 +7,7 @@
@@ -26093,16 +26140,18 @@ index 73f3aac2..75874382 100644
          if (NowMonstorUnit->monster[monster_no].state == -1) {
              continue;
          }
-@@ -381,7 +406,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
+@@ -381,9 +406,7 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
      }
  
      if (map_no != 5) {
 -        const int floors = maxFloorTbl[map_no];
-+        const int floors = maxFloorTbl__3[map_no];
- 
-         if (UserStatus->cur_floor < floors - 1) {
+-
+-        if (UserStatus->cur_floor < floors - 1) {
++        if (!IsLastFloor(map_no, UserStatus->cur_floor)) {
              BtBattleMusic_Excg(nearest, &bgm_volume, &ambient_volume);
-@@ -485,7 +510,7 @@ void StatusBarFill(int frame_y, int cells, float value, float max, spRGBA *left,
+ 
+             if (ambient_volume > 0.0f) {
+@@ -485,7 +508,7 @@ void StatusBarFill(int frame_y, int cells, float value, float max, spRGBA *left,
  
  void topStatusInfo(int y, int selected_item, int floor) {
      const int chara = UserStatus->cur_chara;
@@ -26111,7 +26160,7 @@ index 73f3aac2..75874382 100644
          return;
      }
  
-@@ -624,6 +649,51 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -624,6 +647,51 @@ void topStatusInfo(int y, int selected_item, int floor) {
          set2DSprite(Vif1Packet, icons, CRect_i_(full_drops * 0x12 + 0x33, y + 0x22, 0x10, 0x14), CRect_i_((3 - static_cast<int>(static_cast<float>(leftover) / 2.5f)) * 16, 0x48, 0x10, 0x14), 0x50);
      }
  
@@ -26163,10 +26212,12 @@ index 73f3aac2..75874382 100644
      static float popupYRate = -PI;
      popupYRate += 0.20943952f;
  
-@@ -682,7 +752,28 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -680,9 +748,28 @@ void topStatusInfo(int y, int selected_item, int floor) {
+         set2DSprite(Vif1Packet, icons, CRect_i_(0x21E, y + 5, 0x20, 0x20), CRect_i_(0x20, 0xA0, 0x20, 0x20));
+     }
  
-     int last_floor = maxFloorTbl__3[georama];
- 
+-    int last_floor = maxFloorTbl__3[georama];
+-
 -    if (floor + 1 == last_floor) {
 +    // A mod's label (render.floor_label_set) takes the number's place, lettered like it and shrunk to fit.
 +    if (const std::string label = moonmod::ChronicleFloorLabel(); !label.empty()) {
@@ -26189,11 +26240,11 @@ index 73f3aac2..75874382 100644
 +            plate_label.SetScale(style.scale * static_cast<float>(kPlateNumberWidth) / static_cast<float>(width));
 +        }
 +        plate_label.DrawCenteredInRect(0x23C, y + 0x11, 0x26, 0x13);
-+    } else if (floor + 1 == last_floor) {
++    } else if (IsLastFloor(georama, floor)) {
          set2DSprite(Vif1Packet, frame, CRect_i_(0x23C, y + 0x12, 0x26, 0x11), CRect_i_(0x78, 0x9E, 0x26, 0x12));
      } else {
          const int x = floor + 1 >= 10 ? 0x245 : 0x23F;
-@@ -696,6 +787,66 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -696,6 +783,66 @@ void topStatusInfo(int y, int selected_item, int floor) {
          set2DSprite(Vif1Packet, frame, CRect_i_(x + 9, number_y, 0xE, 0x11), CRect_i_((floor + 1) % 10 * 12, 0x9E, 0xC, 0x12));
      }
  
@@ -26260,7 +26311,7 @@ index 73f3aac2..75874382 100644
      selected_item *= 40;
      set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0xFC, y, 0x10, 0x10), CRect_i_(0x4A, 0x48, 0x10, 0x10));
      set2DSprite(Vif1Packet, frame, CRect_i_(selected_item + 0x113, y, 0x10, 0x10), CRect_i_(0x5A, 0x48, 0x10, 0x10));
-@@ -710,11 +861,11 @@ void topStatusInfo(int y, int selected_item, int floor) {
+@@ -710,11 +857,11 @@ void topStatusInfo(int y, int selected_item, int floor) {
      int v = 0;
      int item = UserStatus->chara_weapons[chara][weapon_slot].item_no;
  
@@ -26274,7 +26325,7 @@ index 73f3aac2..75874382 100644
          u = 0x20;
          v = 0x20;
      }
-@@ -788,19 +939,23 @@ void BtStatusErrStep() {
+@@ -788,19 +935,23 @@ void BtStatusErrStep() {
  
  void BtSetStatusErr(int status) {
      const int chara = UserStatus->cur_chara;
@@ -26300,7 +26351,7 @@ index 73f3aac2..75874382 100644
              }
  
              break;
-@@ -832,6 +987,85 @@ void BtSetStatusErr(int status) {
+@@ -832,6 +983,85 @@ void BtSetStatusErr(int status) {
      }
  }
  
@@ -26386,7 +26437,7 @@ index 73f3aac2..75874382 100644
  void BtStatusErrDraw(int y) {
      CTexture                                   *texture = TexManager.GetTexture("itempack", -1);
      constexpr std::array<int, 5>                status_flags = {AILMENT_FREEZE, AILMENT_STAMINA, AILMENT_POISON, AILMENT_CURSE, AILMENT_GOO};
-@@ -853,7 +1087,7 @@ void BtStatusErrDraw(int y) {
+@@ -853,7 +1083,7 @@ void BtStatusErrDraw(int y) {
      }
  }
  
@@ -26395,7 +26446,7 @@ index 73f3aac2..75874382 100644
      CTexture *page = TexManager.GetTexture(page_name, -1);
      CTexture *item = TexManager.GetTexture(item_name, -1);
  
-@@ -862,7 +1096,7 @@ void setItemToReserved(char *page_name, int x, int y, char *item_name, int dsax,
+@@ -862,7 +1092,7 @@ void setItemToReserved(char *page_name, int x, int y, char *item_name, int dsax,
      int sbw = (page->tex0 >> 14) & 0x3F;
      int dbw = (item->tex0 >> 14) & 0x3F;
  
@@ -26404,7 +26455,7 @@ index 73f3aac2..75874382 100644
  }
  
  void BtMapJumpCashClear() {
-@@ -871,7 +1105,32 @@ void BtMapJumpCashClear() {
+@@ -871,7 +1101,32 @@ void BtMapJumpCashClear() {
      BtSteebMsgNo = -1;
  }
  
@@ -26437,7 +26488,7 @@ index 73f3aac2..75874382 100644
      int mes_size = 0;
  
      CUserStatus *status = UserStatus;
-@@ -917,7 +1176,8 @@ int BtMapJumpLoad(char *map_name) {
+@@ -917,7 +1172,8 @@ int BtMapJumpLoad(char *map_name) {
      NowDngMap = &MainDungeonMap;
      NowEventMan = &DngEventMan;
  
@@ -26447,7 +26498,7 @@ index 73f3aac2..75874382 100644
          return 0;
      }
  
-@@ -992,10 +1252,37 @@ int BtMapJumpLoad(char *map_name) {
+@@ -992,10 +1248,37 @@ int BtMapJumpLoad(char *map_name) {
      itemOpenSmall.LoadPack(read_buffer, "dun/etc/itemget_s/d01i02m", &MapModelBuffer, &MapModelBuffer, &itemOpenSmall_info, 0);
      itemOpenBig.LoadPack(read_buffer, "dun/etc/itemget_b/d01i01m", &MapModelBuffer, &MapModelBuffer, &itemOpenBig_info, 0);
  
@@ -26485,7 +26536,7 @@ index 73f3aac2..75874382 100644
      MonstorModelBuffer.used = 0;
      read_buffer = pack;
  
-@@ -1029,3 +1316,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
+@@ -1029,3 +1312,4 @@ void BtSet3DCellModel(float *world, CTexture *texture, float size, int x, int y,
  }
  
  } // namespace dc::game
