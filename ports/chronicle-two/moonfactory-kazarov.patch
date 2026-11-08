@@ -1,8 +1,111 @@
+diff --git a/cmake/KazarovRust.cmake b/cmake/KazarovRust.cmake
+index a4f044e..21349d8 100644
+--- a/cmake/KazarovRust.cmake
++++ b/cmake/KazarovRust.cmake
+@@ -8,6 +8,8 @@ if(DEFINED ENV{KZ_CORROSION_SOURCE_DIR} AND
+ endif()
+ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+     set(Rust_CARGO_TARGET x86_64-pc-windows-gnullvm CACHE STRING "Rust target for llvm-mingw" FORCE)
++elseif(EMSCRIPTEN)
++    set(Rust_CARGO_TARGET wasm32-unknown-emscripten CACHE STRING "Rust target for Emscripten" FORCE)
+ endif()
+ FetchContent_Declare(corrosion
+     URL https://github.com/corrosion-rs/corrosion/archive/refs/tags/v0.6.1.zip
+@@ -20,6 +22,18 @@ get_filename_component(KZ_RUST_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/../Cargo.toml
+ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+     # The desktop setup window (eframe, rfd) does not target iOS, which extracts without it.
+     corrosion_import_crate(MANIFEST_PATH ${KZ_RUST_MANIFEST} CRATES kazarov_core NO_DEFAULT_FEATURES LOCKED)
++elseif(EMSCRIPTEN)
++    # Nor the browser. The game there runs on pthreads (shared memory), which every wasm object linked into it
++    # must be built for, Rust's standard library included: the prebuilt one for wasm32-unknown-emscripten is not,
++    # so cargo builds it (-Zbuild-std, which stable cargo runs with RUSTC_BOOTSTRAP=1 and the rust-src component)
++    # with atomics and bulk memory, and with panics aborting: Rust's unwinding there is WebAssembly's own
++    # exceptions, which Asyncify does not take. The C and C++ the crates compile (zstd, cxx) take the same thread
++    # model through cc's CFLAGS.
++    corrosion_import_crate(MANIFEST_PATH ${KZ_RUST_MANIFEST} CRATES kazarov_core NO_DEFAULT_FEATURES LOCKED
++        FLAGS -Zbuild-std=std,panic_abort)
++    corrosion_add_target_rustflags(kazarov_core -Ctarget-feature=+atomics,+bulk-memory,+mutable-globals -Cpanic=abort)
++    corrosion_set_env_vars(kazarov_core RUSTC_BOOTSTRAP=1
++        "CFLAGS_wasm32_unknown_emscripten=-pthread -O2" "CXXFLAGS_wasm32_unknown_emscripten=-pthread -fexceptions -O2")
+ else()
+     corrosion_import_crate(MANIFEST_PATH ${KZ_RUST_MANIFEST} CRATES kazarov_core LOCKED)
+ endif()
+@@ -28,8 +42,11 @@ set(KZ_GAMEPLAY_ARCHIVE "${CMAKE_BINARY_DIR}/assets/data.zip")
+ corrosion_set_env_vars(kazarov_core "KAZAROV_GAMEPLAY_ARCHIVE=${KZ_GAMEPLAY_ARCHIVE}")
+ include(GNUInstallDirs)
+ install(FILES "${KZ_GAMEPLAY_ARCHIVE}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+-include("${CMAKE_CURRENT_LIST_DIR}/KazarovFfmpeg.cmake")
+-kz_ffmpeg(kazarov_core INTERFACE)
++# The browser has no FFmpeg: the game there plays no movies, and the extraction leaves them out (publish.rs).
++if(NOT EMSCRIPTEN)
++    include("${CMAKE_CURRENT_LIST_DIR}/KazarovFfmpeg.cmake")
++    kz_ffmpeg(kazarov_core INTERFACE)
++endif()
+ if(DEFINED KAZAROV_GAMEPLAY_ROOT)
+     corrosion_set_env_vars(kazarov_core "KAZAROV_GAMEPLAY_ROOT=${KAZAROV_GAMEPLAY_ROOT}")
+ else()
+@@ -38,12 +55,14 @@ else()
+         corrosion_set_env_vars(kazarov_core "KAZAROV_GAMEPLAY_ROOT=${KZ_GAMEPLAY_ROOT}")
+     endif()
+ endif()
+-find_program(KZ_FFMPEG_EXECUTABLE NAMES ffmpeg.exe ffmpeg HINTS "${KZ_FFMPEG_DIR}/bin")
+-if(KZ_FFMPEG_EXECUTABLE)
+-    corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG=${KZ_FFMPEG_EXECUTABLE}")
+-endif()
+-if(KZ_FFMPEG_DIR)
+-    corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG_INCLUDE=${KZ_FFMPEG_DIR}/include" "KAZAROV_FFMPEG_LIB=${KZ_FFMPEG_DIR}/lib")
++if(NOT EMSCRIPTEN)
++    find_program(KZ_FFMPEG_EXECUTABLE NAMES ffmpeg.exe ffmpeg HINTS "${KZ_FFMPEG_DIR}/bin")
++    if(KZ_FFMPEG_EXECUTABLE)
++        corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG=${KZ_FFMPEG_EXECUTABLE}")
++    endif()
++    if(KZ_FFMPEG_DIR)
++        corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG_INCLUDE=${KZ_FFMPEG_DIR}/include" "KAZAROV_FFMPEG_LIB=${KZ_FFMPEG_DIR}/lib")
++    endif()
+ endif()
+ corrosion_add_cxxbridge(kazarov_bridge CRATE kazarov_core FILES rust/lib.rs rust/host_jobs.rs rust/host_models.rs)
+ get_target_property(kz_bridge_generated_include_dirs kazarov_bridge INTERFACE_INCLUDE_DIRECTORIES)
+diff --git a/include/platform/arena.hpp b/include/platform/arena.hpp
+index f55357a..d82e198 100644
+--- a/include/platform/arena.hpp
++++ b/include/platform/arena.hpp
+@@ -38,6 +38,11 @@ void ArenaRequireOneAbove4GiB(const void *const *bases, std::size_t count);
+ // the one nearest an address inside the image is the one that was truncated. Exact wherever the
+ // image sits.
+ inline std::uintptr_t WidenNear(std::uintptr_t anchor, std::uint32_t low) {
++#if UINTPTR_MAX <= 0xFFFFFFFFu
++    // 32-bit addresses (wasm32) are never truncated: the low 32 bits are the address.
++    static_cast<void>(anchor);
++    return low;
++#else
+     constexpr std::uintptr_t kWindow = std::uintptr_t{1} << 32;
+     std::uintptr_t           candidate = (anchor & ~(kWindow - 1)) | low;
+     if (candidate > anchor && candidate - anchor > kWindow / 2 && candidate >= kWindow) {
+@@ -46,6 +51,7 @@ inline std::uintptr_t WidenNear(std::uintptr_t anchor, std::uint32_t low) {
+         candidate += kWindow;
+     }
+     return candidate;
++#endif
+ }
+ 
+ // A pointer into the executable's image (a global, a static, a literal) back from the int the game
 diff --git a/include/platform/input.hpp b/include/platform/input.hpp
-index 3a686a9..536349d 100644
+index 3a686a9..a9a3c4c 100644
 --- a/include/platform/input.hpp
 +++ b/include/platform/input.hpp
-@@ -53,6 +53,8 @@ struct InputPadState {
+@@ -10,8 +10,9 @@
+ #include <TargetConditionals.h>
+ #endif
+ 
+-// Touch screens get an on-screen gamepad: Android's and iOS's ports draw it over the game.
+-#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
++// Touch screens get an on-screen gamepad: Android's and iOS's ports draw it over the game, and on the web the
++// page does on a touch screen.
++#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
+ #define KZ_TOUCH_OVERLAY 1
+ #endif
+ 
+@@ -53,6 +54,8 @@ struct InputPadState {
      std::uint8_t  left_y = kInputAxisCentre;
      std::uint8_t  right_x = kInputAxisCentre;
      std::uint8_t  right_y = kInputAxisCentre;
@@ -11,7 +114,7 @@ index 3a686a9..536349d 100644
      // D-pad bits the left-stick keys add only while the game is not reading the left stick: the
      // screens that read the d-pad alone (the developer menu, the dungeon loader).
      std::uint16_t stick_dpad = 0;
-@@ -166,6 +168,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
+@@ -166,6 +169,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
  // The stick byte the game's AxisCalibration reads as deflection * 128, deflection in [-1, 1]: the
  // dead zone is stepped over, so any motion moves the game.
  std::uint8_t InputStickByte(float deflection);
@@ -20,7 +123,7 @@ index 3a686a9..536349d 100644
  
  // Rebinds one action ("cross", "up", "lx-", "rx", ...) to the names given: SDL key names, Mouse1 to
  // Mouse5 (left, right, middle, X1, X2), and for the whole-axis actions lx ly rx ry MouseX or MouseY
-@@ -173,6 +177,15 @@ std::uint8_t InputStickByte(float deflection);
+@@ -173,6 +178,15 @@ std::uint8_t InputStickByte(float deflection);
  // the camera's own. Returns false if the action or a name is unknown or does not fit the action.
  bool InputBindKeys(std::string_view action, std::span<const std::string_view> keys);
  
@@ -36,6 +139,25 @@ index 3a686a9..536349d 100644
  // Restores the default bindings and mouse settings.
  void InputResetBindings();
  
+diff --git a/src/c/movie_mux.c b/src/c/movie_mux.c
+index d00f4ef..d6d3d3f 100644
+--- a/src/c/movie_mux.c
++++ b/src/c/movie_mux.c
+@@ -27,7 +27,13 @@ static int memory_read(void *opaque, uint8_t *buffer, int size) {
+     return (int)count;
+ }
+ 
+-static int memory_write(void *opaque, const uint8_t *buffer, int size) {
++#if LIBAVFORMAT_VERSION_MAJOR >= 61
++typedef const uint8_t *write_packet_buffer;
++#else
++typedef uint8_t *write_packet_buffer;
++#endif
++
++static int memory_write(void *opaque, write_packet_buffer buffer, int size) {
+     MemoryFile *file = opaque;
+     if (!file->writable || size < 0 || (size_t)size > SIZE_MAX - file->position)
+         return AVERROR(EINVAL);
 diff --git a/src/cpp/gfx/displaylist.cpp b/src/cpp/gfx/displaylist.cpp
 index a1a0667..a7f469b 100644
 --- a/src/cpp/gfx/displaylist.cpp
@@ -91,8 +213,130 @@ index a1a0667..a7f469b 100644
          }
      }
  }
+diff --git a/src/cpp/gfx/memory.cpp b/src/cpp/gfx/memory.cpp
+index ab953cf..37f5d92 100644
+--- a/src/cpp/gfx/memory.cpp
++++ b/src/cpp/gfx/memory.cpp
+@@ -9,6 +9,12 @@
+ #include "gfx/profile.hpp"
+ #include "kazarov/log.hpp"
+ 
++#ifdef __EMSCRIPTEN__
++// The web build's Vulkan runs on WebGPU or WebGL2, which share no memory with the CPU: what a span holds is
++// uploaded at the next submit (port/web/vulkan, port/web/gl).
++extern "C" void vkWebGpuMarkWritten(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size);
++#endif
++
+ namespace gfx::detail {
+ 
+ namespace {
+@@ -377,6 +383,9 @@ TransientSpan AllocateFromChunks(std::vector<TransientChunk> &chunks, uint32_t &
+         VkDeviceSize    offset = AlignUp(chunk.used, align);
+         if (offset + size <= chunk.buffer.size) {
+             chunk.used = offset + size;
++#ifdef __EMSCRIPTEN__
++            vkWebGpuMarkWritten(chunk.buffer.buffer, offset, size);
++#endif
+             return TransientSpan{chunk.buffer.buffer, offset, chunk.buffer.memory.mapped + offset};
+         }
+     }
+@@ -391,6 +400,9 @@ TransientSpan AllocateFromChunks(std::vector<TransientChunk> &chunks, uint32_t &
+         chunk.buffer = CreateBuffer(bytes, usage, true);
+     }
+     chunk.used = size;
++#ifdef __EMSCRIPTEN__
++    vkWebGpuMarkWritten(chunk.buffer.buffer, 0, size);
++#endif
+     chunks.push_back(chunk);
+     current = static_cast<uint32_t>(chunks.size() - 1);
+     return TransientSpan{chunk.buffer.buffer, 0, chunk.buffer.memory.mapped};
+diff --git a/src/cpp/gfx/renderer.cpp b/src/cpp/gfx/renderer.cpp
+index ee0faa2..98432cc 100644
+--- a/src/cpp/gfx/renderer.cpp
++++ b/src/cpp/gfx/renderer.cpp
+@@ -40,6 +40,11 @@ extern "C" {
+ #include "gfx/profile.hpp"
+ #include "kazarov/log.hpp"
+ 
++#ifdef __EMSCRIPTEN__
++// The page's canvas as a surface, from the web build's Vulkan on WebGPU or WebGL2 (port/web/vulkan, port/web/gl).
++extern "C" VkResult vkCreateCanvasSurfaceWEB(VkInstance instance, VkSurfaceKHR *surface);
++#endif
++
+ #ifdef __SWITCH__
+ namespace {
+ 
+@@ -1219,6 +1224,12 @@ void CreateInstance() {
+     }
+ 
+     std::vector<const char *> extensions;
++#ifdef __EMSCRIPTEN__
++    // The web build's Vulkan draws to the page's canvas (port/web); SDL has no Vulkan there.
++    if (!g.config.offscreen) {
++        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
++    }
++#else
+     if (!g.config.offscreen) {
+         uint32_t           sdl_count = 0;
+         const char *const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_count);
+@@ -1227,6 +1238,7 @@ void CreateInstance() {
+         }
+         extensions.assign(sdl_extensions, sdl_extensions + sdl_count);
+     }
++#endif
+     // Drivers that implement Vulkan on another API (MoltenVK on Metal) are only
+     // enumerated for an instance that says it handles VK_KHR_portability_subset.
+     bool portability = InstanceHasExtension(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+@@ -2686,9 +2698,15 @@ void RendererInit(SDL_Window *window, const RendererConfig &config) {
+     g.offscreen = config.offscreen;
+     g.layout = config.layout;
+     CreateInstance();
++#ifdef __EMSCRIPTEN__
++    if (!g.offscreen && vkCreateCanvasSurfaceWEB(g.instance, &g.surface) != VK_SUCCESS) {
++        Fatal("the page's canvas cannot be drawn to");
++    }
++#else
+     if (!g.offscreen && !SDL_Vulkan_CreateSurface(window, g.instance, nullptr, &g.surface)) {
+         Fatal("SDL_Vulkan_CreateSurface: %s", SDL_GetError());
+     }
++#endif
+     PickPhysicalDevice();
+     CreateDevice();
+     CreateFrames();
+@@ -2781,7 +2799,11 @@ void RendererShutdown() {
+     ShutdownMemory();
+     vkDestroyDevice(g.device, nullptr);
+     if (g.surface != VK_NULL_HANDLE) {
++#ifdef __EMSCRIPTEN__
++        vkDestroySurfaceKHR(g.instance, g.surface, nullptr);
++#else
+         SDL_Vulkan_DestroySurface(g.instance, g.surface, nullptr);
++#endif
+     }
+     if (g.messenger != VK_NULL_HANDLE) {
+         auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+diff --git a/src/cpp/platform/files.cpp b/src/cpp/platform/files.cpp
+index c0dc8d2..c9295f7 100644
+--- a/src/cpp/platform/files.cpp
++++ b/src/cpp/platform/files.cpp
+@@ -266,6 +266,15 @@ int RenameExclusive(const fs::path &temp, const fs::path &path) {
+     return renamex_np(temp.c_str(), path.c_str(), RENAME_EXCL);
+ #elif defined(__SWITCH__)
+     return rename(temp.c_str(), path.c_str());
++#elif defined(__EMSCRIPTEN__)
++    // WasmFS has neither an exclusive rename nor hard links. The game is the only process on the browser's
++    // storage, so no one can take the name between this check and the rename.
++    struct stat existing;
++    if (lstat(path.c_str(), &existing) == 0) {
++        errno = EEXIST;
++        return -1;
++    }
++    return rename(temp.c_str(), path.c_str());
+ #else
+     errno = ENOSYS;
+     return -1;
 diff --git a/src/cpp/platform/input.cpp b/src/cpp/platform/input.cpp
-index c5a4797..e129c5a 100644
+index c5a4797..2d07dff 100644
 --- a/src/cpp/platform/input.cpp
 +++ b/src/cpp/platform/input.cpp
 @@ -8,6 +8,7 @@
@@ -177,7 +421,27 @@ index c5a4797..e129c5a 100644
  bool MouseAxisBound(int code) {
      return std::ranges::any_of(g_bindings, [&](const std::vector<Source> &sources) {
          return std::ranges::any_of(sources, [&](const Source &source) {
-@@ -1091,6 +1138,7 @@ void InputPoll() {
+@@ -1048,8 +1095,19 @@ static InputGlyphFamily GamepadFamily(SDL_Gamepad *gamepad) {
+ }
+ 
+ #ifdef KZ_TOUCH_OVERLAY
++#if defined(__EMSCRIPTEN__)
++// Whether the page is on a touch screen; the web port's port/web/src/touch.cpp says, as a browser always reports
++// a keyboard and a mouse. None of it in programs without that file.
++__attribute__((weak)) bool WebTouchScreen() { return false; }
++#endif
++
+ // The on-screen gamepad stands in for physical devices, so it hides while one is connected or held.
+ bool TouchOverlayWanted() {
++#if defined(__EMSCRIPTEN__)
++    return WebTouchScreen() &&
++           std::ranges::none_of(g_slots, [](const PadSlot &slot) { return slot.gamepad != nullptr; }) &&
++           std::ranges::find(g_keys, true) == g_keys.end();
++#endif
+     if (std::ranges::any_of(g_slots, [](const PadSlot &slot) { return slot.gamepad != nullptr; }) ||
+         SDL_HasKeyboard() || MouseButtons() != 0 || std::ranges::find(g_keys, true) != g_keys.end()) {
+         return false;
+@@ -1091,6 +1149,7 @@ void InputPoll() {
      }
      ReadTouchpad(g_slots[0].gamepad);
      PollHostActions();
@@ -185,7 +449,7 @@ index c5a4797..e129c5a 100644
  }
  
  void InputHandleEvent(const SDL_Event &event) {
-@@ -1161,6 +1209,7 @@ void InputHandleEvent(const SDL_Event &event) {
+@@ -1161,6 +1220,7 @@ void InputHandleEvent(const SDL_Event &event) {
          default:
              break;
      }
@@ -193,7 +457,7 @@ index c5a4797..e129c5a 100644
  }
  
  void InputLatchPad(int pad) {
-@@ -1556,6 +1605,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
+@@ -1556,6 +1616,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
      return false;
  }
  
@@ -250,7 +514,7 @@ index c5a4797..e129c5a 100644
  std::span<const InputActionInfo> InputActions() {
      static const std::vector<InputActionInfo> actions = [] {
          std::vector<InputActionInfo> list;
-@@ -1850,6 +1949,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
+@@ -1850,6 +1960,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
      g_scripted = held;
      g_scripted_wheel = held.mouse_wheel;
      PollHostActions();
@@ -258,3 +522,90 @@ index c5a4797..e129c5a 100644
  }
  
  static bool g_movement_locked = false;
+diff --git a/src/cpp/platform/window.cpp b/src/cpp/platform/window.cpp
+index 386fdcc..82c7add 100644
+--- a/src/cpp/platform/window.cpp
++++ b/src/cpp/platform/window.cpp
+@@ -144,6 +144,8 @@ void WindowInit(const WindowConfig &config) {
+ #endif
+     // SDL3 backs a Vulkan window on macOS with a CAMetalLayer (VK_EXT_metal_surface) by itself.
+     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
++    // On the web the renderer's Vulkan draws to the canvas itself (port/web); SDL has no Vulkan there.
++#ifndef __EMSCRIPTEN__
+     if (config.vulkan) {
+         flags |= SDL_WINDOW_VULKAN;
+ #ifdef _WIN32
+@@ -152,6 +154,7 @@ void WindowInit(const WindowConfig &config) {
+         }
+ #endif
+     }
++#endif
+     Placement placement = Place(config, SDL_GetPrimaryDisplay());
+     // An iOS window takes the whole display whatever is placed; fullscreen also hides the status bar.
+     if (placement.fullscreen || kIos) {
+diff --git a/src/cpp/sce/eekernel_threads.cpp b/src/cpp/sce/eekernel_threads.cpp
+index eba144f..b6bb5e3 100644
+--- a/src/cpp/sce/eekernel_threads.cpp
++++ b/src/cpp/sce/eekernel_threads.cpp
+@@ -89,6 +89,9 @@ _kz_fiber_trampoline:
+     bl _kz_fiber_entry
+     brk #0
+ )");
++#elif defined(__EMSCRIPTEN__)
++// WebAssembly has no way to swap stacks by hand; Emscripten's fibers unwind and rewind with Asyncify.
++#include <emscripten/fiber.h>
+ #else
+ #include <ucontext.h>
+ #endif
+@@ -208,6 +211,51 @@ void ContextDestroy(Context &c) {
+     c.sp = nullptr;
+ }
+ 
++#elif defined(__EMSCRIPTEN__)
++
++// Each fiber has its C stack and an Asyncify stack, where a suspended fiber's unwound call frames wait.
++constexpr std::size_t kAsyncifyStackSize = 256 * 1024;
++
++struct Context : SanitizerStack {
++    emscripten_fiber_t fiber{};
++    void              *stack = nullptr;
++    void              *asyncify_stack = nullptr;
++};
++
++void FiberStart(void *) {
++    RunEntry();
++}
++
++void ContextInitMain(Context &c) {
++    c.asyncify_stack = std::malloc(kAsyncifyStackSize);
++    if (c.asyncify_stack == nullptr) {
++        kz::Abort("eekernel", "out of memory for the main thread's Asyncify stack");
++    }
++    emscripten_fiber_init_from_current_context(&c.fiber, c.asyncify_stack, kAsyncifyStackSize);
++}
++
++void ContextCreate(Context &c) {
++    static_cast<SanitizerStack &>(c) = {};
++    c.stack = std::malloc(kStackSize);
++    c.asyncify_stack = std::malloc(kAsyncifyStackSize);
++    if (c.stack == nullptr || c.asyncify_stack == nullptr) {
++        kz::Abort("eekernel", "out of memory for a thread stack");
++    }
++    emscripten_fiber_init(&c.fiber, FiberStart, nullptr, c.stack, kStackSize, c.asyncify_stack,
++                          kAsyncifyStackSize);
++}
++
++void ContextSwitch(Context &prev, Context &next) {
++    emscripten_fiber_swap(&prev.fiber, &next.fiber);
++}
++
++void ContextDestroy(Context &c) {
++    std::free(c.stack);
++    std::free(c.asyncify_stack);
++    c.stack = nullptr;
++    c.asyncify_stack = nullptr;
++}
++
+ #else
+ 
+ struct Context : SanitizerStack {

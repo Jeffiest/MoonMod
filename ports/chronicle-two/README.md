@@ -12,7 +12,7 @@ installer pins these revisions; applying this patch to newer upstream source is 
 | File | Purpose |
 | --- | --- |
 | `moonfactory-chronicle-two.patch` | Game adapter, runtime, UI, engine hooks, and tests. |
-| `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule, and the camera matching the aerial dungeon map needs (a tick that draws through several cameras keeps each one's interpolation). |
+| `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule, the camera matching the aerial dungeon map needs (a tick that draws through several cameras keeps each one's interpolation), the movie muxer building with FFmpeg 6 as well as 7, and the web build's changes under `__EMSCRIPTEN__`. |
 | `apply-moonfactory.ps1` | Pins source revisions, checks both patches, and applies them. |
 | `verify-headless.ps1` | Builds and runs the Chronicle Two MoonMod native tests; optionally checks executable startup. |
 
@@ -88,6 +88,16 @@ capabilities before using game operations. The broader roadmap and historical ve
 describe work from the original development workspace; they are not a new retail validation of this
 distributed patch. Authored model rigs, fighting styles, independent dungeon graphs, and other open
 items remain unsupported. Test with an isolated save before using an existing playthrough.
+
+## Regenerated on November 8, 2026
+
+Both patches are now generated from Jeffiest/ChronicleTwo's `claude/dark-cloud-2-engine-yr3rlk` branch with its
+`tools/gauntlet/export_moonmod_patch.py --committed --check`, so they carry that branch's Dark Cloud 2 engine work:
+raised capacities (`port/include/capacity.hpp`, listed in `port/docs/capacity.md`), co-op for Chronicle Two
+(`port/docs/COOP.md`) and content registration (`port/docs/CONTENT.md`). The pins are unchanged: ChronicleTwo
+`7a7d7f29` and Kazarov `fd72338a`. Both patches apply cleanly to them. The branch's gauntlet passed on Linux with
+software Vulkan, as `tools/gauntlet/report/merged-20261108` there records. That covers the build, the CPU suite with
+no new failure, every MoonMod case, the co-op relay with two games and the web build. Nothing ran with retail data.
 
 ## Verification on November 2, 2026
 
