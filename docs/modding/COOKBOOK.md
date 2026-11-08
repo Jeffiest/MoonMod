@@ -735,3 +735,10 @@ of the house scene in Norune while he is waiting to join, and puts them back aft
   `mods.settings_overlay({id, values})` gives a mod values for this session only, never saved, and
   `mods.settings_overlay_clear` takes them back; co-op uses these for the host's settings
   (`mods/moonmod.coop/main.lua`, "The room's mods").
+- **Ship several mods as one.** A merged pack (`"parts"` in `mod.json`) holds several mods in one script behind one
+  switch; each part keeps its own id, settings, saved data and co-op entry. Build one from separate mods with a
+  builder like `tools/pack/build_pack.py` rather than by hand ([Packs and live on/off](PACKS.md)).
+- **Survive being switched on and off live.** Players can switch your mod mid-game. Keep what you set up undoable
+  through owned state (binds, HUD, tuning, formulas: all released for you), read `game.session.get()` in `on_load`
+  when `live` is true instead of waiting for `game.session.started`, and save progress as you go, not only at
+  `runtime.unloaded`.

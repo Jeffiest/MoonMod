@@ -21,7 +21,9 @@ Where the game looks for mods on Chronicle, in this order:
 3. `<save folder>\mods\` (a copy of the game run with `--save <folder>`).
 
 New mods start **disabled**. Turn yours on in **Options > Game > Mod Manager** (or the **MODS** slot of the pause
-ring). After that, a change to the Lua takes a game restart.
+ring). It starts at once. After that, save a change to the Lua and the game reloads the mod within a couple of
+seconds; a mod that registers content the game keeps (items, characters, floors) needs a restart instead
+([Packs and live on/off](PACKS.md)).
 
 ## 2. Describe it: `mod.json`
 

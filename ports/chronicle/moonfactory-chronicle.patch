@@ -4312,10 +4312,10 @@ index 00000000..3cda6e5d
 +} // namespace moonmod
 diff --git a/port/include/moonmod/manifest.hpp b/port/include/moonmod/manifest.hpp
 new file mode 100644
-index 00000000..e61dee85
+index 00000000..c6a67b56
 --- /dev/null
 +++ b/port/include/moonmod/manifest.hpp
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,72 @@
 +#pragma once
 +
 +#include <filesystem>
@@ -4376,6 +4376,10 @@ index 00000000..e61dee85
 +    std::filesystem::path package_root;
 +    std::filesystem::path entry_file;
 +    std::filesystem::path native_library;
++    // A merged pack ("parts" in mod.json): the mods whose code is in this package's one script. Each part keeps its own
++    // id, version, settings, co-op role and saved data, and owns what it registers. On a part, pack is the pack's id.
++    std::vector<ModManifest> parts;
++    std::string              pack;
 +};
 +
 +std::optional<ModManifest> ReadManifest(const std::filesystem::path &package_root, std::string &error);
@@ -5041,10 +5045,10 @@ index 00000000..a9f3a8b3
 +} // namespace moonmod
 diff --git a/port/include/moonmod/runtime.hpp b/port/include/moonmod/runtime.hpp
 new file mode 100644
-index 00000000..60ca8f4f
+index 00000000..2d533522
 --- /dev/null
 +++ b/port/include/moonmod/runtime.hpp
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,137 @@
 +#pragma once
 +
 +#include <filesystem>
@@ -5087,6 +5091,9 @@ index 00000000..60ca8f4f
 +    bool                   native_trusted = false;
 +    bool                   valid_manifest = false;
 +    std::string            native_status;
++    std::string            pack;           // a merged pack's part: the pack's id (it runs inside the pack's Lua)
++    bool                   part_switch = true; // a part's own switch, kept apart from its pack's (profile "parts")
++    std::string            restart_reason; // why the last on/off waits for a restart (empty: it took effect at once)
 +};
 +
 +using PackageApiCallHandler = std::function<ApiCallResult(std::string_view mod_id,
@@ -5150,6 +5157,7 @@ index 00000000..60ca8f4f
 +    std::vector<std::string> LoadedModOrder() const;
 +    bool                      Running() const;
 +    std::uint64_t             Frame() const;
++    // Saves the choice, and applies it at once when the package's hooks can be undone (see ModRecord::restart_reason).
 +    bool                      SetEnabled(std::string_view id, bool enabled, std::string &error);
 +    bool                      SetNativeTrusted(std::string_view id, bool trusted, std::string &error);
 +    Json                      Setting(std::string_view mod_id, std::string_view setting_id) const;
@@ -29596,10 +29604,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..7f371ac6
+index 00000000..6bbd9de7
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17467 @@
+@@ -0,0 +1,17471 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -32431,6 +32439,8 @@ index 00000000..7f371ac6
 +        result["room_bonus_percent"] = DngRoomBonusPercent;
 +        result["monster_bonus_percent"] = DngMonsterBonusPercent;
 +        result["chest_bonus_percent"] = DngChestBonusPercent;
++        // Playing on the floor: false while it loads (its floor and seed aren't settled then), in a menu or a scene.
++        result["walking"] = gameTask == GAME_TASK_PLAY && BtGameModeFlag == BT_GAME_MODE_PLAY;
 +    }
 +    if (mode == GAME_MODE_EDIT && MapNo >= 0) result["map_no"] = MapNo; // the town, house or field the player is in
 +    if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT) {
@@ -40982,7 +40992,9 @@ index 00000000..7f371ac6
 +    int dungeon = mode == GAME_MODE_DUNGEON ? selectMapNo : -1;
 +    if (request.contains("dungeon_id") && !ReadBoundedInt(request, "dungeon_id", 0, DUNGEON_COUNT - 1, dungeon)) return Invalid(usage);
 +    const bool in_town = mode == GAME_MODE_EDIT && IsSettlementOrRegisteredLocationMap(MapNo);
-+    if ((mode != GAME_MODE_DUNGEON && !in_town) || UserStatus == nullptr) return Failed("the player is not in a dungeon or a town");
++    // The save's status, not UserStatus: that is set only once a dungeon starts, so a game that has been in none since
++    // it started (a co-op guest arriving from the title, a save just loaded in a town) could not walk in from a town.
++    if ((mode != GAME_MODE_DUNGEON && !in_town) || CurrentStatus() == nullptr) return Failed("the player is not in a dungeon or a town");
 +    if (dungeon < 0 || dungeon >= DUNGEON_COUNT) return Failed(in_town ? "from a town, dungeon_id names the dungeon" : "the player is not in a dungeon");
 +    if (NextMapNo >= 0) return Failed("a native map transition is already pending");
 +    if (!ReadBoundedInt(request, "floor_id", 0, maxFloorTbl__3[dungeon] - 1, floor)) return Invalid(usage);
@@ -50532,10 +50544,10 @@ index 00000000..a267d5ec
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..a60dfa79
+index 00000000..a5e51336
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3635 @@
+@@ -0,0 +1,4009 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/symlinks.hpp"
 +#include "moonmod/manager_ui.hpp"
@@ -50576,7 +50588,7 @@ index 00000000..a60dfa79
 +namespace {
 +
 +constexpr int         kHookInterval = 1000;
-+constexpr std::size_t kScriptSizeLimit = 1024 * 1024;
++constexpr std::size_t kScriptSizeLimit = 4 * 1024 * 1024;
 +constexpr std::size_t kStorageSizeLimit = 128 * 1024;
 +constexpr std::size_t kStorageValueLimit = 4096;
 +constexpr int         kEventCallbackLimit = 128;
@@ -50916,6 +50928,7 @@ index 00000000..a60dfa79
 +    struct EventCallback {
 +        int token = 0;
 +        int reference = LUA_NOREF;
++        std::string owner; // the mod, or the pack's part, that registered it
 +    };
 +
 +    struct CommandCallback {
@@ -50929,6 +50942,7 @@ index 00000000..a60dfa79
 +
 +    struct ScriptOverrideCallback {
 +        int reference = LUA_NOREF;
++        std::string owner;
 +    };
 +
 +    struct Memory {
@@ -50949,8 +50963,9 @@ index 00000000..a60dfa79
 +    };
 +
 +    const RuntimeConfig &config;
-+    const ModManifest  &manifest;
-+    std::function<Json(std::string_view)> setting_reader;
++    // The current owner's manifest: the mod's own, or (in a merged pack, while one of its parts runs) the part's.
++    ModManifest manifest;
++    std::function<Json(std::string_view owner, std::string_view setting)> setting_reader;
 +    std::filesystem::path storage_file;
 +    Json storage = Json::object();
 +    lua_State *state = nullptr;
@@ -50970,11 +50985,321 @@ index 00000000..a60dfa79
 +    bool       save_migration_window = false;
 +    bool       budget_exceeded = false;
 +
++    // A merged pack runs its parts in this one Lua state, each as its own owner: what it registers, its settings and
++    // its saved data (moonmod/data/<part id>/, as when it was a mod of its own) are the part's. The current owner's
++    // state is in the fields above (manifest, storage, commands, ...); every other owner's waits in its slot here.
++    struct OwnerState {
++        ModManifest manifest;
++        std::filesystem::path storage_file;
++        Json storage = Json::object();
++        bool storage_dirty = false;
++        bool storage_loaded = false;
++        std::map<std::string, CommandCallback, std::less<>> commands;
++        std::map<std::string, ScriptFunctionCallback, std::less<>> script_functions;
++        std::map<std::string, LocalizationEntry, std::less<>> localizations;
++        std::size_t localization_bytes = 0;
++    };
++    std::map<std::string, OwnerState, std::less<>> owners;
++    std::string home_id;
++    std::set<std::string, std::less<>> enabled_parts;
++    std::map<std::string, int, std::less<>> part_functions;
++    // A part given as source with a globals table: that table, and a copy of it as it was handed over, so the part
++    // starts with fresh globals each time it is turned on again.
++    std::map<std::string, std::pair<int, int>, std::less<>> part_globals;
++    std::set<std::string, std::less<>> running_parts;
++    std::map<std::string, std::string, std::less<>> part_errors;
++    std::size_t callback_limit = kEventCallbackLimit;
++
 +    Impl(const RuntimeConfig &runtime_config, const ModManifest &mod_manifest,
-+         std::function<Json(std::string_view)> reader)
++         std::function<Json(std::string_view, std::string_view)> reader)
 +        : memory{0, runtime_config.lua_memory_limit}, config(runtime_config), manifest(mod_manifest),
 +          setting_reader(std::move(reader)),
-+          storage_file(runtime_config.save_root / "moonmod" / "data" / mod_manifest.id / "storage.json") {}
++          storage_file(runtime_config.save_root / "moonmod" / "data" / mod_manifest.id / "storage.json"),
++          home_id(mod_manifest.id) {
++        // A pack's parts share its state, so they share its budgets too: each part brings its own share.
++        const std::size_t shares = 1 + mod_manifest.parts.size();
++        memory.limit = std::min<std::size_t>(runtime_config.lua_memory_limit * shares, 512u * 1024u * 1024u);
++        callback_limit = kEventCallbackLimit * shares;
++    }
++
++    void ResetOwners() {
++        owners.clear();
++        running_parts.clear();
++        part_functions.clear();
++        part_globals.clear();
++        part_errors.clear();
++        if (manifest.parts.empty()) return;
++        owners[home_id].storage_loaded = true; // the home owner is checked out: its slot holds nothing until it parks
++        for (const ModManifest &part : manifest.parts) {
++            OwnerState slot;
++            slot.manifest = part;
++            slot.storage_file = config.save_root / "moonmod" / "data" / part.id / "storage.json";
++            owners.emplace(part.id, std::move(slot));
++        }
++    }
++
++    void SwapCurrent(OwnerState &slot) {
++        std::swap(manifest, slot.manifest);
++        std::swap(storage_file, slot.storage_file);
++        std::swap(storage, slot.storage);
++        std::swap(storage_dirty, slot.storage_dirty);
++        std::swap(commands, slot.commands);
++        std::swap(script_functions, slot.script_functions);
++        std::swap(localizations, slot.localizations);
++        std::swap(localization_bytes, slot.localization_bytes);
++    }
++
++    bool SwitchOwner(std::string_view id) {
++        if (id.empty() || id == manifest.id) return true;
++        const auto target = owners.find(id);
++        const auto current = owners.find(manifest.id);
++        if (target == owners.end() || current == owners.end()) return false;
++        SwapCurrent(current->second);
++        SwapCurrent(target->second);
++        if (!target->second.storage_loaded) {
++            target->second.storage_loaded = true;
++            std::string error;
++            if (!LoadStorage(error)) Log("warning", error);
++        }
++        return true;
++    }
++
++    // While it lives, the given owner (a part of this pack) is current; the previous one comes back after.
++    struct OwnerScope {
++        Impl &self;
++        std::string previous;
++        bool switched = false;
++        OwnerScope(Impl &impl, std::string_view id) : self(impl), previous(impl.manifest.id) {
++            switched = !id.empty() && id != previous && impl.SwitchOwner(id);
++        }
++        ~OwnerScope() {
++            if (switched) self.SwitchOwner(previous);
++        }
++        OwnerScope(const OwnerScope &) = delete;
++        OwnerScope &operator=(const OwnerScope &) = delete;
++    };
++
++    std::vector<std::string> OwnerIds() const {
++        std::vector<std::string> ids{home_id};
++        for (const std::string &part : running_parts) ids.push_back(part);
++        return ids;
++    }
++
++    // What the game holds for an owner (input binds, HUD, title modes, menus, ...), let go.
++    void ReleaseOwner(const std::string &owner) {
++        if (config.api_owner_unloaded) {
++            try {
++                config.api_owner_unloaded(owner);
++            } catch (const std::exception &exception) {
++                Log("error", std::string("API owner cleanup failed: ") + exception.what());
++            } catch (...) {
++                Log("error", "API owner cleanup failed with an unknown exception");
++            }
++        }
++        RemoveNativeResourceOverridesByOwner(owner);
++        RemoveManagerActions(owner);
++        ClearCharacterSheet(owner);
++    }
++
++    // Puts a part's globals table back as it was handed over: what an earlier run set is gone.
++    void ResetPartGlobals(const std::string &part) {
++        const auto globals = part_globals.find(part);
++        if (state == nullptr || globals == part_globals.end()) return;
++        lua_rawgeti(state, LUA_REGISTRYINDEX, globals->second.first);  // env
++        lua_rawgeti(state, LUA_REGISTRYINDEX, globals->second.second); // as handed over
++        // Every key now in env gets its handed-over value (nil drops it; assigning an existing field while
++        // traversing is allowed).
++        lua_pushnil(state);
++        while (lua_next(state, -3) != 0) {
++            lua_pop(state, 1);
++            lua_pushvalue(state, -1);
++            lua_pushvalue(state, -1);
++            lua_rawget(state, -4);
++            lua_rawset(state, -5);
++        }
++        // Then every handed-over key is put back.
++        lua_pushnil(state);
++        while (lua_next(state, -2) != 0) {
++            lua_pushvalue(state, -2);
++            lua_insert(state, -2);
++            lua_rawset(state, -5);
++        }
++        lua_pop(state, 2);
++    }
++
++    bool StartPart(const std::string &part, std::string &error) {
++        error.clear();
++        const auto function = part_functions.find(part);
++        if (state == nullptr || function == part_functions.end()) {
++            error = "the pack's script did not hand this part over (moonmod.part.run)";
++            part_errors[part] = error;
++            return false;
++        }
++        if (running_parts.contains(part)) return true;
++        bool started = false;
++        {
++            OwnerScope scope(*this, part);
++            if (!scope.switched) {
++                error = "'" + part + "' is not a part of this pack";
++                return false;
++            }
++            ResetPartGlobals(part);
++            lua_rawgeti(state, LUA_REGISTRYINDEX, function->second);
++            if (ProtectedCall(0, 1, error)) {
++                if (lua_istable(state, -1)) {
++                    AddModuleCallback("on_load", "runtime.loaded");
++                    AddModuleCallback("on_unload", "runtime.unloaded");
++                    AddModuleCallback("on_tick", "game.tick");
++                }
++                lua_pop(state, 1);
++                started = true;
++            }
++        }
++        running_parts.insert(part);
++        if (!started) {
++            StopPart(part, false);
++            part_errors[part] = error;
++            Log("error", "part '" + part + "' failed to load: " + error);
++            return false;
++        }
++        part_errors.erase(part);
++        return true;
++    }
++
++    void StopPart(const std::string &part, bool announce) {
++        if (!running_parts.contains(part)) return;
++        if (announce) Emit("runtime.unloaded", Json::object(), part);
++        {
++            OwnerScope scope(*this, part);
++            if (scope.switched) {
++                for (auto &[id, command] : commands) {
++                    (void)id;
++                    luaL_unref(state, LUA_REGISTRYINDEX, command.reference);
++                }
++                commands.clear();
++                for (auto &[id, function] : script_functions) {
++                    (void)id;
++                    luaL_unref(state, LUA_REGISTRYINDEX, function.reference);
++                }
++                script_functions.clear();
++                localizations.clear();
++                localization_bytes = 0;
++                std::string error;
++                if (!FlushStorage(error)) Log("error", error);
++            }
++        }
++        for (auto it = callbacks.begin(); it != callbacks.end();) {
++            std::erase_if(it->second, [&](const EventCallback &callback) {
++                if (callback.owner != part) return false;
++                luaL_unref(state, LUA_REGISTRYINDEX, callback.reference);
++                return true;
++            });
++            it = it->second.empty() ? callbacks.erase(it) : std::next(it);
++        }
++        bool monster_hook = false;
++        std::erase_if(script_overrides, [&](const auto &entry) {
++            if (entry.second.owner != part) return false;
++            monster_hook = monster_hook || entry.first == "native.monster.run";
++            luaL_unref(state, LUA_REGISTRYINDEX, entry.second.reference);
++            return true;
++        });
++        if (monster_hook) BumpMonsterScriptOverrideGeneration();
++        ReleaseOwner(part);
++        running_parts.erase(part);
++        // Its saved data is read again from disk when it next runs.
++        if (const auto slot = owners.find(part); slot != owners.end()) {
++            slot->second.storage = Json::object();
++            slot->second.storage_dirty = false;
++            slot->second.storage_loaded = false;
++        }
++    }
++
++    static int ApiPartRun(lua_State *lua) {
++        Impl *self = Upvalue(lua);
++        std::size_t length = 0;
++        const char *raw = luaL_checklstring(lua, 1, &length);
++        const std::string part(raw, length);
++        // The part's code: a function, or its script's source (compiled here as a chunk of its own, with the
++        // globals table given third and the name given fourth, so its line numbers are its own file's and it has a
++        // main chunk's room for locals, as when it was a mod of its own).
++        const bool source = lua_type(lua, 2) == LUA_TSTRING;
++        if (!source) luaL_checktype(lua, 2, LUA_TFUNCTION);
++        if (source && !lua_isnoneornil(lua, 3)) luaL_checktype(lua, 3, LUA_TTABLE);
++        if (self == nullptr || part == self->home_id || !self->owners.contains(part)) {
++            return luaL_error(lua, "'%s' is not a part of this pack", part.c_str());
++        }
++        if (self->manifest.id != self->home_id) return luaL_error(lua, "a part cannot start another part");
++        if (!self->part_functions.contains(part)) {
++            if (source) {
++                std::size_t code_length = 0;
++                const char *code = lua_tolstring(lua, 2, &code_length);
++                const std::string name = "=" + (lua_type(lua, 4) == LUA_TSTRING ? std::string(lua_tostring(lua, 4)) : part);
++                if (luaL_loadbufferx(lua, code, code_length, name.c_str(), "t") != LUA_OK) {
++                    const char *message = lua_tostring(lua, -1);
++                    std::string error = message != nullptr ? message : "the part's code does not compile";
++                    lua_pop(lua, 1);
++                    self->part_errors[part] = error;
++                    lua_pushboolean(lua, 0);
++                    lua_pushlstring(lua, error.data(), error.size());
++                    return 2;
++                }
++                if (lua_istable(lua, 3)) {
++                    lua_pushvalue(lua, 3);
++                    lua_setupvalue(lua, -2, 1); // a main chunk's one upvalue is its _ENV
++                    lua_newtable(lua);          // a copy of the globals as handed over
++                    lua_pushnil(lua);
++                    while (lua_next(lua, 3) != 0) {
++                        lua_pushvalue(lua, -2);
++                        lua_insert(lua, -2);
++                        lua_rawset(lua, -4);
++                    }
++                    const int copy = luaL_ref(lua, LUA_REGISTRYINDEX);
++                    lua_pushvalue(lua, 3);
++                    self->part_globals[part] = {luaL_ref(lua, LUA_REGISTRYINDEX), copy};
++                }
++            } else {
++                lua_pushvalue(lua, 2);
++            }
++            self->part_functions[part] = luaL_ref(lua, LUA_REGISTRYINDEX);
++        }
++        if (!self->enabled_parts.contains(part)) {
++            lua_pushboolean(lua, 0);
++            lua_pushstring(lua, "off");
++            return 2;
++        }
++        std::string error;
++        const bool started = self->StartPart(part, error);
++        lua_pushboolean(lua, started ? 1 : 0);
++        if (started) {
++            lua_pushnil(lua);
++        } else {
++            lua_pushlstring(lua, error.data(), error.size());
++        }
++        return 2;
++    }
++
++    static int ApiPartEnabled(lua_State *lua) {
++        Impl *self = Upvalue(lua);
++        std::size_t length = 0;
++        const char *raw = luaL_checklstring(lua, 1, &length);
++        lua_pushboolean(lua, self != nullptr && self->enabled_parts.contains(std::string_view(raw, length)) ? 1 : 0);
++        return 1;
++    }
++
++    static int ApiPartList(lua_State *lua) {
++        Impl *self = Upvalue(lua);
++        Json parts = Json::array();
++        if (self != nullptr) {
++            for (const auto &[id, slot] : self->owners) {
++                if (id == self->home_id) continue;
++                parts.push_back({{"id", id},
++                                 {"enabled", self->enabled_parts.contains(id)},
++                                 {"running", self->running_parts.contains(id)}});
++            }
++        }
++        PushJson(lua, parts);
++        return 1;
++    }
 +
 +    static void *Allocate(void *userdata, void *pointer, std::size_t old_size, std::size_t new_size) {
 +        auto &memory = *static_cast<Memory *>(userdata);
@@ -53176,7 +53501,8 @@ index 00000000..a60dfa79
 +        const bool package_operation = operation->domain == "audio";
 +        if (package_operation && config.package_api_handler) {
 +            try {
-+                ApiCallResult result = config.package_api_handler(manifest.id, manifest.package_root, *operation, arguments);
++                const std::string owner = manifest.id;
++                ApiCallResult result = config.package_api_handler(owner, manifest.package_root, *operation, arguments);
 +                const std::size_t response_limit = path == "resources.resolve" ? kApiResourceResultBytesLimit
 +                                                                                 : kApiValueBytesLimit;
 +                if (result.status == ApiCallStatus::Ok && result.value.dump().size() > response_limit) {
@@ -53193,7 +53519,8 @@ index 00000000..a60dfa79
 +            return {ApiCallStatus::Unsupported, nullptr, "this game adapter has not bound the operation"};
 +        }
 +        try {
-+            ApiCallResult result = config.api_handler(manifest.id, *operation, arguments);
++            const std::string owner = manifest.id;
++            ApiCallResult result = config.api_handler(owner, *operation, arguments);
 +            const std::size_t response_limit = path == "resources.resolve" ? kApiResourceResultBytesLimit
 +                                                                             : kApiValueBytesLimit;
 +            if (result.status == ApiCallStatus::Ok && result.value.dump().size() > response_limit) {
@@ -53309,10 +53636,10 @@ index 00000000..a60dfa79
 +
 +    int AddCallback(std::string event, int reference) {
 +        auto &list = callbacks[std::move(event)];
-+        if (list.size() >= kEventCallbackLimit) return 0;
++        if (list.size() >= callback_limit) return 0;
 +        if (next_event_token <= 0 || next_event_token == std::numeric_limits<int>::max()) next_event_token = 1;
 +        const int token = next_event_token++;
-+        list.push_back({token, reference});
++        list.push_back({token, reference, manifest.id});
 +        return token;
 +    }
 +
@@ -53348,7 +53675,7 @@ index 00000000..a60dfa79
 +        }
 +        luaL_checktype(lua, callback_index, LUA_TFUNCTION);
 +        const auto found = self->callbacks.find(event_name);
-+        if (found != self->callbacks.end() && found->second.size() >= kEventCallbackLimit) {
++        if (found != self->callbacks.end() && found->second.size() >= self->callback_limit) {
 +            error = "event callback limit reached";
 +            return false;
 +        }
@@ -53581,7 +53908,12 @@ index 00000000..a60dfa79
 +                                       "unknown hook id; inspect game.scripts.list_hooks()"});
 +        }
 +        const bool enabled = enabled_field == definition.end() || enabled_field->get<bool>();
-+        const auto existing = self->script_overrides.find(hook_id);
++        auto existing = self->script_overrides.find(hook_id);
++        if (existing != self->script_overrides.end() && existing->second.owner != self->manifest.id) {
++            // another part of this pack holds the hook: removing leaves it; taking it over says so
++            if (!enabled) existing = self->script_overrides.end();
++            else self->Log("warning", "takes native script hook '" + std::string(hook_id) + "' from " + existing->second.owner);
++        }
 +        if (!enabled) {
 +            if (lua_gettop(lua) != first_argument) {
 +                return PushApiResult(lua, {ApiCallStatus::InvalidArgument, nullptr,
@@ -53609,7 +53941,7 @@ index 00000000..a60dfa79
 +        const int reference = luaL_ref(lua, LUA_REGISTRYINDEX);
 +        const bool replaced = existing != self->script_overrides.end();
 +        if (replaced) luaL_unref(lua, LUA_REGISTRYINDEX, existing->second.reference);
-+        self->script_overrides[hook_id] = ScriptOverrideCallback{reference};
++        self->script_overrides[hook_id] = ScriptOverrideCallback{reference, self->manifest.id};
 +        if (hook_id == "native.monster.run") BumpMonsterScriptOverrideGeneration();
 +        PushJson(lua, {{"id", hook_id}, {"enabled", true}, {"replaced", replaced}});
 +        lua_pushnil(lua);
@@ -53714,7 +54046,7 @@ index 00000000..a60dfa79
 +            lua_pushnil(lua);
 +            return 1;
 +        }
-+        const Json value = self->setting_reader(std::string_view(key, length));
++        const Json value = self->setting_reader(self->manifest.id, std::string_view(key, length));
 +        PushJson(lua, value);
 +        return 1;
 +    }
@@ -53917,6 +54249,13 @@ index 00000000..a60dfa79
 +
 +        lua_pushlstring(state, config.game_id.data(), config.game_id.size());
 +        lua_setglobal(state, "game_id");
++        if (!owners.empty()) {
++            lua_newtable(state);
++            SetFunction(state, "run", ApiPartRun, this);
++            SetFunction(state, "enabled", ApiPartEnabled, this);
++            SetFunction(state, "list", ApiPartList, this);
++            lua_setfield(state, -2, "part");
++        }
 +        lua_setglobal(state, "moonmod");
 +        RegisterGameApi();
 +    }
@@ -53982,9 +54321,25 @@ index 00000000..a60dfa79
 +        }
 +    }
 +
-+    void Emit(std::string_view event_name, const Json &payload) {
++    void Emit(std::string_view event_name, const Json &payload, std::string_view only_owner = {}) {
 +        if (state == nullptr) return;
-+        if (event_name.starts_with("game.")) AdvanceQuestsFromEvent(event_name, payload);
++        if (event_name.starts_with("game.")) {
++            if (owners.empty()) {
++                AdvanceQuestsFromEvent(event_name, payload);
++            } else {
++                for (const std::string &owner : OwnerIds()) {
++                    if (!only_owner.empty() && owner != only_owner) continue;
++                    const auto slot = owners.find(owner);
++                    const bool current = owner == manifest.id;
++                    if (!current && (slot == owners.end() || !slot->second.storage.contains(std::string(kQuestStorageKey)))) {
++                        continue;
++                    }
++                    OwnerScope scope(*this, owner);
++                    AdvanceQuestsFromEvent(event_name, payload);
++                }
++            }
++        }
++        OwnerScope target_scope(*this, only_owner);
 +        if (event_name == "ui.action" && payload.is_object() && payload.contains("id") && payload["id"].is_string()) {
 +            const std::string &action_id = payload["id"].get_ref<const std::string &>();
 +            if (action_id.starts_with("cmd.")) {
@@ -54003,7 +54358,9 @@ index 00000000..a60dfa79
 +        const bool previous_migration_window = save_migration_window;
 +        save_migration_window = event_name == "runtime.loaded";
 +        for (const EventCallback &callback : event_callbacks) {
++            if (!only_owner.empty() && callback.owner != only_owner) continue;
 +            if (!HasCallback(callback.token)) continue;
++            OwnerScope scope(*this, callback.owner);
 +            lua_rawgeti(state, LUA_REGISTRYINDEX, callback.reference);
 +            PushJson(state, payload);
 +            std::string error;
@@ -54016,7 +54373,7 @@ index 00000000..a60dfa79
 +};
 +
 +LuaMod::LuaMod(const RuntimeConfig &config, const ModManifest &manifest,
-+               std::function<Json(std::string_view)> setting_reader)
++               std::function<Json(std::string_view, std::string_view)> setting_reader)
 +    : impl_(std::make_unique<Impl>(config, manifest, std::move(setting_reader))) {}
 +
 +LuaMod::~LuaMod() { Unload(); }
@@ -54032,6 +54389,7 @@ index 00000000..a60dfa79
 +        return false;
 +    }
 +    *static_cast<Impl **>(lua_getextraspace(self.state)) = &self;
++    self.ResetOwners();
 +    self.OpenSafeLibraries();
 +    self.RegisterApi();
 +
@@ -54070,19 +54428,12 @@ index 00000000..a60dfa79
 +void LuaMod::Unload() {
 +    if (!impl_ || impl_->state == nullptr) return;
 +    Impl &self = *impl_;
++    self.SwitchOwner(self.home_id);
 +    Emit("runtime.unloaded", Json::object());
-+    if (self.config.api_owner_unloaded) {
-+        try {
-+            self.config.api_owner_unloaded(self.manifest.id);
-+        } catch (const std::exception &exception) {
-+            self.Log("error", std::string("API owner cleanup failed: ") + exception.what());
-+        } catch (...) {
-+            self.Log("error", "API owner cleanup failed with an unknown exception");
-+        }
++    for (const std::string &part : std::vector<std::string>(self.running_parts.begin(), self.running_parts.end())) {
++        self.StopPart(part, false);
 +    }
-+    RemoveNativeResourceOverridesByOwner(self.manifest.id);
-+    RemoveManagerActions(self.manifest.id);
-+    ClearCharacterSheet(self.manifest.id);
++    self.ReleaseOwner(self.manifest.id);
 +    std::string error;
 +    if (!self.FlushStorage(error)) self.Log("error", error);
 +    lua_close(self.state);
@@ -54090,38 +54441,72 @@ index 00000000..a60dfa79
 +    self.callbacks.clear();
 +    if (self.script_overrides.contains("native.monster.run")) BumpMonsterScriptOverrideGeneration();
 +    self.script_overrides.clear();
++    self.owners.clear();
++    self.part_functions.clear();
++    self.part_globals.clear();
 +    self.memory.used = 0;
 +}
 +
-+void LuaMod::Emit(std::string_view event_name, const Json &payload) {
-+    impl_->Emit(event_name, payload);
++void LuaMod::Emit(std::string_view event_name, const Json &payload, std::string_view owner) {
++    impl_->Emit(event_name, payload, owner);
 +}
 +
-+ApiCallResult LuaMod::GetQuests() const {
++void LuaMod::SetEnabledParts(std::set<std::string, std::less<>> parts) { impl_->enabled_parts = std::move(parts); }
++
++bool LuaMod::StartPart(std::string_view part, std::string &error) {
++    impl_->enabled_parts.insert(std::string(part));
++    if (impl_->state == nullptr) {
++        error = "the pack is not running";
++        return false;
++    }
++    return impl_->StartPart(std::string(part), error);
++}
++
++void LuaMod::StopPart(std::string_view part) {
++    impl_->enabled_parts.erase(std::string(part));
++    if (impl_->state != nullptr) impl_->StopPart(std::string(part), true);
++}
++
++bool LuaMod::PartRunning(std::string_view part) const { return impl_->running_parts.contains(part); }
++
++std::string LuaMod::PartError(std::string_view part) const {
++    const auto found = impl_->part_errors.find(part);
++    return found == impl_->part_errors.end() ? std::string{} : found->second;
++}
++
++bool LuaMod::OwnsHook(std::string_view owner) const {
++    return std::ranges::any_of(impl_->script_overrides, [&](const auto &entry) { return entry.second.owner == owner; });
++}
++
++ApiCallResult LuaMod::GetQuests(std::string_view owner) const {
 +    if (impl_ == nullptr || impl_->state == nullptr) {
 +        return {ApiCallStatus::Failed, nullptr, "quest owner is not loaded"};
 +    }
++    Impl::OwnerScope scope(*impl_, owner);
 +    return impl_->GetQuests(Json::array());
 +}
 +
-+ApiCallResult LuaMod::GetSkills() const {
++ApiCallResult LuaMod::GetSkills(std::string_view owner) const {
 +    if (impl_ == nullptr || impl_->state == nullptr) {
 +        return {ApiCallStatus::Failed, nullptr, "skill owner is not loaded"};
 +    }
++    Impl::OwnerScope scope(*impl_, owner);
 +    return impl_->GetSkills(Json::array());
 +}
 +
-+ApiCallResult LuaMod::InvokeFunction(std::string_view function_id, const Json &arguments) {
++ApiCallResult LuaMod::InvokeFunction(std::string_view owner, std::string_view function_id, const Json &arguments) {
 +    if (impl_ == nullptr || impl_->state == nullptr) {
 +        return {ApiCallStatus::Failed, nullptr, "script function owner is not loaded"};
 +    }
++    Impl::OwnerScope scope(*impl_, owner);
 +    return impl_->InvokeScriptFunction(function_id, arguments);
 +}
 +
-+ApiCallResult LuaMod::ListFunctions() const {
++ApiCallResult LuaMod::ListFunctions(std::string_view owner) const {
 +    if (impl_ == nullptr || impl_->state == nullptr) {
 +        return {ApiCallStatus::Failed, nullptr, "script function owner is not loaded"};
 +    }
++    Impl::OwnerScope scope(*impl_, owner);
 +    return impl_->ListOwnScriptFunctions();
 +}
 +
@@ -54138,6 +54523,7 @@ index 00000000..a60dfa79
 +        return ApiCallResult{ApiCallStatus::InvalidArgument, nullptr,
 +                             "native script hook context is not valid JSON"};
 +    }
++    Impl::OwnerScope scope(*impl_, found->second.owner);
 +    lua_rawgeti(impl_->state, LUA_REGISTRYINDEX, found->second.reference);
 +    PushJson(impl_->state, payload);
 +    std::string error;
@@ -54173,15 +54559,16 @@ index 00000000..a60dfa79
 +} // namespace moonmod
 diff --git a/port/src/moonmod/lua_runtime.hpp b/port/src/moonmod/lua_runtime.hpp
 new file mode 100644
-index 00000000..286d8dce
+index 00000000..9dc970f1
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.hpp
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,49 @@
 +#pragma once
 +
 +#include <filesystem>
 +#include <functional>
 +#include <memory>
++#include <set>
 +#include <optional>
 +#include <string>
 +#include <string_view>
@@ -54193,19 +54580,29 @@ index 00000000..286d8dce
 +
 +class LuaMod {
 +public:
++    // setting_reader(owner, setting id): owner is the mod, or the pack part whose code asks.
 +    LuaMod(const RuntimeConfig &config, const ModManifest &manifest,
-+           std::function<Json(std::string_view)> setting_reader);
++           std::function<Json(std::string_view, std::string_view)> setting_reader);
 +    ~LuaMod();
 +    LuaMod(const LuaMod &) = delete;
 +    LuaMod &operator=(const LuaMod &) = delete;
 +
 +    bool Load(std::string &error);
 +    void Unload();
-+    void Emit(std::string_view event_name, const Json &payload);
-+    ApiCallResult GetQuests() const;
-+    ApiCallResult GetSkills() const;
-+    ApiCallResult InvokeFunction(std::string_view function_id, const Json &arguments);
-+    ApiCallResult ListFunctions() const;
++    // owner: only that owner's callbacks (a pack's part, or the mod itself); empty: everyone's.
++    void Emit(std::string_view event_name, const Json &payload, std::string_view owner = {});
++    ApiCallResult GetQuests(std::string_view owner = {}) const;
++    ApiCallResult GetSkills(std::string_view owner = {}) const;
++    ApiCallResult InvokeFunction(std::string_view owner, std::string_view function_id, const Json &arguments);
++    ApiCallResult ListFunctions(std::string_view owner = {}) const;
++
++    // A merged pack's parts (manifest "parts"): which run at Load, and starting or stopping one while the pack runs.
++    void SetEnabledParts(std::set<std::string, std::less<>> parts);
++    bool StartPart(std::string_view part, std::string &error);
++    void StopPart(std::string_view part);
++    bool PartRunning(std::string_view part) const;
++    std::string PartError(std::string_view part) const;
++    bool OwnsHook(std::string_view owner) const;
 +    std::optional<ApiCallResult> InvokeScriptOverride(std::string_view hook_id, const Json &payload);
 +    ApiCallResult CallApi(std::string_view path, const Json &arguments);
 +
@@ -54217,10 +54614,10 @@ index 00000000..286d8dce
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manager_ui.cpp b/port/src/moonmod/manager_ui.cpp
 new file mode 100644
-index 00000000..35f9485d
+index 00000000..c1e4f4f4
 --- /dev/null
 +++ b/port/src/moonmod/manager_ui.cpp
-@@ -0,0 +1,988 @@
+@@ -0,0 +1,1002 @@
 +#include "moonmod/manager_ui.hpp"
 +
 +#include <algorithm>
@@ -54416,17 +54813,31 @@ index 00000000..35f9485d
 +        return;
 +    }
 +    std::string error;
-+    if (!SharedRuntime().SetEnabled(record->id, !record->enabled_next_launch, error)) {
++    const std::string id = record->id; // the list is read again when a mod goes on or off now
++    // A part flips its own switch, which holds even while its pack is off.
++    const bool turning_on = record->pack.empty() ? !record->enabled_next_launch : !record->part_switch;
++    if (!SharedRuntime().SetEnabled(id, turning_on, error)) {
 +        Notice(error);
 +        return;
 +    }
 +    g_state.settings_focus = false;
 +    g_state.native_trust_focus = false;
 +    g_state.detail_tab = 0;
++    const auto mods = SharedRuntime().Mods();
++    if (const auto found = std::ranges::find(mods, id, &ModRecord::id); found != mods.end()) {
++        g_state.selected_mod = static_cast<int>(found - mods.begin());
++    }
 +    const ModRecord *updated = ManagerSelectedMod();
-+    Notice(updated && updated->restart_required
-+               ? (updated->enabled_next_launch ? "Will enable after game restart" : "Will disable after game restart")
-+               : "Restart change canceled; current session unchanged");
++    if (updated == nullptr) {
++        Notice("Saved");
++    } else if (updated->restart_required) {
++        Notice((turning_on ? "On after a restart" : "Off after a restart") +
++               (updated->restart_reason.empty() ? std::string{} : ": " + updated->restart_reason));
++    } else if (updated->state == ModState::LoadError) {
++        Notice("Could not start: " + updated->status_message);
++    } else {
++        Notice(turning_on ? (updated->enabled ? "On now" : "On") : "Off now");
++    }
 +    Reconcile();
 +}
 +
@@ -55211,10 +55622,10 @@ index 00000000..35f9485d
 +} // namespace moonmod
 diff --git a/port/src/moonmod/manifest.cpp b/port/src/moonmod/manifest.cpp
 new file mode 100644
-index 00000000..d94cba06
+index 00000000..9c3c64c9
 --- /dev/null
 +++ b/port/src/moonmod/manifest.cpp
-@@ -0,0 +1,440 @@
+@@ -0,0 +1,512 @@
 +#include "moonmod/manifest.hpp"
 +
 +#include "moonmod/api.hpp"
@@ -55235,7 +55646,9 @@ index 00000000..d94cba06
 +namespace moonmod {
 +namespace {
 +
-+constexpr std::size_t kManifestLimit = 256 * 1024;
++constexpr std::size_t kManifestLimit = 1024 * 1024;
++constexpr std::size_t kEntryLimit = 4 * 1024 * 1024;
++constexpr std::size_t kMaxParts = 64;
 +
 +bool IsString(const Json &value, std::size_t limit) {
 +    return value.is_string() && value.get_ref<const std::string &>().size() <= limit;
@@ -55457,6 +55870,75 @@ index 00000000..d94cba06
 +    return first != relative.end() && *first != "..";
 +}
 +
++
++// A merged pack's parts: mods whose code is in the pack's one script, each still its own owner (id, settings, saved data).
++bool ReadParts(const Json &document, ModManifest &manifest, std::string &error) {
++    const auto found = document.find("parts");
++    if (found == document.end()) return true;
++    if (!found->is_array() || found->empty() || found->size() > kMaxParts) {
++        error = "field 'parts' must be an array with 1-" + std::to_string(kMaxParts) + " entries";
++        return false;
++    }
++    std::set<std::string> ids{manifest.id};
++    for (const Json &value : *found) {
++        if (!value.is_object()) {
++            error = "each parts entry must be an object";
++            return false;
++        }
++        if (!RejectUnknownFields(value, {"id", "name", "version", "description", "coop", "settings", "dependencies",
++                                         "optional_dependencies"},
++                                 error)) {
++            error = "parts: " + error;
++            return false;
++        }
++        ModManifest part;
++        if (!ReadString(value, "id", part.id, 64, true, error) || !ReadString(value, "name", part.name, 96, true, error) ||
++            !ReadString(value, "version", part.version, 64, true, error) ||
++            !ReadString(value, "description", part.description, 1024, false, error) ||
++            !ReadString(value, "coop", part.coop, 16, false, error) ||
++            !ReadStringList(value, "dependencies", part.dependencies, 64, false, error) ||
++            !ReadStringList(value, "optional_dependencies", part.optional_dependencies, 64, false, error) ||
++            !ReadSettings(value, part.settings, error)) {
++            error = "parts: " + error;
++            return false;
++        }
++        if (!IsValidModId(part.id) || !ids.insert(part.id).second) {
++            error = "parts: each part needs a valid id, unique and not the pack's own";
++            return false;
++        }
++        static const std::regex kPartVersion("[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?");
++        if (!std::regex_match(part.version, kPartVersion)) {
++            error = "parts: '" + part.id + "' version must use MAJOR.MINOR.PATCH";
++            return false;
++        }
++        if (part.coop.empty()) part.coop = "required";
++        if (part.coop != "required" && part.coop != "host_only" && part.coop != "local") {
++            error = "parts: '" + part.id + "' coop must be required, host_only, or local";
++            return false;
++        }
++        for (const auto *list : {&part.dependencies, &part.optional_dependencies}) {
++            for (const std::string &id : *list) {
++                if (!IsValidModId(id)) {
++                    error = "parts: dependency references must use valid mod ids";
++                    return false;
++                }
++            }
++        }
++        // What the part shares with its pack: the package, its script, its permissions and games.
++        part.author = manifest.author;
++        part.entry = manifest.entry;
++        part.schema_version = manifest.schema_version;
++        part.framework_api = manifest.framework_api;
++        part.games = manifest.games;
++        part.permissions = manifest.permissions;
++        part.package_root = manifest.package_root;
++        part.entry_file = manifest.entry_file;
++        part.pack = manifest.id;
++        manifest.parts.push_back(std::move(part));
++    }
++    return true;
++}
++
 +} // namespace
 +
 +bool IsValidModId(std::string_view id) {
@@ -55482,7 +55964,7 @@ index 00000000..d94cba06
 +    }
 +    const auto size = std::filesystem::file_size(manifest_file, ec);
 +    if (ec || size == 0 || size > kManifestLimit) {
-+        error = "mod.json is empty, unreadable, or larger than 256 KiB";
++        error = "mod.json is empty, unreadable, or larger than 1 MiB";
 +        return std::nullopt;
 +    }
 +    Json document;
@@ -55503,7 +55985,7 @@ index 00000000..d94cba06
 +    }
 +    if (!RejectUnknownFields(document, {"schema_version", "id", "name", "version", "author", "description",
 +                                        "framework_api", "games", "entry", "dependencies", "optional_dependencies",
-+                                        "load_after", "load_before", "permissions", "settings", "native_extension", "coop"},
++                                        "load_after", "load_before", "permissions", "settings", "native_extension", "coop", "parts"},
 +                            error)) {
 +        return std::nullopt;
 +    }
@@ -55620,10 +56102,11 @@ index 00000000..d94cba06
 +        return std::nullopt;
 +    }
 +    const auto entry_size = std::filesystem::file_size(manifest.entry_file, ec);
-+    if (ec || entry_size == 0 || entry_size > 1024 * 1024) {
-+        error = "entry script is empty, unreadable, or larger than 1 MiB";
++    if (ec || entry_size == 0 || entry_size > kEntryLimit) {
++        error = "entry script is empty, unreadable, or larger than 4 MiB";
 +        return std::nullopt;
 +    }
++    if (!ReadParts(document, manifest, error)) return std::nullopt;
 +    return manifest;
 +}
 +
@@ -60376,15 +60859,16 @@ index 00000000..a32cd35f
 +} // namespace dc::game
 diff --git a/port/src/moonmod/runtime.cpp b/port/src/moonmod/runtime.cpp
 new file mode 100644
-index 00000000..1ac0ed1b
+index 00000000..74173ebd
 --- /dev/null
 +++ b/port/src/moonmod/runtime.cpp
-@@ -0,0 +1,1517 @@
+@@ -0,0 +1,2086 @@
 +#include <chrono>
 +#include "moonmod/runtime.hpp"
 +#include "moonmod/symlinks.hpp"
 +
 +#include <algorithm>
++#include <array>
 +#include <cmath>
 +#include <cstdlib>
 +#include <cstdio>
@@ -60435,9 +60919,94 @@ index 00000000..1ac0ed1b
 +           path != "commands.register" && path != "scripts.register_function" && path != "scripts.override";
 +}
 +
++// What a mod can register that the game keeps after the mod goes: data-defined items, weapons, build-ups, characters
++// (enemies, villagers, playable heroes), floors, locations, Georama pieces, models and animation bindings. A mod
++// (or pack part) that did any of it this run turns off only with a restart; one whose script asks for any of it turns
++// on mid-game only from the title screen.
++constexpr std::array<std::string_view, 16> kStickyOperations = {
++    "items.register",        "weapons.register",          "weapons.build_up_register", "characters.register",
++    "characters.register_playable", "dungeons.register",  "world.register_dungeon",    "georama.register",
++    "locations.register",    "content.register",          "models.register",           "animations.register",
++    "inventions.register",   "combat.styles_register",    "animations.player_register", "animations.monster_register"};
++
++bool StickyOperation(std::string_view path) {
++    return std::ranges::find(kStickyOperations, path) != kStickyOperations.end();
++}
++
++// What a sticky operation adds, in the words the Mod Manager uses.
++std::string_view StickyNoun(std::string_view path) {
++    if (path == "items.register") return "items";
++    if (path == "weapons.register" || path == "weapons.build_up_register") return "weapons";
++    if (path == "characters.register") return "characters";
++    if (path == "characters.register_playable") return "playable characters";
++    if (path == "dungeons.register" || path == "world.register_dungeon") return "dungeons";
++    if (path == "georama.register") return "Georama parts";
++    if (path == "locations.register") return "places";
++    if (path == "models.register") return "models";
++    if (path.starts_with("animations.")) return "animations";
++    if (path == "inventions.register") return "inventions";
++    if (path == "combat.styles_register") return "combat styles";
++    return "content";
++}
++
++// "items, dungeons and playable characters"
++std::string JoinNouns(const std::set<std::string, std::less<>> &nouns) {
++    std::string text;
++    std::size_t index = 0;
++    for (const std::string &noun : nouns) {
++        if (index > 0) text += index + 1 == nouns.size() ? " and " : ", ";
++        text += noun;
++        ++index;
++    }
++    return text.empty() ? std::string("content") : text;
++}
++
++// A pack part's code: between "-- moonmod:part <id>" and the next "-- moonmod:end" in the pack's script. Without the
++// markers, the whole script counts.
++std::string ScriptText(const ModManifest &manifest, std::string_view part) {
++    std::ifstream input(manifest.entry_file, std::ios::binary);
++    std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
++    std::erase(text, '\r'); // a checkout may have turned the script's line ends into CRLF
++    if (part.empty()) return text;
++    const std::string begin = "-- moonmod:part " + std::string(part) + "\n";
++    const auto start = text.find(begin);
++    if (start == std::string::npos) return text;
++    const auto end = text.find("-- moonmod:end", start);
++    return text.substr(start, end == std::string::npos ? std::string::npos : end - start);
++}
++
++// What the script (or the part's code) would add that the game keeps; empty when nothing.
++std::set<std::string, std::less<>> ScriptAsksForSticky(const ModManifest &manifest, std::string_view part) {
++    const std::string text = ScriptText(manifest, part);
++    std::set<std::string, std::less<>> nouns;
++    for (std::string_view path : kStickyOperations) {
++        if (text.find(path) != std::string::npos) nouns.emplace(StickyNoun(path));
++    }
++    return nouns;
++}
++
++using FileStamp = std::pair<std::filesystem::file_time_type, std::filesystem::file_time_type>;
++
++FileStamp PackageStamp(const ModRecord &record) {
++    std::error_code ec;
++    FileStamp stamp{};
++    stamp.first = std::filesystem::last_write_time(record.package_root / "mod.json", ec);
++    if (!record.manifest.entry_file.empty()) stamp.second = std::filesystem::last_write_time(record.manifest.entry_file, ec);
++    return stamp;
++}
++
 +Json DefaultProfile() {
 +    return {{"format_version", 1}, {"enabled", Json::object()}, {"settings", Json::object()},
-+            {"native_trusted", Json::object()}};
++            {"native_trusted", Json::object()}, {"parts", Json::object()}};
++}
++
++// A pack part's own switch: parts[pack][part], on unless turned off. Kept apart from "enabled" so the pack's switch
++// never overwrites a part's choice, and a separate mod of the same id keeps its own.
++bool PartChoice(const Json &parts, std::string_view pack, std::string_view part) {
++    const auto in_pack = parts.find(std::string(pack));
++    if (in_pack == parts.end() || !in_pack->is_object()) return true;
++    const auto found = in_pack->find(std::string(part));
++    return found == in_pack->end() || !found->is_boolean() || found->get<bool>();
 +}
 +
 +
@@ -60455,6 +61024,7 @@ index 00000000..1ac0ed1b
 +    RuntimeConfig config;
 +    Json profile = DefaultProfile();
 +    Json session_enabled = Json::object();
++    Json session_parts = Json::object(); // pack part switches for this run (profile["parts"] at start, then live)
 +    // MOONMOD_NO_MODS=1 (a launcher's Mods switch off): every mod is off for this run; the profile keeps the choices.
 +    bool mods_off_this_run = false;
 +    std::filesystem::path profile_file;
@@ -60467,6 +61037,26 @@ index 00000000..1ac0ed1b
 +    std::uint64_t frame = 0;
 +    int script_function_call_depth = 0;
 +    bool running = false;
++    // Live on/off: owners that registered content the game keeps, whether a game session is on, and each running
++    // package's files as they were when it loaded.
++    std::map<std::string, std::set<std::string, std::less<>>, std::less<>> sticky_owners; // owner -> what it added
++    bool session_active = false;
++    bool in_game = false; // the last scene entered wasn't the title screen
++    std::map<std::string, FileStamp, std::less<>> loaded_stamps;
++    // Packages whose live reload failed (a script saved half-way, a syntax error): tried again when files change.
++    std::map<std::string, FileStamp, std::less<>> failed_stamps;
++
++    // The Lua state that runs a mod or pack part, and the owner to run it as.
++    LuaMod *ModuleFor(std::string_view id) const {
++        const ModRecord *record = Find(id);
++        const std::string_view package = record != nullptr && !record->pack.empty() ? std::string_view(record->pack) : id;
++        const auto module = std::ranges::find(modules, package, [](const auto &entry) -> std::string_view {
++            return entry.first;
++        });
++        if (module == modules.end()) return nullptr;
++        if (package != id && !module->second->PartRunning(id)) return nullptr;
++        return module->second.get();
++    }
 +
 +    void Queue(std::string_view event, const Json &payload) {
 +        if (event.empty() || queued_events.size() >= kMaxQueuedEvents) {
@@ -60634,6 +61224,13 @@ index 00000000..1ac0ed1b
 +            if (loaded.contains("native_trusted") && loaded["native_trusted"].is_object()) {
 +                profile["native_trusted"] = loaded["native_trusted"];
 +            }
++            if (loaded.contains("parts") && loaded["parts"].is_object()) {
++                // Only a pack's object of part switches is kept: anything else (a hand-edited "pack": true) is
++                // dropped, so its parts start switched on.
++                for (const auto &[pack, choices] : loaded["parts"].items()) {
++                    if (choices.is_object()) profile["parts"][pack] = choices;
++                }
++            }
 +            return true;
 +        } catch (const std::exception &exception) {
 +            error = std::string("MoonFactory profile could not be parsed: ") + exception.what();
@@ -60788,6 +61385,101 @@ index 00000000..1ac0ed1b
 +        std::stable_sort(records.begin(), records.end(), [](const ModRecord &left, const ModRecord &right) {
 +            return left.id < right.id;
 +        });
++        AddPartRecords();
++    }
++
++    // A merged pack's parts are records of their own (settings, quests, co-op entries, the manager's pages). While the
++    // pack is on, a part stands in for a package of the same id beside it; while the pack is off, that one is itself.
++    void AddPartRecords() {
++        std::vector<ModRecord> added;
++        const std::size_t count = records.size();
++        for (std::size_t pack_index = 0; pack_index < count; ++pack_index) {
++            const ModRecord pack = records[pack_index];
++            if (!pack.valid_manifest || pack.manifest.parts.empty() || pack.state == ModState::Invalid) continue;
++            for (const ModManifest &part : pack.manifest.parts) {
++                ModRecord *standalone = Find(part.id);
++                if (standalone != nullptr && !pack.enabled) continue;
++                ModRecord record;
++                record.manifest = part;
++                record.package_root = pack.package_root;
++                record.id = part.id;
++                record.display_name = part.name;
++                record.valid_manifest = true;
++                record.pack = pack.id;
++                record.enabled = pack.enabled && PartChoice(session_parts, pack.id, part.id);
++                record.part_switch = PartChoice(profile["parts"], pack.id, part.id);
++                record.enabled_next_launch = pack.enabled_next_launch && record.part_switch;
++                record.restart_required = !mods_off_this_run && record.enabled != record.enabled_next_launch;
++                record.state = pack.state == ModState::Incompatible ? ModState::Incompatible
++                               : record.enabled                    ? ModState::Ready
++                                                                   : ModState::Disabled;
++                record.status_message = pack.state == ModState::Incompatible ? pack.status_message
++                                                                             : "Part of " + pack.display_name;
++                if (standalone != nullptr) {
++                    *standalone = std::move(record);
++                } else {
++                    added.push_back(std::move(record));
++                }
++            }
++        }
++        for (ModRecord &record : added) records.push_back(std::move(record));
++        // The manager lists a pack's parts right under it.
++        auto group = [](const ModRecord &record) -> const std::string & { return record.pack.empty() ? record.id : record.pack; };
++        std::stable_sort(records.begin(), records.end(), [&](const ModRecord &left, const ModRecord &right) {
++            if (group(left) != group(right)) return group(left) < group(right);
++            if (left.pack.empty() != right.pack.empty()) return left.pack.empty();
++            return left.id < right.id;
++        });
++    }
++
++    // After records are read again: what runs keeps its state; what no longer runs says so.
++    void SyncStates(const std::map<std::string, std::tuple<ModState, std::string, std::string>, std::less<>> &before) {
++        for (ModRecord &record : records) {
++            if (const auto kept = before.find(record.id); kept != before.end()) {
++                std::tie(record.state, record.status_message, record.native_status) = kept->second;
++            }
++            LuaMod *module = ModuleFor(record.id);
++            const bool part = !record.pack.empty();
++            if (module != nullptr) {
++                record.state = ModState::Loaded;
++                if (part) record.status_message = "Running in " + record.pack;
++                continue;
++            }
++            if (record.state == ModState::Loaded || (part && record.state != ModState::Incompatible)) {
++                record.state = record.enabled ? ModState::Ready : ModState::Disabled;
++                record.status_message = part ? "Part of " + record.pack : std::string{};
++                if (part && record.enabled) {
++                    const auto pack = std::ranges::find(modules, record.pack, [](const auto &entry) -> std::string_view {
++                        return entry.first;
++                    });
++                    if (pack != modules.end() && !pack->second->PartError(record.id).empty()) {
++                        record.state = ModState::LoadError;
++                        record.status_message = pack->second->PartError(record.id);
++                    }
++                }
++            }
++        }
++    }
++
++    std::map<std::string, std::tuple<ModState, std::string, std::string>, std::less<>> SnapshotStates() const {
++        std::map<std::string, std::tuple<ModState, std::string, std::string>, std::less<>> states;
++        for (const ModRecord &record : records) states[record.id] = {record.state, record.status_message, record.native_status};
++        return states;
++    }
++
++    void Rediscover() {
++        const auto before = SnapshotStates();
++        std::map<std::string, std::string, std::less<>> reasons; // why a change waits, while it still does
++        for (const ModRecord &record : records) {
++            if (record.restart_required && !record.restart_reason.empty()) reasons[record.id] = record.restart_reason;
++        }
++        Discover();
++        SyncStates(before);
++        for (ModRecord &record : records) {
++            if (const auto reason = reasons.find(record.id); reason != reasons.end() && record.restart_required) {
++                record.restart_reason = reason->second;
++            }
++        }
 +    }
 +
 +    ModRecord *Find(std::string_view id) {
@@ -60808,21 +61500,21 @@ index 00000000..1ac0ed1b
 +        }
 +        const ModRecord *caller = Find(caller_id);
 +        const ModRecord *owner = Find(owner_id);
-+        if (caller == nullptr || owner == nullptr || owner->state != ModState::Loaded) {
++        if (caller == nullptr || owner == nullptr ||
++            (owner->state != ModState::Loaded && (owner->pack.empty() || ModuleFor(owner_id) == nullptr))) {
 +            return {ApiCallStatus::Failed, nullptr, "script function owner is not loaded"};
 +        }
 +        const bool declared_dependency =
 +            std::ranges::find(caller->manifest.dependencies, owner_id) != caller->manifest.dependencies.end() ||
 +            std::ranges::find(caller->manifest.optional_dependencies, owner_id) !=
 +                caller->manifest.optional_dependencies.end();
-+        if (caller_id != owner_id && !declared_dependency) {
++        const bool same_pack = !owner->pack.empty() && (owner->pack == caller->pack || owner->pack == caller->id);
++        if (caller_id != owner_id && !declared_dependency && !same_pack) {
 +            return {ApiCallStatus::PermissionDenied, nullptr,
 +                    "calling another mod's functions requires a declared dependency"};
 +        }
-+        const auto module = std::ranges::find(modules, owner_id, [](const auto &entry) -> std::string_view {
-+            return entry.first;
-+        });
-+        if (module == modules.end()) {
++        LuaMod *module = ModuleFor(owner_id);
++        if (module == nullptr) {
 +            return {ApiCallStatus::Failed, nullptr, "script function owner is not running"};
 +        }
 +        ++script_function_call_depth;
@@ -60830,7 +61522,7 @@ index 00000000..1ac0ed1b
 +            int &depth;
 +            ~DepthGuard() { --depth; }
 +        } guard{script_function_call_depth};
-+        return module->second->InvokeFunction(function_id, arguments);
++        return module->InvokeFunction(owner_id, function_id, arguments);
 +    }
 +
 +    ApiCallResult ListScriptFunctions(std::string_view caller_id) const {
@@ -60852,11 +61544,9 @@ index 00000000..1ac0ed1b
 +
 +        Json functions = Json::array();
 +        for (const std::string &owner_id : owners) {
-+            const auto module = std::ranges::find(modules, owner_id, [](const auto &entry) -> std::string_view {
-+                return entry.first;
-+            });
-+            if (module == modules.end()) continue;
-+            ApiCallResult listed = module->second->ListFunctions();
++            LuaMod *module = ModuleFor(owner_id);
++            if (module == nullptr) continue;
++            ApiCallResult listed = module->ListFunctions(owner_id);
 +            if (listed.status != ApiCallStatus::Ok) return listed;
 +            const auto entries = listed.value.find("functions");
 +            if (entries == listed.value.end() || !entries->is_array()) {
@@ -60868,13 +61558,11 @@ index 00000000..1ac0ed1b
 +    }
 +
 +    ApiCallResult CallLuaApi(std::string_view mod_id, std::string_view path, const Json &arguments) {
-+        const auto module = std::ranges::find(modules, mod_id, [](const auto &entry) -> std::string_view {
-+            return entry.first;
-+        });
-+        if (module == modules.end()) {
++        LuaMod *module = ModuleFor(mod_id);
++        if (module == nullptr) {
 +            return {ApiCallStatus::Failed, nullptr, "native API caller's Lua package is not running"};
 +        }
-+        return module->second->CallApi(path, arguments);
++        return module->CallApi(path, arguments);
 +    }
 +
 +    ApiCallResult CallNativeScriptOriginal(std::string_view mod_id, std::string_view hook_id) {
@@ -61041,9 +61729,8 @@ index 00000000..1ac0ed1b
 +    bool PersistSetting(const ModRecord &record, const SettingDefinition &setting, Json value, std::string &error) {
 +        profile["settings"][record.id][setting.id] = std::move(value);
 +        if (!SaveProfile(error)) return false;
-+        const auto loaded = std::ranges::find_if(modules, [&](const auto &entry) { return entry.first == record.id; });
-+        if (loaded != modules.end()) {
-+            loaded->second->Emit("settings.changed", {{"id", setting.id}, {"value", SettingValue(record, setting)}});
++        if (LuaMod *module = ModuleFor(record.id); module != nullptr) {
++            module->Emit("settings.changed", {{"id", setting.id}, {"value", SettingValue(record, setting)}}, record.id);
 +        }
 +        return true;
 +    }
@@ -61056,15 +61743,19 @@ index 00000000..1ac0ed1b
 +            if (record.valid_manifest) index.emplace(record.id, i);
 +        }
 +        std::vector<bool> candidate(records.size(), false);
++        // A pack's parts load with it: ordering against a part is ordering against its pack.
++        for (std::size_t i = 0; i < records.size(); ++i) {
++            if (records[i].pack.empty()) continue;
++            if (const auto pack = index.find(records[i].pack); pack != index.end()) index[records[i].id] = pack->second;
++        }
 +        for (std::size_t i = 0; i < records.size(); ++i) {
 +            ModRecord &record = records[i];
-+            if (record.state != ModState::Ready || !record.enabled) continue;
++            if (record.state != ModState::Ready || !record.enabled || !record.pack.empty()) continue;
 +            bool blocked = false;
 +            for (const std::string &dependency : record.manifest.dependencies) {
-+                const auto found = index.find(dependency);
-+                if (found == index.end() || !records[found->second].enabled ||
-+                    records[found->second].state == ModState::Incompatible ||
-+                    records[found->second].state == ModState::Invalid) {
++                const ModRecord *found = Find(dependency);
++                if (found == nullptr || !found->enabled || found->state == ModState::Incompatible ||
++                    found->state == ModState::Invalid) {
 +                    record.state = ModState::MissingDependency;
 +                    record.status_message = "Requires enabled mod '" + dependency + "'";
 +                    blocked = true;
@@ -61094,6 +61785,13 @@ index 00000000..1ac0ed1b
 +            }
 +            for (const std::string &before : manifest.load_before) {
 +                if (const auto found = index.find(before); found != index.end()) add_edge(i, found->second);
++            }
++            for (const ModManifest &part : manifest.parts) {
++                for (const auto *list : {&part.dependencies, &part.optional_dependencies}) {
++                    for (const std::string &dependency : *list) {
++                        if (const auto found = index.find(dependency); found != index.end()) add_edge(found->second, i);
++                    }
++                }
 +            }
 +        }
 +        auto compare = [&](std::size_t left, std::size_t right) { return records[left].id < records[right].id; };
@@ -61129,86 +61827,402 @@ index 00000000..1ac0ed1b
 +                }
 +            }
 +            if (dependency_failed) continue;
-+            auto module = std::make_unique<LuaMod>(
-+                config, record.manifest,
-+                [this, id = record.id](std::string_view setting_id) -> Json {
-+                    const ModRecord *current = Find(id);
-+                    if (current == nullptr) return nullptr;
-+                    const SettingDefinition *setting = FindSetting(*current, setting_id);
-+                    return setting == nullptr ? Json(nullptr) : SettingValue(*current, *setting);
-+                });
-+            std::string error;
-+            if (!module->Load(error)) {
-+                record.state = ModState::LoadError;
-+                record.status_message = error;
-+                Log("error", record.id, error);
-+                continue;
-+            }
-+            modules.emplace_back(record.id, std::move(module));
-+            record.state = ModState::Loaded;
-+            record.status_message = "Lua package is running";
-+            record.native_status.clear();
-+            if (!record.manifest.native_library.empty()) {
-+                if (!record.native_trusted) {
-+                    record.native_status = "Native code is disabled until this package is trusted locally.";
-+                    record.status_message = "Lua is running; native extension is not trusted";
-+                    continue;
-+                }
-+                auto native = std::make_unique<NativePluginInstance>();
-+                NativePluginLoadConfig native_config;
-+                native_config.library = record.manifest.native_library;
-+                native_config.plugin_id = record.id;
-+                native_config.game_id = config.game_id;
-+                native_config.build_id = config.build_id;
-+                native_config.manifest_permissions = record.manifest.permissions;
-+                native_config.api_capabilities = config.api_capabilities;
-+                for (const ApiOperationSpec &operation : ApiCatalog()) {
-+                    if (!IsCoreApiOperation(operation.path)) continue;
-+                    const bool callable = NativeJsonApiCallable(operation.path);
-+                    const auto existing = std::ranges::find(native_config.api_capabilities, operation.path,
-+                                                            &ApiCapability::path);
-+                    const ApiCapability capability{
-+                        std::string(operation.path), callable,
-+                        callable ? std::string{} :
-+                                   "native api_call_json cannot provide callbacks or safely delegate api.call"};
-+                    if (existing == native_config.api_capabilities.end()) {
-+                        native_config.api_capabilities.push_back(capability);
-+                    } else {
-+                        *existing = capability;
-+                    }
-+                }
-+                const std::filesystem::path package_root = record.package_root;
-+                const PackageApiCallHandler package_api_handler = config.package_api_handler;
-+                const ApiCallHandler api_handler = config.api_handler;
-+                native_config.api_handler = [runtime = this, package_root, package_api_handler, api_handler](
-+                                                std::string_view mod_id, const ApiOperationSpec &operation,
-+                                                const Json &arguments) {
-+                    if (operation.domain == "audio" && package_api_handler) {
-+                        return package_api_handler(mod_id, package_root, operation, arguments);
-+                    }
-+                    if (IsCoreApiOperation(operation.path)) return runtime->CallLuaApi(mod_id, operation.path, arguments);
-+                    return api_handler ? api_handler(mod_id, operation, arguments)
-+                                       : ApiCallResult{ApiCallStatus::Unsupported, nullptr,
-+                                                       "this game adapter has not bound the operation"};
-+                };
-+                native_config.log = config.log;
-+                std::string native_error;
-+                if (!native->Load(std::move(native_config), native_error)) {
-+                    record.native_status = "Native extension failed to load: " + native_error;
-+                    record.status_message = "Lua is running; native extension failed to load";
-+                    Log("error", record.id, native_error);
-+                    continue;
-+                }
-+                record.native_status = "Trusted native extension is running.";
-+                record.status_message = "Lua and trusted native extension are running";
-+                native_plugins.emplace_back(record.id, std::move(native));
-+            }
++            LoadRecord(record);
 +        }
 +        for (auto &[id, module] : modules) {
 +            module->Emit("runtime.loaded", {{"game", config.game_id}, {"mod", id}, {"frame", frame}});
 +        }
 +        for (auto &[id, plugin] : native_plugins) {
 +            plugin->Publish("runtime.loaded", {{"game", config.game_id}, {"mod", id}, {"frame", frame}}, frame);
++        }
++    }
++
++
++    // Starts one package's Lua (and trusted native code). A merged pack starts the parts that are on.
++    bool LoadRecord(ModRecord &record) {
++        auto module = std::make_unique<LuaMod>(
++            config, record.manifest,
++            [this](std::string_view owner, std::string_view setting_id) -> Json {
++                const ModRecord *current = Find(owner);
++                if (current == nullptr) return nullptr;
++                const SettingDefinition *setting = FindSetting(*current, setting_id);
++                return setting == nullptr ? Json(nullptr) : SettingValue(*current, *setting);
++            });
++        LuaMod *started = module.get();
++        // A pack's parts may call each other while the pack loads: the pack is reachable from the start.
++        const bool pack = !record.manifest.parts.empty();
++        if (pack) {
++            module->SetEnabledParts(PartsToStart(record));
++            modules.emplace_back(record.id, std::move(module));
++        }
++        std::string error;
++        if (!started->Load(error)) {
++            if (pack) UnloadModule(record.id);
++            record.state = ModState::LoadError;
++            record.status_message = error;
++            Log("error", record.id, error);
++            for (ModRecord &part : records) {
++                if (part.pack != record.id || !part.enabled) continue;
++                part.state = ModState::LoadError;
++                part.status_message = record.display_name + " didn't load";
++            }
++            return false;
++        }
++        if (!pack) modules.emplace_back(record.id, std::move(module));
++        loaded_stamps[record.id] = PackageStamp(record);
++        record.state = ModState::Loaded;
++        record.status_message = "Lua package is running";
++        for (ModRecord &part : records) {
++            if (part.pack != record.id) continue;
++            if (started->PartRunning(part.id)) {
++                part.state = ModState::Loaded;
++                part.status_message = "Running in " + record.display_name;
++            } else if (part.enabled) {
++                part.state = ModState::LoadError;
++                part.status_message = started->PartError(part.id);
++            }
++        }
++        record.native_status.clear();
++        if (!record.manifest.native_library.empty()) {
++            if (!record.native_trusted) {
++                record.native_status = "Native code is disabled until this package is trusted locally.";
++                record.status_message = "Lua is running; native extension is not trusted";
++                return true;
++            }
++            auto native = std::make_unique<NativePluginInstance>();
++            NativePluginLoadConfig native_config;
++            native_config.library = record.manifest.native_library;
++            native_config.plugin_id = record.id;
++            native_config.game_id = config.game_id;
++            native_config.build_id = config.build_id;
++            native_config.manifest_permissions = record.manifest.permissions;
++            native_config.api_capabilities = config.api_capabilities;
++            for (const ApiOperationSpec &operation : ApiCatalog()) {
++                if (!IsCoreApiOperation(operation.path)) continue;
++                const bool callable = NativeJsonApiCallable(operation.path);
++                const auto existing = std::ranges::find(native_config.api_capabilities, operation.path,
++                                                        &ApiCapability::path);
++                const ApiCapability capability{
++                    std::string(operation.path), callable,
++                    callable ? std::string{} :
++                               "native api_call_json cannot provide callbacks or safely delegate api.call"};
++                if (existing == native_config.api_capabilities.end()) {
++                    native_config.api_capabilities.push_back(capability);
++                } else {
++                    *existing = capability;
++                }
++            }
++            const std::filesystem::path package_root = record.package_root;
++            const PackageApiCallHandler package_api_handler = config.package_api_handler;
++            const ApiCallHandler api_handler = config.api_handler;
++            native_config.api_handler = [runtime = this, package_root, package_api_handler, api_handler](
++                                            std::string_view mod_id, const ApiOperationSpec &operation,
++                                            const Json &arguments) {
++                if (operation.domain == "audio" && package_api_handler) {
++                    return package_api_handler(mod_id, package_root, operation, arguments);
++                }
++                if (IsCoreApiOperation(operation.path)) return runtime->CallLuaApi(mod_id, operation.path, arguments);
++                return api_handler ? api_handler(mod_id, operation, arguments)
++                                   : ApiCallResult{ApiCallStatus::Unsupported, nullptr,
++                                                   "this game adapter has not bound the operation"};
++            };
++            native_config.log = config.log;
++            std::string native_error;
++            if (!native->Load(std::move(native_config), native_error)) {
++                record.native_status = "Native extension failed to load: " + native_error;
++                record.status_message = "Lua is running; native extension failed to load";
++                Log("error", record.id, native_error);
++                return true;
++            }
++            record.native_status = "Trusted native extension is running.";
++            record.status_message = "Lua and trusted native extension are running";
++            native_plugins.emplace_back(record.id, std::move(native));
++        }
++        return true;
++    }
++
++    // Which of a pack's parts start: those on whose required mods are on.
++    std::set<std::string, std::less<>> PartsToStart(const ModRecord &pack) {
++        std::set<std::string, std::less<>> parts;
++        for (ModRecord &part : records) {
++            if (part.pack != pack.id || !part.enabled || part.state == ModState::Incompatible) continue;
++            bool ready = true;
++            for (const std::string &dependency : part.manifest.dependencies) {
++                const ModRecord *found = Find(dependency);
++                if (found == nullptr || !found->enabled) {
++                    part.state = ModState::MissingDependency;
++                    part.status_message = "Requires enabled mod '" + dependency + "'";
++                    ready = false;
++                    break;
++                }
++            }
++            if (ready) parts.insert(part.id);
++        }
++        return parts;
++    }
++
++
++    // ---- Live on/off: what can change now, and doing it.
++
++    std::vector<std::string> RunningDependents(const ModRecord &record) const {
++        std::vector<std::string> ids{record.id};
++        for (const ModManifest &part : record.manifest.parts) ids.push_back(part.id);
++        std::vector<std::string> dependents;
++        for (const ModRecord &other : records) {
++            if (other.state != ModState::Loaded || other.id == record.id || other.pack == record.id) continue;
++            for (const std::string &dependency : other.manifest.dependencies) {
++                if (std::ranges::find(ids, dependency) != ids.end()) dependents.push_back(other.display_name);
++            }
++        }
++        return dependents;
++    }
++
++    bool CanStopLive(const ModRecord &record, std::string &why) const {
++        if (!record.manifest.native_library.empty()) {
++            why = "it has native code";
++            return false;
++        }
++        std::vector<std::string> owners{record.id};
++        for (const ModManifest &part : record.manifest.parts) owners.push_back(part.id);
++        for (const std::string &owner : owners) {
++            if (const auto sticky = sticky_owners.find(owner); sticky != sticky_owners.end()) {
++                const ModRecord *part = Find(owner);
++                const std::string who = owner == record.id ? "it" : "its part " + (part ? part->display_name : owner);
++                why = who + " added " + JoinNouns(sticky->second) + ", which the game keeps until it closes";
++                return false;
++            }
++        }
++        if (const auto dependents = RunningDependents(record); !dependents.empty()) {
++            why = dependents.front() + " needs it";
++            return false;
++        }
++        return true;
++    }
++
++    bool CanStartLive(const ModRecord &record, std::string_view part, std::string &why) const {
++        if (!record.manifest.native_library.empty()) {
++            why = "it has native code";
++            return false;
++        }
++        if (session_active || in_game) {
++            if (const auto nouns = ScriptAsksForSticky(record.manifest, part); !nouns.empty()) {
++                why = "it adds " + JoinNouns(nouns) + "; turn it on from the title screen";
++                return false;
++            }
++        }
++        for (const std::string &dependency : part.empty() ? record.manifest.dependencies
++                                                          : Find(part)->manifest.dependencies) {
++            const ModRecord *found = Find(dependency);
++            if (found == nullptr || found->state != ModState::Loaded) {
++                why = "it needs " + dependency + " running";
++                return false;
++            }
++        }
++        return true;
++    }
++
++    void UnloadModule(std::string_view id) {
++        const auto module = std::ranges::find(modules, id, [](const auto &entry) -> std::string_view {
++            return entry.first;
++        });
++        if (module == modules.end()) return;
++        module->second->Unload();
++        modules.erase(module);
++        loaded_stamps.erase(std::string(id));
++        tick_seconds.erase(std::string(id));
++    }
++
++    void AnnounceLive(std::string_view package, std::string_view owner) {
++        LuaMod *module = ModuleFor(owner);
++        if (module == nullptr) return;
++        module->Emit("runtime.loaded", {{"game", config.game_id}, {"mod", owner}, {"frame", frame}, {"live", true}},
++                     package == owner ? std::string_view{} : owner);
++    }
++
++    // Turns a package, or a pack's part, on or off in this run when its hooks can be undone. On false, why says
++    // what keeps it for a restart; nothing has changed then.
++    bool ApplyLive(const std::string &id, bool enabled, std::string &why) {
++        why.clear();
++        if (!running || mods_off_this_run) {
++            why = "mods are off for this run";
++            return false;
++        }
++        ModRecord *record = Find(id);
++        if (record == nullptr) return false;
++
++        if (!record->pack.empty()) { // a pack's part
++            const ModRecord *pack = Find(record->pack);
++            const auto module = std::ranges::find(modules, record->pack, [](const auto &entry) -> std::string_view {
++                return entry.first;
++            });
++            if (pack == nullptr || module == modules.end()) {
++                session_parts[record->pack][id] = enabled; // the pack is off: nothing runs, nothing to restart
++                record->enabled = enabled && pack != nullptr && pack->enabled;
++                return true;
++            }
++            if (enabled) {
++                if (module->second->PartRunning(id)) return true;
++                if (!CanStartLive(*pack, id, why)) return false;
++                std::string error;
++                session_parts[record->pack][id] = true;
++                record->enabled = true;
++                if (!module->second->StartPart(id, error)) {
++                    record->state = ModState::LoadError;
++                    record->status_message = error;
++                    return true;
++                }
++                record->state = ModState::Loaded;
++                record->status_message = "Running in " + pack->display_name;
++                AnnounceLive(record->pack, id);
++                return true;
++            }
++            if (!module->second->PartRunning(id)) {
++                session_parts[record->pack][id] = false;
++                record->enabled = false;
++                record->state = ModState::Disabled;
++                return true;
++            }
++            if (const auto sticky = sticky_owners.find(id); sticky != sticky_owners.end()) {
++                why = "it added " + JoinNouns(sticky->second) + ", which the game keeps until it closes";
++                return false;
++            }
++            for (const ModRecord &other : records) {
++                if (other.state != ModState::Loaded || other.id == id) continue;
++                if (std::ranges::find(other.manifest.dependencies, id) != other.manifest.dependencies.end()) {
++                    why = other.display_name + " needs it";
++                    return false;
++                }
++            }
++            module->second->StopPart(id);
++            session_parts[record->pack][id] = false;
++            record->enabled = false;
++            record->state = ModState::Disabled;
++            record->status_message = "Part of " + pack->display_name;
++            return true;
++        }
++
++        const bool loaded = ModuleFor(id) != nullptr;
++        if (!enabled) {
++            if (!loaded) {
++                session_enabled[id] = false;
++                Rediscover();
++                return true;
++            }
++            if (!CanStopLive(*record, why)) return false;
++            const std::vector<ModManifest> parts = record->manifest.parts;
++            UnloadModule(id);
++            session_enabled[id] = false;
++            Rediscover();
++            // Separate mods the pack's parts stood in for are themselves again: those switched on start now.
++            for (const ModManifest &part : parts) StartStandalone(part.id);
++            return true;
++        }
++        if (loaded) return true;
++        if (record->state != ModState::Ready && record->state != ModState::Disabled &&
++            record->state != ModState::MissingDependency && record->state != ModState::LoadError) {
++            why = record->status_message;
++            return false;
++        }
++        if (!CanStartLive(*record, {}, why)) return false;
++        // A pack takes over the packages its parts stand in for: they go first, if they can.
++        for (const ModManifest &part : record->manifest.parts) {
++            const ModRecord *standalone = Find(part.id);
++            if (standalone == nullptr || standalone->pack == id || ModuleFor(part.id) == nullptr) continue;
++            if (!CanStopLive(*standalone, why)) {
++                why = standalone->display_name + " is running on its own and can't stop now: " + why;
++                return false;
++            }
++        }
++        for (const ModManifest &part : record->manifest.parts) {
++            const ModRecord *standalone = Find(part.id);
++            if (standalone != nullptr && standalone->pack.empty() && ModuleFor(part.id) != nullptr) UnloadModule(part.id);
++        }
++        session_enabled[id] = true;
++        Rediscover();
++        record = Find(id);
++        if (record == nullptr) return true;
++        record->enabled = true;
++        record->state = ModState::Ready;
++        if (LoadRecord(*record)) {
++            AnnounceLive(id, id);
++        } else {
++            // Like a failed reload: fixing and saving its files tries again.
++            failed_stamps[id] = PackageStamp(*record);
++            record->status_message += "; fix and save its files to try again";
++        }
++        return true;
++    }
++
++    // A separate mod that is switched on but not running (its pack just went off) starts now when it can.
++    void StartStandalone(std::string_view id) {
++        ModRecord *record = Find(id);
++        if (record == nullptr || !record->pack.empty() || !record->enabled || ModuleFor(id) != nullptr) return;
++        if (record->state != ModState::Ready && record->state != ModState::Disabled) return;
++        std::string why;
++        if (!CanStartLive(*record, {}, why)) {
++            record->state = ModState::Ready;
++            record->status_message = "Starts after a restart: " + why;
++            return;
++        }
++        record->state = ModState::Ready;
++        if (LoadRecord(*record)) AnnounceLive(record->id, record->id);
++    }
++
++    // Packages whose files changed since they loaded come back with the new files, when they can go and come back.
++    // One whose new files failed to load is tried again when they change once more.
++    void ReloadChangedPackages() {
++        std::vector<std::string> changed;
++        for (const auto &[id, stamp] : loaded_stamps) {
++            const ModRecord *record = Find(id);
++            if (record != nullptr && PackageStamp(*record) != stamp) changed.push_back(id);
++        }
++        std::vector<std::string> retry;
++        for (const auto &[id, stamp] : failed_stamps) {
++            const ModRecord *record = Find(id);
++            if (record != nullptr && PackageStamp(*record) != stamp) retry.push_back(id);
++        }
++        for (const std::string &id : changed) {
++            ModRecord *record = Find(id);
++            if (record == nullptr) continue;
++            loaded_stamps[id] = PackageStamp(*record);
++            std::string why;
++            if (!CanStopLive(*record, why) || !CanStartLive(*record, {}, why)) {
++                record->status_message = "Its files changed; restart to use them (" + why + ")";
++                Log("info", id, record->status_message);
++                continue;
++            }
++            UnloadModule(id);
++            ReloadPackage(id);
++        }
++        for (const std::string &id : retry) {
++            failed_stamps.erase(id);
++            if (ModuleFor(id) == nullptr) ReloadPackage(id);
++        }
++    }
++
++    void ReloadPackage(const std::string &id) {
++        Rediscover();
++        ModRecord *record = Find(id);
++        if (record != nullptr && !record->enabled) return; // switched off since: it stays off
++        if (record == nullptr || !record->valid_manifest) {
++            if (record != nullptr) failed_stamps[id] = PackageStamp(*record);
++            Log("warning", id, "files changed and the package no longer loads: " +
++                                   (record == nullptr ? std::string("it is gone") : record->status_message));
++            return;
++        }
++        std::string why;
++        if (!CanStartLive(*record, {}, why)) {
++            record->status_message = "Its files changed; restart to use them (" + why + ")";
++            return;
++        }
++        record->state = ModState::Ready;
++        if (LoadRecord(*record)) {
++            AnnounceLive(id, id);
++            Log("info", id, "reloaded after its files changed");
++        } else {
++            failed_stamps[id] = PackageStamp(*record);
++            record->status_message = "Its new files didn't load (" + record->status_message +
++                                     "); fix and save them to try again";
 +        }
 +    }
 +
@@ -61241,11 +62255,9 @@ index 00000000..1ac0ed1b
 +    }
 +
 +    bool EmitTo(std::string_view mod_id, std::string_view event, const Json &payload) {
-+        const auto found = std::ranges::find(modules, mod_id, [](const auto &entry) -> std::string_view {
-+            return entry.first;
-+        });
-+        if (found == modules.end()) return false;
-+        found->second->Emit(event, payload);
++        LuaMod *found = ModuleFor(mod_id);
++        if (found == nullptr) return false;
++        found->Emit(event, payload, mod_id);
 +        const auto native = std::ranges::find(native_plugins, mod_id, [](const auto &entry) -> std::string_view {
 +            return entry.first;
 +        });
@@ -61314,6 +62326,9 @@ index 00000000..1ac0ed1b
 +                                 std::string_view mod_id, const ApiOperationSpec &operation,
 +                                 const Json &arguments) -> ApiCallResult {
 +            ApiCallResult result = adapter_call(mod_id, operation, arguments);
++            if (result.status == ApiCallStatus::Ok && StickyOperation(operation.path)) {
++                runtime->sticky_owners[std::string(mod_id)].emplace(StickyNoun(operation.path));
++            }
 +            if (result.status == ApiCallStatus::Ok && operation.path == "items.use") {
 +                runtime->QueueItemUsed(mod_id, result.value);
 +            } else if (result.status == ApiCallStatus::Ok && operation.path == "items.give") {
@@ -61404,10 +62419,12 @@ index 00000000..1ac0ed1b
 +    std::string profile_error;
 +    if (!impl_->LoadProfile(profile_error)) impl_->Log("warning", "", profile_error);
 +    impl_->session_enabled = impl_->profile["enabled"];
++    impl_->session_parts = impl_->profile["parts"];
 +    const char *no_mods = std::getenv("MOONMOD_NO_MODS");
 +    impl_->mods_off_this_run = no_mods != nullptr && std::string_view(no_mods) == "1";
 +    if (impl_->mods_off_this_run) {
 +        impl_->session_enabled = Json::object();
++        impl_->session_parts = Json::object();
 +        impl_->Log("info", "", "MOONMOD_NO_MODS=1: every mod is off for this run (the profile keeps its choices)");
 +    }
 +    impl_->Discover();
@@ -61422,6 +62439,11 @@ index 00000000..1ac0ed1b
 +    impl_->Emit("runtime.stopping", {{"game", impl_->config.game_id}, {"frame", impl_->frame}});
 +    impl_->StopModules();
 +    impl_->records.clear();
++    impl_->sticky_owners.clear();
++    impl_->loaded_stamps.clear();
++    impl_->failed_stamps.clear();
++    impl_->session_active = false;
++    impl_->in_game = false;
 +    impl_->queued_events.clear();
 +    impl_->observed_world_location = nullptr;
 +    impl_->running = false;
@@ -61435,13 +62457,21 @@ index 00000000..1ac0ed1b
 +    impl_->DrainSettingEvents();
 +    impl_->DrainQueuedEvents();
 +    impl_->Emit("game.tick", {{"frame", impl_->frame}});
++    // A package whose files change comes back with them (every two seconds or so).
++    if (impl_->frame % 120 == 0) impl_->ReloadChangedPackages();
 +}
 +
 +void Runtime::Publish(std::string_view event_name, const Json &payload) {
 +    if (!impl_ || !impl_->running || event_name.empty()) return;
 +    impl_->Emit(event_name, payload);
++    if (event_name == "game.session.started") impl_->session_active = true;
++    // Any scene but the title screen is a game in play (a story save, a sandbox, a visit).
++    if (event_name == "game.scene.entered") impl_->in_game = payload.value("scene_id", std::string{}) != "title";
 +    // A session's borrowed settings (co-op's, the host's) end with it.
-+    if (event_name == "game.session.ended" || event_name == "game.session.failed") impl_->ClearSettingOverlay({});
++    if (event_name == "game.session.ended" || event_name == "game.session.failed") {
++        impl_->session_active = false;
++        impl_->ClearSettingOverlay({});
++    }
 +}
 +
 +void Runtime::ObserveWorldLocationNow() {
@@ -61475,15 +62505,19 @@ index 00000000..1ac0ed1b
 +    std::vector<std::string> order;
 +    order.reserve(impl_->modules.size());
 +    for (const auto &[id, module] : impl_->modules) {
-+        (void)module;
 +        order.push_back(id);
++        // a merged pack's running parts follow it
++        for (const ModRecord &record : impl_->records) {
++            if (record.pack == id && module->PartRunning(record.id)) order.push_back(record.id);
++        }
 +    }
 +    return order;
 +}
 +bool                      Runtime::Running() const { return impl_->running; }
 +std::uint64_t             Runtime::Frame() const { return impl_->frame; }
 +
-+bool Runtime::SetEnabled(std::string_view id, bool enabled, std::string &error) {
++bool Runtime::SetEnabled(std::string_view requested_id, bool enabled, std::string &error) {
++    const std::string id(requested_id); // records are read again below; the caller's view may point into one
 +    ModRecord *record = impl_->Find(id);
 +    if (record == nullptr || !record->valid_manifest) {
 +        error = "this package does not have a valid manifest";
@@ -61493,14 +62527,38 @@ index 00000000..1ac0ed1b
 +        error = record->status_message;
 +        return false;
 +    }
-+    const Json previous=impl_->profile["enabled"];
-+    impl_->profile["enabled"][record->id] = enabled;
++    // A pack's part keeps its switch under the pack (profile "parts"), so the pack's own switch, which turns all its
++    // parts on and off as a unit, never overwrites it, and a separate mod of the same id keeps its own choice.
++    const std::string pack = record->pack;
++    const Json previous = impl_->profile;
++    if (pack.empty()) {
++        impl_->profile["enabled"][record->id] = enabled;
++    } else {
++        impl_->profile["parts"][pack][record->id] = enabled;
++    }
 +    if (!impl_->SaveProfile(error)) {
-+        impl_->profile["enabled"]=previous;
++        impl_->profile = previous;
 +        return false;
 +    }
-+    record->enabled_next_launch = enabled;
-+    record->restart_required = record->enabled != enabled;
++    std::string why;
++    const bool live = impl_->ApplyLive(id, enabled, why);
++    record = impl_->Find(id);
++    if (record == nullptr) return true;
++    const ModRecord *owner = pack.empty() ? nullptr : impl_->Find(pack);
++    if (owner != nullptr) record->part_switch = enabled;
++    record->enabled_next_launch = enabled && (owner == nullptr || owner->enabled_next_launch);
++    // A part can apply at once yet still wait on its pack (the pack goes on or off only after a restart).
++    record->restart_required = record->enabled != record->enabled_next_launch;
++    record->restart_reason = !live                                            ? why
++                             : !record->restart_required || owner == nullptr ? std::string{}
++                             : owner->enabled_next_launch ? owner->display_name + " starts after a restart"
++                                                          : owner->display_name + " is off after a restart";
++    for (ModRecord &part : impl_->records) {
++        if (part.pack != id) continue;
++        part.enabled_next_launch = enabled && part.part_switch;
++        part.restart_required = part.enabled != part.enabled_next_launch;
++        if (part.restart_required) part.restart_reason = live ? (enabled ? "its pack is on" : "its pack is off") : why;
++    }
 +    return true;
 +}
 +
@@ -61604,10 +62662,7 @@ index 00000000..1ac0ed1b
 +    if (record == nullptr || !record->valid_manifest) {
 +        return {ApiCallStatus::Failed, nullptr, "mod package is unavailable"};
 +    }
-+    const auto module = std::ranges::find(impl_->modules, mod_id, [](const auto &entry) -> std::string_view {
-+        return entry.first;
-+    });
-+    if (module != impl_->modules.end()) return module->second->GetQuests();
++    if (LuaMod *running = impl_->ModuleFor(mod_id); running != nullptr) return running->GetQuests(mod_id);
 +
 +    const std::filesystem::path storage_file = impl_->config.save_root / "moonmod" / "data" / record->id / "storage.json";
 +    if (moonmod::ContainsSymlinkBelow(storage_file, impl_->config.save_root)) {
@@ -61694,10 +62749,7 @@ index 00000000..1ac0ed1b
 +    if (record == nullptr || !record->valid_manifest) {
 +        return {ApiCallStatus::Failed, nullptr, "mod package is unavailable"};
 +    }
-+    const auto module = std::ranges::find(impl_->modules, mod_id, [](const auto &entry) -> std::string_view {
-+        return entry.first;
-+    });
-+    if (module != impl_->modules.end()) return module->second->GetSkills();
++    if (LuaMod *running = impl_->ModuleFor(mod_id); running != nullptr) return running->GetSkills(mod_id);
 +
 +    const std::filesystem::path storage_file = impl_->config.save_root / "moonmod" / "data" / record->id / "storage.json";
 +    if (moonmod::ContainsSymlinkBelow(storage_file, impl_->config.save_root)) {
@@ -62938,10 +63990,10 @@ index 0ccbba78..166c88c8 100644
      }
 diff --git a/port/src/options/mod_manager_ui.cpp b/port/src/options/mod_manager_ui.cpp
 new file mode 100644
-index 00000000..af8d9afb
+index 00000000..f207868e
 --- /dev/null
 +++ b/port/src/options/mod_manager_ui.cpp
-@@ -0,0 +1,450 @@
+@@ -0,0 +1,466 @@
 +#include "options/mod_manager_ui.hpp"
 +
 +#include <algorithm>
@@ -63008,14 +64060,14 @@ index 00000000..af8d9afb
 +
 +// Word-wraps text into at most max_lines lines; the last line ends with "..." if it runs out.
 +void Wrapped(const std::string &text, int x, int y, int width, int line_step, int max_lines, int alpha,
-+             float scale = kSmall) {
++             float scale = kSmall, u32 color = ui::ColorWhite) {
 +    std::vector<std::string> lines = ui::WrapText(text, width, scale);
 +    if (static_cast<int>(lines.size()) > max_lines) {
 +        lines.resize(max_lines);
 +        lines.back() = Fit(lines.back() + "...", width, scale);
 +    }
 +    for (std::size_t i = 0; i < lines.size(); ++i) {
-+        ui::Label(lines[i], ui::ColorWhite, ui::Alignment::Left, true, scale).Draw(x, y + int(i) * line_step, alpha);
++        ui::Label(lines[i], color, ui::Alignment::Left, true, scale).Draw(x, y + int(i) * line_step, alpha);
 +    }
 +}
 +
@@ -63053,6 +64105,11 @@ index 00000000..af8d9afb
 +void Footer(const std::string &line, const std::string &hint, bool highlight, int alpha) {
 +    ui::HelpBox::Draw(ui::Rect(45, 397, 550, 55), alpha);
 +    MenuTextureReload(0x1A);
++    // A notice too long for one line (why a mod waits for a restart) takes the hint's line while it shows.
++    if (highlight && ui::WrapText(line, 528, kSmall).size() > 1) {
++        Wrapped(line, 56, 403, 528, 24, 2, alpha, kSmall, ui::ColorYellow);
++        return;
++    }
 +    Text(line, 56, 403, 528, highlight ? ui::ColorYellow : ui::ColorWhite, alpha, kSmall);
 +    Text(hint, 56, 427, 528, ui::ColorGold, alpha, kSmall);
 +}
@@ -63213,8 +64270,14 @@ index 00000000..af8d9afb
 +            const int y = 143 + (row - state.first_mod) * 29;
 +            const bool selected = row == state.selected_mod;
 +            const bool native = !record.manifest.native_library.empty();
-+            Text(record.display_name, 56, y + 2, native ? 128 : 150, RowColor(selected), alpha, kSmall);
++            // a merged pack's parts sit indented under it
++            const int indent = record.pack.empty() ? 0 : 10;
++            Text(record.pack.empty() ? record.display_name : "- " + record.display_name, 56 + indent, y + 2,
++                 (native ? 128 : 150) - indent, RowColor(selected), alpha, kSmall);
++            // A part of a pack that is off shows its own switch, dimmed: it applies when the pack is on.
++            const bool idle_part = !record.pack.empty() && !record.enabled && !record.restart_required;
 +            const std::string on = record.restart_required ? (record.enabled_next_launch ? "ON*" : "OFF*")
++                                   : idle_part             ? (record.part_switch ? "ON" : "OFF")
 +                                                           : (record.enabled ? "ON" : "OFF");
 +            Text(on, native ? 202 : 228, y + 3, 44, record.enabled ? ui::ColorGold : ui::ColorWhite,
 +                 record.enabled ? alpha : alpha / 2, kSmall, ui::Alignment::Right);
@@ -63239,10 +64302,15 @@ index 00000000..af8d9afb
 +            Text(ModTitle(*record), 264, 144, 320, ui::ColorYellow, alpha, kHeader);
 +            const std::string author = record->manifest.author.empty() ? "Unknown author" : record->manifest.author;
 +            Text(std::format("{}  /  {}{}", author, ModStateText(record->state),
-+                             record->restart_required ? "  /  RESTART REQUIRED" : ""),
++                             record->restart_required ? "  /  RESTART REQUIRED"
++                             : !record->pack.empty()      ? "  /  IN " + record->pack
++                                                          : std::string{}),
 +                 264, 166, 320, ui::ColorWhite, alpha, kSmall);
-+            const std::string &description =
-+                record->manifest.description.empty() ? record->status_message : record->manifest.description;
++            const std::string description =
++                record->restart_required && !record->restart_reason.empty()
++                    ? std::string(record->enabled_next_launch ? "On" : "Off") + " after a restart: " + record->restart_reason
++                : record->manifest.description.empty() ? record->status_message
++                                                        : record->manifest.description;
 +            Wrapped(description, 264, 184, 320, 17, record->native_status.empty() ? 2 : 1, alpha);
 +            if (!record->native_status.empty()) Text(record->native_status, 264, 201, 320, ui::ColorWhite, alpha, kSmall);
 +        }
@@ -75791,6 +76859,621 @@ index 00000000..4f7c2e47
 +}
 +
 +} // namespace
+diff --git a/port/src/tests/moonmod_pack_live_test.cpp b/port/src/tests/moonmod_pack_live_test.cpp
+new file mode 100644
+index 00000000..01388e76
+--- /dev/null
++++ b/port/src/tests/moonmod_pack_live_test.cpp
+@@ -0,0 +1,609 @@
++// Merged packs (manifest "parts": several mods in one script, each still its own owner) and live mod on/off.
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <chrono>
++#include <filesystem>
++#include <fstream>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "moonmod/manager_ui.hpp"
++#include "moonmod/runtime.hpp"
++
++namespace {
++
++namespace fs = std::filesystem;
++
++struct TempRoot {
++    fs::path path = fs::temp_directory_path() /
++                    ("moonmod-pack-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    ~TempRoot() {
++        moonmod::SharedRuntime().Stop();
++        std::error_code ignored;
++        fs::remove_all(path, ignored);
++    }
++};
++
++void Write(const fs::path &path, std::string_view content) {
++    fs::create_directories(path.parent_path());
++    std::ofstream output(path, std::ios::binary | std::ios::trunc);
++    output << content;
++    ASSERT_TRUE(output.good()) << path.string();
++}
++
++std::string Read(const fs::path &path) {
++    std::ifstream input(path, std::ios::binary);
++    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
++}
++
++struct Probe {
++    std::vector<std::string> logs;
++    bool Saw(std::string_view text) const {
++        return std::ranges::any_of(logs, [&](const std::string &line) { return line.find(text) != std::string::npos; });
++    }
++    int Count(std::string_view text) const {
++        return static_cast<int>(std::ranges::count_if(logs, [&](const std::string &line) {
++            return line.find(text) != std::string::npos;
++        }));
++    }
++};
++
++moonmod::RuntimeConfig Config(const fs::path &root, Probe &probe) {
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    config.game_name = "Chronicle";
++    config.mod_directories = {root / "mods"};
++    config.save_root = root / "save";
++    config.log = [&probe](std::string_view, std::string_view mod_id, std::string_view message) {
++        probe.logs.push_back(std::string(mod_id) + "|" + std::string(message));
++    };
++    return config;
++}
++
++const moonmod::ModRecord *Record(std::string_view id) {
++    for (const moonmod::ModRecord &record : moonmod::SharedRuntime().Mods()) {
++        if (record.id == id) return &record;
++    }
++    return nullptr;
++}
++
++// A pack of two parts, test.alpha and test.beta, written the way tools/pack/build_pack.py writes one.
++void WritePack(const fs::path &mods) {
++    Write(mods / "test.pack" / "mod.json", R"json({
++      "schema_version":1,"id":"test.pack","name":"Test Pack","version":"1.0.0","coop":"local",
++      "framework_api":1,"games":["chronicle"],"entry":"main.lua",
++      "permissions":["game.read","game.write","content.register","storage.read","storage.write"],
++      "parts":[
++        {"id":"test.alpha","name":"Alpha","version":"2.0.0","coop":"host_only",
++         "settings":[{"id":"power","name":"Power","type":"integer","default":3,"min":0,"max":9}]},
++        {"id":"test.beta","name":"Beta","version":"3.1.0","dependencies":["test.alpha"],
++         "settings":[{"id":"power","name":"Power","type":"integer","default":7,"min":0,"max":9}]}
++      ]
++    })json");
++    Write(mods / "test.pack" / "main.lua", R"lua(
++-- moonmod:part test.alpha
++moonmod.part.run("test.alpha", function()
++  moonmod.log("info", "ALPHA_LOADED power=" .. tostring(moonmod.settings.get("power")))
++  moonmod.storage.set("who", "alpha")
++  moonmod.on("probe.ping", function() moonmod.log("info", "ALPHA_PING") end)
++  moonmod.on("settings.changed", function(e) moonmod.log("info", "ALPHA_SETTING " .. e.id .. "=" .. tostring(e.value)) end)
++  moonmod.on("runtime.loaded", function(e) moonmod.log("info", "ALPHA_RUNTIME_LOADED live=" .. tostring(e.live)) end)
++  moonmod.on("runtime.unloaded", function() moonmod.log("info", "ALPHA_UNLOADED") end)
++  assert(game.scripts.register_function({id = "double", description = "x2"}, function(a) return {value = a.value * 2} end))
++end)
++-- moonmod:end
++-- moonmod:part test.beta
++moonmod.part.run("test.beta", function()
++  moonmod.log("info", "BETA_LOADED power=" .. tostring(moonmod.settings.get("power")))
++  moonmod.storage.set("who", "beta")
++  moonmod.on("probe.ping", function() moonmod.log("info", "BETA_PING") end)
++  moonmod.on("runtime.unloaded", function() moonmod.log("info", "BETA_UNLOADED") end)
++  local doubled = assert(game.scripts.call_function({id = "test.alpha:double", arguments = {value = 21}}))
++  moonmod.log("info", "BETA_CALLED " .. tostring(doubled.value))
++  return {on_tick = function() end}
++end)
++-- moonmod:end
++moonmod.log("info", "PACK_LOADED")
++)lua");
++}
++
++void WriteMod(const fs::path &mods, std::string_view id, std::string_view script, std::string_view extra = "") {
++    Write(mods / std::string(id) / "mod.json",
++          std::string(R"json({"schema_version":1,"id":")json") + std::string(id) +
++              R"json(","name":"Probe","version":"1.0.0","framework_api":1,"games":["chronicle"],"entry":"main.lua",)json"
++              R"json("permissions":["game.read","content.register"])json" +
++              std::string(extra) + "}");
++    Write(mods / std::string(id) / "main.lua", script);
++}
++
++} // namespace
++
++TEST(MoonModPack, PartsRunInOneScriptEachAsItsOwnOwner) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.pack":true},"settings":{"test.alpha":{"power":5}}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++
++    // the parts are records of their own, listed right under the pack
++    const auto mods = moonmod::SharedRuntime().Mods();
++    ASSERT_EQ(mods.size(), 3u);
++    EXPECT_EQ(mods[0].id, "test.pack");
++    EXPECT_EQ(mods[1].id, "test.alpha");
++    EXPECT_EQ(mods[2].id, "test.beta");
++    EXPECT_EQ(mods[1].pack, "test.pack");
++    EXPECT_EQ(Record("test.pack")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Loaded);
++
++    // each part reads its own settings, logs under its own id, and calls another part's functions
++    EXPECT_TRUE(probe.Saw("test.alpha|ALPHA_LOADED power=5"));
++    EXPECT_TRUE(probe.Saw("test.beta|BETA_LOADED power=7"));
++    EXPECT_TRUE(probe.Saw("test.beta|BETA_CALLED 42"));
++    EXPECT_TRUE(probe.Saw("test.pack|PACK_LOADED"));
++    EXPECT_TRUE(probe.Saw("ALPHA_RUNTIME_LOADED live=nil"));
++
++    // each part's saved data is in its own folder, as when it was a mod of its own
++    moonmod::SharedRuntime().Stop();
++    EXPECT_NE(Read(root.path / "save" / "moonmod" / "data" / "test.alpha" / "storage.json").find("alpha"), std::string::npos);
++    EXPECT_NE(Read(root.path / "save" / "moonmod" / "data" / "test.beta" / "storage.json").find("beta"), std::string::npos);
++    EXPECT_TRUE(probe.Saw("ALPHA_UNLOADED"));
++    EXPECT_TRUE(probe.Saw("BETA_UNLOADED"));
++}
++
++TEST(MoonModPack, EventsSettingsAndModListReachThePartThemselves) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.pack":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++
++    ASSERT_TRUE(moonmod::SharedRuntime().PublishToMod("test.beta", "probe.ping", moonmod::Json::object()));
++    EXPECT_TRUE(probe.Saw("BETA_PING"));
++    EXPECT_FALSE(probe.Saw("ALPHA_PING"));
++    moonmod::SharedRuntime().Publish("probe.ping", moonmod::Json::object());
++    EXPECT_TRUE(probe.Saw("ALPHA_PING"));
++
++    ASSERT_TRUE(moonmod::SharedRuntime().StepSetting("test.alpha", "power", 1, error)) << error;
++    EXPECT_TRUE(probe.Saw("test.alpha|ALPHA_SETTING power=4"));
++    EXPECT_EQ(moonmod::SharedRuntime().Setting("test.beta", "power"), 7);
++
++    // co-op compares the parts, each with its own version and role; the pack itself is local
++    const moonmod::Json list = moonmod::SharedRuntime().ModList();
++    ASSERT_EQ(list.size(), 3u);
++    EXPECT_EQ(list[0]["id"], "test.pack");
++    EXPECT_EQ(list[0]["coop"], "local");
++    EXPECT_EQ(list[1]["id"], "test.alpha");
++    EXPECT_EQ(list[1]["version"], "2.0.0");
++    EXPECT_EQ(list[1]["coop"], "host_only");
++    EXPECT_EQ(list[2]["id"], "test.beta");
++    EXPECT_EQ(list[2]["version"], "3.1.0");
++    const moonmod::ApiCallResult settings = moonmod::SharedRuntime().ModSettings("test.alpha");
++    ASSERT_EQ(settings.status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(settings.value["values"]["power"], 4);
++}
++
++TEST(MoonModPack, PartTurnsOffAndOnWhileThePackRuns) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.pack":true},"parts":{"test.pack":{"test.beta":false}},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Disabled);
++    EXPECT_FALSE(probe.Saw("BETA_LOADED"));
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.beta", true, error)) << error;
++    EXPECT_FALSE(Record("test.beta")->restart_required) << Record("test.beta")->restart_reason;
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Loaded);
++    EXPECT_TRUE(probe.Saw("BETA_LOADED power=7"));
++
++    // Alpha can't go while Beta, which needs it, runs
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.alpha", false, error)) << error;
++    EXPECT_TRUE(Record("test.alpha")->restart_required);
++    EXPECT_NE(Record("test.alpha")->restart_reason.find("Beta"), std::string::npos);
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.alpha", true, error)) << error;
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.beta", false, error)) << error;
++    EXPECT_FALSE(Record("test.beta")->restart_required);
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Disabled);
++    EXPECT_TRUE(probe.Saw("BETA_UNLOADED"));
++    probe.logs.clear();
++    moonmod::SharedRuntime().Publish("probe.ping", moonmod::Json::object());
++    EXPECT_TRUE(probe.Saw("ALPHA_PING"));
++    EXPECT_FALSE(probe.Saw("BETA_PING"));
++    EXPECT_FALSE(moonmod::SharedRuntime().PublishToMod("test.beta", "probe.ping", moonmod::Json::object()));
++}
++
++TEST(MoonModPack, PackStandsInForPackagesOfTheSameIdAndGoesOnAsAUnit) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    WriteMod(root.path / "mods", "test.alpha", "moonmod.log('info', 'STANDALONE_ALPHA')\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.alpha":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    EXPECT_TRUE(probe.Saw("STANDALONE_ALPHA"));
++    EXPECT_TRUE(Record("test.alpha")->pack.empty());
++    ASSERT_NE(Record("test.beta"), nullptr) << "a part with no package of its own shows under its pack, off";
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Disabled);
++
++    // on: the standalone Alpha goes, the pack's Alpha and Beta come, at once
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.pack", true, error)) << error;
++    EXPECT_FALSE(Record("test.pack")->restart_required) << Record("test.pack")->restart_reason;
++    EXPECT_EQ(Record("test.pack")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.alpha")->pack, "test.pack");
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Loaded);
++    EXPECT_TRUE(probe.Saw("ALPHA_RUNTIME_LOADED live=true"));
++    EXPECT_EQ(probe.Count("STANDALONE_ALPHA"), 1);
++
++    // off: the parts go with it, and the separate Alpha, still switched on, is itself again at once
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.pack", false, error)) << error;
++    EXPECT_FALSE(Record("test.pack")->restart_required) << Record("test.pack")->restart_reason;
++    EXPECT_EQ(Record("test.pack")->state, moonmod::ModState::Disabled);
++    EXPECT_TRUE(Record("test.alpha")->pack.empty());
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(probe.Count("STANDALONE_ALPHA"), 2);
++    EXPECT_TRUE(probe.Saw("BETA_UNLOADED"));
++
++    // the pack's switch never wrote the separate Alpha's choice
++    const moonmod::Json profile = moonmod::Json::parse(Read(root.path / "save" / "moonmod" / "profile.json"));
++    EXPECT_EQ(profile["enabled"]["test.alpha"], true);
++    EXPECT_FALSE(profile["enabled"].contains("test.beta"));
++}
++
++TEST(MoonModPack, PartChoicesOutliveThePacksSwitch) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.pack":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    ASSERT_EQ(Record("test.beta")->state, moonmod::ModState::Loaded) << "parts start on";
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.beta", false, error)) << error;
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.pack", false, error)) << error;
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.pack", true, error)) << error;
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Disabled) << "Beta stays off as it was left";
++    EXPECT_FALSE(Record("test.beta")->restart_required);
++
++    // and after a restart
++    moonmod::SharedRuntime().Stop();
++    probe.logs.clear();
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Disabled);
++    EXPECT_FALSE(probe.Saw("BETA_LOADED"));
++    const moonmod::Json profile = moonmod::Json::parse(Read(root.path / "save" / "moonmod" / "profile.json"));
++    EXPECT_EQ(profile["parts"]["test.pack"]["test.beta"], false);
++}
++
++// A part handed over as its script's source is a chunk of its own: its own globals, a main chunk's room for locals,
++// and errors that name its own file and line.
++TEST(MoonModPack, PartGivenAsSourceIsAChunkOfItsOwn) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    const fs::path mods = root.path / "mods";
++    Write(mods / "test.src" / "mod.json", R"json({
++      "schema_version":1,"id":"test.src","name":"Source Pack","version":"1.0.0","coop":"local",
++      "framework_api":1,"games":["chronicle"],"entry":"main.lua","permissions":["game.read"],
++      "parts":[{"id":"test.many","name":"Many","version":"1.0.0"},{"id":"test.broken","name":"Broken","version":"1.0.0"},
++               {"id":"test.typo","name":"Typo","version":"1.0.0"}]
++    })json");
++    std::string many; // 199 locals: as much as a mod's own main chunk may have
++    for (int i = 0; i < 199; ++i) many += "local v" + std::to_string(i) + " = " + std::to_string(i) + "\n";
++    many += "shared = v198\nmoonmod.log('info', 'MANY ' .. tostring(v198))\n";
++    Write(mods / "test.src" / "main.lua",
++          "local function env() return setmetatable({}, {__index = _ENV}) end\n"
++          "moonmod.part.run('test.many', [[\n" + many + "]], env(), 'test.many/main.lua')\n"
++          "moonmod.part.run('test.broken', [[\nlocal x = 1\nerror('BROKEN_ON_PURPOSE')\n]], env(), 'test.broken/main.lua')\n"
++          "moonmod.part.run('test.typo', [[\nlocal = 1\n]], env(), 'test.typo/main.lua')\n"
++          "moonmod.log('info', 'SHARED=' .. tostring(shared))\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.src":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    EXPECT_EQ(Record("test.src")->state, moonmod::ModState::Loaded) << Record("test.src")->status_message;
++    EXPECT_EQ(Record("test.many")->state, moonmod::ModState::Loaded) << Record("test.many")->status_message;
++    EXPECT_TRUE(probe.Saw("test.many|MANY 198"));
++    EXPECT_TRUE(probe.Saw("test.src|SHARED=nil")) << "a part's globals stay its own";
++
++    EXPECT_EQ(Record("test.broken")->state, moonmod::ModState::LoadError);
++    EXPECT_NE(Record("test.broken")->status_message.find("test.broken/main.lua:2:"), std::string::npos)
++        << Record("test.broken")->status_message;
++    EXPECT_EQ(Record("test.typo")->state, moonmod::ModState::LoadError);
++    EXPECT_NE(Record("test.typo")->status_message.find("test.typo/main.lua:1:"), std::string::npos)
++        << Record("test.typo")->status_message;
++
++    // a part that failed is tried again when switched off and on
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.broken", false, error)) << error;
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.broken", true, error)) << error;
++    EXPECT_EQ(Record("test.broken")->state, moonmod::ModState::LoadError);
++}
++
++TEST(MoonModLive, ModTurnsOnAndOffWithoutARestart) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WriteMod(root.path / "mods", "test.live", R"lua(
++moonmod.log("info", "LIVE_LOADED")
++moonmod.on("runtime.loaded", function(e) moonmod.log("info", "LIVE_RUNTIME live=" .. tostring(e.live)) end)
++moonmod.on("runtime.unloaded", function() moonmod.log("info", "LIVE_UNLOADED") end)
++moonmod.on("probe.ping", function() moonmod.log("info", "LIVE_PING") end)
++)lua");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    EXPECT_EQ(Record("test.live")->state, moonmod::ModState::Disabled);
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.live", true, error)) << error;
++    EXPECT_FALSE(Record("test.live")->restart_required);
++    EXPECT_TRUE(Record("test.live")->enabled);
++    EXPECT_EQ(Record("test.live")->state, moonmod::ModState::Loaded);
++    EXPECT_TRUE(probe.Saw("LIVE_RUNTIME live=true"));
++    moonmod::SharedRuntime().Publish("probe.ping", moonmod::Json::object());
++    EXPECT_TRUE(probe.Saw("LIVE_PING"));
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.live", false, error)) << error;
++    EXPECT_FALSE(Record("test.live")->restart_required);
++    EXPECT_FALSE(Record("test.live")->enabled);
++    EXPECT_EQ(Record("test.live")->state, moonmod::ModState::Disabled);
++    EXPECT_TRUE(probe.Saw("LIVE_UNLOADED"));
++    probe.logs.clear();
++    moonmod::SharedRuntime().Publish("probe.ping", moonmod::Json::object());
++    EXPECT_FALSE(probe.Saw("LIVE_PING"));
++}
++
++TEST(MoonModLive, ContentTheGameKeepsWaitsForARestart) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WriteMod(root.path / "mods", "test.sticky", R"lua(
++assert(game.items.register({id = "probe", name = "Probe"}))
++moonmod.log("info", "STICKY_LOADED")
++)lua");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.sticky":true},"settings":{}})json");
++    moonmod::RuntimeConfig config = Config(root.path, probe);
++    config.api_capabilities.push_back({"items.register", true, {}});
++    config.api_handler = [](std::string_view, const moonmod::ApiOperationSpec &, const moonmod::Json &) {
++        return moonmod::ApiCallResult{moonmod::ApiCallStatus::Ok, {{"id", "test.sticky:probe"}}, {}};
++    };
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(config, error)) << error;
++    ASSERT_TRUE(probe.Saw("STICKY_LOADED"));
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.sticky", false, error)) << error;
++    EXPECT_TRUE(Record("test.sticky")->restart_required);
++    EXPECT_FALSE(Record("test.sticky")->enabled_next_launch);
++    EXPECT_EQ(Record("test.sticky")->state, moonmod::ModState::Loaded);
++    EXPECT_NE(Record("test.sticky")->restart_reason.find("added items, which the game keeps"), std::string::npos);
++
++    // turning it back on cancels the pending change
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.sticky", true, error)) << error;
++    EXPECT_FALSE(Record("test.sticky")->restart_required);
++
++    // a mod whose script registers such content starts mid-game only from the title screen
++    WriteMod(root.path / "mods", "test.later", "game.items.register({id = 'x', name = 'X'})\nmoonmod.log('info', 'LATER_LOADED')\n");
++    moonmod::SharedRuntime().Stop();
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(config, error)) << error;
++    moonmod::SharedRuntime().Publish("game.session.started", moonmod::Json::object());
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.later", true, error)) << error;
++    EXPECT_TRUE(Record("test.later")->restart_required);
++    EXPECT_NE(Record("test.later")->restart_reason.find("title screen"), std::string::npos);
++    EXPECT_FALSE(probe.Saw("LATER_LOADED"));
++    moonmod::SharedRuntime().Publish("game.session.ended", moonmod::Json::object());
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.later", true, error)) << error;
++    EXPECT_FALSE(Record("test.later")->restart_required);
++    EXPECT_TRUE(probe.Saw("LATER_LOADED"));
++}
++
++TEST(MoonModLive, ChangedFilesReloadThePackage) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WriteMod(root.path / "mods", "test.edit", "moonmod.log('info', 'EDIT_V1')\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.edit":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    ASSERT_TRUE(probe.Saw("EDIT_V1"));
++
++    const fs::path script = root.path / "mods" / "test.edit" / "main.lua";
++    Write(script, "moonmod.log('info', 'EDIT_V2')\n");
++    fs::last_write_time(script, fs::last_write_time(script) + std::chrono::seconds(5));
++    for (int frame = 0; frame < 120; ++frame) moonmod::SharedRuntime().Pump();
++    EXPECT_TRUE(probe.Saw("EDIT_V2"));
++    EXPECT_TRUE(probe.Saw("reloaded after its files changed"));
++    EXPECT_EQ(Record("test.edit")->state, moonmod::ModState::Loaded);
++
++    // saved half-way: the new files don't load, and the mod comes back once they're fixed
++    Write(script, "moonmod.log('info', 'EDIT_V3'\n");
++    fs::last_write_time(script, fs::last_write_time(script) + std::chrono::seconds(10));
++    for (int frame = 0; frame < 120; ++frame) moonmod::SharedRuntime().Pump();
++    EXPECT_EQ(Record("test.edit")->state, moonmod::ModState::LoadError);
++    EXPECT_NE(Record("test.edit")->status_message.find("fix and save"), std::string::npos)
++        << Record("test.edit")->status_message;
++    Write(script, "moonmod.log('info', 'EDIT_V4')\n");
++    fs::last_write_time(script, fs::last_write_time(script) + std::chrono::seconds(15));
++    for (int frame = 0; frame < 120; ++frame) moonmod::SharedRuntime().Pump();
++    EXPECT_TRUE(probe.Saw("EDIT_V4"));
++    EXPECT_EQ(Record("test.edit")->state, moonmod::ModState::Loaded);
++}
++
++
++// A part's switch holds while its pack is off: it can be set ahead, and the pack starts it (or not) as it was left.
++TEST(MoonModPack, PartSwitchHoldsWhileItsPackIsOff) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    // a hand-edited profile with a pack's parts as anything but an object is read as "all on"
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.pack":false},"parts":{"test.pack":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    ASSERT_TRUE(Record("test.beta")->part_switch);
++
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.beta", false, error)) << error;
++    EXPECT_FALSE(Record("test.beta")->part_switch);
++    EXPECT_FALSE(Record("test.beta")->restart_required);
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.pack", true, error)) << error;
++    EXPECT_EQ(Record("test.alpha")->state, moonmod::ModState::Loaded);
++    EXPECT_EQ(Record("test.beta")->state, moonmod::ModState::Disabled);
++    EXPECT_FALSE(probe.Saw("BETA_LOADED"));
++    const moonmod::Json profile = moonmod::Json::parse(Read(root.path / "save" / "moonmod" / "profile.json"));
++    EXPECT_EQ(profile["parts"]["test.pack"]["test.beta"], false);
++}
++
++// A part turned off and on again starts with the globals it was handed, not those its last run left.
++TEST(MoonModPack, PartStartsAgainWithFreshGlobals) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    const fs::path mods = root.path / "mods";
++    Write(mods / "test.src" / "mod.json", R"json({
++      "schema_version":1,"id":"test.src","name":"Source Pack","version":"1.0.0","coop":"local",
++      "framework_api":1,"games":["chronicle"],"entry":"main.lua","permissions":["game.read"],
++      "parts":[{"id":"test.once","name":"Once","version":"1.0.0"}]
++    })json");
++    Write(mods / "test.src" / "main.lua",
++          "moonmod.part.run('test.once', [[\n"
++          "if SEEN then moonmod.log('info', 'STALE') end\nSEEN = true\nmoonmod.log('info', 'FRESH ' .. GIVEN)\n"
++          "]], setmetatable({GIVEN = 'given'}, {__index = _ENV}), 'test.once/main.lua')\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.src":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.once", false, error)) << error;
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.once", true, error)) << error;
++    EXPECT_EQ(probe.Count("FRESH given"), 2);
++    EXPECT_FALSE(probe.Saw("STALE"));
++}
++
++// Part markers are found whatever the script's line ends, so one part's content doesn't hold back another.
++TEST(MoonModPack, PartMarkersWorkWithCrlfLineEnds) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    const fs::path mods = root.path / "mods";
++    Write(mods / "test.crlf" / "mod.json", R"json({
++      "schema_version":1,"id":"test.crlf","name":"CRLF Pack","version":"1.0.0","coop":"local",
++      "framework_api":1,"games":["chronicle"],"entry":"main.lua","permissions":["game.read","content.register"],
++      "parts":[{"id":"test.plain","name":"Plain","version":"1.0.0"},{"id":"test.adds","name":"Adds","version":"1.0.0"}]
++    })json");
++    Write(mods / "test.crlf" / "main.lua",
++          "-- moonmod:part test.plain\r\nmoonmod.part.run('test.plain', function() moonmod.log('info', 'PLAIN') end)\r\n"
++          "-- moonmod:end\r\n-- moonmod:part test.adds\r\n"
++          "moonmod.part.run('test.adds', function() game.items.register({id = 'x', name = 'X'}) end)\r\n"
++          "-- moonmod:end\r\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.crlf":true},
++                  "parts":{"test.crlf":{"test.plain":false,"test.adds":false}},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    moonmod::SharedRuntime().Publish("game.scene.entered", {{"scene_id", "town"}});
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.plain", true, error)) << error;
++    EXPECT_FALSE(Record("test.plain")->restart_required) << Record("test.plain")->restart_reason;
++    EXPECT_TRUE(probe.Saw("PLAIN"));
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.adds", true, error)) << error;
++    EXPECT_TRUE(Record("test.adds")->restart_required);
++}
++
++// A pack whose script fails takes its parts' rows with it: none says it is ready.
++TEST(MoonModPack, PackThatFailsMarksItsParts) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WritePack(root.path / "mods");
++    const fs::path script = root.path / "mods" / "test.pack" / "main.lua";
++    Write(script, Read(script) + "error('PACK_BROKEN')\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.pack":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    EXPECT_EQ(Record("test.pack")->state, moonmod::ModState::LoadError);
++    for (const char *part : {"test.alpha", "test.beta"}) {
++        EXPECT_EQ(Record(part)->state, moonmod::ModState::LoadError) << part;
++        EXPECT_NE(Record(part)->status_message.find("didn't load"), std::string::npos) << Record(part)->status_message;
++    }
++}
++
++// In a story game (any scene but the title), content the game keeps waits for the title screen.
++TEST(MoonModLive, AStoryGameCountsAsMidGame) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WriteMod(root.path / "mods", "test.later",
++             "game.items.register({id = 'x', name = 'X'})\nmoonmod.log('info', 'LATER_LOADED')\n");
++    moonmod::RuntimeConfig config = Config(root.path, probe);
++    config.api_capabilities.push_back({"items.register", true, {}});
++    config.api_handler = [](std::string_view, const moonmod::ApiOperationSpec &, const moonmod::Json &) {
++        return moonmod::ApiCallResult{moonmod::ApiCallStatus::Ok, {{"id", "test.later:x"}}, {}};
++    };
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(config, error)) << error;
++    moonmod::SharedRuntime().Publish("game.scene.entered", {{"scene_id", "dungeon"}});
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.later", true, error)) << error;
++    EXPECT_TRUE(Record("test.later")->restart_required);
++    EXPECT_FALSE(probe.Saw("LATER_LOADED"));
++    moonmod::SharedRuntime().Publish("game.scene.entered", {{"scene_id", "title"}});
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.later", true, error)) << error;
++    EXPECT_FALSE(Record("test.later")->restart_required) << Record("test.later")->restart_reason;
++    EXPECT_TRUE(probe.Saw("LATER_LOADED"));
++}
++
++// A mod switched off while its broken files wait for a fix stays off when the fix is saved.
++TEST(MoonModLive, ModSwitchedOffAfterABadSaveStaysOff) {
++    moonmod::SharedRuntime().Stop();
++    moonmod::CloseManager();
++    Probe probe; // declared first: TempRoot stops the runtime, which still logs to it
++    TempRoot root;
++    WriteMod(root.path / "mods", "test.edit", "moonmod.log('info', 'EDIT_V1')\n");
++    Write(root.path / "save" / "moonmod" / "profile.json",
++          R"json({"format_version":1,"enabled":{"test.edit":true},"settings":{}})json");
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(Config(root.path, probe), error)) << error;
++    const fs::path script = root.path / "mods" / "test.edit" / "main.lua";
++    Write(script, "moonmod.log('info', 'EDIT_V2'\n");
++    fs::last_write_time(script, fs::last_write_time(script) + std::chrono::seconds(5));
++    for (int frame = 0; frame < 120; ++frame) moonmod::SharedRuntime().Pump();
++    ASSERT_EQ(Record("test.edit")->state, moonmod::ModState::LoadError);
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("test.edit", false, error)) << error;
++    Write(script, "moonmod.log('info', 'EDIT_V3')\n");
++    fs::last_write_time(script, fs::last_write_time(script) + std::chrono::seconds(10));
++    for (int frame = 0; frame < 120; ++frame) moonmod::SharedRuntime().Pump();
++    EXPECT_FALSE(probe.Saw("EDIT_V3"));
++    EXPECT_FALSE(Record("test.edit")->enabled);
++}
 diff --git a/port/src/tests/moonmod_player_party_api_test.cpp b/port/src/tests/moonmod_player_party_api_test.cpp
 new file mode 100644
 index 00000000..0db3e7b0
@@ -76616,6 +78299,243 @@ index 00000000..218de2a6
 +}
 +
 +} // namespace
+diff --git a/port/src/tests/moonmod_real_pack_test.cpp b/port/src/tests/moonmod_real_pack_test.cpp
+new file mode 100644
+index 00000000..d61a4338
+--- /dev/null
++++ b/port/src/tests/moonmod_real_pack_test.cpp
+@@ -0,0 +1,231 @@
++// Loads the MoonMod Pack (MoonMod's mods/moonmod.pack: twelve mods merged into one script) through the real Lua
++// runtime and the Chronicle adapter: every part starts as its own owner, the Gauntlet's and Vigil's title modes both
++// register, co-op sees the parts, and a part turns off and on while the pack runs.
++// Set MOONMOD_PACK_PATH to the pack's folder to run it; skipped otherwise.
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "gamemode.hpp"
++#include "main.hpp"
++#include "moonmod/chronicle_adapter.hpp"
++#include "moonmod/runtime.hpp"
++#include "moonmod/title_modes.hpp"
++#include "savedata.hpp"
++#include "ui/framework.hpp"
++
++namespace dc::game {}
++using namespace dc::game;
++
++namespace {
++
++namespace fs = std::filesystem;
++
++struct TempRoot {
++    fs::path path = fs::temp_directory_path() /
++                    ("moonmod-real-pack-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    ~TempRoot() {
++        std::error_code ignored;
++        fs::remove_all(path, ignored);
++    }
++};
++
++struct Restore {
++    CSaveData *save = SaveData;
++    int current_mode = mode;
++    ~Restore() {
++        moonmod::SharedRuntime().Stop();
++        SaveData = save;
++        mode = current_mode;
++        moonmod::ResetTitleModesForTests();
++        moonmod::ResetChronicleDungeonsForTests();
++        moonmod::ResetChronicleCharactersForTests();
++    }
++};
++
++const moonmod::ModRecord *Record(std::string_view id) {
++    for (const moonmod::ModRecord &record : moonmod::SharedRuntime().Mods()) {
++        if (record.id == id) return &record;
++    }
++    return nullptr;
++}
++
++} // namespace
++
++TEST(MoonModRealPack, EveryPartStartsAsItsOwnOwner) {
++    const char *pack_path = std::getenv("MOONMOD_PACK_PATH");
++    if (pack_path == nullptr || !fs::exists(fs::path(pack_path) / "mod.json")) {
++        GTEST_SKIP() << "Set MOONMOD_PACK_PATH to MoonMod's mods/moonmod.pack to run this.";
++    }
++    std::vector<std::string> logs; // declared before Restore: stopping the runtime still logs
++    Restore restore;
++    moonmod::SharedRuntime().Stop();
++    moonmod::ResetTitleModesForTests();
++    moonmod::ResetChronicleDungeonsForTests();
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    mode = GAME_MODE_TITLE;
++
++    TempRoot root;
++    const fs::path package = root.path / "mods" / "moonmod.pack";
++    fs::create_directories(package.parent_path());
++    fs::copy(pack_path, package, fs::copy_options::recursive);
++    fs::create_directories(root.path / "save" / "moonmod");
++    {
++        std::ofstream profile(root.path / "save" / "moonmod" / "profile.json", std::ios::binary | std::ios::trunc);
++        profile << R"json({"format_version":1,"enabled":{"moonmod.pack":true},"settings":{}})json";
++    }
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    config.game_name = "Chronicle";
++    config.mod_directories = {root.path / "mods"};
++    config.save_root = root.path / "save";
++    moonmod::ConfigureChronicleApi(config);
++    config.log = [&logs](std::string_view level, std::string_view mod_id, std::string_view message) {
++        logs.push_back(std::string(level) + " " + std::string(mod_id) + ": " + std::string(message));
++    };
++    std::string error;
++    const auto started = std::chrono::steady_clock::now();
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(std::move(config), error)) << error;
++    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
++    std::printf("pack load: %.3f s\n", seconds);
++
++    const moonmod::ModRecord *pack = Record("moonmod.pack");
++    ASSERT_NE(pack, nullptr);
++    EXPECT_EQ(pack->state, moonmod::ModState::Loaded) << pack->status_message;
++    ASSERT_EQ(pack->manifest.parts.size(), 12u);
++    for (const moonmod::ModManifest &part : pack->manifest.parts) {
++        const moonmod::ModRecord *record = Record(part.id);
++        ASSERT_NE(record, nullptr) << part.id;
++        EXPECT_EQ(record->state, moonmod::ModState::Loaded) << part.id << ": " << record->status_message;
++    }
++    for (const std::string &line : logs) {
++        EXPECT_EQ(line.rfind("error", 0), std::string::npos) << line;
++        std::printf("  %s\n", line.c_str());
++    }
++
++    // the Gauntlet and Vigil each keep their own title-menu row
++    std::vector<std::string> modes;
++    for (const moonmod::TitleMode &title : moonmod::TitleModes()) modes.push_back(title.id);
++    EXPECT_NE(std::ranges::find(modes, "moonmod.roguelike:gauntlet"), modes.end());
++
++    // co-op sees the parts with their own versions
++    const moonmod::Json list = moonmod::SharedRuntime().ModList();
++    EXPECT_EQ(list.size(), 13u);
++
++    // a few frames at the title screen
++    for (int frame = 0; frame < 30; ++frame) moonmod::SharedRuntime().Pump();
++
++    // the Hub (nothing the game keeps) turns off and on again while the pack runs
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("moonmod.hub", false, error)) << error;
++    EXPECT_FALSE(Record("moonmod.hub")->restart_required) << Record("moonmod.hub")->restart_reason;
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("moonmod.hub", true, error)) << error;
++    EXPECT_EQ(Record("moonmod.hub")->state, moonmod::ModState::Loaded) << Record("moonmod.hub")->status_message;
++    // the Gauntlet registered playable characters and floors: turning it off waits for a restart
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("moonmod.roguelike", false, error)) << error;
++    EXPECT_TRUE(Record("moonmod.roguelike")->restart_required);
++    std::printf("roguelike off: %s\n", Record("moonmod.roguelike")->restart_reason.c_str());
++    ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled("moonmod.roguelike", true, error)) << error;
++    for (const std::string &line : logs) EXPECT_EQ(line.rfind("error", 0), std::string::npos) << line;
++}
++
++// Every part, one at a time: off and on again at the title screen, then in a game session. A part either switches at
++// once (and is running again after) or waits for a restart and says why; nothing logs an error either way, and the
++// other parts keep running.
++TEST(MoonModRealPack, EveryPartSwitchesLiveOrSaysWhyNot) {
++    const char *pack_path = std::getenv("MOONMOD_PACK_PATH");
++    if (pack_path == nullptr || !fs::exists(fs::path(pack_path) / "mod.json")) {
++        GTEST_SKIP() << "Set MOONMOD_PACK_PATH to MoonMod's mods/moonmod.pack to run this.";
++    }
++    std::vector<std::string> logs; // declared before Restore: stopping the runtime still logs
++    Restore restore;
++    moonmod::SharedRuntime().Stop();
++    moonmod::ResetTitleModesForTests();
++    moonmod::ResetChronicleDungeonsForTests();
++    auto save = std::make_unique<CSaveData>();
++    save->Initialize();
++    SaveData = save.get();
++    mode = GAME_MODE_TITLE;
++
++    TempRoot root;
++    const fs::path package = root.path / "mods" / "moonmod.pack";
++    fs::create_directories(package.parent_path());
++    fs::copy(pack_path, package, fs::copy_options::recursive);
++    fs::create_directories(root.path / "save" / "moonmod");
++    {
++        std::ofstream profile(root.path / "save" / "moonmod" / "profile.json", std::ios::binary | std::ios::trunc);
++        profile << R"json({"format_version":1,"enabled":{"moonmod.pack":true},"settings":{}})json";
++    }
++    moonmod::RuntimeConfig config;
++    config.game_id = "chronicle";
++    config.game_name = "Chronicle";
++    config.mod_directories = {root.path / "mods"};
++    config.save_root = root.path / "save";
++    moonmod::ConfigureChronicleApi(config);
++    config.log = [&logs](std::string_view level, std::string_view mod_id, std::string_view message) {
++        logs.push_back(std::string(level) + " " + std::string(mod_id) + ": " + std::string(message));
++    };
++    std::string error;
++    ASSERT_TRUE(moonmod::SharedRuntime().Start(std::move(config), error)) << error;
++    std::vector<std::string> parts;
++    for (const moonmod::ModManifest &part : Record("moonmod.pack")->manifest.parts) parts.push_back(part.id);
++    ASSERT_EQ(parts.size(), 12u);
++
++    auto all_others_running = [&](std::string_view except) {
++        for (const std::string &id : parts) {
++            if (id == except) continue;
++            EXPECT_EQ(Record(id)->state, moonmod::ModState::Loaded) << "after switching " << except << ", " << id
++                                                                   << ": " << Record(id)->status_message;
++        }
++    };
++    auto sweep = [&](const char *where) {
++        std::printf("%s:\n", where);
++        for (const std::string &id : parts) {
++            const std::size_t logged = logs.size();
++            ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled(id, false, error)) << id << ": " << error;
++            const moonmod::ModRecord *record = Record(id);
++            const bool live = !record->restart_required;
++            const std::string reason = record->restart_reason;
++            if (live) {
++                EXPECT_EQ(record->state, moonmod::ModState::Disabled) << id;
++                EXPECT_TRUE(record->restart_reason.empty()) << id;
++            } else {
++                EXPECT_EQ(record->state, moonmod::ModState::Loaded) << id;
++                EXPECT_FALSE(record->restart_reason.empty()) << id << " waits without saying why";
++                // The mod's page has two lines for it, 320 wide in small text.
++                const std::string shown = "Off after a restart: " + reason;
++                EXPECT_LE(dc::ui::WrapText(shown, 320, dc::ui::metrics::kScaleSmall).size(), 2u) << shown;
++            }
++            for (int frame = 0; frame < 10; ++frame) moonmod::SharedRuntime().Pump();
++            all_others_running(id);
++            ASSERT_TRUE(moonmod::SharedRuntime().SetEnabled(id, true, error)) << id << ": " << error;
++            EXPECT_FALSE(Record(id)->restart_required) << id << ": " << Record(id)->restart_reason;
++            EXPECT_EQ(Record(id)->state, moonmod::ModState::Loaded) << id << ": " << Record(id)->status_message;
++            for (int frame = 0; frame < 10; ++frame) moonmod::SharedRuntime().Pump();
++            std::printf("  %-26s %s\n", id.c_str(), live ? "live" : ("restart: " + reason).c_str());
++            for (std::size_t i = logged; i < logs.size(); ++i) {
++                EXPECT_EQ(logs[i].rfind("error", 0), std::string::npos) << "switching " << id << ": " << logs[i];
++            }
++        }
++    };
++    sweep("title screen");
++    // the Gauntlet's title row is still there after all that
++    std::vector<std::string> modes;
++    for (const moonmod::TitleMode &title : moonmod::TitleModes()) modes.push_back(title.id);
++    EXPECT_NE(std::ranges::find(modes, "moonmod.roguelike:gauntlet"), modes.end());
++
++    moonmod::SharedRuntime().Publish("game.session.started", moonmod::Json::object());
++    for (int frame = 0; frame < 10; ++frame) moonmod::SharedRuntime().Pump();
++    sweep("in a session");
++    moonmod::SharedRuntime().Publish("game.session.ended", moonmod::Json::object());
++    EXPECT_EQ(moonmod::SharedRuntime().ModList().size(), 13u);
++}
 diff --git a/port/src/tests/moonmod_render_api_test.cpp b/port/src/tests/moonmod_render_api_test.cpp
 new file mode 100644
 index 00000000..09896c74

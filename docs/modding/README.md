@@ -18,6 +18,7 @@ When a page says "the Gauntlet does it this way", the code is there to read.
 | Do something the API can't do yet | [Extending the engine](EXTENDING_THE_ENGINE.md) |
 | Plan for the button-prompt scenes or fishing | [Event battles and fishing](EVENT_BATTLES_AND_FISHING.md) |
 | Check that your mod works, outside and inside the game | [Testing mods](TESTING.md) |
+| Ship several mods as one pack, or know when a switch applies at once | [Packs and live on/off](PACKS.md) |
 | Understand how Dark Cloud's own code behaves (units, floors, triggers, saves) | [Dark Cloud engine notes](DARK_CLOUD_NOTES.md) |
 | Look up an exact operation, field or event | [API map](../API.md) |
 | Give a character a new animated move | [Animation guide](../ANIMATION_GUIDE.md) |
@@ -28,7 +29,9 @@ When a page says "the Gauntlet does it this way", the code is there to read.
 
 **A mod is a folder.** It holds `mod.json` (identity, permissions, settings), a Lua entry script, and any resources the
 mod ships (PNGs, model packs, motion files, sounds). The folder is named after the mod's id, for example
-`author.my-mod`. Players drop it into the game's `mods` folder and switch it on in the Mod Manager.
+`author.my-mod`. Players drop it into the game's `mods` folder and switch it on in the Mod Manager. The switch
+works at once for most mods; one that adds content the game keeps (items, characters, floors) waits for a restart.
+Several mods can also ship as one merged pack, one folder with one switch ([Packs](PACKS.md)).
 
 **Each mod runs in its own Lua sandbox.** There is no `io`, `os`, `debug` or `package`. Each mod has a memory ceiling
 and an instruction budget per callback. A mod that throws an error is switched off on its own, and the other mods keep

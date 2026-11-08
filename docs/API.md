@@ -9,7 +9,8 @@ The first runtime slice implements the marked surfaces:
 | Namespace | Intended surface | First slice |
 | --- | --- | --- |
 | `moonmod.log(level, message)` | Structured per-mod logs and in-game diagnostics | Implemented |
-| `moonmod.on(event, callback)` | Event subscription with an isolated Lua callback budget | Implemented: `runtime.loaded`, `runtime.unloaded`, `game.tick` |
+| `moonmod.on(event, callback)` | Event subscription with an isolated Lua callback budget | Implemented: `runtime.loaded` (`live = true` when the mod was switched on mid-run), `runtime.unloaded`, `game.tick` |
+| `moonmod.part.run/enabled/list` | A merged pack's script hands over each part (a mod of its own inside the pack) | Implemented; only in a pack (`parts` in `mod.json`). See [Packs and live on/off](modding/PACKS.md) |
 | `game.events.list/subscribe/unsubscribe` | Discover verified event names per game and subscribe with owner-scoped tokens | Implemented in the shared runtime; the list includes short descriptions and omits game-specific events from the other port |
 | `moonmod.game` | Game id, framework API version, and capability queries | Implemented: id and API major |
 | `game.info.get()` | Game id and name, API major, the calling mod's id, and today's `date` `{year, month, day}` | Implemented; the date is the UTC calendar day, the same for every player, for daily seeds (Chronicle; the Lua sandbox has no `os`) |
@@ -36,7 +37,7 @@ The first runtime slice implements the marked surfaces:
 | `moonmod.api.supports(path)` | Query an operation by canonical path, returning support and reason | Implemented |
 | `moonmod.api.call(path, ...)` | Call a catalogued operation by canonical path | Implemented |
 
-Scripts run in separate Lua states. They receive the standard base, table, string, math, and UTF-8 libraries. File, process, dynamic module, bytecode loading, debug, and unrestricted garbage-collector APIs are withheld. Each state has an allocator ceiling and callback instruction budget. A failure is reported against the owning mod and does not unwind into the game.
+Scripts run in separate Lua states (a merged pack's parts share the pack's, each as its own owner). They receive the standard base, table, string, math, and UTF-8 libraries. File, process, dynamic module, bytecode loading, debug, and unrestricted garbage-collector APIs are withheld. Each state has an allocator ceiling and callback instruction budget. A failure is reported against the owning mod and does not unwind into the game.
 
 ### Shared save migrations
 
@@ -2121,7 +2122,7 @@ local world = assert(game.world.get())
 print(world.context, world.map_id, world.dungeon_id, world.floor_id)
 ```
 
-`world.get()` reports native area/map identifiers, active game context, the native adventure `day`, and the native world-time cycle. Chronicle identifies dungeon scenes from the active game mode, then reports the native dungeon and floor even when the dungeon belongs to an overworld region. During an active dungeon, Chronicle also reports `room_count`, `floor_seed`, `back_floor`, and the active additive `room_bonus_percent`, `monster_bonus_percent`, and `chest_bonus_percent`. `day` is Chronicle's saved adventure-day counter and is available to mods that need stable daily rotations. `dungeon_id` and `floor_id` are `nil` outside an active dungeon; `sub_map_id` is available in ChronicleTwo. These are the games' native identifiers, so mods should keep them as data and resolve stable mod content ids through the corresponding registration API.
+`world.get()` reports native area/map identifiers, active game context, the native adventure `day`, and the native world-time cycle. Chronicle identifies dungeon scenes from the active game mode, then reports the native dungeon and floor even when the dungeon belongs to an overworld region. During an active dungeon, Chronicle also reports `room_count`, `floor_seed`, `walking` (playing on the floor, not loading it or in a menu), `back_floor`, and the active additive `room_bonus_percent`, `monster_bonus_percent`, and `chest_bonus_percent`. `day` is Chronicle's saved adventure-day counter and is available to mods that need stable daily rotations. `dungeon_id` and `floor_id` are `nil` outside an active dungeon; `sub_map_id` is available in ChronicleTwo. These are the games' native identifiers, so mods should keep them as data and resolve stable mod content ids through the corresponding registration API.
 
 ```lua
 local world = assert(game.world.get())
@@ -2541,7 +2542,7 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   dungeon frame and let go out of the dungeon (the slot is kept for the next floor). `world.avatar_clear({slot})`
   takes one away, `world.avatar_clear()` every one. `player.get()` reports the `motion` the hero plays, and in a town,
   walking, its `position`, `heading`, `motion` and `town_character` (the hero it walks as, `party.town_set_active`).
-  `world.get()` in a town reports `walking` too. `name` (24
+  `world.get()` in a town reports `walking` too, and on a dungeon floor `walking` is true only while the player plays there (false while the floor loads, when its `floor_id` and `floor_seed` aren't settled yet, and in a menu or a scene). `name` (24
   bytes at most) is drawn over the hero's head, in blue for a tinted one, fading out toward where monsters stop being
   drawn.
 
@@ -2595,8 +2596,9 @@ game.mods.settings_overlay({id = "moonmod.roguelike", values = {companion = true
 game.mods.settings_overlay_clear({})                                              -- every mod's, or {id = ...}
 ```
 
-- `mods.list()` (`game.read`) gives `{mods = {{id, name, version, author, coop}}}`: the Lua mods loaded this session,
-  in load order. A mod enabled in the Mod Manager since the game started is not listed until the next launch.
+- `mods.list()` (`game.read`) gives `{mods = {{id, name, version, author, coop}}}`: the Lua mods running now, in
+  load order, a merged pack's running parts right after the pack (each with its own version and role). A mod switched
+  on or off live is listed, or not, at once; one whose change waits for a restart keeps its current state.
 - `coop` comes from the mod's manifest key of that name: `"required"` (the default when the key is absent) every
   player in an online room has the mod at the host's version and plays with the host's settings; `"host_only"` only
   the host needs it (a mod whose state lives in the host's save, such as Randomizer and Living Towns); `"local"` each
@@ -2618,6 +2620,32 @@ game.mods.settings_overlay_clear({})                                            
 Online Co-op uses these to make every game in a room play the same mods with the host's settings: see
 `docs/COOP_PLAN.md`, "The room's mods".
 
+
+## Merged packs and live on/off (both games)
+
+A **merged pack** is one mod whose script holds several mods, its *parts* (`"parts"` in `mod.json`, up to 64). The
+script hands each part over with `moonmod.part.run(id, source, globals, name)` (the part's script as source, compiled
+as a chunk of its own, so errors name the part's file and line) or `moonmod.part.run(id, fn)`; the engine runs the
+part only when it is on, as the part's own owner: the part's id, settings (`moonmod.settings.get`), saved data (`moonmod/data/<part id>/`), events,
+and everything it registers are its own, as when it was a separate mod. `moonmod.part.enabled(id)` and
+`moonmod.part.list()` (`{id, enabled, running}`) read the state. Parts are records of their own in the Mod Manager
+(listed under the pack), in `mods.list`, `mods.settings_get` and to other mods' `dependencies` and
+`scripts.call_function`. A pack's switch turns its parts on and off with it; each part's own switch is kept apart
+(the profile's `parts`, under the pack), so the pack's switch never overwrites it. While a pack is on, a part stands
+in for a separate mod of the same id; when it goes off, that mod is itself again and starts at once if it is on. The memory ceiling and per-event handler limit grow with the number of parts, each
+part's load has its own instruction budget, a script may be 4 MiB and `mod.json` 1 MiB.
+
+**Live on/off.** Switching a mod or part in the Mod Manager applies at once when the engine can undo it: the mod
+starts (`runtime.loaded` with `live = true`) or stops (`runtime.unloaded`, then its owned state is released). It
+waits for a restart, with the reason in the Mod Manager, when the mod has native code, a running mod depends on it, a
+dependency isn't running, or it touches content the game keeps: `items.register`, `weapons.register`,
+`weapons.build_up_register`, `characters.register`, `characters.register_playable`, `dungeons.register`,
+`world.register_dungeon`, `georama.register`, `locations.register`, `content.register`, `models.register`,
+`animations.register`, `animations.player_register`, `animations.monster_register`, `inventions.register`,
+`combat.styles_register`. A mod that called one of those this run turns off only with a restart; one whose script
+names one turns on mid-game only from the title screen (no game session running). A running package whose `mod.json`
+or entry script changes on disk is reloaded within about two seconds when it could be switched off and on live.
+Details and the MoonMod Pack's builder: [Packs and live on/off](modding/PACKS.md).
 ## Permissions and ownership
 
 Permissions are declared in `mod.json` and checked by the runtime for each operation: `game.read`, `game.write`, `content.register`, and `scripts.override` cover game adapters; `debug.inspect` gates diagnostics; `storage.read` and `storage.write` cover per-mod storage. Enabling a local package enables its declared Lua permissions. A package that declares `native.extension` also needs a package-relative native library and a separate local trust confirmation before that library loads. Lua does not get direct filesystem, process, network, native code, or arbitrary memory access. `storage.*` is sandboxed to a fixed JSON file under that mod's user-data directory. `net.session` lets a mod play online through `net.*`: it talks only to the co-op relay, in text messages to the other players in its room, never to an address of its own choosing beyond a `wss://` relay. `mods.settings` lets a mod read other mods' settings and give them session-only values (`mods.*`); it never writes another mod's saved settings. Trusted native code runs in-process and is outside the Lua sandbox; see [Native SDK](NATIVE_SDK.md).

@@ -1,0 +1,1594 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.pack",
+  "name": "MoonMod Pack",
+  "version": "1.0.0",
+  "author": "Jeffiest and the MoonMod contributors",
+  "description": "The MoonMod mods in one: Autosave, Controls, Expanded Town Camera, Modern Cloud, SirFancyBacon Mod Pack, Living Towns, Dungeon+, RPG: Character Paths, Dark Genie's Gauntlet (Roguelike), Opar in the Story, Vigil, MoonMod Hub. One switch turns them all on or off; each part has its own switch and settings under the pack in the Mod Manager, and keeps its own saved progress.",
+  "framework_api": 1,
+  "games": [
+    "chronicle"
+  ],
+  "entry": "main.lua",
+  "coop": "local",
+  "permissions": [
+    "game.write",
+    "game.read",
+    "content.register",
+    "storage.read",
+    "storage.write",
+    "scripts.override"
+  ],
+  "parts": [
+    {
+      "id": "moonmod.autosave",
+      "name": "Autosave",
+      "version": "1.0.0",
+      "description": "Controls Chronicle's guarded native town autosave slot.",
+      "coop": "local",
+      "settings": [
+        {
+          "id": "enabled",
+          "name": "Enable native town autosave",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "id": "moonmod.controls",
+      "name": "Controls",
+      "version": "1.0.0",
+      "description": "Dungeon quick-item hotkeys, party shortcuts, and first-person toggle using MoonFactory input actions.",
+      "coop": "local",
+      "settings": [
+        {
+          "id": "first_person_key",
+          "name": "First-person view key",
+          "type": "choice",
+          "default": "V",
+          "choices": [
+            "V",
+            "B",
+            "N",
+            "F1",
+            "F2",
+            "F3",
+            "F4",
+            "F5"
+          ]
+        },
+        {
+          "id": "quick_1_key",
+          "name": "Quick item slot 1 key",
+          "type": "choice",
+          "default": "1",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "quick_2_key",
+          "name": "Quick item slot 2 key",
+          "type": "choice",
+          "default": "2",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "quick_3_key",
+          "name": "Quick item slot 3 key",
+          "type": "choice",
+          "default": "3",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "party_1_key",
+          "name": "Toan party key",
+          "type": "choice",
+          "default": "4",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "party_2_key",
+          "name": "Xiao party key",
+          "type": "choice",
+          "default": "5",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "party_3_key",
+          "name": "Goro party key",
+          "type": "choice",
+          "default": "6",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "party_4_key",
+          "name": "Ruby party key",
+          "type": "choice",
+          "default": "7",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "party_5_key",
+          "name": "Ungaga party key",
+          "type": "choice",
+          "default": "8",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        },
+        {
+          "id": "party_6_key",
+          "name": "Osmond party key",
+          "type": "choice",
+          "default": "9",
+          "choices": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "F1",
+            "F2",
+            "F3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "moonmod.expanded-town",
+      "name": "Expanded Town Camera",
+      "version": "1.0.0",
+      "description": "Toggle the legacy overhead camera while walking in towns.",
+      "coop": "local",
+      "settings": [
+        {
+          "id": "town_camera_key",
+          "name": "Overhead camera key",
+          "type": "choice",
+          "default": "O",
+          "choices": [
+            "O",
+            "F1",
+            "F2",
+            "F3",
+            "F4",
+            "F5"
+          ]
+        },
+        {
+          "id": "camera_height",
+          "name": "Overhead height",
+          "type": "integer",
+          "default": 90,
+          "min": 40,
+          "max": 500,
+          "step": 10
+        },
+        {
+          "id": "camera_back",
+          "name": "Camera offset",
+          "type": "integer",
+          "default": 22,
+          "min": -200,
+          "max": 200,
+          "step": 2
+        }
+      ]
+    },
+    {
+      "id": "moonmod.modern-cloud",
+      "name": "Modern Cloud",
+      "version": "1.0.1",
+      "description": "Quality of life for the story game, each part its own setting: thirst down to none, slower weapon wear, a weapon guard that warns, repairs from your Repair Powder or never lets a weapon break, the floor map and monsters shown, quicker character switches, a quicker walk, and keys 1, 2 and 3 for the quick item slots.",
+      "settings": [
+        {
+          "id": "thirst",
+          "name": "Thirst (%; 0 keeps the water gauge full)",
+          "type": "integer",
+          "default": 50,
+          "min": 0,
+          "max": 200,
+          "step": 25
+        },
+        {
+          "id": "wear",
+          "name": "Weapon wear (%)",
+          "type": "integer",
+          "default": 75,
+          "min": 25,
+          "max": 200,
+          "step": 25
+        },
+        {
+          "id": "weapon_guard",
+          "name": "Weapon guard",
+          "type": "choice",
+          "default": "Repair Powder",
+          "choices": [
+            "Off",
+            "Warn",
+            "Repair Powder",
+            "Never break"
+          ]
+        },
+        {
+          "id": "warn_at",
+          "name": "Warn when durability is below (%)",
+          "type": "integer",
+          "default": 25,
+          "min": 5,
+          "max": 50,
+          "step": 5
+        },
+        {
+          "id": "map_reveal",
+          "name": "Show the whole floor map",
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "id": "monster_reveal",
+          "name": "Show monsters on the map",
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "id": "swap_speed",
+          "name": "Character switch wait (%)",
+          "type": "integer",
+          "default": 50,
+          "min": 0,
+          "max": 100,
+          "step": 25
+        },
+        {
+          "id": "run_speed",
+          "name": "Walk speed in dungeons (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 100,
+          "max": 150,
+          "step": 5
+        },
+        {
+          "id": "quick_keys",
+          "name": "Keys 1, 2, 3 use the quick item slots",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "id": "moonmod.sirfancybacon",
+      "name": "SirFancyBacon Mod Pack",
+      "version": "0.1.0",
+      "description": "Quality-of-life ideas from SirFancyBacon's Chronicle branches (qol-pack, floor-select), as a MoonMod mod. An Auto Repair Powder in your bag saves a weapon about to break, as one in a quick slot does. T mends the active weapon with a Repair Powder from the bag. The dungeon's floor list warns, before you go in, of a floor that lets only one character in, locks your weapon, or dries you out faster. Each part has its own setting.",
+      "settings": [
+        {
+          "id": "auto_repair",
+          "name": "Auto Repair Powder works from the bag",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "repair_key",
+          "name": "T mends the weapon with a Repair Powder from the bag",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "limit_warning",
+          "name": "The floor list warns of limited floors",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "id": "moonmod.living-towns",
+      "name": "Living Towns",
+      "version": "1.0.0",
+      "description": "The towns ask things of you after their houses are rebuilt. Each day the villagers post three bounties on the board (hunt in a dungeon, open its chests, go deeper, or bring them something), sized to how far your story has gone. A villager waits by the exit gate on a bounty's floors and pays you there. And the general stores stock better goods as each new dungeon is reached.",
+      "coop": "host_only",
+      "settings": [
+        {
+          "id": "bounties",
+          "name": "Bounty board",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "bounty_count",
+          "name": "Bounties a day",
+          "type": "integer",
+          "default": 3,
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        {
+          "id": "reward",
+          "name": "Bounty rewards (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 25,
+          "max": 300,
+          "step": 25
+        },
+        {
+          "id": "villager",
+          "name": "A villager waits on a bounty's floors",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "stock",
+          "name": "Stores stock better goods as the story goes on",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "id": "moonmod.dungeon-plus",
+      "name": "Dungeon+",
+      "version": "2.1.1",
+      "description": "Champions with themed loot. Replay floors at Tiers 1-5 (Square/Triangle on the floor list), floor mutators, a bounty on every floor, kill streaks, a bestiary and trophies (Journal), enemies that get back up, and the DarkCloud-Expanded weapon, price and shop data.",
+      "settings": [
+        {
+          "id": "difficulty_preset",
+          "name": "Difficulty preset",
+          "type": "choice",
+          "default": "normal",
+          "choices": [
+            "relaxed",
+            "normal",
+            "hardcore"
+          ]
+        },
+        {
+          "id": "champion_chance",
+          "name": "Champion chance per enemy (%)",
+          "type": "integer",
+          "default": 8,
+          "min": 0,
+          "max": 50,
+          "step": 1
+        },
+        {
+          "id": "mutator_chance",
+          "name": "Floor mutator chance (%)",
+          "type": "integer",
+          "default": 35,
+          "min": 0,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "tier_hp_percent",
+          "name": "Enemy HP per tier (%)",
+          "type": "integer",
+          "default": 35,
+          "min": 0,
+          "max": 200,
+          "step": 5
+        },
+        {
+          "id": "tier_defense",
+          "name": "Enemy defense per tier",
+          "type": "integer",
+          "default": 2,
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        {
+          "id": "tier_gilda_percent",
+          "name": "Enemy Gilda per tier (%)",
+          "type": "integer",
+          "default": 40,
+          "min": 0,
+          "max": 300,
+          "step": 10
+        },
+        {
+          "id": "bounty_kills",
+          "name": "Kills needed for a floor bounty",
+          "type": "integer",
+          "default": 6,
+          "min": 1,
+          "max": 20,
+          "step": 1
+        },
+        {
+          "id": "bounty_reward_percent",
+          "name": "Floor bounty reward (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 0,
+          "max": 300,
+          "step": 10
+        },
+        {
+          "id": "feats_reward_scale",
+          "name": "Dungeon Feats reward scale (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 0,
+          "max": 300,
+          "step": 25
+        },
+        {
+          "id": "enemy_base_speed_percent",
+          "name": "Enemy base speed (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 60,
+          "max": 200,
+          "step": 5
+        },
+        {
+          "id": "enemy_speed_variance",
+          "name": "Enemy speed variance (%)",
+          "type": "integer",
+          "default": 25,
+          "min": 0,
+          "max": 50,
+          "step": 5
+        },
+        {
+          "id": "monsters_per_room_min",
+          "name": "Min monsters / room (%)",
+          "type": "integer",
+          "default": 150,
+          "min": 0,
+          "max": 300,
+          "step": 25
+        },
+        {
+          "id": "monsters_per_room_max",
+          "name": "Max monsters / room (%)",
+          "type": "integer",
+          "default": 300,
+          "min": 0,
+          "max": 300,
+          "step": 25
+        },
+        {
+          "id": "chests_per_room_min",
+          "name": "Min chests / room (%)",
+          "type": "integer",
+          "default": 75,
+          "min": 0,
+          "max": 150,
+          "step": 25
+        },
+        {
+          "id": "chests_per_room_max",
+          "name": "Max chests / room (%)",
+          "type": "integer",
+          "default": 150,
+          "min": 0,
+          "max": 150,
+          "step": 25
+        },
+        {
+          "id": "enemy_revive_chance",
+          "name": "Enemy get-back-up chance (%)",
+          "type": "integer",
+          "default": 25,
+          "min": 0,
+          "max": 100,
+          "step": 5
+        }
+      ]
+    },
+    {
+      "id": "moonmod.rpg",
+      "name": "RPG: Character Paths",
+      "version": "2.0.1",
+      "description": "A real character build for every hero. Kills give XP, levels give HP, damage, toughness and skill points. Each of the six heroes spends them on three paths of their own in the Journal's Character page, each path ending in a power: Toan's Swordsman, Survivor and Explorer, Xiao's Hunter, Nimble and Forager, Goro's Might, Stone and Appetite, Ruby's Arcana, Grace and Fortune, Ungaga's Spearman, Shaman and Champion, Osmond's Gunner, Armor and Surveyor. Weapon mastery, loot rolls and the DarkCloud-Expanded weapon abilities stay.",
+      "settings": [
+        {
+          "id": "xp_rate",
+          "name": "XP rate (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 25,
+          "max": 300,
+          "step": 25
+        },
+        {
+          "id": "xp_toasts",
+          "name": "Show +XP after each kill",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "weapon_loot_rolls",
+          "name": "Weapons you pick up can roll bonus stats",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "sword_dance_radius",
+          "name": "Radius of area powers",
+          "type": "integer",
+          "default": 180,
+          "min": 100,
+          "max": 400,
+          "step": 20
+        },
+        {
+          "id": "sword_dance_key",
+          "name": "First power keyboard key (L2+Square)",
+          "type": "choice",
+          "default": "F4",
+          "choices": [
+            "F4",
+            "F5",
+            "F6",
+            "F7",
+            "F8",
+            "F9",
+            "Z",
+            "X",
+            "C"
+          ]
+        },
+        {
+          "id": "second_wind_key",
+          "name": "Second power keyboard key (L2+Triangle)",
+          "type": "choice",
+          "default": "F5",
+          "choices": [
+            "F4",
+            "F5",
+            "F6",
+            "F7",
+            "F8",
+            "F9",
+            "Z",
+            "X",
+            "C"
+          ]
+        },
+        {
+          "id": "battle_cry_key",
+          "name": "Third power keyboard key (L2+Circle)",
+          "type": "choice",
+          "default": "F6",
+          "choices": [
+            "F4",
+            "F5",
+            "F6",
+            "F7",
+            "F8",
+            "F9",
+            "Z",
+            "X",
+            "C"
+          ]
+        }
+      ],
+      "optional_dependencies": [
+        "moonmod.dungeon-plus"
+      ]
+    },
+    {
+      "id": "moonmod.roguelike",
+      "name": "Dark Genie's Gauntlet (Roguelike)",
+      "version": "0.3.0",
+      "description": "A roguelike game mode on the title menu. Dark Genie's Gauntlet has its own title screen and its own progress: Start Run begins a fresh game that belongs to no save file and drops you onto the first floor of a forward-only run through five biomes, three floors and a Warden each. Cursed Gates, fast ABS, one weapon each (a broken one ends the run), an in-run Diorama, drafted allies and Moon Shards for the Norune Eternal unlocks. Needs the MoonFactory engine with title modes.",
+      "settings": [
+        {
+          "id": "biome_count",
+          "name": "Biomes per run",
+          "type": "integer",
+          "default": 5,
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "description": "Divine Beast Cave, Wise Owl Forest, Shipwreck, Sun and Moon Temple and Moon Sea, in that order."
+        },
+        {
+          "id": "biome_shuffle",
+          "name": "Shuffle biome order",
+          "type": "boolean",
+          "default": false,
+          "description": "Biomes come in a random order; a late biome rolled early has its enemies and their hits scaled down."
+        },
+        {
+          "id": "starter_kit",
+          "name": "Starter kit (food, water, repair)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "abs_rate",
+          "name": "Weapon ABS multiplier",
+          "type": "integer",
+          "default": 6,
+          "min": 1,
+          "max": 12,
+          "step": 1
+        },
+        {
+          "id": "ally_abs_share",
+          "name": "Benched allies' ABS share (%)",
+          "type": "integer",
+          "default": 50,
+          "min": 0,
+          "max": 100,
+          "step": 10
+        },
+        {
+          "id": "depth_hp",
+          "name": "Enemy HP per floor of depth (%)",
+          "type": "integer",
+          "default": 6,
+          "min": 0,
+          "max": 40,
+          "step": 2
+        },
+        {
+          "id": "floor_shuffle",
+          "name": "Shuffled floors: after 1-1 each floor is in a random dungeon",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "new_moves",
+          "name": "New moves",
+          "type": "boolean",
+          "default": true,
+          "description": "New animated attacks, an L2 evade and combos. Toan: Dash Slash, Spinning Sweep, Counter Slash, roll and backstep. Xiao: Triple Shot, tumble and hop shot. Goro and Ungaga get a melee set, Ruby and Osmond a set of shots. R2 is a heavy attack; A,A,R2 and A,A,A,R2 are finishers; locked on, toward or away + A lunge in or strike backing off; A out of an evade follows it up. The evades also cut an attack short once its blow lands."
+        },
+        {
+          "id": "loot_rarity",
+          "name": "Weapon rarity, touches and legendaries",
+          "type": "boolean",
+          "default": true,
+          "description": "Found weapons roll Common to Legendary: stronger stats, a coloured name and glow, and touches such as Vampire, Poison or Thunder Chain."
+        },
+        {
+          "id": "boss_wardens",
+          "name": "Chance a Warden is the dungeon's own boss (%)",
+          "type": "integer",
+          "default": 50,
+          "min": 0,
+          "max": 100,
+          "step": 10,
+          "description": "Dran, Master Utan, the Ice Queen, King's Curse or Minotaur Joe, each with its own cast; otherwise the floor's toughest monster grows into the Warden."
+        },
+        {
+          "id": "confluence",
+          "name": "The Confluence: each floor runs through several dungeons, a new one past each gate",
+          "type": "boolean",
+          "default": true,
+          "description": "A floor before a Warden starts in its own dungeon; past each locked gate the next dungeon takes over, with its own rooms, spring and monsters, a step lower. The Rest floor, the Wardens and the Lair stay one dungeon."
+        },
+        {
+          "id": "one_map",
+          "name": "One map per biome: its floors are zones of one map",
+          "type": "boolean",
+          "default": true,
+          "description": "With the Confluence on, a biome's floors before its Warden are one map: each floor is a zone in a dungeon of its own, past a locked gate, and walking through a gate is the next floor. The last zone's exit gate leads to the Warden. Takes the place of shuffled floors."
+        },
+        {
+          "id": "one_map_run",
+          "name": "One map for the whole run",
+          "type": "boolean",
+          "default": true,
+          "description": "With One map per biome on, the whole run is one map: every biome's floors, then its Warden's hall (the way on stays shut until the Warden falls), a Rest stop with a healing spring and Gaffer, on to the next biome, and the Genie's Lair at the very end. No Vaults or Cursed Path on it."
+        },
+        {
+          "id": "confluence_zones",
+          "name": "The Confluence: dungeons a floor runs through",
+          "type": "integer",
+          "default": 3,
+          "min": 2,
+          "max": 4
+        },
+        {
+          "id": "genie_finale",
+          "name": "Finale: the Genie's Lair after the last Warden",
+          "type": "boolean",
+          "default": true,
+          "description": "One more floor after the last biome's Warden. The Dark Genie fights there in his pink form and his dark elemental form: one after the other in either order, or both at once, each with a random share of its spells. Beating him wins the run."
+        },
+        {
+          "id": "rest_rooms",
+          "name": "Rest floor between biomes",
+          "type": "boolean",
+          "default": true,
+          "description": "After each Warden but the last: a hall with a healing spring and Gaffer's shop, then two ways on. The exit gate leads to the next biome as usual; the stairs in the side room take the Cursed Path, where every floor of that biome before its Warden is cursed (richer chests, a Miracle cache each, and a Warden that pays out twice)."
+        },
+        {
+          "id": "roaming_bosses",
+          "name": "Chance a floor has a boss roaming it (%)",
+          "type": "integer",
+          "default": 25,
+          "min": 0,
+          "max": 100,
+          "step": 5,
+          "description": "One of the dungeons' bosses, with its cast, as a regular monster: smaller, with a modest HP pool. Never on a Warden floor."
+        },
+        {
+          "id": "warden_hp_scale",
+          "name": "Warden HP (percent of the boss table: x10, x20, x35, x60, x100 by biome)",
+          "type": "integer",
+          "default": 100,
+          "min": 25,
+          "max": 200,
+          "step": 25
+        },
+        {
+          "id": "curse_hp",
+          "name": "Cursed floor enemy HP (%)",
+          "type": "integer",
+          "default": 160,
+          "min": 100,
+          "max": 300,
+          "step": 10
+        },
+        {
+          "id": "preroll_weapons",
+          "name": "Found weapons arrive pre-leveled",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "enforce_draft",
+          "name": "Only drafted allies may fight",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "move_tips",
+          "name": "Move tips: each character's controls when they join a run",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "square_map",
+          "name": "Square map: the corner map scrolls around you, as in Vigil",
+          "type": "boolean",
+          "default": true,
+          "description": "Off: the game's own corner map, the whole floor at once."
+        },
+        {
+          "id": "map_screen",
+          "name": "Map screen: Select, L3 or M shows the whole floor",
+          "type": "boolean",
+          "default": true,
+          "description": "As far as you've seen it (all of it with a Lamp), with you on it. Triangle puts a waypoint, which the corner map flags too. L1+Select still curses the next floor."
+        },
+        {
+          "id": "curse_key",
+          "name": "Cursed Gate toggle key",
+          "type": "choice",
+          "default": "G",
+          "choices": [
+            "G",
+            "H",
+            "U",
+            "F7",
+            "F8",
+            "F9"
+          ]
+        },
+        {
+          "id": "opar",
+          "name": "Opar joins the roster (in development)",
+          "type": "boolean",
+          "default": false,
+          "description": "A seventh hero for new runs: Opar, the frog mage, with his own staffs, moves and voice. He can be drafted or chosen as the starting character. Without this setting, he joins once his star in Norune Eternal's Allies is bought (it rises when a run beats the Moon Sea Warden). Runs only: he is never written to a save."
+        },
+        {
+          "id": "seda",
+          "name": "Seda joins the roster (needs his pack)",
+          "type": "boolean",
+          "default": false,
+          "description": "An eighth hero for new runs: Seda, the swordsman of four hundred years ago, fighting with Toan's swords. He needs his model, built from art/seda into resources/seda/c08d.chr, and Opar's roster (the Opar setting or his star), since a run's party reaches him only past Opar. Runs only."
+        },
+        {
+          "id": "companion",
+          "name": "Companion: a drafted ally fights beside you",
+          "type": "boolean",
+          "default": false,
+          "description": "Needs the Eternal tree's Companion. Off: drafted allies wait on the bench until you switch to them."
+        },
+        {
+          "id": "journal_page",
+          "name": "Also show the run on Journal > Character (Start opens the run menu)",
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "optional_dependencies": [
+        "moonmod.dungeon-plus",
+        "moonmod.rpg"
+      ]
+    },
+    {
+      "id": "moonmod.opar",
+      "name": "Opar in the Story",
+      "version": "0.1.0",
+      "description": "Opar, the frog mage, joins the story with Xiao. Baby Opar's Atla lies on the Divine Beast Cave's 8th floor, beside the cat's. Found, he waits in Toan's house beside the cat; in her scene he turns into Opar, and both join. Needs the MoonFactory engine with registered playable characters and mod Atla.",
+      "optional_dependencies": [
+        "moonmod.roguelike"
+      ]
+    },
+    {
+      "id": "moonmod.vigil",
+      "name": "Vigil",
+      "version": "0.1.1",
+      "description": "Souls-lite combat for the story game, first prototype (S1). L2 evades (a roll, or a backstep at rest) spend the weapon gauge, so stamina gates them. Enemies hit harder, and a hit stuns you for less time and so protects you for less. Toan gains a heavy attack, combo finishers and lunges. Enemies with a brain circle you, track you through a wind-up, feint, punish a whiffed swing and take turns attacking. Holding the guard slows the gauge's recovery. See VIGIL_PLAN.md.",
+      "settings": [
+        {
+          "id": "evades",
+          "name": "L2 evades (roll and backstep)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "run_cost",
+          "name": "Hold L2 to run: gauge it drains a second (0 = no run; a tap still evades)",
+          "type": "integer",
+          "default": 20,
+          "min": 0,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "lightness",
+          "name": "Lightness and Stamina: Speed sets a swing's cost; each hero refills at their own rate",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "toan_attacks",
+          "name": "Toan's attacks (heavy, finishers, lunge, counters)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "enemy_brain",
+          "name": "Enemies fight smarter (circle, feint, block, punish; one attacks at a time)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "evade_cost",
+          "name": "Evade cost (weapon gauge, of 100)",
+          "type": "integer",
+          "default": 35,
+          "min": 0,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "evade_cooldown",
+          "name": "Evade cooldown (frames)",
+          "type": "integer",
+          "default": 30,
+          "min": 0,
+          "max": 120,
+          "step": 2
+        },
+        {
+          "id": "evade_commit",
+          "name": "Frames after a blow before an evade can cut the swing",
+          "type": "integer",
+          "default": 6,
+          "min": 0,
+          "max": 60,
+          "step": 1
+        },
+        {
+          "id": "enemy_damage",
+          "name": "Enemy damage (%)",
+          "type": "integer",
+          "default": 250,
+          "min": 100,
+          "max": 500,
+          "step": 25
+        },
+        {
+          "id": "recoil",
+          "name": "Hit stun and its protection (% of normal)",
+          "type": "integer",
+          "default": 40,
+          "min": 25,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "gauge_refill",
+          "name": "Weapon gauge recovery (%)",
+          "type": "integer",
+          "default": 100,
+          "min": 25,
+          "max": 200,
+          "step": 5
+        },
+        {
+          "id": "guard_refill",
+          "name": "Gauge recovery while guarding (% of normal)",
+          "type": "integer",
+          "default": 25,
+          "min": 25,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "guard_key",
+          "name": "Keyboard key you guard with (R1), if any",
+          "type": "choice",
+          "default": "None",
+          "choices": [
+            "None",
+            "Q",
+            "E",
+            "R",
+            "F",
+            "C",
+            "V",
+            "Left Shift",
+            "Right Shift",
+            "Mouse2"
+          ]
+        },
+        {
+          "id": "guard_rules",
+          "name": "Souls guard: front only, costs gauge, breaks, parries",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "guard_arc",
+          "name": "Guard covers this many degrees in front",
+          "type": "integer",
+          "default": 120,
+          "min": 60,
+          "max": 360,
+          "step": 30
+        },
+        {
+          "id": "guard_cost",
+          "name": "Gauge a blocked hit costs, at least",
+          "type": "integer",
+          "default": 10,
+          "min": 0,
+          "max": 50,
+          "step": 5
+        },
+        {
+          "id": "guard_cost_per_damage",
+          "name": "Gauge a blocked hit costs per 100 damage it stops",
+          "type": "integer",
+          "default": 150,
+          "min": 0,
+          "max": 400,
+          "step": 25
+        },
+        {
+          "id": "guard_chip",
+          "name": "Damage that gets through a block (%)",
+          "type": "integer",
+          "default": 15,
+          "min": 0,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "parry_frames",
+          "name": "Parry window after R1 (frames, 0 = no parry)",
+          "type": "integer",
+          "default": 6,
+          "min": 0,
+          "max": 20,
+          "step": 1
+        },
+        {
+          "id": "guard_without_lock",
+          "name": "R1 guards without a lock-on",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "gauge_rules",
+          "name": "Souls stamina: hits drain the gauge, the first swing costs",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "hit_drain",
+          "name": "Gauge a hit that lands takes",
+          "type": "integer",
+          "default": 15,
+          "min": 0,
+          "max": 50,
+          "step": 5
+        },
+        {
+          "id": "first_swing_cost",
+          "name": "Gauge the first swing of a combo costs",
+          "type": "integer",
+          "default": 25,
+          "min": 0,
+          "max": 50,
+          "step": 5
+        },
+        {
+          "id": "min_to_swing",
+          "name": "Gauge you need to start a combo",
+          "type": "integer",
+          "default": 10,
+          "min": 0,
+          "max": 50,
+          "step": 5
+        },
+        {
+          "id": "refill_delay",
+          "name": "Frames the gauge waits after a spend before refilling",
+          "type": "integer",
+          "default": 36,
+          "min": 0,
+          "max": 120,
+          "step": 6
+        },
+        {
+          "id": "exhausted",
+          "name": "Exhausted: swing damage on an empty gauge, for 1.5 s (%; 100 = off)",
+          "type": "integer",
+          "default": 30,
+          "min": 10,
+          "max": 100,
+          "step": 10
+        },
+        {
+          "id": "riposte",
+          "name": "Riposte: your next blow on a parried enemy within 2 s (%)",
+          "type": "integer",
+          "default": 300,
+          "min": 100,
+          "max": 500,
+          "step": 50
+        },
+        {
+          "id": "flask",
+          "name": "The flask: D-pad Down drinks and heals; a hit spills it; refilled at shrines and in town",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "flask_charges",
+          "name": "Flask charges (Flask Shards from chests add up to 7 more)",
+          "type": "integer",
+          "default": 3,
+          "min": 1,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "id": "flask_heal",
+          "name": "A drink heals (% of max HP)",
+          "type": "integer",
+          "default": 40,
+          "min": 10,
+          "max": 100,
+          "step": 5
+        },
+        {
+          "id": "flask_key",
+          "name": "Keyboard key that drinks from the flask, if any",
+          "type": "choice",
+          "default": "None",
+          "choices": [
+            "None",
+            "Q",
+            "E",
+            "R",
+            "F",
+            "C",
+            "V",
+            "Left Shift",
+            "Right Shift",
+            "Mouse3"
+          ]
+        },
+        {
+          "id": "heal_lock",
+          "name": "No healing items this near an enemy, with the flask (0 = never; a cell is 160)",
+          "type": "integer",
+          "default": 240,
+          "min": 0,
+          "max": 400,
+          "step": 40
+        },
+        {
+          "id": "arts",
+          "name": "Weapon arts: guard (R1) + R2 plays the weapon's art (Toan)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "art_level",
+          "name": "Weapon level an art unlocks at",
+          "type": "integer",
+          "default": 3,
+          "min": 1,
+          "max": 20,
+          "step": 1
+        },
+        {
+          "id": "criticals",
+          "name": "Criticals: attack at an enemy's back, or at one you parried or staggered, to stab it (Toan)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "critical",
+          "name": "Critical damage (%)",
+          "type": "integer",
+          "default": 300,
+          "min": 100,
+          "max": 600,
+          "step": 50
+        },
+        {
+          "id": "poise",
+          "name": "Enemy poise: blows an enemy shrugs off before it flinches (0 = flinch at every hit)",
+          "type": "integer",
+          "default": 2,
+          "min": 0,
+          "max": 6,
+          "step": 1
+        },
+        {
+          "id": "stagger",
+          "name": "Stagger when an enemy's poise breaks (frames)",
+          "type": "integer",
+          "default": 40,
+          "min": 0,
+          "max": 120,
+          "step": 10
+        },
+        {
+          "id": "target_bar",
+          "name": "Target bar: the locked enemy's life, a trail of what a blow took, and its poise underneath",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "swap_delay",
+          "name": "Character switch wait (%)",
+          "type": "integer",
+          "default": 200,
+          "min": 0,
+          "max": 400,
+          "step": 25
+        },
+        {
+          "id": "no_power_up",
+          "name": "Enemies can't hand you the Stamina power-up",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "vigil_sky",
+          "name": "Vigil sky: a shrine's Level up opens a sky of upgrades, Keystones bought with Embers",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "loot_rarity",
+          "name": "Weapon rarity: found weapons roll Common to Legendary, with touches and legendaries",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "loot_tier",
+          "name": "Tests only: found weapons always roll this tier (0 = rolled)",
+          "type": "integer",
+          "default": 0,
+          "min": 0,
+          "max": 5
+        },
+        {
+          "id": "gear",
+          "name": "Gear: hats, tunics, gloves and boots drop in dungeons; the item page has an Equipment tab",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "charm_slot",
+          "name": "Charm slot beside the shield: an amulet in it guards without taking a quick slot",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "same_floors",
+          "name": "The same floors every visit (each floor keeps its layout in your save)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "world_zones",
+          "name": "Vigil World: each dungeon one big map (new games, and saves still on a first floor)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "world_regions",
+          "name": "Vigil World preview: each dungeon is one map before its midway boss and one after",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "world_map",
+          "name": "Map screen (Select or L3, M on keys): what you've seen, a waypoint, shrine travel from town",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "world_scaling",
+          "name": "Vigil World preview: monsters scale with depth, and with you, so no zone becomes trivial",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "scaling_gap",
+          "name": "Floor scaling: how many levels below you an outgrown zone's monsters stay",
+          "type": "integer",
+          "default": 2,
+          "min": 0,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "id": "no_minimap",
+          "name": "No minimap",
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "id": "lock_flick",
+          "name": "Lock-on: flick the right stick to move the lock to the next enemy",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "lock_sight",
+          "name": "Lock-on: the lock drops when a wall hides the target",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "soft_lock",
+          "name": "Soft lock: a swing turns to the nearest enemy within this many degrees (0 off)",
+          "type": "integer",
+          "default": 35,
+          "min": 0,
+          "max": 90,
+          "step": 5
+        },
+        {
+          "id": "boss_phase",
+          "name": "Story bosses: an entrance card, a bottom bar and a second phase at half life",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "elites",
+          "name": "Named elites: one titled foe on each floor, with a drop",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "elite_strength",
+          "name": "Named elites: their life, in percent of an ordinary monster's",
+          "type": "integer",
+          "default": 300,
+          "min": 150,
+          "max": 800,
+          "step": 50
+        },
+        {
+          "id": "ng_plus",
+          "name": "NG+: the Dark Genie's fall readies a new, harder cycle at the shrines",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "you_died",
+          "name": "YOU DIED: a card as the party falls",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "ambushes",
+          "name": "Ambushes: in some zones monsters drop in around you a moment after you walk in",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "ambush_size",
+          "name": "Ambushes: how many monsters drop in",
+          "type": "integer",
+          "default": 3,
+          "min": 1,
+          "max": 6,
+          "step": 1
+        },
+        {
+          "id": "notes",
+          "name": "Notes by the shrines: a warning or a line of lore the first time you reach one",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "messages",
+          "name": "Messages: leave and rate players' messages at shrines (shared through your messages folder)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "shortcuts",
+          "name": "Shortcuts: two doors a floor that open from the far side and stay open",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "illusory_walls",
+          "name": "Illusory walls: one wall a floor that fades when struck, with something behind it",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "trial",
+          "name": "Vigil Trial: a title mode to fight any story boss with Vigil's rules",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "ambush_rooms",
+          "name": "Ambush rooms shut behind you until the pack is dead",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "ambush_drops",
+          "name": "Ambushers drop from above",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "height_steps",
+          "name": "Each zone a step lower, down a ramp",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "darkness",
+          "name": "Darkness in the Gallery of Time until each zone's shrine is lit",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "lantern",
+          "name": "The Shrine Lantern: the Gallery's first lit shrine gives a pouch that lights the dark round you",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "miasma",
+          "name": "Foul mist in the Moon Sea that poisons you",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "ghost",
+          "name": "Your ghost walks its last steps where you fell",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "chain_cancel",
+          "name": "Chain attacks: R2 or attack after a blow lands cuts into the next attack",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "input_buffer",
+          "name": "Frames a roll or R2 pressed early is kept for (0 = off)",
+          "type": "integer",
+          "default": 12,
+          "min": 0,
+          "max": 20
+        },
+        {
+          "id": "lock_camera",
+          "name": "Locked on, the camera keeps the target in front of you",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "shooters",
+          "name": "Monsters that shoot keep their distance, step aside and fire after a glint",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "party_attacks",
+          "name": "Xiao, Goro, Ruby, Ungaga and Osmond get a heavy, finishers and more (as in the Gauntlet)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "telegraphs",
+          "name": "Monsters' wind-ups glint before the blow (red before their own new attack)",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "boss_moves",
+          "name": "Story bosses gain a new, telegraphed move in their second phase",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "elite_patrols",
+          "name": "Named elites walk a beat until you come near",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "drops",
+          "name": "Ledges beside some locked gates: drop past them, no climbing back",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "hit_feel",
+          "name": "Hit feel: blows freeze the moment they land, the camera shakes, the pad rumbles",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "invaders",
+          "name": "Invaders: a dark copy of a party member hunts you through some zones",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "hub",
+          "name": "Your town as a hub: folk saved from the dungeons come home with services",
+          "type": "boolean",
+          "default": true
+        },
+        {
+          "id": "tips",
+          "name": "Show the controls once",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    {
+      "id": "moonmod.hub",
+      "name": "MoonMod Hub",
+      "version": "1.1.0",
+      "description": "Quick links to the integrated progression, dungeon, controls, autosave and Gauntlet pages in the MoonFactory Mod Manager.",
+      "coop": "local"
+    }
+  ]
+}
