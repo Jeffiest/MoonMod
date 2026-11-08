@@ -1516,7 +1516,7 @@ assert(game.dungeons.set_layout({})) -- back to the native layout
 
 `rooms` (2-64) is required unless resetting with `{}`; `area` (8-46 in Chronicle, default 46; 8-30 in Chronicle Two, default 30) is the side of the corner rooms are placed in; `room_min`/`room_max` (Chronicle 3-6, Chronicle Two 2-6; default 3-4) bound each room's side; Chronicle needs 3 because it puts a room's door on the middle cell of a wall and a 2-cell wall would put it on a corner, which has no door piece, and `area` must exceed `room_max`. In Chronicle Two, `room_min`/`room_max` also filter the floor builder's preset room table (`CreateRandomRoom`). The layout is global, stays until changed (unloading the mod does not reset it) and is not saved; a floor already built keeps its layout.
 
-### The same floor again (`dungeons.set_seed`, Chronicle)
+### The same floor again (`dungeons.set_seed`, Chronicle and Chronicle Two)
 
 Every Chronicle floor is built from a seed, and a floor built from the same seed (with the same layout requests) comes out the same, cell for cell, with the same chests and monsters. `game.dungeon.generated` reports the seed a floor was built from, and `dungeons.set_seed` builds the next new floor from a seed you kept:
 
@@ -1632,7 +1632,7 @@ Events:
 
 `DC_ZONE_VISIT=frames` (a test hook) puts the player just outside the first gate that many frames into a zoned floor.
 
-### Shrines, warps and the way out (`dungeons.set_exits`, `dungeons.warp`, `dungeons.enter_floor`, Chronicle)
+### Shrines, warps and the way out (`dungeons.set_exits`, `dungeons.warp`, `dungeons.enter_floor`, Chronicle; `dungeons.enter_floor` also Chronicle Two)
 
 ```lua
 game.dungeons.set_exits({town = "shrines"})                 -- town only by your own way (a shrine's panel)
@@ -2308,7 +2308,7 @@ end)
 - `world.transition` to another registered floor, in the same dungeon or another one, keeps the session going, and
   the session's area follows the dungeon it enters.
 
-The bundled Dark Genie's Gauntlet (`mods/moonmod.roguelike`) is built on these. Chronicle Two has no title modes yet.
+The bundled Dark Genie's Gauntlet (`mods/moonmod.roguelike`) is built on these. Chronicle Two has title modes too (`title.mode_register/set/remove`, `game.title.opened/selected`): rows under the title menu's own that open a page of lines and entries the mod drives. Its `session.start` takes only `{visit = ...}` (no sandbox floors: it has no registered-floor sandbox), `session.get` answers `title`, `story` or `visit`, and a page has up to 8 lines and 8 entries (no sky page).
 
 ### Shared quest lifecycle
 
@@ -2338,6 +2338,62 @@ print(quest.status, quest.objectives[1].progress, quest.objectives[1].target)
 Quest definitions and frame. Chronicle weapon pickups also include the exact receiving character and slot. Objectives without event remain manually advanced.
 
 Entity and resource references use generation-checked handles, not raw addresses. Mutating APIs report failure when an object is stale, the phase is wrong, or the mod lacks the needed capability. Registration calls return ownership tokens; disabling or reloading a mod releases the registrations owned by that mod.
+
+
+### Chronicle Two content: stable numbers, item and weapon assets, Georama parts, villagers, playable characters
+
+Chronicle Two keeps the number of every item, weapon and Georama part a mod appends in
+`<save root>/moonmod/game-content/chronicle-two-{item,weapon,georama}-slots.json`
+(`{"format_version": 1, "<items|weapons|georama>": {"<mod:id>": number}}`). A stable id gets its number the first time
+it materializes and keeps it; an id whose mod is gone stays in the file, so a save's item and part numbers name the
+same content after mods are added or removed. Items and weapons share the game's item numbers (from 511 down);
+Georama definition ids run from `0x7F` down to `0x40`. An unreadable registry stops that kind's content from
+materializing (`native_item_no` stays `nil`) instead of guessing.
+
+```lua
+game.resources.override({path = "resources/moonblade.gltf", game_path = "mainchr/moonblade.gltf"})
+game.resources.override({path = "resources/moonicon.png", game_path = "icons/moonicon.png"})
+local blade = assert(game.weapons.register({
+  id = "moonblade", name = "Moonblade", template_weapon = 0x20, owner = "monica",
+  model = "moonblade",                               -- mainchr/moonblade.gltf, owned
+  icon = "moonicon",                                 -- icons/moonicon.png, owned, fitted into the 32x32 cell
+  description = {"A blade of moonlight.", "Forged for Monica."},
+}))
+```
+
+- `weapons.register` takes `owner` (`"max"`, `"monica"` or a registered playable id: the weapon joins the weapons of
+  the character he fights as, and `assets.holder` names him), `model`, `icon` and `description` (a string or up to
+  4 lines of 1-64 bytes, shown as the item's description). `menu_scale` is refused (the menu has no per-weapon scale).
+- `items.register` takes `icon` and `description`; not `model` or `owner`.
+- `weapons.get().assets` / `items.get().assets` report `model`, `icon`, `description`, `owner`, `owner_character`,
+  `holder` and `message_no`.
+
+`georama.register` also takes `town_id` (0-4; omitted, every town), `stock` (1-999 built parts, given once to a save that
+holds none built or placed), `model = {part = <name of a part the town's scene loads>}` (an owned scene file is
+refused) and `territory = {radius, height}`. Its definition id is persistent, appended definitions appear in the
+game's Make list, and saved layouts that use the part round-trip through the save. `georama.get().mod_pieces[].extras`
+reports `town_id`, `stock`, `model`, `territory`, `definition_id` and `model_notes`.
+
+`characters.register({id, kind = "npc", name, map_no, model, position = {x, y, z}, facing?, talk_event?})` stands a
+villager (`chara/<model>.gltf`) in a town map: he loads into a free villager slot after the game's own pick, at his
+position and facing. `talk_event` 1-65535 runs that native event of the map's script on the talk button; 0 (default)
+publishes `game.npc.talk` `{id, name, map_no, owner, slot}`. Villagers are in memory only and leave with their mod;
+`characters.list/get` report them with `status` (`registered` or `placed`) and `note`.
+
+```lua
+game.characters.register_playable({id = "opar", name = "Opar", pack = "mainchr/opar.gltf", fights_as = "monica",
+  title = "Moon Sea Frog Mage", portrait = "opar_face", hp = 77, defense = 9})   -- {id, character_id, count}
+```
+
+Chronicle Two's `characters.register_playable` takes `pack` (an owned `mainchr/<stem>.gltf`, or `c01_base`/`c02_base`),
+`fights_as` (`max` or `monica`), `portrait` (owned `icons/<stem>.png`), `title`, `hp` and `defense`. Up to twelve
+heroes take character ids 4-15. `party.recruit({id = <hero id>, joined = true|false})` makes him join (default)
+or leave the party. `characters.list/get`, `party.list` (once joined) and `player.heal/damage/set
+{character = <id>}` see him. His hp, defence, status, active items and equipment (equipped weapons with their full
+record) are written beside the save in `<save root>/moonmod/characters.json` under the save's identity, never in the
+retail save image; records of unregistered ids are kept, and a new game resets every hero. `party.set_active` to a
+registered hero returns `unsupported`: the dungeon and battle code keys on the native ids 0-3. The game's own party
+and character menus do not list him yet (their layouts have one part per native character).
 
 ## Events and update phases
 
@@ -2467,7 +2523,7 @@ These operations bind each game's signature systems to native save or live engin
   - `game.dungeons.spheda_spawn({par = optional 1..99})` requires an already allocated Spheda session on an active dungeon floor. It calls the game's native course setup again, optionally overrides par, and enables the play/status/minimap flags so the new pin and ball are active. It cannot allocate a Spheda session when the floor event has not created one.
   - `game.spheda.completed` is queued when the native floor-info setter first records a Spheda clear (through the clear value or the floor clear flag). It contains `dungeon_id`, `floor_id`, `cleared`, `clear_value`, and `frame`; stroke count and medal are not stored by the native save format.
 
-## Online play (`net.*`, `net.session` permission, Chronicle)
+## Online play (`net.*`, `net.session` permission, Chronicle and Chronicle Two)
 
 ```lua
 local ok = game.net.host({version = 1, name = "Toan"})        -- a room through the co-op relay
@@ -2503,7 +2559,7 @@ to four players and keeps no game state: the host's game is the world, and the m
 The web build uses the browser's WebSocket, Windows WinHTTP, Linux and macOS libcurl; a build without libcurl reports
 `net.*` unsupported.
 
-## Co-op: the host's world, a guest's things, visits (`save.*`, `session.start {visit}`, Chronicle)
+## Co-op: the host's world, a guest's things, visits (`save.*`, `session.start {visit}`, Chronicle and Chronicle Two)
 
 Co-op splits a save in two (`moonmod/coop_save.hpp`): the **world**, which is the host's (Georama in every town, the
 story and map flags, the day and time, dungeon progress, and the party the story has brought), and a **player's own
@@ -2585,6 +2641,38 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
 
 The bundled Online Co-op mod (`mods/moonmod.coop`) is built on these and `net.*`; `docs/COOP_PLAN.md` has what is
 built and what comes next.
+
+## Chronicle Two's co-op (what differs from Chronicle)
+
+The same operations and events, with Dark Cloud 2's records (ChronicleTwo `port/docs/COOP.md`):
+
+- The relay `game` id is `chronicle-two`; a room is one game at one protocol number.
+- `save.world_export` is `DCW2...`: the story flags and counters, each map's flags, the time and day, where the host
+  is, the Georama parts held, each town's record and its layout (a variable field checked whole), dungeon progress,
+  quests, the monster book and the fishing tournament. `save.player_export` is `DCP2...`: Max, Monica and the
+  ridepod, the bag and bait, the aquarium, badges, the townsfolk in the party, inventions and photos, Gilda, medals,
+  fishing records and costumes; a mod's `player_extra` travels after it as `|DCX2{...}`. `georama.town_export` is
+  `DCT2<town>:...` (its record and layout); `town_import` with `base` merges only what changed (parts added and
+  taken away one for one, houses and river grids by index). Accounts live in `<save root>/moonmod/coop_accounts.json`
+  for the whole game (not a slot's folder) and are written with every `account_set/remove`.
+- A visit's `map` is the town's area (0-4: Palm Brinks, Sindain, Balance Valley, Veniccio, Heim Rada); `world.get`
+  gives `town_map` (the area) and `map_no` in a town, `floor_seed` on a floor, `editing` while the Georama editor is
+  open. `player.get` adds `heading`, `motion` (the motion number `CCharacter2::SetMotion` takes), the melee `weapon`
+  and, in a town, `town_character` and the hero's position.
+- `world.avatar_set` shows `"max"` or `"monica"` (not the ridepod or a monster form), tinted through the ambient
+  light; no weapon and no name over the head yet. Avatars use the scene's last three event slots on a floor and the
+  last three talk slots in a town.
+- `monsters.mirror_get` reports `kind` = monster id, `state` (1 live, 3 dying), `hp`/`max_hp` = life; its `hits` are
+  empty for now (a host's monsters go for the nearest player, their blows on avatars are not measured yet).
+  `puppet_set` pauses the monster scripts on a guest's floor and moves the copies; `mirror_hit` kills through the
+  game's own death path.
+- `dungeons.shared_events_get` returns the map events (doors, gates, switches) the player started with the action or
+  item button: `script` is the event point's number, `mode` the button; `shared_event_run` re-finds the point at
+  `pos` on this floor and runs it, lending the gate and door keys for its length.
+- `ui.choice_open` draws a list panel over the floor, the town or the title (up to 6 options) and answers
+  `ui.choice_made {id, index, cancelled}`; it does not pause the game.
+- `combat.strike_player {x, y, z, radius, damage, kind}` takes the hero's life through the battle character and asks
+  the small or large damage reaction.
 
 ## Mods in a session and their co-op roles (`mods.*`, both games)
 
