@@ -34,6 +34,7 @@ Scenarios (in `run_live.py`, each with its checks):
 | `floors`      | Norune, floor 2, floor 4, Norune, with the guest following each step. No one is offered a floor that is only loading. |
 | `host_leaves` | The host closes the room while both stand on a floor. The guest's things go to the host first, the guest's visit ends, and the host plays on alone. |
 | `rejoin`      | The guest's connection drops on a floor (the test hook `drop_after` leaves the relay as a pulled cable would). Its visit goes on, it gets back into the room by itself, and both see each other again. |
+| `down`        | Down, not out: on a floor together the guest is knocked out (test hook `knocks`) and lies down; the host, holding Revive (`hold_revive`), gets it up, or it gets up beside the host after the wait. Then both are knocked out: the party fell, and both walk back to Norune. |
 
 `basic` and `rejoin` also check that each game measures its ping to the other. For what only two people at two
 screens can check, see `PLAYTEST.md`.

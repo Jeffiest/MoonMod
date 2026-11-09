@@ -62,11 +62,24 @@ local function make_game(name, opts)
         return w
       end,
       enter_map = function(a) S.entered[#S.entered + 1] = "map " .. a.map_no; return {queued = true} end,
+      transition = function(a) S.entered[#S.entered + 1] = "to " .. a.id; return {queued = true} end,
       set_time = function(a) S.clock = a.fraction; S.clock_sets = (S.clock_sets or 0) + 1; return {time = {fraction = a.fraction}} end,
       avatar_set = function(a) S.avatars[a.slot] = a; return {slot = a.slot, shown = true} end,
       avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
     },
-    player = {get = function() return S.player end},
+    player = {
+      get = function() return S.player end,
+      down_rule_set = function(a) S.down_rule = a.enabled; return {enabled = a.enabled} end,
+      revive = function(a)
+        if not S.player.down then return nil, {message = "the player isn't down"} end
+        S.player.down = false
+        S.player.hp = a.hp
+        if a.x then S.player.position = {x = a.x, y = a.y, z = a.z} end
+        S.revives = (S.revives or 0) + 1
+        return {queued = true}
+      end,
+      give_up = function() if not S.player.down then return nil, {message = "the player isn't down"} end; S.gave_up = true; return {queued = true} end,
+    },
     monsters = {
       mirror_get = function()
         local hits = S.avatar_hits
@@ -925,6 +938,117 @@ do
   lone.tick(1805)
   check(lone.mod.state.role == nil and lone.title.lines[3]:find("didn't send their world", 1, true),
         "a join the host never answers ends after half a minute", lone.title.lines[3])
+end
+
+print("The mod's manifest")
+do
+  local f = assert(io.open(root .. "/mods/moonmod.coop/mod.json", "rb"))
+  local text = f:read("a")
+  f:close()
+  local settings = text:match('"settings": %[(.*)%]')
+  local long = {}
+  for name in (settings or ""):gmatch('"name": "(.-)"') do if #name > 96 then long[#long + 1] = name:sub(1, 30) end end
+  check(settings and #long == 0, "every setting's name fits the engine's 96 bytes (else the game refuses the whole mod)",
+        table.concat(long, " / "))
+end
+
+print("Falling and getting back up")
+do
+  relay.rooms = {}
+  local function enter(g)
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+        g.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+    g.emit("game.title.selected", {entry = "join"})
+  end
+  local h, g = make_game("Toan"), make_game("Xiao")
+  h.tick(2)
+  check(not h.down_rule, "out of a room the game's own knockout stands")
+  h.keys.host_key = true
+  both(h, g, 2)
+  enter(g)
+  both(h, g, 10)
+  check(h.down_rule == true and g.down_rule == true, "in a room every game lies down instead")
+  g.settings.follow_offers = false
+  h.map = {context = "dungeon", dungeon_id = 1, floor_id = 2, floor_seed = 77}
+  g.map = {context = "dungeon", dungeon_id = 1, floor_id = 2, floor_seed = 77}
+  h.player = {character = "toan", hp = 40, max_hp = 60, position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "xiao", hp = 30, max_hp = 45, position = {x = 30, y = 0, z = 0}, heading = 0, motion = 0}
+  both(h, g, 60)
+
+  -- the guest falls: the host sees it lying there and revives it by holding Revive
+  g.player.down, g.player.hp = true, 0
+  both(h, g, 30)
+  check(find_toast(g, "you're down"), "a fallen player is told they're down")
+  check(find_toast(h, "Xiao is down"), "and the others that they can revive them")
+  check(h.avatars[1] and h.avatars[1].down == true, "the host's screen shows Xiao's hero lying down")
+  for _ = 1, 100 do h.keys.revive = true; both(h, g, 1) end
+  check(tostring(h.layers.coop_revive):find("Reviving Xiao", 1, true), "holding Revive shows how far along it is",
+        tostring(h.layers.coop_revive))
+  h.player.hp = 30 -- struck while holding
+  for _ = 1, 5 do h.keys.revive = true; both(h, g, 1) end
+  check(find_toast(h, "hit! Hold Revive again") and g.player.down == true, "a hit starts the revive over")
+  for _ = 1, 185 do h.keys.revive = true; both(h, g, 1) end
+  both(h, g, 4)
+  check(g.player.down == false and g.player.hp == 15, "held for three seconds, the guest gets up with a third of its HP", g.player.hp)
+  check(find_toast(g, "Toan revived you") and find_toast(h, "Xiao is back on their feet"), "and both hear it")
+  do
+    local downs = 0
+    for _, t in ipairs(h.toasts) do if t:find("Xiao is down", 1, true) then downs = downs + 1 end end
+    g.player.down = true -- the game stands the hero up a frame late
+    both(h, g, 1)
+    g.player.down = false
+    both(h, g, 10)
+    local after = 0
+    for _, t in ipairs(h.toasts) do if t:find("Xiao is down", 1, true) then after = after + 1 end end
+    check(after == downs and g.mod.fall.state == "up", "the frame before the game stands the hero up isn't another fall")
+  end
+  both(h, g, 30)
+  check(h.avatars[1] and not h.avatars[1].down, "Xiao's hero stands up on the host's screen")
+
+  -- too far away: nothing happens; a Revival Powder revives at once, at half HP
+  g.player.down, g.player.hp = true, 0
+  g.player.position = {x = 400, y = 0, z = 0}
+  both(h, g, 30)
+  for _ = 1, 200 do h.keys.revive = true; both(h, g, 1) end
+  check(g.player.down == true, "a player too far away can't revive")
+  h.player.position = {x = 390, y = 0, z = 0}
+  h.bag = {{id = "chronicle:item:revival-powder", name = "Revival Powder", count = 1}}
+  h.keys.revive = true
+  both(h, g, 4)
+  check(g.player.down == false and g.player.hp == 22 and h.bag[1].count == 0, "a Revival Powder revives at once, at half HP, and is used",
+        tostring(g.player.hp) .. "/" .. h.bag[1].count)
+
+  -- down too long: out, and back up beside the host after the wait (longer with each fall on the floor)
+  both(h, g, 30)
+  g.player.down, g.player.hp = true, 0
+  both(h, g, 1800 + 10)
+  check(find_toast(g, "you're out; back on your feet in 60 seconds"), "after half a minute down, out; the wait grows each fall")
+  h.player.position = {x = 500, y = 0, z = 80}
+  both(h, g, 60 * 60 + 10)
+  check(g.player.down == false and g.player.position.x == 500 and g.player.position.z == 80 and g.player.hp == 15,
+        "then back on its feet beside the host", g.player.position.x)
+
+  -- everyone down: the party walks back to Matataki with its things
+  both(h, g, 30)
+  h.player.down, h.player.hp = true, 0
+  g.player.down, g.player.hp = true, 0
+  both(h, g, 200)
+  check(h.player.down == false and g.player.down == false and not h.gave_up and not g.gave_up, "a fallen party all stand up, no knockout")
+  check(h.entered[#h.entered] == "to chronicle:location:matataki-village" and g.entered[#g.entered] == "to chronicle:location:matataki-village",
+        "and walk back to the town the dungeon is reached from", h.entered[#h.entered])
+  check(find_toast(h, "the party fell"), "and are told why")
+
+  -- leaving the room while down: the game's own knockout after all
+  both(h, g, 30)
+  g.player.down = true
+  both(h, g, 10)
+  g.keys.leave_key = true
+  both(h, g, 3)
+  check(g.gave_up == true and g.down_rule == false, "a player who leaves while down gets the game's knockout")
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

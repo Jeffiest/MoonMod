@@ -473,6 +473,7 @@ Everything here is drawn by the engine in the game's own art, so a mod never dra
 | Hits that drain the gauge, a first swing that costs, a refill delay | `player.gauge_rules_set` |
 | React to the player being hit, blocked, parried or broken | event `game.player.hit` |
 | Read or spend the gauge, see what the player is doing | `player.gauge_get`, `player.gauge_set`, `player.state` |
+| Down instead of the game over, then revive (or give up) | `player.down_rule_set`, `player.get().down`, `player.revive`, `player.give_up` |
 | A monster that fights differently | hook `native.monster.run` (`scripts.override`), drive it with `monsters.call` |
 
 Formulas are owned and stack by priority. Register them once, and update them by re-registering the same id with a
@@ -516,6 +517,24 @@ Each rule set has one owner. Clear both (`guard_rules_clear`, `gauge_rules_clear
 another's game mode; unloading clears them too. `game.player.hit` fires for every hit, with or without rules, so a
 mod can count hits taken, drop Gilda on death or show a hit direction without changing the guard at all.
 `player.gauge_set({add = n})` refunds or charges gauge for things the game doesn't price (a heal, a switch).
+
+A second chance instead of the game over (the co-op mod's "down, not out" is built this way):
+
+```lua
+game.player.down_rule_set({enabled = true})
+moonmod.on("game.tick", function()
+  local p = game.player.get()
+  if p.down then
+    down_for = (down_for or 0) + 1
+    if down_for == 600 then game.player.revive({hp = math.max(1, p.max_hp // 3)}) end -- ten seconds on the floor
+  else
+    down_for = nil
+  end
+end)
+```
+
+`player.revive` takes `x, y, z` to stand the hero up somewhere else on the floor; `player.give_up()` is the game's own
+knockout after all. Turn the rule off when your mod stands aside, or the player lies there for good.
 
 ---
 

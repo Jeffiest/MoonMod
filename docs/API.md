@@ -2534,7 +2534,7 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   refuses, and autosave skips it. `session.get()`, `game.session.started` and `game.session.ended` say
   `kind = "visit"`; `game.session.failed` `{kind = "visit", reason}` comes to the mod when the data didn't fit.
 
-- `world.avatar_set({slot, character, weapon?, x, y, z, heading, motion, tint?, name?})` shows another player (slot 1-3) on
+- `world.avatar_set({slot, character, weapon?, x, y, z, heading, motion, tint?, name?, down?})` shows another player (slot 1-3) on
   the dungeon floor, or walking in the town the player walks in (without a weapon there, and with the town's motions): `character` a character id, `weapon` an `item_no` (as `player.get().weapon.item_no`), the position
   and `heading` as `player.get()` reports them, `motion` its `motion`, and `tint` `{r, g, b}` (each 0-128) the ambient
   it draws in. Set it as reports come (several a second): between them the hero eases there and turns the shortest
@@ -2544,7 +2544,16 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   walking, its `position`, `heading`, `motion` and `town_character` (the hero it walks as, `party.town_set_active`).
   `world.get()` in a town reports `walking` too, and on a dungeon floor `walking` is true only while the player plays there (false while the floor loads, when its `floor_id` and `floor_seed` aren't settled yet, and in a menu or a scene). `name` (24
   bytes at most) is drawn over the hero's head, in blue for a tinted one, fading out toward where monsters stop being
-  drawn.
+  drawn. `down = true` lays the hero down (it holds its motion's last frame, so send the knockout motion): the
+  monsters pass it by and no blow lands on it.
+
+- Down, not out (co-op). `player.down_rule_set({enabled})` (`game.write`): while it is on, a party knocked out on a
+  dungeon floor (no one left to switch to, and no Revival Powder: the powder still works first) doesn't get the game
+  over. The hero lies on its knockout motion, the monsters pass it by, and `player.get().down` is true, until the mod
+  calls `player.revive({hp = 1-999, x?, y?, z?})`, which stands the hero up with that HP (no more than its max, its
+  ailments cleared, a moment of invincibility), at `x, y, z` if all three are given; or `player.give_up()`, which plays
+  the game's own knockout after all. Both fail with "the player isn't down" otherwise, and leaving the dungeon ends
+  being down. The rule is off until a mod turns it on.
 
 - `monsters.mirror_get()` (co-op's host) gives the floor's monsters, `{monsters = {{slot, kind, state, hp, max_hp, x,
   y, z, heading, motion}, ...}, hits}`, and what struck other players' heroes since the last call (anything that would

@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 8
+local PROTOCOL = 9
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -181,7 +181,8 @@ local function show_others()
       local st = o.state
       try(game.world and game.world.avatar_set, {slot = slot, character = st.character, weapon = st.weapon, x = st.x, y = st.y, z = st.z,
                                   heading = st.heading, motion = st.motion, tint = peer ~= 0 and GUEST_TINT or nil,
-                                  name = o.name or (peer == 0 and "Host" or ("Player " .. peer))})
+                                  name = o.name or (peer == 0 and "Host" or ("Player " .. peer)),
+                                  down = o.down ~= nil and o.down ~= "up" or nil})
       o.slot = slot
     elseif o.slot then
       try(game.world and game.world.avatar_clear, {slot = o.slot})
@@ -1322,6 +1323,226 @@ function link.resync()
   toast("Co-op: asked the host for the doors and the time again")
 end
 
+-- Falling and getting back up -----------------------------------------------------------------------------------------
+-- In a room, a player whose party is knocked out on a floor goes down rather than out (player.down_rule_set): they lie
+-- there, the monsters pass them by, and their game says so ("DN down", then "DN out", "DN up"), which the others show
+-- on that player's hero. Another player standing beside them holds Revive (R, or the right stick) for three seconds,
+-- which a hit breaks, or presses it once with a Revival Powder in their bag, which it uses: the fallen player gets up
+-- with a third of their HP (half with the powder). Their own Revival Powder still works first, as in the game.
+--
+-- Down lasts fall.DOWN_FOR; then they're out: still lying there, back on their feet beside another player after a wait that
+-- grows with each fall on the floor (30 seconds, then 15 more each time), or at once when no one else is left on the
+-- floor. When everyone on the floor is down or out, the party has fallen: every game on it stands its player up and
+-- walks them back to the town the dungeon is reached from, with all their things (the game's own knockout would have
+-- halved their Gilda).
+local fall = {state = "up", since = 0, deaths = 0, floor = nil, rule = nil, hold = nil, wiping = nil,
+              TOWNS = {[0] = "chronicle:location:norune-village", "chronicle:location:matataki-village",
+                       "chronicle:location:queens", "chronicle:location:muska-lacka", "chronicle:location:yellow-drops"}}
+fall.DOWN_FOR, fall.OUT_FIRST, fall.OUT_MORE, fall.REVIVE_HOLD, fall.REVIVE_REACH, fall.WIPE_AFTER = 1800, 1800, 900, 180, 48, 120
+
+-- The rule follows the room: on while in one (and the setting is on), off otherwise.
+function fall.rule_step()
+  local want = S.role ~= nil and S.code ~= nil and not S.rejoin and setting("down_not_out", true)
+  if want ~= fall.rule then
+    if not want and fall.state ~= "up" then -- out of the room while down: the game's own knockout
+      call(game.player and game.player.give_up)
+      fall.state = "up"
+    end
+    local ok = call(game.player and game.player.down_rule_set, {enabled = want})
+    if ok or not want then fall.rule = want end
+  end
+end
+
+function fall.say(state)
+  fall.state, fall.since = state, S.frame
+  send("all", "DN", state)
+end
+
+function fall.hear(peer, rest)
+  local o = others[peer] or {}
+  others[peer] = o
+  local was = o.down
+  o.down = (rest == "down" or rest == "out") and rest or "up"
+  if rest == "fell" and fall.state ~= "up" and o.scene and o.scene == my_scene and not fall.wiping then
+    fall.forced = true -- the party fell: this one goes too
+  end
+  if o.down ~= "up" and (was == nil or was == "up") and o.scene and o.scene == my_scene then
+    toast("Co-op: " .. peer_name(peer) .. " is down! Stand beside them and hold Revive (R / right stick)")
+  end
+end
+
+-- Get up: in place, or at a spot (beside another player).
+function fall.get_up(hp_share, at, why, say)
+  local p = try(game.player and game.player.get) or {}
+  local hp = math.max(1, math.floor((tonumber(p.max_hp) or 3) * hp_share))
+  local args = {hp = hp}
+  if at then args.x, args.y, args.z = at.x, at.y, at.z end
+  local ok, err = call(game.player and game.player.revive, args)
+  if not ok and at then ok, err = call(game.player.revive, {hp = hp}) end -- that spot refused: in place
+  if not ok then moonmod.log("warn", "co-op revive: " .. errmsg(err)) return false end
+  fall.say(say or "up")
+  fall.state = "up"
+  fall.rising = S.frame + 20 -- the game stands the hero up on its next frames: still "down" until then
+  if why then toast("Co-op: " .. why) end
+  return true
+end
+
+-- The players on this floor besides this one, and whether any of them is on their feet.
+function fall.floor_mates()
+  local mates, standing = {}, nil
+  for peer, o in pairs(others) do
+    if o.scene and my_scene and o.scene == my_scene and S.frame - (o.heard or 0) < QUIET then
+      mates[#mates + 1] = peer
+      if (o.down or "up") == "up" and o.state then standing = standing or o end
+    end
+  end
+  return mates, standing
+end
+
+-- This player: down, out, and back.
+function fall.self_step()
+  local p = try(game.player and game.player.get)
+  local down = type(p) == "table" and p.down == true and not (fall.rising and S.frame < fall.rising)
+  if my_scene ~= fall.floor then fall.floor, fall.deaths = my_scene, 0 end
+  if not down then
+    if fall.state ~= "up" then fall.say("up") end -- revived by the game itself (or left the floor)
+    return
+  end
+  local mates, standing = fall.floor_mates()
+  if fall.state == "up" then
+    fall.deaths = fall.deaths + 1
+    fall.say("down")
+    toast(#mates > 0 and "Co-op: you're down. A friend can revive you; hold on"
+                      or "Co-op: you're down, with no one else on this floor")
+    return
+  end
+  if fall.state == "down" and S.frame - fall.since >= fall.DOWN_FOR then
+    fall.say("out")
+    toast(string.format("Co-op: you're out; back on your feet in %d seconds", (fall.OUT_FIRST + fall.OUT_MORE * (fall.deaths - 1)) // 60))
+    return
+  end
+  if fall.state == "out" then
+    local wait = fall.OUT_FIRST + fall.OUT_MORE * (fall.deaths - 1)
+    if #mates == 0 then fall.get_up(1 / 3, nil, "no one else is on the floor: you get back up") return end
+    if S.frame - fall.since >= wait and standing then
+      fall.get_up(1 / 3, {x = standing.state.x, y = standing.state.y, z = standing.state.z},
+                  "back on your feet beside the others")
+    end
+  end
+end
+
+-- The party has fallen: everyone on this floor down or out, for a moment (so the reports have come).
+function fall.wipe_step()
+  if fall.wiping then
+    if S.frame >= fall.wiping.at then
+      local town = fall.wiping.town
+      fall.wiping = nil
+      local ok, err = call(game.world and game.world.transition, {id = town})
+      if not ok then toast("Co-op: can't walk back to town (" .. errmsg(err):sub(1, 60) .. ")") end
+    end
+    return
+  end
+  if fall.state == "up" or not on_floor() then fall.wipe_since, fall.forced = nil, nil return end
+  if fall.forced then
+    fall.forced, fall.wipe_since = nil, -1000000
+  else
+    for _, peer in ipairs(fall.floor_mates()) do
+      if (others[peer].down or "up") == "up" then fall.wipe_since = nil return end
+    end
+  end
+  fall.wipe_since = fall.wipe_since or S.frame
+  if S.frame - fall.wipe_since < fall.WIPE_AFTER then return end
+  fall.wipe_since = nil
+  local d = tonumber(my_scene:match("^D(%d+):"))
+  local town = fall.TOWNS[DUNGEON_TOWN[d or 0] or 0]
+  if fall.get_up(1 / 2, nil, "the party fell; back to town, with all your things", "fell") then
+    fall.wiping = {town = town, at = S.frame + 30}
+  end
+end
+
+-- This player reviving another: Revive held beside a fallen player for three seconds, a hit breaking it; or pressed once
+-- with a Revival Powder, which it uses.
+function fall.powder()
+  local got = try(game.items and game.items.owned)
+  for _, it in ipairs(type(got) == "table" and got.items or {}) do
+    if tostring(it.name):lower() == "revival powder" and (tonumber(it.count) or 0) > 0 then return it end
+  end
+  return nil
+end
+
+function fall.bar(text)
+  if text then try(game.render.layer_register, {id = "coop_revive", text = text:sub(1, 48)})
+  else try(game.render.layer_remove, {id = "coop_revive"}) end
+end
+
+function fall.reviver_step()
+  if fall.state ~= "up" or not on_floor() then fall.hold = nil return end
+  local p = try(game.player and game.player.get)
+  if type(p) ~= "table" or not p.position then fall.hold = nil return end
+  -- the nearest fallen player within reach
+  local target, best = nil, fall.REVIVE_REACH
+  for peer, o in pairs(others) do
+    if o.down and o.down ~= "up" and o.scene == my_scene and o.state then
+      local d = math.sqrt((o.state.x - p.position.x) ^ 2 + (o.state.z - p.position.z) ^ 2)
+      if d <= best then target, best = peer, d end
+    end
+  end
+  local key = try(game.input.state, {id = "revive"})
+  if AUTOTEST and AUTOTEST.hold_revive then key = {down = true} end -- the live test holds Revive
+  local press = try(game.input.consume, {id = "revive"})
+  if not target then
+    if fall.hold then fall.bar(nil) end
+    fall.hold = nil
+    return
+  end
+  if press and press.pressed then
+    local powder = fall.powder()
+    if powder then
+      local took = try(game.items.remove, {id = powder.id, count = 1})
+      if type(took) == "table" and (tonumber(took.removed) or 0) > 0 then
+        send(target, "RV", "powder")
+        toast("Co-op: you used a Revival Powder on " .. peer_name(target))
+        fall.hold = nil
+        return
+      end
+    end
+  end
+  if not (key and key.down) then
+    if fall.hold then fall.bar(nil) end
+    fall.hold = nil
+    return
+  end
+  if not fall.hold or fall.hold.peer ~= target then fall.hold = {peer = target, since = S.frame, hp = p.hp} end
+  if (tonumber(p.hp) or 0) < (tonumber(fall.hold.hp) or 0) then -- struck: start over
+    fall.hold = {peer = target, since = S.frame, hp = p.hp}
+    toast("Co-op: hit! Hold Revive again")
+    return
+  end
+  local done = S.frame - fall.hold.since
+  fall.bar(string.format("Reviving %s... %d%%", peer_name(target), math.min(100, done * 100 // fall.REVIVE_HOLD)))
+  if done >= fall.REVIVE_HOLD then
+    send(target, "RV", "hold")
+    fall.hold = nil
+    fall.bar(nil)
+  end
+end
+
+-- Another player revived this one.
+function fall.revived(peer, rest)
+  if fall.state == "up" then return end
+  if fall.get_up(rest == "powder" and 1 / 2 or 1 / 3, nil, peer_name(peer) .. " revived you") then
+    send(peer, "THX")
+  end
+end
+
+function fall.step()
+  fall.rule_step()
+  if not fall.rule then return end
+  fall.self_step()
+  fall.reviver_step()
+  fall.wipe_step()
+end
+
 -- Messages ----------------------------------------------------------------------------------------------------------
 
 local function message(peer, data)
@@ -1330,6 +1551,9 @@ local function message(peer, data)
   link.heard_from(peer)
   if kind == "PING" then send(peer, "PONG", rest) return end
   if kind == "PONG" then link.pong(peer, rest) return end
+  if kind == "DN" then fall.hear(peer, rest) return end
+  if kind == "RV" then fall.revived(peer, rest) return end
+  if kind == "THX" then toast("Co-op: " .. peer_name(peer) .. " is back on their feet") return end
   if kind == "P" then hear_position(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
@@ -1460,6 +1684,7 @@ end
 moonmod.on("game.tick", function(e)
   S.frame = e and e.frame or S.frame + 1
   pump()
+  fall.step()
   -- a guest getting back in after a drop plays on alone meanwhile
   if S.rejoin then link.rejoin_step() return end
   if S.closing then link.closing_step() end
@@ -1593,6 +1818,7 @@ end)
 try(game.input.bind, {id = "host_key", keys = {"F8"}})
 try(game.input.bind, {id = "leave_key", keys = {"F10"}})
 try(game.input.bind, {id = "give_key", keys = {"F7"}})
+try(game.input.bind, {id = "revive", keys = {"R", "Gamepad:rightstick"}})
 moonmod.on("game.tick", function()
   local g = try(game.input.consume, {id = "give_key"})
   if g and g.pressed then together.give() end
@@ -1726,6 +1952,7 @@ end)
 -- second as "COOPTEST" lines in the log, which the harness reads.
 if AUTOTEST then
   local said = {}
+  if tonumber(AUTOTEST.revive_reach) then fall.REVIVE_REACH = tonumber(AUTOTEST.revive_reach) end -- headless heroes can't walk over
   local function report()
     local w = try(game.world.get) or {}
     local p = try(game.player and game.player.get) or {}
@@ -1777,6 +2004,23 @@ if AUTOTEST then
         link.lost("the live test pulled the cable")
       end
     end
+    -- knocked out (down, not out): at these frames after first standing on a floor with another player
+    if AUTOTEST.knocks and S.role and on_floor() then
+      for _, o in pairs(others) do
+        if o.scene == my_scene then said.together_since = said.together_since or S.frame end
+      end
+      said.knocked = said.knocked or 0
+      local at = AUTOTEST.knocks[said.knocked + 1]
+      if at and said.together_since and S.frame - said.together_since >= at then
+        said.knocked = said.knocked + 1
+        local hit = try(game.player.damage, {amount = 32767})
+        moonmod.log("info", "COOPTEST knocked " .. said.knocked .. " hp=" .. tostring(type(hit) == "table" and hit.hp))
+      end
+    end
+    if fall.state ~= said.fall then
+      said.fall = fall.state
+      moonmod.log("info", "COOPTEST fall " .. fall.state .. " frame=" .. S.frame)
+    end
     -- a host that should close its room: once a guest has stood on its floor this long, it closes as a player does
     if AUTOTEST.close_after and S.role == "host" and on_floor() and not said.closed then
       for _, o in pairs(others) do
@@ -1822,4 +2066,4 @@ if AUTOTEST then
 end
 
 -- For the tests: the state, and the pieces' size.
-return {state = S, me = me, piece = PIECE, mods = rm, link = link}
+return {state = S, me = me, piece = PIECE, mods = rm, link = link, fall = fall}

@@ -85,6 +85,12 @@ moment), and the monster send rate isn't raised on a busy floor.
 
 ### Phase 3: Falling and getting back up
 
+**Built in 0.11.0 (protocol 9).** Down, revive by holding beside them or with a Revival Powder, out and back up beside
+a friend after a growing wait, and the whole party to town with its things. Unit tests in `tools/tests/coop/test_coop.lua`
+and the live scenario `down` in `tools/tests/coop/live/run_live.py`. Not done: crawling while down, watching the
+others while out (the camera stays on the fallen hero), coming back at the floor's entrance when it's cleared, the
+floor resetting after a party falls, and the shared faint limit setting.
+
 Dark Cloud's own rule is that HP at 0 means game over, unless Revival Powder brings you back. Co-op needs a kinder rule.
 
 | What | From | Dark Cloud detail |

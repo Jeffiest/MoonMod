@@ -303,6 +303,45 @@ def check_rejoin(host, guest, result):
     return c.list
 
 
+@scenario('down')
+def down():
+    """Down, not out: on a floor together the guest is knocked out and lies down; the host (holding Revive) gets it up,
+    or it gets up beside the host after the wait. Then both are knocked out: the party fell, and both walk back to
+    Norune with their things."""
+    host = [
+        {'when': 'dungeon', 'after': 120, 'op': 'transition', 'id': 'chronicle:location:norune-village'},
+        {'when': 'town', 'after': 2700, 'op': 'enter_floor', 'dungeon_id': 0, 'floor_id': 1},
+        {'when': 'town', 'after': 1200, 'op': 'mark', 'text': 'end'},
+    ]
+    guest = [{'when': 'visit', 'op': 'mark', 'text': 'arrived'}]
+    return {'host': host, 'guest': guest, 'host_autotest': {'hold_revive': True, 'revive_reach': 600, 'knocks': [5400]},
+            'guest_autotest': {'knocks': [600, 5400]}, 'host_frames': 14000, 'guest_frames': 13400}
+
+
+def check_down(host, guest, result):
+    c = Checks(host, guest, result)
+    c.ran()
+    c.visit()
+    h, g = host['events'], guest['events']
+    c.check(any(e.startswith('COOPTEST knocked 1') for e in g), 'the guest was knocked out', [e for e in g if 'knock' in e])
+    c.check('COOPTEST fall down' in ' '.join(g), "the guest's game lies down instead of the game over",
+            [e for e in g if 'fall' in e])
+    c.check(toast(guest, "you're down"), 'the guest is told it is down', toasts(guest))
+    c.check(toast(host, 'Guest is down!'), 'the host is told the guest is down', toasts(host))
+    c.check(toast(guest, 'Host revived you') and toast(host, 'Guest is back on their feet'),
+            'the host, holding Revive, gets the guest up', toasts(guest))
+    downs = [e for e in g if e.startswith('COOPTEST fall down')]
+    c.check(len(downs) == 2, 'each knockout is one fall, no more', downs)
+    c.check(not any('GAME OVER' in l or 'gameover' in l.lower() for l in guest['lines']), 'no game over on the guest')
+    c.check(any(e.startswith('COOPTEST knocked 1') for e in h), 'then the host was knocked out too', [e for e in h if 'knock' in e])
+    c.check(toast(host, 'the party fell') and toast(guest, 'the party fell'), 'with everyone down the party fell, on both',
+            toasts(host) + toasts(guest))
+    c.check(any(e.startswith('COOPTEST scene T') for e in h) and any(e.startswith('COOPTEST scene T') for e in g),
+            'and both walked back to town', [e for e in h + g if e.startswith('COOPTEST scene')][-6:])
+    c.no_errors()
+    return c.list
+
+
 def toasts(side):
     return [l.split('toast ', 1)[1] for l in side['lines'] if 'toast ' in l][-6:]
 
@@ -311,7 +350,8 @@ def toast(side, text):
     return any(text in l for l in side['lines'] if 'toast ' in l)
 
 
-CHECKS = {'basic': check_basic, 'floors': check_floors, 'host_leaves': check_host_leaves, 'rejoin': check_rejoin}
+CHECKS = {'basic': check_basic, 'floors': check_floors, 'host_leaves': check_host_leaves, 'rejoin': check_rejoin,
+          'down': check_down}
 
 
 # --- running -------------------------------------------------------------------------------------------------------

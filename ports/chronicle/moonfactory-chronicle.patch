@@ -609,7 +609,7 @@ index 00000000..9e15e269
 +
 +} // namespace dc::game
 diff --git a/port/include/game/dun/gameloop.hpp b/port/include/game/dun/gameloop.hpp
-index 91b8bba0..f0c066bc 100644
+index 91b8bba0..35424ca1 100644
 --- a/port/include/game/dun/gameloop.hpp
 +++ b/port/include/game/dun/gameloop.hpp
 @@ -7,6 +7,7 @@
@@ -620,16 +620,17 @@ index 91b8bba0..f0c066bc 100644
  #include "runscript.hpp"
  #include "textureanime.hpp"
  
-@@ -50,6 +51,8 @@ enum GameTask {
+@@ -50,6 +51,9 @@ enum GameTask {
      GAME_TASK_MAPJUMP_FADE_START       = 0x97,  /**< Fading out for a map jump. */
      GAME_TASK_MAPJUMP_FADE_WAIT        = 0x98,  /**< Jumping once the fade ends. */
      GAME_TASK_PAUSE                    = 0x9B,  /**< Paused. */
 +    GAME_TASK_MOD_CHOICE               = 0x9C,  /**< MoonMod: paused on a mod's choice panel (ui.choice_open). */
 +    GAME_TASK_MOD_MENU                 = 0x9D,  /**< MoonMod: paused on a mod's run menu (ui.run_menu_set). */
++    GAME_TASK_MOD_DOWNED               = 0x9E,  /**< MoonMod: the party knocked out, down rather than out (player.down_rule_set). */
      GAME_TASK_URA_SWAP                 = 0xA0,  /**< Switching between the floor and its back floor. */
      GAME_TASK_ESCAPE_INIT              = 0xAA,  /**< Starting an escape. */
      GAME_TASK_ESCAPE_LOOP              = 0xAB,  /**< Running an escape. */
-@@ -494,6 +497,12 @@ void BattleActionPlay_Ozumond_F(int aimed);
+@@ -494,6 +498,12 @@ void BattleActionPlay_Ozumond_F(int aimed);
   */
  void autoCamTrial();
  
@@ -642,7 +643,7 @@ index 91b8bba0..f0c066bc 100644
  /**
   * Spends one use of an active item slot, dropping its model on the last use.
   */
-@@ -509,6 +518,25 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap);
+@@ -509,6 +519,25 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap);
   */
  void LockOffTargte();
  
@@ -668,7 +669,7 @@ index 91b8bba0..f0c066bc 100644
  /**
   * Draws the life gauge of the enemy that the player has locked on to.
   */
-@@ -850,6 +878,9 @@ extern u_int *shortAtraEffectPtr;
+@@ -850,6 +879,9 @@ extern u_int *shortAtraEffectPtr;
   * The models of the items the player is running.
   */
  extern CActiveItemPack activeItem;
@@ -678,7 +679,7 @@ index 91b8bba0..f0c066bc 100644
  
  /**
   * The model a large treasure box opens with.
-@@ -1157,7 +1188,7 @@ extern ENEMY_LIFE_GAGE EnemyLifeGage;
+@@ -1157,7 +1189,7 @@ extern ENEMY_LIFE_GAGE EnemyLifeGage;
  extern GAME_ENV        GameEnv;
  extern CRandomItem     MainRandomItem;
  extern s32             MonstorNameOff;
@@ -3237,10 +3238,10 @@ index 00000000..d857f227
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_avatars.hpp b/port/include/moonmod/coop_avatars.hpp
 new file mode 100644
-index 00000000..3560e9dc
+index 00000000..3f23aa2d
 --- /dev/null
 +++ b/port/include/moonmod/coop_avatars.hpp
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +#pragma once
 +
 +// Co-op's remote players (world.avatar_set / avatar_clear), drawn and driven by src/moonmod/coop_avatars_moonmod.cpp:
@@ -3261,6 +3262,7 @@ index 00000000..3560e9dc
 +    int   motion = 0;
 +    float tint[3] = {-1.0f, -1.0f, -1.0f}; // the ambient it draws in (0..128), or -1 for the scene's own
 +    std::string name;                        // shown over its head, or nothing
++    bool  down = false;   // knocked out (co-op's down, not out): lies on its motion's last frame; monsters pass it by
 +};
 +
 +// slot 0..kMoonModAvatars-1. A new character or weapon loads on the next dungeon frame; a far jump (a new floor, a
@@ -3313,10 +3315,10 @@ index 00000000..f5b397f6
 +} // namespace dc::game
 diff --git a/port/include/moonmod/coop_monsters.hpp b/port/include/moonmod/coop_monsters.hpp
 new file mode 100644
-index 00000000..3c5fe1d6
+index 00000000..aa83a961
 --- /dev/null
 +++ b/port/include/moonmod/coop_monsters.hpp
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,65 @@
 +#pragma once
 +
 +// Co-op's monsters (monsters.mirror_get / puppet_set / mirror_hit), from src/moonmod/coop_monsters_moonmod.cpp. The
@@ -3361,6 +3363,18 @@ index 00000000..3c5fe1d6
 +
 +// Host: what would strike the player that lands on a hero instead, from the player's own damage check each frame.
 +void MoonModCoopAvatarHitsScan();
++
++// Down, not out (player.down_rule_set / revive / give_up): with the rule on, a party knocked out in a dungeon lies down
++// (GAME_TASK_MOD_DOWNED) instead of the game over, takes no hits and is passed by the monsters, until the mod revives
++// it (HP, and optionally a place to stand up) or gives up for it (the game's own knockout follows).
++void MoonModCoopSetDownRule(bool on);
++bool MoonModCoopDownRule();
++void MoonModCoopSetPlayerDown(bool down);
++bool MoonModCoopPlayerDown();
++bool MoonModCoopRequestRevive(int hp, const float *at); // false when the player isn't down
++bool MoonModCoopRequestGiveUp();
++bool MoonModCoopTakeRevive(int &hp, float at[3], bool &has_at);
++bool MoonModCoopTakeGiveUp();
 +
 +struct MoonModAvatarHit {
 +    int avatar = 0;  // 1..3, as world.avatar_set numbers them
@@ -14546,7 +14560,7 @@ index 0e33bf79..5e3ff291 100644
          int keep = 1;
  
 diff --git a/port/src/game/dun/movechara.cpp b/port/src/game/dun/movechara.cpp
-index f0d0e889..ba19daff 100644
+index f0d0e889..f43a83a3 100644
 --- a/port/src/game/dun/movechara.cpp
 +++ b/port/src/game/dun/movechara.cpp
 @@ -1,5 +1,6 @@
@@ -14556,7 +14570,15 @@ index f0d0e889..ba19daff 100644
  #include "dun/gameloop.hpp"
  
  #include <libvu0.h>
-@@ -30,6 +31,7 @@
+@@ -9,6 +10,7 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <algorithm>
+ 
+ #include "app/gameloop.hpp"
+ #include "battlemenu.hpp"
+@@ -30,6 +32,7 @@
  #include "dispctrl.hpp"
  #include "dngmessageman.hpp"
  #include "dngstatusdata.hpp"
@@ -14564,17 +14586,18 @@ index f0d0e889..ba19daff 100644
  #include "dranmapfield.hpp"
  #include "dungeoneventman.hpp"
  #include "dungeonmap.hpp"
-@@ -61,6 +63,9 @@
+@@ -61,6 +64,10 @@
  #include "menuitemstep.hpp"
  #include "mglib.hpp"
  #include "monstorunit.hpp"
 +#include "moonmod/coop_events.hpp"
++#include "moonmod/coop_monsters.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
 +#include "moonmod/manager_ui.hpp"
  #include "motionmodel.hpp"
  #include "nowload.hpp"
  #include "npcharacter.hpp"
-@@ -86,6 +91,11 @@
+@@ -86,6 +93,11 @@
  #include "weaponeffect.hpp"
  #include "weaponelement.hpp"
  #include "wind.hpp"
@@ -14586,7 +14609,7 @@ index f0d0e889..ba19daff 100644
  
  #pragma clang diagnostic ignored "-Wwritable-strings"
  #pragma clang diagnostic ignored "-Wchar-subscripts"
-@@ -103,6 +113,12 @@ s32 quickChangeLockOn = -1;
+@@ -103,6 +115,12 @@ s32 quickChangeLockOn = -1;
  s32 quickChangeShiftNo;
  s32 quickChangeShiftRot;
  
@@ -14599,7 +14622,7 @@ index f0d0e889..ba19daff 100644
  void DeleteItemModel(int slot) {
      if (activeItem.model[slot] != -1) {
          activeItem.models->DeleteModel(activeItem.model[slot]);
-@@ -112,6 +128,15 @@ void DeleteItemModel(int slot) {
+@@ -112,6 +130,15 @@ void DeleteItemModel(int slot) {
  
  } // namespace
  
@@ -14615,7 +14638,7 @@ index f0d0e889..ba19daff 100644
  void DunMoveChara() {
      // Where the camera looks relative to what it follows, before the floor's own offset is added.
      static sceVu0FVECTOR reference = {0.0f, 7.5f, 0.0f, 0.0f};
-@@ -126,6 +151,18 @@ void DunMoveChara() {
+@@ -126,6 +153,18 @@ void DunMoveChara() {
      CFrame              *collision = nullptr;
      int                  entry_no = 0;
  
@@ -14634,7 +14657,7 @@ index f0d0e889..ba19daff 100644
      // An event that sets its own draw distance keeps it; anything else draws
      // the whole floor.
      if (BtEventMode != 0 && EdEventInfo.projection > 0.0f) {
-@@ -177,6 +214,22 @@ void DunMoveChara() {
+@@ -177,6 +216,22 @@ void DunMoveChara() {
          case GAME_TASK_PLAY:
              if (CheckTrialEnd() != 0) {
                  tryalExit = 1;
@@ -14657,7 +14680,7 @@ index f0d0e889..ba19daff 100644
              } else if (GamePad.Down(PAD_START) != 0) {
                  printf("pause!!\n");
                  exitMenuFlag = 1;
-@@ -229,16 +282,24 @@ void DunMoveChara() {
+@@ -229,16 +284,24 @@ void DunMoveChara() {
                      NowCamera__3->SetSpeed(8.0f);
                      defCameraWait = 0;
  
@@ -14683,7 +14706,7 @@ index f0d0e889..ba19daff 100644
  #ifdef PAL
                  // In debug mode, Select outside an event opens the debug menu.
                  if (DebugMode != 0 && GamePad.Down(PAD_R3) != 0 && BtEventMode == 0) {
-@@ -269,8 +330,8 @@ void DunMoveChara() {
+@@ -269,8 +332,8 @@ void DunMoveChara() {
                  } else {
                      bool should_walk = true;
  
@@ -14694,7 +14717,7 @@ index f0d0e889..ba19daff 100644
  
                          if (move_x == 0.0f && move_z == 0.0f && BtActStatus.action_on == 0) {
                              ok = 1;
-@@ -298,7 +359,7 @@ void DunMoveChara() {
+@@ -298,7 +361,7 @@ void DunMoveChara() {
                      }
  
                      if (should_walk) {
@@ -14703,7 +14726,7 @@ index f0d0e889..ba19daff 100644
                              CharaFrame->SetRotation(0.0f, unitRotation(CharaFrame, atan2f(move_x, move_z)), 0.0f);
                          }
                          CharaMain.motion_type.motion_info->speed = 0.05f;
-@@ -309,7 +370,7 @@ void DunMoveChara() {
+@@ -309,7 +372,7 @@ void DunMoveChara() {
                          }
  
                          if (BtActStatus.recoil_frames != 0) {
@@ -14712,7 +14735,7 @@ index f0d0e889..ba19daff 100644
                                  BtActStatus.motion_no = 0x1D;
                              }
  
-@@ -323,7 +384,7 @@ void DunMoveChara() {
+@@ -323,7 +386,7 @@ void DunMoveChara() {
                          // SELECT opens the party, as retail does; with game.element_quick_select on,
                          // D-pad Up the same menu as the element picker (game/menu_dungeon.cpp), for a
                          // party of any size and a weapon with more than one element to pick between.
@@ -14721,7 +14744,7 @@ index f0d0e889..ba19daff 100644
                          bool elements = !party && ConfigGet().element_quick_select && GamePad.Down(PAD_UP) != 0 &&
                                          ElementPickerHasChoice();
  
-@@ -384,6 +445,8 @@ void DunMoveChara() {
+@@ -384,6 +447,8 @@ void DunMoveChara() {
                              }
  
                              if (GamePad.Down(PadInput_NO) != 0) {
@@ -14730,7 +14753,7 @@ index f0d0e889..ba19daff 100644
                                  if (lockOnTargetNo == -1) {
                                      sceVu0FMATRIX look;
  
-@@ -412,15 +475,16 @@ void DunMoveChara() {
+@@ -412,15 +477,16 @@ void DunMoveChara() {
                                  }
                              }
  
@@ -14749,7 +14772,7 @@ index f0d0e889..ba19daff 100644
                                  float face = atan2f(target[0] - pos[0], target[2] - pos[2]);
  
                                  if (BtActStatus.stick_strength > 0.0f) {
-@@ -476,11 +540,14 @@ void DunMoveChara() {
+@@ -476,11 +542,14 @@ void DunMoveChara() {
                                  }
                              }
  
@@ -14766,7 +14789,7 @@ index f0d0e889..ba19daff 100644
                                  BtActStatus.action_on = 6;
                                  BtActStatus.action_no = 8;
                                  driveNoInterpolate = 1;
-@@ -489,7 +556,7 @@ void DunMoveChara() {
+@@ -489,7 +558,7 @@ void DunMoveChara() {
                              if (BtActStatus.action_on == 6) {
                                  float end = 0.0f;
  
@@ -14775,7 +14798,7 @@ index f0d0e889..ba19daff 100644
                                      BtActStatus.action_on = 0;
                                      BtActStatus.action_no = 0x12;
                                  }
-@@ -538,10 +605,12 @@ void DunMoveChara() {
+@@ -538,10 +607,12 @@ void DunMoveChara() {
                                  BtEventInfo.fade_on_start = false;
                                  gameTask = GAME_TASK_FLOOR_FADE_RESET;
                              } else if (UserStatus->CheckLife() != 0 && BtActStatus.action_on == 0 && (script = NowMonstorUnit->CheckEventFlag2()) != -1) {
@@ -14788,7 +14811,7 @@ index f0d0e889..ba19daff 100644
                                  BtEventInfo.script_no = script;
                                  BtEventInfo.ext_memory = BtEventInfo.clear_script_ext_memory;
                                  BtEventInfo.clear_script_no = -1;
-@@ -587,7 +656,11 @@ void DunMoveChara() {
+@@ -587,7 +658,11 @@ void DunMoveChara() {
                                                  case ITEM_CLOCK_HANDS:
                                                  case ITEM_POINTY_CHESTNUT:
                                                  case ITEM_BLACK_KNIGHT_CREST:
@@ -14801,7 +14824,7 @@ index f0d0e889..ba19daff 100644
                                                      BtGetGateKey_Init(event);
                                                      gameTask = GAME_TASK_GATE_KEY_LOOP;
                                                      break;
-@@ -646,7 +719,13 @@ void DunMoveChara() {
+@@ -646,7 +721,13 @@ void DunMoveChara() {
                                              sceVu0CopyVector(BtEventInfo.direction, slot_dir);
                                          }
  
@@ -14816,7 +14839,7 @@ index f0d0e889..ba19daff 100644
                                              if (state->event->chara_no != -1 && GamePad.Down(PadInput_OK) != 0) {
                                                  if (UserStatus->cur_chara == state->event->chara_no) {
                                                      state->chara_done = UserStatus->cur_chara;
-@@ -689,7 +768,8 @@ void DunMoveChara() {
+@@ -689,7 +770,8 @@ void DunMoveChara() {
                                          }
  
                                          if (GamePad.Down(PadInput_OK | 0x80) != 0 && BtActStatus.movement_locked == 0 && BtActStatus.in_water != 0) {
@@ -14826,7 +14849,7 @@ index f0d0e889..ba19daff 100644
                                              DngMessMan.hide_timer = 0x5A;
                                              autoCamTrial();
                                              BtActStatus.action_on = 0;
-@@ -700,7 +780,7 @@ void DunMoveChara() {
+@@ -700,7 +782,7 @@ void DunMoveChara() {
                                              BtActStatus.action_gauge = 100.0f;
                                              BtActStatus.gauge_exhausted = 0;
                                              ResetMovePower();
@@ -14835,7 +14858,7 @@ index f0d0e889..ba19daff 100644
                                              SetSystemMes(0x50, 0x5A, MES_POS_BOTTOM, 0, nullptr, nullptr);
                                              DngMessMan.hide_timer = 0x5A;
                                              autoCamTrial();
-@@ -776,7 +856,7 @@ void DunMoveChara() {
+@@ -776,7 +858,7 @@ void DunMoveChara() {
                                                              if (NowDngMap->atra[entry_no].used != 0) {
                                                                  s8 chara = UserStatus->cur_chara;
  
@@ -14844,7 +14867,7 @@ index f0d0e889..ba19daff 100644
                                                                      gameTask = GAME_TASK_ATRA_GET_INIT;
                                                                      done = 1;
                                                                      SndSePlay(MENU_SOUND_CONFIRM, -1, 0);
-@@ -809,7 +889,14 @@ void DunMoveChara() {
+@@ -809,7 +891,14 @@ void DunMoveChara() {
  
                                                      run_play = true;
                                                  } else {
@@ -14860,7 +14883,7 @@ index f0d0e889..ba19daff 100644
                                                          case CHARA_TOAN:
                                                              ToanKey_On();
                                                              break;
-@@ -843,13 +930,17 @@ void DunMoveChara() {
+@@ -843,13 +932,17 @@ void DunMoveChara() {
                                                              break;
                                                      }
  
@@ -14880,7 +14903,7 @@ index f0d0e889..ba19daff 100644
                                                          case CHARA_TOAN:
                                                              ToanKey_Play();
                                                              break;
-@@ -885,7 +976,8 @@ void DunMoveChara() {
+@@ -885,7 +978,8 @@ void DunMoveChara() {
                                                  }
                                                  BtBySpeedFlag = 0;
  
@@ -14890,7 +14913,7 @@ index f0d0e889..ba19daff 100644
                                                      if (DebugStatus[5] == 0) {
                                                          BtBySpeedFlag = 1;
                                                      }
-@@ -893,7 +985,9 @@ void DunMoveChara() {
+@@ -893,7 +987,9 @@ void DunMoveChara() {
                                                      if (BtActStatus.action_on == 0 && gameTask != GAME_TASK_UNK_F0 && BtActStatus.can_act != 0) {
                                                          s16 *slots = UserStatus->active_item;
  
@@ -14901,7 +14924,7 @@ index f0d0e889..ba19daff 100644
                                                              // A boosting running item is spent each frame the button is held.
                                                              BtBySpeedFlag = 1;
                                                              int slot = itemNowSel - 1;
-@@ -912,7 +1006,10 @@ void DunMoveChara() {
+@@ -912,7 +1008,10 @@ void DunMoveChara() {
                                                      }
                                                  }
  
@@ -14913,7 +14936,7 @@ index f0d0e889..ba19daff 100644
                                                      s16 *slots = UserStatus->active_item;
                                                      int  used = checkItemUsed(itemNowSel - 1);
  
-@@ -1026,11 +1123,11 @@ void DunMoveChara() {
+@@ -1026,11 +1125,11 @@ void DunMoveChara() {
                                                          if (BtActStatus.action_on == 1) {
                                                              int slow = 0;
  
@@ -14927,7 +14950,7 @@ index f0d0e889..ba19daff 100644
                                                                  slow = 1;
                                                              }
  
-@@ -1061,7 +1158,7 @@ void DunMoveChara() {
+@@ -1061,7 +1160,7 @@ void DunMoveChara() {
                                                              BtActStatus.slow_walking = 1;
                                                          }
  
@@ -14936,7 +14959,7 @@ index f0d0e889..ba19daff 100644
                                                              ok = 1;
                                                          }
  
-@@ -1202,7 +1299,7 @@ void DunMoveChara() {
+@@ -1202,7 +1301,7 @@ void DunMoveChara() {
                                                                          }
                                                                      }
  
@@ -14945,7 +14968,7 @@ index f0d0e889..ba19daff 100644
                                                                          if (NowDngMap->boxes[entry_no].used != 0) {
                                                                              collision = NowDngMap->box_collision_model;
  
-@@ -1216,7 +1313,7 @@ void DunMoveChara() {
+@@ -1216,7 +1315,7 @@ void DunMoveChara() {
                                                                      NowMonstorUnit->MoveCheck(pos, velo__2, lockOnTargetFlag);
                                                                      int mode = 1;
  
@@ -14954,7 +14977,7 @@ index f0d0e889..ba19daff 100644
                                                                          mode = 8;
                                                                      }
  
-@@ -1263,22 +1360,23 @@ void DunMoveChara() {
+@@ -1263,22 +1362,23 @@ void DunMoveChara() {
                                                                      bound.min[2] = pos[2] - 20.0f;
                                                                      colPolyNum = 0;
  
@@ -14985,7 +15008,7 @@ index f0d0e889..ba19daff 100644
  
                                                                                  int turn = dir;
                                                                                  turn += base;
-@@ -1295,8 +1393,10 @@ void DunMoveChara() {
+@@ -1295,8 +1395,10 @@ void DunMoveChara() {
  
                                                                                  collision->SetRotation(0.0f, rot, 0.0f);
                                                                                  collision->SetPosition(160.0f * x, 0.0f, 160.0f * z);
@@ -14998,7 +15021,7 @@ index f0d0e889..ba19daff 100644
                                                                              }
                                                                          }
                                                                      }
-@@ -1314,7 +1414,7 @@ void DunMoveChara() {
+@@ -1314,7 +1416,7 @@ void DunMoveChara() {
                                                                      NowMonstorUnit->MoveCheck(pos, velo__2, lockOnTargetFlag);
                                                                      int mode = 1;
  
@@ -15007,7 +15030,7 @@ index f0d0e889..ba19daff 100644
                                                                          mode = 8;
                                                                      }
  
-@@ -1351,7 +1451,7 @@ void DunMoveChara() {
+@@ -1351,7 +1453,7 @@ void DunMoveChara() {
                                                                  pos[2] += velo__2[2];
                                                              }
  
@@ -15016,7 +15039,7 @@ index f0d0e889..ba19daff 100644
                                                                  CharaMain.FootSoundEnable(1);
                                                                  CharaMain.EventEnable(1);
                                                                  CharaMain.SetFootSoundID(BtActStatus.foot_sound);
-@@ -1372,7 +1472,8 @@ void DunMoveChara() {
+@@ -1372,7 +1474,8 @@ void DunMoveChara() {
                                                                  }
                                                              }
  
@@ -15026,7 +15049,7 @@ index f0d0e889..ba19daff 100644
                                                                  UserStatus->AddNowLife(UserStatus->cur_chara, -0x28, 10.0f);
                                                                  setUnitAmbientAnime(120.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                                                                  ResetStatusInfo();
-@@ -1428,7 +1529,7 @@ void DunMoveChara() {
+@@ -1428,7 +1531,7 @@ void DunMoveChara() {
  
                                                                          sceVu0CopyVector(step_pos, CharaFrame->position);
  
@@ -15035,7 +15058,7 @@ index f0d0e889..ba19daff 100644
                                                                              CRunFx__2.Set(step_pos);
                                                                          }
                                                                      }
-@@ -1446,7 +1547,8 @@ void DunMoveChara() {
+@@ -1446,7 +1549,8 @@ void DunMoveChara() {
                                                                  NowCamera__3->AddAngle(0.04f * -turn);
  
                                                                  if (lockOnTargetFlag == 0) {
@@ -15045,7 +15068,7 @@ index f0d0e889..ba19daff 100644
                                                                          NowCamera__3->AddAngle(-0.034906585f);
                                                                      }
  
-@@ -1455,14 +1557,18 @@ void DunMoveChara() {
+@@ -1455,14 +1559,18 @@ void DunMoveChara() {
                                                                      }
                                                                  }
  
@@ -15066,7 +15089,7 @@ index f0d0e889..ba19daff 100644
                                                                      oldCameraAngle = NowCamera__3->GetAngle();
                                                                      oldCameraHeight = NowCamera__3->GetHeight();
                                                                      NowCamera__3->FollowOff();
-@@ -1470,7 +1576,7 @@ void DunMoveChara() {
+@@ -1470,7 +1578,7 @@ void DunMoveChara() {
                                                                      viewMode__2 = 1;
                                                                      InitEyeCamera();
  
@@ -15075,7 +15098,7 @@ index f0d0e889..ba19daff 100644
                                                                          EquipReAttach(NowWeapon, 1);
                                                                      }
  
-@@ -1481,7 +1587,7 @@ void DunMoveChara() {
+@@ -1481,7 +1589,7 @@ void DunMoveChara() {
                                                                      LockOffTargte();
                                                                      ResetMovePower();
  
@@ -15084,7 +15107,7 @@ index f0d0e889..ba19daff 100644
                                                                          NowMainEffect->OffEffect(ruby_effect_id);
                                                                          ruby_effect_id = -1;
                                                                      }
-@@ -1490,7 +1596,7 @@ void DunMoveChara() {
+@@ -1490,7 +1598,7 @@ void DunMoveChara() {
                                                                  } else {
                                                                      sceVu0FVECTOR follow;
  
@@ -15093,7 +15116,7 @@ index f0d0e889..ba19daff 100644
                                                                          pos[1] += 200.0f;
                                                                      }
  
-@@ -1502,12 +1608,10 @@ void DunMoveChara() {
+@@ -1502,12 +1610,10 @@ void DunMoveChara() {
                                                                      NowCamera__3->SetFollow(follow[0], follow[1], follow[2]);
  
                                                                      if (lockOnTargetFlag != 0) {
@@ -15107,7 +15130,7 @@ index f0d0e889..ba19daff 100644
                                                                          float dist = DistVector(target, pos);
                                                                          to_target[0] = target[0] - pos[0];
                                                                          to_target[1] = target[1] - pos[1];
-@@ -1553,7 +1657,7 @@ void DunMoveChara() {
+@@ -1553,7 +1659,7 @@ void DunMoveChara() {
              if (EdFadeOutCheck() != 0) {
                  CSHOT_EFFECT *effects = NowShotEffect->effect;
  
@@ -15116,7 +15139,7 @@ index f0d0e889..ba19daff 100644
                      effects[i].Initialize();
                  }
  
-@@ -1602,7 +1706,7 @@ void DunMoveChara() {
+@@ -1602,7 +1708,7 @@ void DunMoveChara() {
                  TexManager.CleanUpTextureList();
                  CSHOT_EFFECT *effects = NowShotEffect->effect;
  
@@ -15125,7 +15148,7 @@ index f0d0e889..ba19daff 100644
                      effects[i].Initialize();
                  }
  
-@@ -1625,9 +1729,23 @@ void DunMoveChara() {
+@@ -1625,9 +1731,23 @@ void DunMoveChara() {
              }
  
              break;
@@ -15151,7 +15174,7 @@ index f0d0e889..ba19daff 100644
                  read_buffer = old_read_buffer;
                  DngMes1.mes_made = -1;
                  DngMes2.mes_made = -1;
-@@ -1647,12 +1765,21 @@ void DunMoveChara() {
+@@ -1647,12 +1767,21 @@ void DunMoveChara() {
                      existFlag = 1;
                  }
              }
@@ -15173,7 +15196,7 @@ index f0d0e889..ba19daff 100644
                      BtMiniItemSelect();
                      gameTask = GAME_TASK_SCRIPT_ITEM_SELECT;
                      break;
-@@ -1662,11 +1789,24 @@ void DunMoveChara() {
+@@ -1662,11 +1791,24 @@ void DunMoveChara() {
                      break;
                  case BT_REQUEST_ENTRANCE_WINDOW:
                      BtEventInfo.request = BT_REQUEST_NONE;
@@ -15199,7 +15222,7 @@ index f0d0e889..ba19daff 100644
                      DngEscapeMsgInit(&DngMes2, &DngMes1, 0);
                      BtGameModeFlag = BT_GAME_MODE_ESCAPE_MSG;
                      break;
-@@ -1706,7 +1846,7 @@ void DunMoveChara() {
+@@ -1706,7 +1848,7 @@ void DunMoveChara() {
                      startCnt2 = 0;
                      gameTask = GAME_TASK_PLAY;
                      printf("go dungeon\n");
@@ -15208,7 +15231,7 @@ index f0d0e889..ba19daff 100644
                      break;
                  case BT_REQUEST_RUN_SCRIPT:
                      BtEventInfo.request = BT_REQUEST_NONE;
-@@ -1735,7 +1875,7 @@ void DunMoveChara() {
+@@ -1735,7 +1877,7 @@ void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -15217,7 +15240,7 @@ index f0d0e889..ba19daff 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1757,7 +1897,7 @@ void DunMoveChara() {
+@@ -1757,7 +1899,7 @@ void DunMoveChara() {
                  unit_now->model_count = 0;
                  unit_now->current_monster = 0;
  
@@ -15226,7 +15249,7 @@ index f0d0e889..ba19daff 100644
                      unit_now->script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -1782,7 +1922,7 @@ void DunMoveChara() {
+@@ -1782,7 +1924,7 @@ void DunMoveChara() {
                  MainMonstorUnit.model_count = 0;
                  MainMonstorUnit.current_monster = 0;
  
@@ -15235,7 +15258,7 @@ index f0d0e889..ba19daff 100644
                      MainMonstorUnit.script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -1850,7 +1990,7 @@ void DunMoveChara() {
+@@ -1850,7 +1992,7 @@ void DunMoveChara() {
                      for (const ATRA_BOLL &ball : NowDngMap->atra) {
                          int atra_no = ball.atra_no;
  
@@ -15244,7 +15267,7 @@ index f0d0e889..ba19daff 100644
                              int atra = UserStatus->atra_registry[selectMapNo][atra_no].id;
  
                              getAtraToSaveData(atra, atra_no, SaveData, selectMapNo, UserStatus->cur_floor);
-@@ -1920,7 +2060,7 @@ void DunMoveChara() {
+@@ -1920,7 +2062,7 @@ void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -15253,7 +15276,7 @@ index f0d0e889..ba19daff 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1940,7 +2080,7 @@ void DunMoveChara() {
+@@ -1940,7 +2082,7 @@ void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -15262,7 +15285,7 @@ index f0d0e889..ba19daff 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1953,6 +2093,18 @@ void DunMoveChara() {
+@@ -1953,6 +2095,18 @@ void DunMoveChara() {
              gameTask = GAME_TASK_PLAY;
              break;
          }
@@ -15281,7 +15304,7 @@ index f0d0e889..ba19daff 100644
          case GAME_TASK_PAUSE:
              if (GamePad.Down(PAD_START) != 0) {
                  driveStepHold = 0;
-@@ -2097,7 +2249,7 @@ void DunMoveChara() {
+@@ -2097,7 +2251,7 @@ void DunMoveChara() {
                  sceVu0FVECTOR before;
                  sceVu0CopyVector(before, pos);
                  auto *fields = NowDngMap->map_type != 1 && selectMapNo == DUNGEON_DIVINE_BEAST_CAVE ? reinterpret_cast<DRAN_MAP_FIELD_SET *>(NowDranMapField) : nullptr;
@@ -15290,7 +15313,7 @@ index f0d0e889..ba19daff 100644
                      sceVu0SubVector(ref_off, pos, before);
                      veloOld[1] = velo__2[1];
                      velo__2[1] = info.landed ? 0.0f : std::max(-10.0f, velo__2[1] - 0.1f);
-@@ -2118,7 +2270,7 @@ void DunMoveChara() {
+@@ -2118,7 +2272,7 @@ void DunMoveChara() {
                      NowCamera__3->SetPos(eye);
                      NowCamera__3->SetRef(look);
                      static float walked = 0.0f;
@@ -15299,7 +15322,7 @@ index f0d0e889..ba19daff 100644
                          walked += hypotf(ref_off[0], ref_off[2]);
                          if (walked >= 10.0f) {
                              static int foot = 0;
-@@ -2140,15 +2292,15 @@ void DunMoveChara() {
+@@ -2140,15 +2294,15 @@ void DunMoveChara() {
                      hand_ok = 0;
                  }
  
@@ -15318,7 +15341,7 @@ index f0d0e889..ba19daff 100644
                      float head = viewAngleH__2;
  
                      if (head - PI <= -PI) {
-@@ -2158,7 +2310,7 @@ void DunMoveChara() {
+@@ -2158,7 +2312,7 @@ void DunMoveChara() {
                      CharaHand.SetRotation(viewAngleV__2, head, 0.0f);
                      CharaMainHandViewFlag = 1;
  
@@ -15327,7 +15350,7 @@ index f0d0e889..ba19daff 100644
                          case CHARA_XIAO:
                              if (GamePad.Down(PadInput_OK) != 0) {
                                  BattleActionOn_Jinn();
-@@ -2192,7 +2344,7 @@ void DunMoveChara() {
+@@ -2192,7 +2346,7 @@ void DunMoveChara() {
                      }
  
                      if (BtActStatus.action_on == 1) {
@@ -15336,7 +15359,7 @@ index f0d0e889..ba19daff 100644
                              case CHARA_XIAO:
                                  BattleActionPlay_Jinn(&CharaHand, 1);
                                  break;
-@@ -2222,7 +2374,12 @@ void DunMoveChara() {
+@@ -2222,7 +2376,12 @@ void DunMoveChara() {
                  SetBattleStyle(selectMapNo, 0);
  
                  bool check_eye_event = true;
@@ -15350,7 +15373,7 @@ index f0d0e889..ba19daff 100644
                      int ok = 1;
  
                      if (BtActStatus.action_on != 0) {
-@@ -2301,6 +2458,7 @@ void DunMoveChara() {
+@@ -2301,6 +2460,7 @@ void DunMoveChara() {
                      }
  
                      if (UserStatus->CheckLife() != 0 && NowMonstorUnit->GetMonstorNum() <= 0 && BtEventInfo.clear_script_no != -1) {
@@ -15358,7 +15381,7 @@ index f0d0e889..ba19daff 100644
                          BtEventInfo.script_no = BtEventInfo.clear_script_no;
                          BtEventInfo.ext_memory = BtEventInfo.clear_script_ext_memory;
                          BtEventInfo.clear_script_no = -1;
-@@ -2336,7 +2494,9 @@ void DunMoveChara() {
+@@ -2336,7 +2496,9 @@ void DunMoveChara() {
                          leaving = 1;
                      }
  
@@ -15369,7 +15392,7 @@ index f0d0e889..ba19daff 100644
                          sceVu0FVECTOR chara_rot;
  
                          CharaMainHandViewFlag = 0;
-@@ -2352,11 +2512,11 @@ void DunMoveChara() {
+@@ -2352,11 +2514,11 @@ void DunMoveChara() {
                          viewMode__2 = 0;
                          cameraAuto = cameraAutoOld;
  
@@ -15383,7 +15406,7 @@ index f0d0e889..ba19daff 100644
                              NowMainEffect->OffEffect(ruby_effect_id);
                              ruby_effect_id = -1;
                          }
-@@ -2471,7 +2631,7 @@ void DunMoveChara() {
+@@ -2471,7 +2633,7 @@ void DunMoveChara() {
                          viewMode__2 = 0;
                          cameraAuto = cameraAutoOld;
  
@@ -15392,7 +15415,7 @@ index f0d0e889..ba19daff 100644
                              EquipReAttach(NowWeapon, 0);
                          }
                      }
-@@ -2535,6 +2695,7 @@ void DunMoveChara() {
+@@ -2535,6 +2697,7 @@ void DunMoveChara() {
                  if (BtMiniChrSelectNo == 2) {
                      ClearSystemMes();
                      driveStepHold = 1;
@@ -15400,7 +15423,7 @@ index f0d0e889..ba19daff 100644
                      gameTask = GAME_TASK_EXIT_FADE_START;
                      static_cast<CDngStatusData *>(UserStatus)->SetDead();
                  } else {
-@@ -2628,7 +2789,7 @@ void DunMoveChara() {
+@@ -2628,7 +2791,7 @@ void DunMoveChara() {
              BtActStatus.camera_hold = 1;
              DngMessMan.enabled = false;
  
@@ -15409,16 +15432,21 @@ index f0d0e889..ba19daff 100644
                  NowMainEffect->OffEffect(ruby_effect_id);
                  ruby_effect_id = -1;
              }
-@@ -2687,7 +2848,7 @@ void DunMoveChara() {
+@@ -2687,8 +2850,12 @@ void DunMoveChara() {
                          activeItem.model[8] = -1;
                      }
  
 -                    if (static_cast<CDngStatusData *>(UserStatus)->GetLiveUnit() != 0 && UserStatus->party_size > 1) {
 +                    if (static_cast<CDngStatusData *>(UserStatus)->GetLiveUnit() != 0 && PartyCount(*UserStatus) > 1) {
                          gameTask += 2;
++                    } else if (MoonModCoopDownRule()) {
++                        // MoonMod co-op: down, not out, until the mod revives the player or gives up for them
++                        MoonModCoopSetPlayerDown(true);
++                        gameTask = GAME_TASK_MOD_DOWNED;
                      } else {
                          gameTask++;
-@@ -2706,7 +2867,7 @@ void DunMoveChara() {
+                     }
+@@ -2706,7 +2873,7 @@ void DunMoveChara() {
                  DeadKeyStartWait--;
  
                  if (DeadKeyStartWait == 0) {
@@ -15427,7 +15455,7 @@ index f0d0e889..ba19daff 100644
                          DeadMes(UserStatus->cur_chara, 0x168);
                      } else {
                          AllDeadMes(0x168);
-@@ -2731,10 +2892,12 @@ void DunMoveChara() {
+@@ -2731,10 +2898,12 @@ void DunMoveChara() {
                      CMonUnitHold = 0;
                      CEffectHold = 0;
                  } else {
@@ -15440,6 +15468,53 @@ index f0d0e889..ba19daff 100644
                  gameTask = GAME_TASK_EXIT_FADE_START;
                  static_cast<CDngStatusData *>(UserStatus)->SetDead();
  #endif
+@@ -2742,6 +2911,46 @@ void DunMoveChara() {
+ 
+             autoCamTrial();
+             break;
++        case GAME_TASK_MOD_DOWNED: {
++            // MoonMod co-op: lying down. The other players' heroes still take this floor's blows (the host runs them).
++            MoonModCoopAvatarHitsScan();
++            int   hp = 1;
++            float at[3] = {};
++            bool  has_at = false;
++            if (MoonModCoopTakeRevive(hp, at, has_at)) {
++                const s8 chara = UserStatus->cur_chara;
++                UserStatus->hp[chara] = static_cast<s16>(std::clamp<int>(hp, 1, UserStatus->max_hp[chara]));
++                UserStatus->ailments[chara] = 0;
++                UserStatus->ailment_frames[chara] = 0;
++                if (has_at) {
++                    CharaMain.pos[0] = at[0];
++                    CharaMain.pos[1] = at[1];
++                    CharaMain.pos[2] = at[2];
++                    CharaMain.SetPosition(CharaMain.pos);
++                }
++                CharaMain.motion_no = 0;
++                CharaMain.motion_flags = 4;
++                CharaMain.motion_speed = -1.0f;
++                BtActStatus.motion_no = 0;
++                BtActStatus.can_act = 1;
++                BtActStatus.action_on = 0;
++                BtActStatus.action_busy = 0;
++                BtActStatus.camera_hold = 0;
++                BtActStatus.invincible_frames = 0xA0;
++                UserStatus->step_disable = 0;
++                DngMessMan.enabled = true;
++                MoonModCoopSetPlayerDown(false);
++                setUnitAmbientAnime(160.0f, 1.0f, 255.0f, 0.0f, 0.0f);
++                gameTask = GAME_TASK_PLAY;
++            } else if (MoonModCoopTakeGiveUp()) {
++                MoonModCoopSetPlayerDown(false);
++                DeadKeyWait = 0x168;
++                DeadKeyStartWait = 0x3C;
++                gameTask = GAME_TASK_DEAD_GAMEOVER;
++            }
++            autoCamTrial();
++            break;
++        }
+         case GAME_TASK_DEAD_CHANGE_CHARA:
+             BtActStatus.motion_no = 0x17;
+ 
 diff --git a/port/src/game/dungeon_aerial.cpp b/port/src/game/dungeon_aerial.cpp
 new file mode 100644
 index 00000000..0984da66
@@ -28110,10 +28185,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..19def084
+index 00000000..242075b9
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,679 @@
+@@ -0,0 +1,682 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -28162,6 +28237,9 @@ index 00000000..19def084
 +    {"player.gauge_rules_clear", "player", "gauge_rules_clear", "simulation", "game.write", "Clear this mod's Chronicle gauge rules."},
 +    {"player.gauge_get", "player", "gauge_get", "simulation", "game.read", "Read the active Chronicle player's action gauge and the guard and gauge rules in force."},
 +    {"player.gauge_set", "player", "gauge_set", "simulation", "game.write", "Set the active Chronicle player's action gauge, or add to it, in a dungeon."},
++    {"player.down_rule_set", "player", "down_rule_set", "simulation", "game.write", "Chronicle: a party knocked out in a dungeon lies down instead of the game over, until player.revive or player.give_up (co-op)."},
++    {"player.revive", "player", "revive", "simulation", "game.write", "Chronicle: get a player who is down (player.down_rule_set) up again with some HP, optionally at a place on the floor."},
++    {"player.give_up", "player", "give_up", "simulation", "game.write", "Chronicle: a player who is down is knocked out after all; the game's own knockout follows."},
 +    {"player.state", "player", "state", "simulation", "game.read", "What the active Chronicle player is doing this frame: action, guard, lock-on target, recoil, invincibility, run, gauge, HP."},
 +    {"party.companion_set", "party", "companion_set", "simulation", "game.write", "Bring a party member out beside the player as an engine-driven Chronicle companion, or send it back."},
 +    {"party.companion_get", "party", "companion_get", "any", "game.read", "Read which Chronicle companion is out."},
@@ -29655,10 +29733,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..6bbd9de7
+index 00000000..f63c16d5
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17471 @@
+@@ -0,0 +1,17515 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -31285,6 +31363,7 @@ index 00000000..6bbd9de7
 +        CharaMain.GetRotation(rotation);
 +        if (std::isfinite(rotation[1])) result["heading"] = rotation[1]; // the way the player faces: (sin, cos) in (x, z)
 +        result["motion"] = CharaMain.motion_no; // the motion the hero plays (co-op's avatars play it on other screens)
++        result["down"] = MoonModCoopPlayerDown(); // knocked out and lying down (player.down_rule_set)
 +    } else if (mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < DUNGEON_MAP_BASE && GameMode == ED_MODE_WALK && Chara != nullptr &&
 +               Chara->frame != nullptr) {
 +        // Walking in a town: where the town's hero is, and which one it is (party.town_set_active).
@@ -43365,11 +43444,11 @@ index 00000000..6bbd9de7
 +    // world.avatar_set / avatar_clear: co-op's remote players on the dungeon floor (moonmod/coop_avatars.hpp).
 +    if (operation.path == "world.avatar_set") {
 +        static constexpr const char *kUsage =
-+            "expected {slot = 1-3, character = a character id, weapon = item_no or nil, x, y, z, heading, motion, tint = {r, g, b} or nil, name = text or nil}";
++            "expected {slot = 1-3, character = a character id, weapon = item_no or nil, x, y, z, heading, motion, tint = {r, g, b} or nil, name = text or nil, down = boolean}";
 +        if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +        const Json &request = args[0];
 +        for (auto field = request.begin(); field != request.end(); ++field) {
-+            static constexpr std::array<std::string_view, 10> kFields = {"slot", "character", "weapon", "x", "y", "z", "heading", "motion", "tint", "name"};
++            static constexpr std::array<std::string_view, 11> kFields = {"slot", "character", "weapon", "x", "y", "z", "heading", "motion", "tint", "name", "down"};
 +            if (std::ranges::find(kFields, field.key()) == kFields.end()) return Invalid(std::string("unknown field: ") + field.key());
 +        }
 +        int slot = 0;
@@ -43401,6 +43480,10 @@ index 00000000..6bbd9de7
 +        if (request.contains("name") && !request["name"].is_null()) {
 +            if (!request["name"].is_string() || request["name"].get_ref<const std::string &>().size() > 24) return Invalid("name must be text of 24 bytes at most");
 +            state.name = request["name"].get<std::string>();
++        }
++        if (request.contains("down")) {
++            if (!request["down"].is_boolean()) return Invalid("down must be true or false");
++            state.down = request["down"].get<bool>();
 +        }
 +        if (!MoonModAvatarSet(slot - 1, state)) return Failed("that character can't be shown");
 +        return {ApiCallStatus::Ok, {{"slot", slot}, {"shown", MoonModAvatarShown(slot - 1)}}, {}};
@@ -43666,6 +43749,45 @@ index 00000000..6bbd9de7
 +    if (operation.path == "player.gauge_get") return GetPlayerGauge(args);
 +    if (operation.path == "player.gauge_set") return SetPlayerGauge(args);
 +    if (operation.path == "player.state") return GetPlayerState(args);
++    if (operation.path == "player.down_rule_set") {
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 || !args[0].contains("enabled") ||
++            !args[0]["enabled"].is_boolean()) {
++            return Invalid("expected {enabled = true or false}");
++        }
++        MoonModCoopSetDownRule(args[0]["enabled"].get<bool>());
++        return {ApiCallStatus::Ok, {{"enabled", MoonModCoopDownRule()}}, {}};
++    }
++    if (operation.path == "player.revive") {
++        static constexpr const char *kUsage = "expected {hp = 1-999, x, y, z (optional, all three: where to stand up)}";
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
++        const Json &request = args[0];
++        for (auto field = request.begin(); field != request.end(); ++field) {
++            if (field.key() != "hp" && field.key() != "x" && field.key() != "y" && field.key() != "z") {
++                return Invalid("player.revive received an unsupported field: " + field.key());
++            }
++        }
++        int hp = 0;
++        if (!ReadBoundedInt(request, "hp", 1, 999, hp)) return Invalid(kUsage);
++        float at[3] = {};
++        const bool has_at = request.contains("x") || request.contains("y") || request.contains("z");
++        if (has_at) {
++            const char *keys[3] = {"x", "y", "z"};
++            for (int i = 0; i < 3; ++i) {
++                if (!request.contains(keys[i]) || !request[keys[i]].is_number()) return Invalid(kUsage);
++                at[i] = request[keys[i]].get<float>();
++                if (!std::isfinite(at[i]) || std::fabs(at[i]) > 1.0e6f) return Invalid(kUsage);
++            }
++        }
++        if (!MoonModCoopRequestRevive(hp, has_at ? at : nullptr)) return Failed("the player isn't down");
++        return {ApiCallStatus::Ok, {{"queued", true}}, {}};
++    }
++    if (operation.path == "player.give_up") {
++        if (!args.is_array() || !(args.empty() || (args.size() == 1 && args[0].is_object() && args[0].empty()))) {
++            return Invalid("expected no arguments");
++        }
++        if (!MoonModCoopRequestGiveUp()) return Failed("the player isn't down");
++        return {ApiCallStatus::Ok, {{"queued", true}}, {}};
++    }
 +    if (operation.path == "party.companion_set") return SetCompanion(mod_id, args);
 +    if (operation.path == "party.companion_get") {
 +        const int out = dc::game::MoonModCompanionLoaded();
@@ -46780,7 +46902,7 @@ index 00000000..6bbd9de7
 +    for (const char *path : {"player.get", "player.set", "player.heal", "player.damage", "party.list", "party.active", "party.set_active", "party.join", "party.leave", "party.town_active", "party.town_set_active",
 +                             "save.slot_id",
 +                             "player.status_add", "player.status_remove", "player.thirst_get", "player.thirst_set",
-+                             "player.tuning_set", "player.tuning_clear", "player.invincible", "player.moves_set", "player.moves_clear", "player.form_set", "player.form_clear", "player.move_play", "player.critical_set", "player.critical_clear", "animations.player_register", "animations.player_unregister", "animations.player_list", "animations.monster_register", "animations.monster_unregister", "animations.monster_list", "player.fatal_guard", "player.guard_rules_set", "player.guard_rules_clear", "player.gauge_rules_set", "player.gauge_rules_clear", "player.gauge_get", "player.gauge_set", "player.state", "party.companion_set", "party.companion_get",
++                             "player.tuning_set", "player.tuning_clear", "player.invincible", "player.moves_set", "player.moves_clear", "player.form_set", "player.form_clear", "player.move_play", "player.critical_set", "player.critical_clear", "animations.player_register", "animations.player_unregister", "animations.player_list", "animations.monster_register", "animations.monster_unregister", "animations.monster_list", "player.fatal_guard", "player.guard_rules_set", "player.guard_rules_clear", "player.gauge_rules_set", "player.gauge_rules_clear", "player.gauge_get", "player.gauge_set", "player.state", "player.down_rule_set", "player.revive", "player.give_up", "party.companion_set", "party.companion_get",
 +                             "characters.list", "characters.get", "world.get", "world.transition", "world.set_time",
 +                             "world.story_flag_get", "world.story_flag_set", "world.map_flag_get", "world.map_flag_set",
 +                             "world.story_value_get", "world.story_value_set",
@@ -47847,10 +47969,10 @@ index 00000000..ae25e54b
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_avatars_moonmod.cpp b/port/src/moonmod/coop_avatars_moonmod.cpp
 new file mode 100644
-index 00000000..9fb83a89
+index 00000000..67c7e411
 --- /dev/null
 +++ b/port/src/moonmod/coop_avatars_moonmod.cpp
-@@ -0,0 +1,329 @@
+@@ -0,0 +1,331 @@
 +// Co-op's remote players (moonmod/coop_avatars.hpp). Each avatar loads like the companion (its own file and model
 +// arenas, its own texture blocks, the weapon referenced to the hand) and is moved like the ghost (placed each frame),
 +// but from reports that come a few times a second: it eases toward the last one.
@@ -48078,6 +48200,7 @@ index 00000000..9fb83a89
 +
 +bool MoonModAvatarAt(int slot, float out[3]) {
 +    if (!MoonModAvatarShown(slot) || !g_avatars[slot].placed || !InDungeon() || g_place != Place()) return false;
++    if (g_avatars[slot].target.down) return false; // down: the monsters pass it by, and no blow lands on it
 +    std::copy(g_avatars[slot].at, g_avatars[slot].at + 3, out);
 +    return true;
 +}
@@ -48117,13 +48240,14 @@ index 00000000..9fb83a89
 +        a.body.SetRotation(0.0f, a.heading, 0.0f);
 +        int motion = mode == GAME_MODE_EDIT ? TownMotion(a.target.motion) : a.target.motion;
 +        if (motion < 0 || motion >= a.body.motion_end[0]) motion = 0;
++        const int hold = a.target.down ? 2 : 0; // down: it stays on the motion's last frame, lying there
 +        if (motion != a.motion) {
 +            a.body.motion_no = motion;
-+            a.body.motion_flags = 4;
++            a.body.motion_flags = 4 | hold;
 +            a.body.motion_speed = -1.0f;
 +            a.motion = motion;
 +        } else {
-+            a.body.motion_flags = 0;
++            a.body.motion_flags = hold;
 +        }
 +        a.body.Step();
 +        a.body.ClothStep(0);
@@ -48315,10 +48439,10 @@ index 00000000..9e108a83
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_monsters_moonmod.cpp b/port/src/moonmod/coop_monsters_moonmod.cpp
 new file mode 100644
-index 00000000..09ef4984
+index 00000000..59b3cfa0
 --- /dev/null
 +++ b/port/src/moonmod/coop_monsters_moonmod.cpp
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,315 @@
 +// Co-op's monsters (moonmod/coop_monsters.hpp): on the host they see every player; on a guest they mirror the host's.
 +
 +#include "moonmod/coop_monsters.hpp"
@@ -48380,6 +48504,13 @@ index 00000000..09ef4984
 +std::array<int, kMoonModAvatars> g_hit_cooldown{}; // frames before an avatar can be hit again (as the game's own grace)
 +
 +// The avatars on this floor: where each stands.
++// Down, not out: the rule, whether this player is down, and what the mod asked for.
++bool  g_down_rule = false;
++bool  g_player_down = false;
++bool  g_revive = false, g_revive_has_at = false, g_give_up = false;
++int   g_revive_hp = 1;
++float g_revive_at[3] = {};
++
 +int Avatars(std::array<std::array<float, 3>, kMoonModAvatars> &at, std::array<bool, kMoonModAvatars> &here) {
 +    int count = 0;
 +    for (int i = 0; i < kMoonModAvatars; ++i) {
@@ -48514,7 +48645,7 @@ index 00000000..09ef4984
 +// ---- Host: every player is seen -----------------------------------------------------------------------------------
 +
 +float MoonModCoopNearestDistance(const float *player, const float *monster) {
-+    float best = Dist3(player, monster);
++    float best = g_player_down ? 1.0e9f : Dist3(player, monster); // a player who is down is passed by
 +    std::array<std::array<float, 3>, kMoonModAvatars> at{};
 +    std::array<bool, kMoonModAvatars>                 here{};
 +    if (Avatars(at, here) == 0) return best;
@@ -48537,7 +48668,7 @@ index 00000000..09ef4984
 +    float monster[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 +    NowMonstorUnit->chara[slot][0].GetPosition(monster);
 +    const float *best = g_saved;
-+    float        best_d = Dist3(g_saved, monster);
++    float        best_d = g_player_down ? 1.0e9f : Dist3(g_saved, monster); // a player who is down is passed by
 +    for (int i = 0; i < kMoonModAvatars; ++i) {
 +        if (!here[i]) continue;
 +        const float d = Dist3(at[i].data(), monster);
@@ -48581,6 +48712,43 @@ index 00000000..09ef4984
 +        g_hits.push_back({a + 1, monster, damage, hit.kind, hit.flags});
 +        g_hit_cooldown[a] = 60; // about the game's own grace after a hit
 +    }
++}
++
++void MoonModCoopSetDownRule(bool on) { g_down_rule = on; }
++bool MoonModCoopDownRule() { return g_down_rule; }
++void MoonModCoopSetPlayerDown(bool down) {
++    g_player_down = down;
++    g_revive = g_give_up = false;
++}
++bool MoonModCoopPlayerDown() {
++    if (g_player_down && mode != GAME_MODE_DUNGEON) MoonModCoopSetPlayerDown(false); // left the dungeon meanwhile
++    return g_player_down;
++}
++bool MoonModCoopRequestRevive(int hp, const float *at) {
++    if (!MoonModCoopPlayerDown()) return false;
++    g_revive = true;
++    g_revive_hp = hp;
++    g_revive_has_at = at != nullptr;
++    if (at != nullptr) std::copy(at, at + 3, g_revive_at);
++    return true;
++}
++bool MoonModCoopRequestGiveUp() {
++    if (!MoonModCoopPlayerDown()) return false;
++    g_give_up = true;
++    return true;
++}
++bool MoonModCoopTakeRevive(int &hp, float at[3], bool &has_at) {
++    if (!g_revive) return false;
++    g_revive = false;
++    hp = g_revive_hp;
++    has_at = g_revive_has_at;
++    std::copy(g_revive_at, g_revive_at + 3, at);
++    return true;
++}
++bool MoonModCoopTakeGiveUp() {
++    if (!g_give_up) return false;
++    g_give_up = false;
++    return true;
 +}
 +
 +std::vector<MoonModAvatarHit> MoonModCoopTakeAvatarHits() {
