@@ -32,7 +32,11 @@ Scenarios (in `run_live.py`, each with its checks):
 |---------------|--------------|
 | `basic`       | The guest joins in Norune, then follows the host into the cave. The host strikes monsters, and the guest's copies lose them too. The guest leaves and the host forgets it. |
 | `floors`      | Norune, floor 2, floor 4, Norune, with the guest following each step. No one is offered a floor that is only loading. |
-| `host_leaves` | The host closes the room while both stand on a floor. The guest's visit ends and the host plays on alone. |
+| `host_leaves` | The host closes the room while both stand on a floor. The guest's things go to the host first, the guest's visit ends, and the host plays on alone. |
+| `rejoin`      | The guest's connection drops on a floor (the test hook `drop_after` leaves the relay as a pulled cable would). Its visit goes on, it gets back into the room by itself, and both see each other again. |
+
+`basic` and `rejoin` also check that each game measures its ping to the other. For what only two people at two
+screens can check, see `PLAYTEST.md`.
 
 Things to know about headless runs:
 

@@ -37,6 +37,8 @@ shared pause and doors.
 | Together | When another player goes to another floor, town or house, a panel offers to join them there (setting, on by default); the Mod Manager's "Join a player" does it later. Players give each other Gilda or items from their bag (F7 or "Give to a player"): what doesn't fit in the other's wallet or bag comes back |
 | Names | Each player's name over their hero on the floor or in town, and the others' names on the HUD under the room's code (the mod's "name" setting), the guests' in blue |
 | Pausing | A pause or menu holds only that player's game. The host's holds the floor's monsters for everyone (the guests' copies wait where they are); a guest's holds nothing of the others' |
+| The link (0.10.0, protocol 8) | Each player's ping by their name on the HUD (a PING/PONG every two seconds); a player unheard for eight seconds is "no signal", and the others are told. A guest whose connection drops keeps playing and gets back into the room by itself, every five seconds for two minutes ("BACK", answered "RESUME": no world sent again); the host hears "connection dropped", not "left". The host closing says "BYE" first: every guest's things go to it, then the room closes (ten seconds at most; F10 again closes at once). Every five seconds the host says its floor and how many doors it has opened there ("K"): a guest on that floor built differently, or whose copies of the host's monsters can't be made for five seconds, is offered to walk in again beside the host; one with fewer doors asks for them ("SYNC"), as does the Mod Manager's "Resync with the host". A join the host never answers ends after half a minute |
+| Monster copies | A guest's copy leads along the host's monster's movement (its speed between reports, a fifth of a second ahead at most) instead of trailing it; a guest's blow lowers the copy's HP at once, until the host's report has it (or three quarters of a second) |
 | Georama | A player's edit goes, once they leave the editor, to the host's world (`georama.town_export/import`), merged into it (only what they changed, so two building in one town at once both keep their work; they are told of each other), and from there to everyone; a player walking in that town is walked back to its entrance; a player busy in that town's editor gets it once free |
 
 ## The room's mods (0.9.0, protocol 7)
@@ -68,6 +70,8 @@ run's).
 Tests: `tools/tests/coop/test_coop.lua` ("The room's mods") and the engine's `moonmod_mods_api_test.cpp`.
 
 ## Next
+
+The plan for co-op that plays well, with what the best co-op games do mapped to Dark Cloud: `docs/COOP_V2_PLAN.md`.
 
 Playing it: everything above is built and tested in the mod's script tests and the engine's unit tests, not yet in two
 real games together.

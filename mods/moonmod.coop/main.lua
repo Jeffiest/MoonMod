@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 7
+local PROTOCOL = 8
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
@@ -59,6 +59,10 @@ end
 
 -- The session: role "host" or "guest" (nil when none), the room code, the players by id, and the pieces arriving.
 local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame = 0, kept_at = 0, names = {}, guest_mods = {}}
+-- The link to the others (section "The link" below): when each was last heard, their ping, who has gone quiet, a
+-- guest's way back in after its connection drops, a host closing its room.
+local link = {heard = {}, ping = {}, quiet = {}, fails = 0, fails_since = 0, warned_at = -100000, refused_since = nil,
+              out_of_step = {}}
 local code = moonmod.storage.get("code") or "-----" -- the code being typed on the title page
 -- A live test run (tools/tests/coop/live) puts its wishes here: {role = "host"|"guest", code?, follow?, where?, at?}. Players never
 -- have it: nothing but that harness writes this storage key.
@@ -75,7 +79,16 @@ end
 
 local function send(to, kind, text)
   local ok, err = call(game.net.send, {to = to, data = kind .. (text and (" " .. text) or "")})
-  if not ok then moonmod.log("warn", "co-op send " .. kind .. ": " .. errmsg(err)) end
+  if not ok then
+    moonmod.log("warn", "co-op send " .. kind .. ": " .. errmsg(err))
+    -- many failing in a short while: the player hears it, once a minute at most
+    if S.frame - link.fails_since > 120 then link.fails, link.fails_since = 0, S.frame end
+    link.fails = link.fails + 1
+    if link.fails >= 10 and S.frame - link.warned_at > 3600 then
+      link.warned_at = S.frame
+      toast("Co-op: messages aren't getting through (" .. errmsg(err):sub(1, 60) .. ")")
+    end
+  end
   return ok
 end
 
@@ -112,10 +125,14 @@ local function show_room()
   for peer in pairs(S.players) do seen[peer] = true end
   for peer in pairs(S.names) do seen[peer] = true end
   for _ in pairs(seen) do count = count + 1 end
+  if S.rejoin then hud(string.format("CO-OP %s  reconnecting...", S.code or "....")) return end
   hud(string.format("CO-OP %s  %d of 4", S.code or "....", count))
-  -- the others in the room, by name, under it
+  -- the others in the room, by name, under it: each with their ping, or "no signal"
   local names = {}
-  for _, name in pairs(S.names) do names[#names + 1] = name end
+  for peer, name in pairs(S.names) do
+    local ms = link.ping[peer]
+    names[#names + 1] = link.quiet[peer] and (name .. " (no signal)") or ms and string.format("%s %dms", name, ms) or name
+  end
   table.sort(names)
   if #names > 0 then try(game.render.layer_register, {id = "coop_who", text = table.concat(names, ", "):sub(1, 48)})
   else try(game.render.layer_remove, {id = "coop_who"}) end
@@ -207,6 +224,7 @@ local function forget(peer)
   if o and o.slot then try(game.world and game.world.avatar_clear, {slot = o.slot}) end
   others[peer] = nil
   S.names[peer] = nil
+  link.heard[peer], link.ping[peer], link.quiet[peer] = nil, nil, nil
 end
 
 local function forget_all()
@@ -330,6 +348,16 @@ function mon.hear(peer, rest)
   local alive = 0
   for _, m in ipairs(monsters) do if m.hp > 0 then alive = alive + 1 end end
   mon.count = alive -- for the live tests' report
+  -- copies this floor can't make (no such monster here): a floor out of step with the host's, once it lasts
+  local refused = type(got) == "table" and type(got.refused) == "table" and #got.refused or 0
+  if refused >= 2 then
+    link.refused_since = link.refused_since or S.frame
+    if S.frame - link.refused_since > 300 and link.out_of_step_here then
+      link.out_of_step_here(string.format("%d of the host's monsters aren't on your floor", refused))
+    end
+  else
+    link.refused_since = nil
+  end
   if got then
     mon.puppets = true
     mon.scene = scene
@@ -993,6 +1021,8 @@ local function stop(reason)
   builders = {}
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest, S.names, S.guest_mods = nil, nil, {}, {}, nil, {}, {}
+  S.rejoin, S.closing, S.host_bye, S.joined_at = nil, nil, nil, nil
+  link.heard, link.ping, link.quiet, link.refused_since, link.out_of_step = {}, {}, {}, nil, {}
   together.queue = {}
   show_room()
 end
@@ -1042,6 +1072,13 @@ local function welcome(peer, hello)
     end
     send_pieces(peer, "SETTINGS", rm.host_settings(host_mods))
   end
+  -- back after a dropped connection: their visit went on, so no world, only "carry on"
+  if hello.back then
+    send(peer, "RESUME")
+    toast("Co-op: " .. name .. " is back in (reconnected)")
+    show_room()
+    return
+  end
   local world = try(game.save.world_export)
   if not world or not world.data then send(peer, "REFUSE", "the host's game can't share its world right now") return end
   local account = try(game.save.account_get, {id = id})
@@ -1065,6 +1102,7 @@ local function keep(peer, data)
     moonmod.log("warn", "co-op: keeping " .. player.name .. "'s things: " .. errmsg(err))
     return
   end
+  if S.closing then S.closing.waiting[peer] = nil end
   if not player.kept_once then
     player.kept_once = true
     toast("Co-op: " .. player.name .. "'s things are kept; save your game to keep them for good")
@@ -1086,6 +1124,7 @@ local function join()
   if not ok then S.status = "Can't join: " .. errmsg(err):sub(1, 60) return end
   S.role = "guest"
   S.guest = {world = nil, player = nil, new = false, map = nil, started = false}
+  S.joined_at = S.frame
   S.status = "Joining " .. code .. "..."
 end
 
@@ -1107,7 +1146,180 @@ end
 local function send_things()
   if S.role ~= "guest" or not (S.guest and S.guest.visiting) then return end
   local things = try(game.save.player_export)
-  if things and things.data then send_pieces(0, "KEEP", things.data) end
+  if things and things.data and send_pieces(0, "KEEP", things.data) then S.kept_at = S.frame end
+end
+
+-- The link ----------------------------------------------------------------------------------------------------------
+-- Ping: every two seconds each game sends "PING frame" to the others, which answer "PONG frame" at once; the round
+-- trip is that player's ping, on the HUD by their name. Any message is a sign of life: a player unheard for eight
+-- seconds is "no signal" on the HUD, and the others are told once, and again when they're back.
+--
+-- A guest whose connection drops (not the host leaving) keeps playing its visit alone and joins the room again, every
+-- five seconds for two minutes, saying "BACK id name": the host checks its mods as for a first join and answers
+-- "RESUME" instead of its world. A host closing its room first says "BYE": every guest sends its things at once, and
+-- the room closes when all have come (or after ten seconds).
+--
+-- Out of step: every five seconds the host says which floor it's on and how many doors it has opened there ("K scene
+-- doors"). A guest on that floor built differently (another seed), or whose copies of the host's monsters can't be
+-- made for a while, is offered to walk onto the floor again beside the host; one with fewer doors open asks for them
+-- ("SYNC scene"), as does the Mod Manager's "Resync with the host".
+local PING_EVERY, QUIET_LINK, REJOIN_EVERY, REJOIN_WAIT, CLOSE_WAIT, CHECK_EVERY = 120, 480, 300, 7200, 600, 300
+
+local function peer_name(peer)
+  return S.names[peer] or (S.players[peer] and S.players[peer].name) or (peer == 0 and "the host") or ("Player " .. tostring(peer))
+end
+
+function link.heard_from(peer)
+  link.heard[peer] = S.frame
+  if link.quiet[peer] then
+    link.quiet[peer] = nil
+    toast("Co-op: " .. peer_name(peer) .. " is back in touch")
+    show_room()
+  end
+end
+
+function link.pong(peer, rest)
+  local at = tonumber(rest)
+  if at and at <= S.frame then link.ping[peer] = math.floor((S.frame - at) * 1000 / 60 + 0.5) end
+end
+
+function link.step()
+  if S.frame % PING_EVERY == 0 then send("all", "PING", tostring(S.frame)) end
+  for peer, at in pairs(link.heard) do
+    if not link.quiet[peer] and S.frame - at > QUIET_LINK then
+      link.quiet[peer] = true
+      toast(string.format("Co-op: no word from %s for %d seconds", peer_name(peer), QUIET_LINK // 60))
+      show_room()
+    end
+  end
+  if S.frame % 30 == 0 then show_room() end -- the pings on the HUD
+end
+
+-- How long ago a guest's things last went to the host, for the messages.
+local function kept_ago()
+  local s = math.floor((S.frame - (S.kept_at or 0)) / 60)
+  return s < 2 and "just now" or (s .. " seconds ago")
+end
+
+-- A guest's connection dropped with the room still open: carry on alone and try to get back in.
+function link.lost(reason)
+  forget_all()
+  mon.release()
+  door.waiting = {}
+  S.players, S.pieces, S.names = {}, {}, {}
+  link.heard, link.ping, link.quiet, link.refused_since = {}, {}, {}, nil
+  S.rejoin = {since = S.frame, next_try = S.frame + 60, tries = 0}
+  moonmod.log("warn", "co-op: connection lost: " .. tostring(reason))
+  toast("Co-op: the connection dropped; getting back into room " .. tostring(S.code) .. "...")
+  show_room()
+end
+
+function link.give_up(why)
+  local visiting = S.guest and S.guest.visiting
+  S.status = "Couldn't get back into the room."
+  stop(why .. "; your things were last kept " .. kept_ago())
+  if visiting then try(game.session.finish) end
+end
+
+function link.rejoin_step()
+  local r = S.rejoin
+  if S.frame - r.since > REJOIN_WAIT then link.give_up("couldn't get back into the room") return end
+  if S.frame < r.next_try then return end
+  r.next_try, r.tries = S.frame + REJOIN_EVERY, r.tries + 1
+  local ok, err = net_open("join", {code = S.code})
+  if not ok then moonmod.log("warn", "co-op rejoin: " .. errmsg(err)) end
+end
+
+-- The room closed under a guest: the host left (said goodbye or not), or this game's connection dropped.
+function link.closed(reason)
+  local visiting = S.role == "guest" and S.guest and S.guest.visiting
+  reason = tostring(reason)
+  if S.rejoin then
+    -- a try that failed: the room is gone, or the next try may do it
+    if reason:find("no room", 1, true) or reason:find("host left", 1, true) then link.give_up("the room is gone") end
+    return
+  end
+  if visiting and not S.host_bye and not reason:find("host left", 1, true) then link.lost(reason) return end
+  local why
+  if S.host_bye then why = "the host closed the room; your things were kept"
+  elseif visiting then why = "the host's game left the room; your things were last kept " .. kept_ago()
+  else why = "the room closed: " .. reason end
+  S.status = "The room closed: " .. reason
+  stop(why)
+  -- The host's world went with the host: back to the title.
+  if visiting then try(game.session.finish) end
+end
+
+-- The host closing: guests' things first.
+function link.close_room()
+  if S.closing then stop("you closed the room") return end -- a second press: at once
+  local waiting, any = {}, false
+  for peer, p in pairs(S.players) do if p.id then waiting[peer], any = true, true end end
+  if not any then stop("you closed the room") return end
+  S.closing = {since = S.frame, waiting = waiting}
+  send("all", "BYE")
+  toast("Co-op: closing the room; keeping your guests' things first (F10 again: close now)")
+end
+
+function link.closing_step()
+  local c = S.closing
+  local left = 0
+  for _ in pairs(c.waiting) do left = left + 1 end
+  if left == 0 then stop("you closed the room; save your game to keep your guests' things") return end
+  if S.frame - c.since > CLOSE_WAIT then
+    stop(string.format("you closed the room; %d guest%s didn't answer, so their things are as last kept",
+                       left, left == 1 and "" or "s"))
+  end
+end
+
+-- Out of step with the host: offered once per floor.
+function link.out_of_step_here(why)
+  if S.role ~= "guest" or not my_scene or link.out_of_step[my_scene] then return end
+  link.out_of_step[my_scene] = true
+  local host_scene = others[0] and others[0].scene
+  moonmod.log("warn", "co-op: out of step on " .. my_scene .. ": " .. why)
+  if not host_scene or host_scene:sub(1, 1) ~= "D" then toast("Co-op: " .. why) return end
+  together.ask({title = "Out of step with the host", subtitle = why:sub(1, 96), options = {
+    {title = "Walk in again beside the host", subtitle = together.place(host_scene), pick = function() together.join(0, host_scene) end},
+    {title = "Stay as I am", subtitle = "Mod Manager: Resync with the host"},
+  }})
+end
+
+function link.host_check()
+  if not (on_floor() and my_scene) then return end
+  -- anyone on this dungeon floor, built like this one or not
+  local floor = my_scene:match("^(D%d+:%-?%d+:)")
+  local anyone = false
+  for _, o in pairs(others) do if o.scene and o.scene:sub(1, #floor) == floor then anyone = true break end end
+  if anyone then send("all", "K", my_scene .. " " .. #(door.log[my_scene] or {})) end
+end
+
+function link.guest_check(rest)
+  local scene, doors = rest:match("^(%S+) (%d+)$")
+  if not (scene and my_scene) then return end
+  local hd, hf, hs = scene:match("^D(%d+):(%-?%d+):(%S+)$")
+  local md, mf, ms = my_scene:match("^D(%d+):(%-?%d+):(%S+)$")
+  if not (hd and md) or hd ~= md or hf ~= mf then return end -- not on the host's floor
+  local w = try(game.world.get)
+  if hs ~= ms then
+    -- a back floor is built by the game itself, not from the room's seed: that one can't match
+    if not (type(w) == "table" and w.back_floor) then link.out_of_step_here("your floor isn't built like the host's") end
+  elseif tonumber(doors) > #(door.log[my_scene] or {}) then
+    send(0, "SYNC", my_scene)
+  end
+end
+
+-- The host answers a guest's "SYNC scene": the doors opened there, and the clock.
+function link.resync_for(peer, scene)
+  for _, text in ipairs(door.log[scene] or {}) do send(peer, "E", scene .. " " .. text) end
+  send_clock()
+end
+
+function link.resync()
+  if S.role ~= "guest" or not S.code or S.rejoin then toast("Co-op: only a guest in a room resyncs with the host") return end
+  send(0, "SYNC", my_scene or "-")
+  link.out_of_step[my_scene or "-"] = nil
+  toast("Co-op: asked the host for the doors and the time again")
 end
 
 -- Messages ----------------------------------------------------------------------------------------------------------
@@ -1115,6 +1327,9 @@ end
 local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
   if not kind then return end
+  link.heard_from(peer)
+  if kind == "PING" then send(peer, "PONG", rest) return end
+  if kind == "PONG" then link.pong(peer, rest) return end
   if kind == "P" then hear_position(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
@@ -1133,15 +1348,33 @@ local function message(peer, data)
     if kind == "MODS" then
       local whole = take_piece(peer, kind, rest)
       if whole then S.guest_mods[peer] = rm.decode_list(whole) end
-    elseif kind == "HELLO" then
+    elseif kind == "HELLO" or kind == "BACK" then
       local id, name = rest:match("^(%S+) ?(.*)$")
-      welcome(peer, {id = id, name = name})
+      welcome(peer, {id = id, name = name, back = kind == "BACK"})
+    elseif kind == "LEAVING" then
+      if S.players[peer] then S.players[peer].leaving = true end
+    elseif kind == "SYNC" then
+      link.resync_for(peer, rest)
     elseif kind == "KEEP" then
       local whole = take_piece(peer, kind, rest)
       if whole then keep(peer, whole) end
     end
   elseif S.role == "guest" and peer == 0 then
     local g = S.guest
+    if kind == "K" then link.guest_check(rest) return end
+    if kind == "BYE" then
+      S.host_bye = true
+      send_things()
+      toast("Co-op: the host is closing the room; your things are going to them")
+      return
+    end
+    if kind == "RESUME" then
+      S.rejoin = nil
+      S.kept_at = -100000 -- the things go to the host again at once
+      toast("Co-op: back in the room")
+      show_room()
+      return
+    end
     if kind == "NEEDMODS" then
       local whole = take_piece(peer, kind, rest)
       if whole then
@@ -1150,7 +1383,9 @@ local function message(peer, data)
         for _, n in ipairs(list) do if n.what == "disable" and mine[n.id] then n.name = mine[n.id].name end end
         moonmod.storage.set("needed", {list = list, code = S.code})
         S.status = string.format("This room needs %d mod change%s first.", #list, #list == 1 and "" or "s")
+        local visiting = g and g.visiting -- back after a drop, with mods changed since
         stop("this room needs mods you don't have: " .. rm.summary(list))
+        if visiting then try(game.session.finish) end
         S.refresh_title = true
       end
       return
@@ -1158,7 +1393,7 @@ local function message(peer, data)
       local whole = take_piece(peer, kind, rest)
       if whole then
         local n = rm.apply_settings(whole)
-        if n > 0 then toast(string.format("Co-op: the host's settings for %d mod%s, for this visit", n, n == 1 and "" or "s")) end
+        if n > 0 and not S.rejoin then toast(string.format("Co-op: the host's settings for %d mod%s, for this visit", n, n == 1 and "" or "s")) end
       end
     elseif kind == "WORLD" then
       g.world = take_piece(peer, kind, rest) or g.world
@@ -1186,9 +1421,10 @@ local function pump()
         -- the mods this game plays, then "HELLO id name": the player id first, then the name, which may hold spaces
         local mine = rm.loaded()
         if mine then send_pieces(0, "MODS", rm.encode_list(mine)) end
-        send(0, "HELLO", me.id .. " " .. (my_name() or ""))
-        S.status = "Joined " .. tostring(e.code) .. "; the host is sending their world..."
+        send(0, S.rejoin and "BACK" or "HELLO", me.id .. " " .. (my_name() or ""))
+        if not S.rejoin then S.status = "Joined " .. tostring(e.code) .. "; the host is sending their world..." end
       end
+      if S.role == "guest" then link.heard_from(0) end -- the host is there from the start; a host doesn't hear itself
       show_room()
     elseif e.kind == "joined" then
       if S.role == "host" then S.players[e.peer] = S.players[e.peer] or {id = nil, name = e.name} end
@@ -1199,16 +1435,22 @@ local function pump()
       S.guest_mods[e.peer] = nil
       forget(e.peer)
       builders[e.peer] = nil
-      if S.role == "host" and p then toast("Co-op: " .. tostring(p.name or "a player") .. " left") end
+      if S.closing then S.closing.waiting[e.peer] = nil end
+      if S.role == "host" and p then
+        if p.leaving or not p.id then toast("Co-op: " .. tostring(p.name or "a player") .. " left")
+        else toast("Co-op: " .. tostring(p.name or "a player") .. "'s connection dropped; they can come back in for two minutes") end
+      end
       show_room()
     elseif e.kind == "message" then
       message(e.peer, e.data)
     elseif e.kind == "closed" then
-      local visiting = S.role == "guest" and S.guest and S.guest.visiting
-      S.status = "The room closed: " .. tostring(e.reason)
-      stop("the room closed: " .. tostring(e.reason))
-      -- The host's world went with the host: back to the title.
-      if visiting then try(game.session.finish) end
+      if S.role == "host" then
+        S.status = "The room closed: " .. tostring(e.reason)
+        stop(S.closing and "you closed the room" or
+             ("the room closed (" .. tostring(e.reason) .. "); save your game to keep your guests' things"))
+      else
+        link.closed(e.reason)
+      end
     end
   end
 end
@@ -1218,6 +1460,18 @@ end
 moonmod.on("game.tick", function(e)
   S.frame = e and e.frame or S.frame + 1
   pump()
+  -- a guest getting back in after a drop plays on alone meanwhile
+  if S.rejoin then link.rejoin_step() return end
+  if S.closing then link.closing_step() end
+  if S.role and S.code then link.step() end
+  if S.role == "host" and S.code and S.frame % CHECK_EVERY == 0 then link.host_check() end
+  -- a host that never answers a join
+  if S.role == "guest" and S.guest and not S.guest.started and S.joined_at and S.frame - S.joined_at > 1800 then
+    S.status = "The host didn't send their world; try again."
+    stop("the host didn't answer")
+    S.refresh_title = true
+    return
+  end
   if S.role and S.code and S.frame % SEND_EVERY == 0 then
     send_position()
     show_others()
@@ -1261,9 +1515,17 @@ end)
 -- Leaving a visit: the things go to the host first, then the session ends.
 local function leave()
   if S.role == "guest" and S.guest and S.guest.visiting then
+    if S.rejoin then
+      stop("you left while out of the room; your things were last kept " .. kept_ago())
+      try(game.session.finish)
+      return
+    end
+    send(0, "LEAVING")
     send_things()
     toast("Co-op: your things went to the host; leaving...")
     try(game.session.finish)
+  elseif S.role == "host" then
+    link.close_room()
   elseif S.role then
     stop("you closed the room")
   end
@@ -1277,6 +1539,7 @@ for _, a in ipairs({
   {"guests", "Guests this save keeps", "The friends whose things this save keeps, by name"},
   {"give", "Give to a player", "Give another player in the room Gilda or items from your bag (F7)"},
   {"follow", "Join a player", "Go to where another player in the room is now"},
+  {"resync", "Resync with the host", "A guest asks the host again for the floor's open doors and the time"},
   {"forget", "Forget guests not here", "Press twice: this save stops keeping the things of guests not in the room now"},
   {"needed", "Mods needed to join", "The mods a room asked this game to enable, update or turn off, still to do"},
 }) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
@@ -1319,6 +1582,7 @@ moonmod.on("ui.action", function(a)
   if a.id == "host" then host() elseif a.id == "leave" then leave()
   elseif a.id == "guests" then list_guests() elseif a.id == "forget" then forget_guests()
   elseif a.id == "give" then together.give() elseif a.id == "follow" then together.follow_menu()
+  elseif a.id == "resync" then link.resync()
   elseif a.id == "needed" then
     local left, room = rm.needed()
     if not left then toast("Co-op: no room has asked this game for mods")
@@ -1472,9 +1736,13 @@ if AUTOTEST then
     end
     table.sort(peers)
     local pos = p.position and string.format("%.0f,%.0f,%.0f", p.position.x, p.position.y, p.position.z) or "-"
-    moonmod.log("info", string.format("COOPTEST state frame=%d role=%s code=%s visiting=%s scene=%s context=%s pos=%s puppets=%s mons=%s peers=[%s]",
+    local pings = {}
+    for peer, ms in pairs(link.ping) do pings[#pings + 1] = peer .. ":" .. ms end
+    table.sort(pings)
+    moonmod.log("info", string.format("COOPTEST state frame=%d role=%s code=%s visiting=%s scene=%s context=%s pos=%s puppets=%s mons=%s link=%s pings=[%s] peers=[%s]",
       S.frame, tostring(S.role), tostring(S.code), tostring(S.guest and S.guest.visiting or false), tostring(my_scene),
-      tostring(w.context), pos, tostring(mon.puppets), tostring(mon.count or "-"), table.concat(peers, " ")))
+      tostring(w.context), pos, tostring(mon.puppets), tostring(mon.count or "-"), S.rejoin and "rejoin" or "ok",
+      table.concat(pings, " "), table.concat(peers, " ")))
   end
   moonmod.on("game.tick", function()
     if S.frame % 60 == 0 then report() end
@@ -1497,6 +1765,16 @@ if AUTOTEST then
         said.left = true
         moonmod.log("info", "COOPTEST leaving")
         leave()
+      end
+    end
+    -- a guest whose connection should drop: once it has been on a floor this long, its link goes as a cable pulled
+    if AUTOTEST.drop_after and S.role == "guest" and S.guest and S.guest.visiting and on_floor() and not said.dropped then
+      said.drop_since = said.drop_since or S.frame
+      if S.frame - said.drop_since >= AUTOTEST.drop_after then
+        said.dropped = true
+        moonmod.log("info", "COOPTEST dropping")
+        try(game.net.leave)
+        link.lost("the live test pulled the cable")
       end
     end
     -- a host that should close its room: once a guest has stood on its floor this long, it closes as a player does
@@ -1544,4 +1822,4 @@ if AUTOTEST then
 end
 
 -- For the tests: the state, and the pieces' size.
-return {state = S, me = me, piece = PIECE, mods = rm}
+return {state = S, me = me, piece = PIECE, mods = rm, link = link}

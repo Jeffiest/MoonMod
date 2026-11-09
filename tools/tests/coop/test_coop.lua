@@ -294,7 +294,7 @@ check(third.started and third.started.map == 4, "a host in the Gallery of Time s
 host.keys.leave_key = true
 for _ = 1, 3 do host.tick(); guest.tick(); third.tick() end
 check(guest.session.kind == "title" and third.session.kind == "title", "the host leaving sends the guests back to the title")
-check(find_toast(third, "room closed"), "and tells them why")
+check(find_toast(third, "closed the room"), "and tells them why")
 
 print("Seeing each other")
 do
@@ -802,6 +802,129 @@ do
     local back = rm.decode_value(rm.encode_value(v))
     check(back == v and math.type(back) == math.type(v), "a setting value crosses intact: " .. tostring(v):gsub("%c", "?"))
   end
+end
+
+print("The link: ping, drops, closing, out of step")
+do
+  relay.rooms = {}
+  -- a cable pulled: the relay drops the player, the others hear it leave, and its own game hears the connection close
+  local function drop(game_)
+    local room = relay.rooms[game_.net.code]
+    room.players[game_.net.id] = nil
+    for _, other in pairs(room.players) do queue(other, {kind = "left", peer = game_.net.id}) end
+    queue(game_, {kind = "closed", reason = "the connection to the relay closed"})
+    game_.net = nil
+  end
+  local function enter(g)
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+        g.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+    g.emit("game.title.selected", {entry = "join"})
+  end
+  local h, g = make_game("Toan"), make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  enter(g)
+  both(h, g, 10)
+  check(g.session.kind == "visit", "a guest is in")
+  both(h, g, 160)
+  check(tostring(h.layers.coop_who):match("^Xiao %d+ms$") and tostring(g.layers.coop_who):match("^Toan %d+ms$"),
+        "each HUD shows the others' ping", tostring(h.layers.coop_who) .. " / " .. tostring(g.layers.coop_who))
+
+  -- a guest gone quiet (a long load, a stalled connection), then back
+  h.tick(500)
+  check(not find_toast(h, "no word from the host"), "the host never waits to hear from itself")
+  check(find_toast(h, "no word from Xiao") and tostring(h.layers.coop_who):find("no signal", 1, true),
+        "the host notices a guest gone quiet", h.layers.coop_who)
+  both(h, g, 3)
+  check(find_toast(h, "Xiao is back in touch"), "and when they're back")
+
+  -- the guest's connection drops: its visit goes on, and it gets back in
+  local starts = g.started
+  drop(g)
+  both(h, g, 2)
+  check(g.mod.state.rejoin ~= nil and g.session.kind == "visit", "a guest whose connection drops keeps playing")
+  check(g.layers.coop == "CO-OP ABCDE  reconnecting...", "and its HUD says it is reconnecting", g.layers.coop)
+  check(find_toast(h, "Xiao's connection dropped"), "the host hears the connection dropped, not a goodbye")
+  g.things = "DCP1 after the drop"
+  both(h, g, 70)
+  check(g.mod.state.rejoin == nil and find_toast(g, "back in the room"), "it gets back into the room by itself")
+  check(find_toast(h, "Xiao is back in %(reconnected%)"), "the host hears it is back")
+  check(g.started == starts, "without a new visit: no world sent again")
+  both(h, g, 4)
+  check(h.accounts[g.storage.me.id] and h.accounts[g.storage.me.id].data == "DCP1 after the drop",
+        "and its things go to the host at once")
+
+  -- the host closes: every guest's things are kept first
+  g.things = "DCP1 the last of it"
+  h.keys.leave_key = true
+  h.tick()
+  check(h.mod.state.closing ~= nil and find_toast(h, "keeping your guests' things first"), "closing the room waits for the guests' things")
+  both(h, g, 6)
+  check(h.accounts[g.storage.me.id].data == "DCP1 the last of it", "the guest's last things reach the host before it closes")
+  check(h.mod.state.role == nil and find_toast(h, "save your game to keep your guests' things"), "then the room closes")
+  check(g.session.kind == "title" and find_toast(g, "the host closed the room; your things were kept"),
+        "and the guest is told its things were kept")
+
+  -- a drop while the room goes away: it gives up and says so
+  relay.rooms = {}
+  h, g = make_game("Toan"), make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  enter(g)
+  both(h, g, 10)
+  drop(g)
+  both(h, g, 2)
+  h.keys.leave_key = true
+  both(h, g, 2)
+  h.keys.leave_key = true -- the guest is gone: closes at once
+  both(h, g, 80)
+  check(g.mod.state.role == nil and g.session.kind == "title" and find_toast(g, "the room is gone"),
+        "a guest can't get back into a room that closed meanwhile")
+
+  -- out of step: the same floor built another way, and doors the guest missed
+  relay.rooms = {}
+  h, g = make_game("Toan"), make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  enter(g)
+  both(h, g, 10)
+  g.settings.follow_offers = false
+  h.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 500}
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 501}
+  h.player = {character = "toan", position = {x = 320, y = 0, z = 480}, heading = 0, motion = 0}
+  g.player = {character = "xiao", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  both(h, g, 330)
+  local panel = g.panel
+  check(panel and panel.title == "Out of step with the host", "a guest on the host's floor built differently is told", panel and panel.title)
+  g.choose(1)
+  both(h, g, 2)
+  check(g.entered[#g.entered] == "floor 0:2", "and can walk in again beside the host", g.entered[#g.entered])
+  g.map = {context = "dungeon", dungeon_id = 0, floor_id = 2, floor_seed = 500}
+  both(h, g, 60)
+  -- a door the host opened that the guest missed (a message lost on the way)
+  h.doors_out = {{script = 50, mode = 1, ext = 0, pos = {1, 0, 1}, dir = {0, 0, 1}}}
+  h.tick(11)
+  g.net_events = {} -- lost on the way
+  local before = #g.doors_run
+  both(h, g, 320)
+  check(#g.doors_run == before + 1 and g.doors_run[#g.doors_run].script == 50, "a guest with fewer doors open asks for them and gets them",
+        #g.doors_run - before)
+  g.emit("ui.action", {id = "resync"})
+  check(find_toast(g, "asked the host for the doors"), "the Mod Manager's Resync asks the host again")
+
+  -- a host that never answers a join
+  relay.rooms = {}
+  local silent, lone = make_game("Toan"), make_game("Xiao")
+  silent.keys.host_key = true
+  silent.tick(2)
+  enter(lone)
+  lone.tick(1805)
+  check(lone.mod.state.role == nil and lone.title.lines[3]:find("didn't send their world", 1, true),
+        "a join the host never answers ends after half a minute", lone.title.lines[3])
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

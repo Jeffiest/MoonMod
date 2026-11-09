@@ -158,6 +158,11 @@ class Checks:
         bad = [e for e in offers if 'floor select' in e or ':-1' in e or ':0 ' in e]
         self.check(not bad, who + ' is never offered a place that is only in transit', bad)
 
+    def pings(self):
+        for side in ('host', 'guest'):
+            seen = [s.get('pings', '[]') for s in getattr(self, side)['coop'] if s.get('pings', '[]') != '[]']
+            self.check(seen, 'the %s measures its ping to the other' % side, seen[-1:] if seen else '')
+
     def no_errors(self):
         bad = [side + ': ' + l.strip() for side in ('host', 'guest') for l in getattr(self, side)['lines']
                if ('moonmod.coop' in l and ('error' in l.lower() or 'traceback' in l.lower()))
@@ -191,6 +196,7 @@ def check_basic(host, guest, result):
             'the guest left by itself', [e for e in guest['events'] if 'leav' in e])
     last = host['coop'][-1] if host['coop'] else {}
     c.check(1 not in peers_of(last) if last else False, 'the host forgets the guest once it has left', last.get('peers'))
+    c.pings()
     c.no_stray_offers('guest')
     c.no_errors()
     return c.list
@@ -246,6 +252,10 @@ def check_host_leaves(host, guest, result):
     c.visit()
     c.together('D', 'on the floor')
     c.check(any(e == 'COOPTEST closing' for e in host['events']), 'the host closed the room')
+    c.check(toast(host, "keeping your guests' things first") and toast(host, "save your game to keep your guests"),
+            "the host kept the guest's things before closing", toasts(host))
+    c.check(toast(guest, 'the host closed the room; your things were kept'), 'the guest is told its things were kept',
+            toasts(guest))
     c.check(any(e.startswith('COOPTEST session_ended visit') for e in guest['events']), "the guest's visit ended",
             [e for e in guest['events'] if 'session' in e or 'status' in e][-4:])
     last_g = guest['drive'][-1] if guest['drive'] else {}
@@ -256,7 +266,52 @@ def check_host_leaves(host, guest, result):
     return c.list
 
 
-CHECKS = {'basic': check_basic, 'floors': check_floors, 'host_leaves': check_host_leaves}
+@scenario('rejoin')
+def rejoin():
+    """The guest's connection drops while both stand on a floor (the co-op mod's test hook leaves the relay as a
+    cable pulled would): its visit goes on alone, it gets back into the room by itself, and both see each other again."""
+    host = [
+        {'when': 'dungeon', 'after': 120, 'op': 'transition', 'id': 'chronicle:location:norune-village'},
+        {'when': 'town', 'after': 2700, 'op': 'enter_floor', 'dungeon_id': 0, 'floor_id': 1},
+        {'when': 'dungeon', 'after': 6000, 'op': 'mark', 'text': 'end'},
+    ]
+    guest = [{'when': 'visit', 'op': 'mark', 'text': 'arrived'}]
+    return {'host': host, 'guest': guest, 'guest_autotest': {'drop_after': 1500}, 'host_frames': 12000,
+            'guest_frames': 11400}
+
+
+def check_rejoin(host, guest, result):
+    c = Checks(host, guest, result)
+    c.ran()
+    c.visit()
+    g = guest['events']
+    c.check('COOPTEST dropping' in g, "the guest's connection was pulled", [e for e in g if 'drop' in e])
+    c.check(toast(host, "Guest's connection dropped"), 'the host hears the connection dropped', toasts(host))
+    c.check(toast(guest, 'back in the room'), 'the guest gets back into the room by itself', toasts(guest))
+    c.check(toast(host, 'is back in (reconnected)'), 'the host hears it is back', toasts(host))
+    visits = [e for e in g if e.startswith('COOPTEST session visit')]
+    c.check(len(visits) == 1 and not any(e.startswith('COOPTEST session_ended') for e in g),
+            'the visit went on through it: no second visit, none ended', visits)
+    # after getting back in: on the floor together again
+    dropped_at = next((i for i, e in enumerate(guest['lines']) if 'COOPTEST dropping' in e), None)
+    after = parse('\n'.join(guest['lines'][dropped_at:]))['coop'] if dropped_at is not None else []
+    back = [s for s in after if s.get('link') == 'ok' and s.get('scene', '').startswith('D')
+            and peers_of(s).get(0, {}).get('slot', '-') != '-']
+    c.check(len(back) >= 3, 'after it, the guest shows the host on the floor again', '%d seconds' % len(back))
+    c.pings()
+    c.no_errors()
+    return c.list
+
+
+def toasts(side):
+    return [l.split('toast ', 1)[1] for l in side['lines'] if 'toast ' in l][-6:]
+
+
+def toast(side, text):
+    return any(text in l for l in side['lines'] if 'toast ' in l)
+
+
+CHECKS = {'basic': check_basic, 'floors': check_floors, 'host_leaves': check_host_leaves, 'rejoin': check_rejoin}
 
 
 # --- running -------------------------------------------------------------------------------------------------------
