@@ -15,6 +15,7 @@ installer pins these revisions; applying this patch to newer upstream source is 
 | `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule, and the camera matching the aerial dungeon map needs (a tick that draws through several cameras keeps each one's interpolation). |
 | `apply-moonfactory.ps1` | Pins source revisions, checks both patches, and applies them. |
 | `verify-headless.ps1` | Builds and runs the Chronicle Two MoonMod native tests; optionally checks executable startup. |
+| `setup-linux.sh` | Installs what an Ubuntu 24.04 host needs to build and test the port without the Kazarov container. |
 
 ## How the patch is laid out
 
@@ -88,6 +89,43 @@ capabilities before using game operations. The broader roadmap and historical ve
 describe work from the original development workspace; they are not a new retail validation of this
 distributed patch. Authored model rigs, fighting styles, independent dungeon graphs, and other open
 items remain unsupported. Test with an isolated save before using an existing playthrough.
+
+## Build and test on Linux
+
+`setup-linux.sh` prepares an Ubuntu 24.04 machine (a cloud session or CI runner, no GPU needed). With MoonMod and a
+patched ChronicleTwo beside each other:
+
+```sh
+sudo MoonMod/ports/chronicle-two/setup-linux.sh ChronicleTwo
+. /opt/chronicletwo/env.sh
+cd ChronicleTwo
+cmake --preset linux-x64 -C tools/ci/dependencies.cmake
+cmake --build port/build/pc
+ctest --test-dir port/build/pc -R 'MoonMod|Smoke' -j4
+```
+
+On Linux, apply the two patches with `git apply` (the game patch in the checkout, the Kazarov patch in
+`tools/kazarov`); `apply-moonfactory.ps1` does the same under PowerShell 7.
+
+## Verification on November 10, 2026
+
+The patches were rebuilt for ChronicleTwo `1dc0c47a` and Kazarov `584cd2ef` and apply cleanly to a fresh checkout of
+both. Four game files needed merging by hand: `main.cpp` (usage text), `dng_event.cpp` (upstream's roster stress load
+now sits beside the template preload), `event.cpp` (upstream's Halloween preamble observer runs inside the
+`native.event.run` hook) and `test_hooks.cpp` (includes). A Linux Debug build made with `setup-linux.sh` (clang 22 with
+libc++, Rust 1.99, SDL 3.4.18, Kazarov's FFmpeg) built `darkchronicle` and `darkchronicle_tests`. With software Vulkan
+(llvmpipe):
+
+- 84 of the 85 `MoonMod*` and `Smoke*` cases pass, First Steps and the two-launch `MoonMod.HeadlessProbe` among them.
+  `MoonModManagerUi.ChangesTypedSettingsNotifiesModsAndSurvivesReload` still fails at its skill-tree mouse
+  expectation, as it did before this update;
+- of the full suite (2847 cases), 10 fail: that case and nine renderer cases (`GfxGpuMeshDc2.*`,
+  `GfxMisc.MeshBoundsFollowTheFlagAndAreInvalidatedByUpdates`, `MglibAspect.FloorMapPassagesAreSolidAt3840x2160`).
+  The renderer cases time out, run out of memory or trip Ubuntu 24.04's Vulkan 1.3 validation layers on the software
+  driver. They were not compared against an unpatched upstream build.
+
+No retail data was used, and no Windows build was made for this update. The notes below describe the earlier port to
+`7a7d7f29` and still apply.
 
 ## Verification on November 2, 2026
 
