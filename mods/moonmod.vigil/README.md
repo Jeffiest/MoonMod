@@ -2,7 +2,7 @@
 
 Souls-lite combat for Chronicle's story game: slow, deliberate fights where you read an enemy, then guard or evade,
 then punish. This is the first prototype. It uses only what the engine already offers. The plan, the findings behind
-it and the engine work still to come are in [`VIGIL_PLAN.md`](../../VIGIL_PLAN.md).
+it and the engine work still to come are in [`VIGIL_PLAN.md`](../../docs/plans/VIGIL_PLAN.md).
 
 ## What it does
 

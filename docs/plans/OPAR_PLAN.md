@@ -6,7 +6,7 @@ Cloud's own monster list (#98, model `e104a`). He joins **Dark Genie's Gauntlet*
 if ever.
 
 How he is checked and graded is [OPAR_VERIFICATION.md](OPAR_VERIFICATION.md). How his model is made and built is
-[art/opar/README.md](../art/opar/README.md) and [tools/chr/README.md](../tools/chr/README.md).
+[art/opar/README.md](../../art/opar/README.md) and [tools/chr/README.md](../../tools/chr/README.md).
 
 Everything here is uncommitted Gauntlet work until the Gauntlet is finished.
 

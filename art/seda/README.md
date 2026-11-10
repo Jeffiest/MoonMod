@@ -2,7 +2,7 @@
 
 The eighth playable hero: Seda, the swordsman of four hundred years ago, who went down after the Dark Genie and waits
 in the Divine Beast Cave for a boy from Norune. How he plays and what is left to do is
-[docs/SEDA_PLAN.md](../../docs/SEDA_PLAN.md).
+[docs/SEDA_PLAN.md](../../docs/plans/SEDA_PLAN.md).
 
 **He is made from his own model in the game** (pack `c07a`, from his floor 8 fight), fitted onto Toan's skeleton so he
 plays Toan's motions and holds Toan's swords. On a machine with the DC1 toolkit and your disc's data:

@@ -72,7 +72,7 @@ port\build\windows-x64-release\darkcloud_tests.exe --gtest_filter=MoonMod*
 
 ## Design the operation first
 
-Write the [API map](../API.md) entry before the code. If it is awkward to explain, it will be awkward to use. The
+Write the [API reference](../API.md) entry before the code, in the chapter for the operation's domain. If it is awkward to explain, it will be awkward to use. The
 habits the existing operations share:
 
 - **General, not mod-specific.** `set_rest_room` builds "a rest layout", not "the Gauntlet's floor between biomes".
@@ -199,8 +199,9 @@ depending on the machine, so judge by "no new failures", not by a fixed count.
 
 ### 9. Document it, and teach the fake game
 
-- Add the operation to [docs/API.md](../API.md), in the section for its domain, with an example call, every field
-  and its limits, what the getter returns, the events, the one-owner rule and any test hook.
+- Add the operation to its domain's chapter under [docs/api/](../API.md#chapters), with an example call, every field
+  and its limits, what the getter returns, the events, the one-owner rule and any test hook. Then run
+  `python tools/gen_api_reference.py`, which rewrites the [operation index](../api/OPERATIONS.md) from the patch.
 - Add it to the fake adapter in `tools/tests/roguelike/fake_game.lua` with the same field checks and result shapes,
   so mod tests catch a misuse before the game does (see [Testing mods](TESTING.md)).
 

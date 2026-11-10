@@ -1,4 +1,4 @@
-"""Toan's house (gedit/e01/in/i01h01/event.stb) with baby Opar in it, for the story Opar mod (docs/OPAR_PLAN.md §8).
+"""Toan's house (gedit/e01/in/i01h01/event.stb) with baby Opar in it, for the story Opar mod (docs/plans/OPAR_PLAN.md §8).
 
     python art/opar/story/patch_house.py [retail event.stb] [out event.stb]
 

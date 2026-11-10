@@ -1,4 +1,4 @@
-"""Baby Opar for the story (docs/OPAR_PLAN.md §8): the packs the house and its scene load.
+"""Baby Opar for the story (docs/plans/OPAR_PLAN.md §8): the packs the house and its scene load.
 
     python art/opar/make_baby.py [out folder]
 

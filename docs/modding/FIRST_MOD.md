@@ -52,7 +52,7 @@ seconds; a mod that registers content the game keeps (items, characters, floors)
 - **`settings`** are drawn by the Mod Manager for the player. The types are `boolean`, `integer`, `number`,
   `string` and `choice` (with `choices`). Read them with `moonmod.settings.get(id)`.
 - **`games`** is `chronicle`, `chronicle-two` or both. Most of what the bundled mods use is Chronicle-only, and the
-  [API map](../API.md) says which operations are which.
+  [operation index](../api/OPERATIONS.md) says which operations are which.
 - To work with another mod, list it in `dependencies` (it must be present) or `optional_dependencies` (used when it's
   there), and in `load_after`. The whole schema is [`manifest.schema.json`](../../manifest.schema.json).
 
@@ -116,7 +116,7 @@ function mod.on_unload() moonmod.log("info", ID .. " unloaded") end
 return mod
 ```
 
-> Check field names against the [API map](../API.md) before relying on them. `try` makes a wrong guess fail quietly
+> Check field names against the [API reference](../API.md) before relying on them. `try` makes a wrong guess fail quietly
 > instead of switching your mod off, but a wrong guess still does nothing, and nothing tells you why.
 
 ### How a script runs
@@ -181,7 +181,7 @@ The Mod Manager also shows each mod's state, and your notices appear over gamepl
 - **Persist correctly.** `moonmod.storage` is yours across every save, which suits unlocks, records and settings-like
   data. `game.save.get/set` follows the player's save slot, which suits story progress. `game.save.slot_id()` tells
   save slots apart. Versioned changes to saved data go through `game.save.migrate` (see the
-  [API map](../API.md#shared-save-migrations)).
+  [API reference](../api/runtime.md#save-data-and-migrations-save)).
 - **Show more.** HUD text layers, HUD bars and icons, choice panels, a run menu that replaces the pause, a page on
   Journal > Character, and boss cards are all in the [Cookbook](COOKBOOK.md#show-things-to-the-player).
 - **Add content.** Floors, items, weapons, enemies, NPCs, playable characters and title-menu game modes are in the

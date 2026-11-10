@@ -2,7 +2,8 @@
 
 This is the modder's guide to MoonFactory (Moon Mod), the mod framework built into the Chronicle (Dark Cloud) and
 Chronicle Two (Dark Chronicle) PC ports. It shows how the bundled mods were made, so the next mod is easier to make.
-The [API map](../API.md) lists every operation. These pages explain how to put the operations together into a mod,
+The [API reference](../API.md) describes every operation, and its
+[operation index](../api/OPERATIONS.md) lists them all. These pages explain how to put the operations together into a mod,
 what to do when the API can't do something yet, and how to test the result.
 
 Everything here comes from building real mods. Dark Genie's Gauntlet (`mods/moonmod.roguelike`) is a whole roguelike
@@ -20,7 +21,7 @@ When a page says "the Gauntlet does it this way", the code is there to read.
 | Check that your mod works, outside and inside the game | [Testing mods](TESTING.md) |
 | Ship several mods as one pack, or know when a switch applies at once | [Packs and live on/off](PACKS.md) |
 | Understand how Dark Cloud's own code behaves (units, floors, triggers, saves) | [Dark Cloud engine notes](DARK_CLOUD_NOTES.md) |
-| Look up an exact operation, field or event | [API map](../API.md) |
+| Look up an exact operation, field or event | [API reference](../API.md) and its [operation index](../api/OPERATIONS.md) |
 | Give a character a new animated move | [Animation guide](../ANIMATION_GUIDE.md) |
 | Replace a model or texture | [Model replacements](../MODEL_REPLACEMENTS.md) |
 | Write native C code instead of Lua | [Native SDK](../NATIVE_SDK.md) |
@@ -50,7 +51,7 @@ told who has it.
 
 **Mods react to events.** `moonmod.on("game.tick", fn)` runs every frame. Scene changes, floor generation, kills,
 hits, item pickups, doors, title-menu choices and run-menu picks are all events too. The event list is in the
-[API map](../API.md#events-and-update-phases), and `game.events.list()` returns it at run time.
+[operation index](../api/OPERATIONS.md#events), and `game.events.list()` returns it at run time.
 
 **Mods keep their own data.** `moonmod.storage` is per-mod key/value storage that lasts across saves (the Gauntlet's
 Moon Shards and unlocks live there). `game.save` is per-mod data tied to the player's save. `moonmod.settings` are

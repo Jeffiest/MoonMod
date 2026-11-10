@@ -1,6 +1,6 @@
 # Gauntlet log
 
-Passes of the gate loop in [GAUNTLET.md](../../../GAUNTLET.md), newest first.
+Passes of the gate loop in [GAUNTLET.md](../../../docs/plans/GAUNTLET.md), newest first.
 
 ## 2026-10-28 — Key icons in their doors' colours (uncommitted)
 
@@ -363,7 +363,7 @@ Verdict: no gate signed. G0 is next: apply the Chronicle patch, run the engine f
 
 ## Opar
 
-Graded against [docs/OPAR_VERIFICATION.md](../../../docs/OPAR_VERIFICATION.md) (13 metrics, 1-10; pass: average 8.5,
+Graded against [docs/OPAR_VERIFICATION.md](../../../docs/plans/OPAR_VERIFICATION.md) (13 metrics, 1-10; pass: average 8.5,
 none under 7, metrics 5, 7 and 11 at 8 or more).
 
 ### 2026-10-29: after phase 2 (model and paint), headless only

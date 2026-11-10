@@ -71,7 +71,7 @@ Each step builds, passes the port's tests, and is checked in game before the nex
 - The changes live as their own patches, `ports/chronicle/vr/vr-chronicle.patch` and `vr-kazarov.patch`, applied
   on top of the two MoonFactory patches. They are folded into the main patches once VR is ready.
 
-![Left and right eye from the VR0 replay](images/vr0_stereo_pair.png)
+![Left and right eye from the VR0 replay](../images/vr0_stereo_pair.png)
 
 ### VR1: OpenXR session — built 2026-11-03, plays on a Quest 3 over Link
 

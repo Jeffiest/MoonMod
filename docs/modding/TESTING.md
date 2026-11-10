@@ -151,7 +151,7 @@ stands the player on the rest floor's stairs) to reach a moment directly instead
 ## 5. Playtests
 
 Write the checklist down before playing: each line something a person can see and tick, with what passes. The
-Gauntlet's gate loop ([GAUNTLET.md](../../GAUNTLET.md)) does this per feature, with results in
+Gauntlet's gate loop ([GAUNTLET.md](../plans/GAUNTLET.md)) does this per feature, with results in
 `tools/tests/roguelike/gauntlet-log.md`. A feature isn't done until its line is ticked in the real game. Three
 failures on the same line mean the design is wrong, not the code.
 

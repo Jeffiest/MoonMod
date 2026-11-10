@@ -1,7 +1,7 @@
 # Opar in the Gauntlet: verification and grading
 
 This is how Opar ([OPAR_PLAN.md](OPAR_PLAN.md)) is checked before he counts as a finished Gauntlet character. It
-works like [GAUNTLET.md](../GAUNTLET.md): gates in order, each with automated checks, a playtest checklist and a
+works like [GAUNTLET.md](GAUNTLET.md): gates in order, each with automated checks, a playtest checklist and a
 grade. The difference is the grading: **13 metrics scored 1 to 10**, and the bar is high.
 
 ## The pass rule
