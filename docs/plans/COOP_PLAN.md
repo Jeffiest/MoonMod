@@ -72,7 +72,7 @@ Tests: `tools/tests/coop/test_coop.lua` ("The room's mods") and the engine's `mo
 
 ## Next
 
-The plan for co-op that plays well, with what the best co-op games do mapped to Dark Cloud: `docs/COOP_V2_PLAN.md`.
+The plan for co-op that plays well, with what the best co-op games do mapped to Dark Cloud: `docs/plans/COOP_V2_PLAN.md`.
 
 Playing it: everything above is built and tested in the mod's script tests and the engine's unit tests, not yet in two
 real games together.

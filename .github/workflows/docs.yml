@@ -1,0 +1,23 @@
+# Checks the generated files and the documentation: the operation index and the merged pack are up to date,
+# and every Markdown link resolves.
+name: docs
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: The operation index matches the port patches
+        run: python tools/gen_api_reference.py --check
+      - name: The merged pack matches its mods
+        run: python tools/pack/build_pack.py --check
+      - name: Markdown links resolve
+        run: python tools/check_docs.py

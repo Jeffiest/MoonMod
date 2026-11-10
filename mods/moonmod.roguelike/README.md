@@ -210,7 +210,7 @@ third biome about 15.
 ## How it is built
 
 **Engine (MoonFactory's Chronicle patch).** The patch adds title modes and sandbox sessions; see *Chronicle title modes
-and sandbox sessions* in [docs/API.md](../../docs/API.md).
+and sandbox sessions* in [docs/api/world.md](../../docs/api/world.md#title-modes-and-sandbox-sessions-title-session-chronicle).
 
 - `port/src/moonmod/title_modes.cpp` holds the registry, the mode screen's state and the session state.
 - `port/src/game/title/titleloop.cpp` and `port/src/title/title_menu.cpp` draw the extra title rows and the mode screen with the game's UI framework: a stone

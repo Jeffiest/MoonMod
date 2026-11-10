@@ -200,7 +200,7 @@ assert(game.player.moves_set({moves = {
   `direction`). If another mod (such as the Gauntlet with its New moves setting on) already uses `run_attack` for
   Toan, your move is refused. Pick another trigger or turn theirs off.
 
-Every move field is listed in [API: mod moves](API.md#chronicle-mod-moves-playermoves_set).
+Every move field is listed in [API: mod moves](api/player.md#mod-moves-playermoves_set-chronicle).
 
 ### 7. Check it in game
 
@@ -358,14 +358,14 @@ you'd ship.
 ### The Lua side
 
 - `game.animations.player_register({id, file})`, `player_unregister({id})`, `player_list()`: up to 64 motions a mod.
-  See [API: playable-character motions](API.md#chronicle-playable-character-motions-animationsplayer_register).
+  See [API: playable-character motions](api/assets.md#playable-character-motions-animationsplayer_register-chronicle).
 - `game.animations.monster_register({id, file, model, hits})`, `monster_unregister({id})`, `monster_list()`: the same
   files for a native monster model (`character` is its file name, `e03a`), with optional hit spheres; the motion number
   and first frame come from `monster_list` once a floor has loaded the model. Open `Rig(chr, gltf,
   cfg_name="info.cfg")` on the monster's `dun/monstor` files; `tools/anim/vigil_monster_moves.py` builds a roll and an
-  attack for two monsters. See [API: monster motions](API.md#chronicle-monster-motions-animationsmonster_register).
+  attack for two monsters. See [API: monster motions](api/assets.md#monster-motions-animationsmonster_register-chronicle).
 - `game.player.moves_set({moves = {...}})`, `moves_clear()`: up to 64 moves a mod. The event `game.player.move` fires
-  as one starts. See [API: mod moves](API.md#chronicle-mod-moves-playermoves_set).
+  as one starts. See [API: mod moves](api/player.md#mod-moves-playermoves_set-chronicle).
 - Triggers: `run_attack`, `guard_attack`, `dodge` (L2 with the stick pushed), `dodge_back` (L2 at rest),
   `heavy` (R2), `combo_finisher` (R2 after `chain` combo blows), `lock_attack` (locked on, stick `toward` or `away`
   + attack), `evade_attack` (attack late in an evade or just after it), `charge_release` (Toan). A finisher starts

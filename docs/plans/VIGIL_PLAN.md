@@ -7,9 +7,9 @@ to survive. The world is persistent and the dungeons are random.
 
 > **Built on [Jeffiest/MoonMod#15](https://github.com/Jeffiest/MoonMod/pull/15)** (Rest floor, Opar, animations and the
 > modder's guide). This plan uses its operations and follows its guide: the
-> [Cookbook](docs/modding/COOKBOOK.md), [Extending the engine](docs/modding/EXTENDING_THE_ENGINE.md),
-> [Testing mods](docs/modding/TESTING.md), [Dark Cloud engine notes](docs/modding/DARK_CLOUD_NOTES.md) and the
-> [Animation guide](docs/ANIMATION_GUIDE.md). Those paths exist once that PR is merged. Vigil work starts after it lands.
+> [Cookbook](../modding/COOKBOOK.md), [Extending the engine](../modding/EXTENDING_THE_ENGINE.md),
+> [Testing mods](../modding/TESTING.md), [Dark Cloud engine notes](../modding/DARK_CLOUD_NOTES.md) and the
+> [Animation guide](../ANIMATION_GUIDE.md). Those paths exist once that PR is merged. Vigil work starts after it lands.
 
 ---
 
@@ -174,7 +174,7 @@ Each gate needs its automated checks green and a playtest checklist ticked befor
 - **Output:** §7. The source half is done; the in-game half still needs the game.
 
 ### S1: Lua prototype on PR 15's API (built; awaiting the playtest)
-Built in `mods/moonmod.vigil/` ([README](mods/moonmod.vigil/README.md)), tested by `tools/tests/vigil/test_vigil.lua`
+Built in `mods/moonmod.vigil/` ([README](../../mods/moonmod.vigil/README.md)), tested by `tools/tests/vigil/test_vigil.lua`
 (45 checks).
 - **Evades for all six**: roll or tumble with the stick, backstep or hop back at rest. Untouchable, `gauge` 25 (the
   native gauge is the stamina bar, so an empty one stops them), cooldown 30, `cancel_after` 6. The motions are copied

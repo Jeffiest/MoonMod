@@ -421,7 +421,7 @@ def back_hop(rig):
                     (22, idle, "inout")])
 
 
-# His kit (docs/OPAR_PLAN.md §3): the same idle-based keyposes, with his legs, arms and staff placed freely.
+# His kit (docs/plans/OPAR_PLAN.md §3): the same idle-based keyposes, with his legs, arms and staff placed freely.
 
 HAND = (-4.4, 8.0, 2.6)  # the staff hand at idle, and the free one
 OFF = (3.2, 6.6, 1.1)

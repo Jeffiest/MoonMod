@@ -60,7 +60,7 @@ Norune. A wanderer by each floor's exit gate repeats the chapter's task, and Sta
 chapters reached and the end are kept on the page.
 
 The Chronicle uses the Shaft's floors and the Boss Rush arena, so it takes no floor slot of its own. Seda is a
-playable character once his pack is built (`docs/SEDA_PLAN.md`): with `resources/seda/c08d.chr` in this mod he
+playable character once his pack is built (`docs/plans/SEDA_PLAN.md`): with `resources/seda/c08d.chr` in this mod he
 registers as the Chronicle starts and takes the field. Until then Toan walks in his place.
 
 ## Floor slots

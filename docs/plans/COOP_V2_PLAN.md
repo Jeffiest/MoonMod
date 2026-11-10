@@ -1,6 +1,6 @@
 # Co-op 2: a plan for co-op that plays well
 
-`docs/COOP_PLAN.md` covers what is built: rooms, visits, the host's world, ghosts, mirrored monsters, doors, towns,
+`docs/plans/COOP_PLAN.md` covers what is built: rooms, visits, the host's world, ghosts, mirrored monsters, doors, towns,
 Georama and the room's mods. That all works in tests, but playing it still feels half done. Players are in the same
 place without really playing together. This plan takes what the best co-op games in Dark Cloud's style do and puts
 each of those things in, mapped to Dark Cloud's own systems.

@@ -1,7 +1,7 @@
 # Cookbook
 
 Recipes for the things the bundled mods do, each with the calls involved, a short example and the traps found while
-building it. Field-by-field details are in the [API map](../API.md). Each recipe names the bundled mod code that does
+building it. Field-by-field details are in the [API reference](../API.md). Each recipe names the bundled mod code that does
 it for real, so you can read a working version.
 
 Recipes are Chronicle unless they say otherwise. The snippets use the `try` and `call` guards from
@@ -175,7 +175,7 @@ end)
 
 **What:** walk from village to village and into every dungeon with no loading card and no world map, each dungeon
 one continuous map, the story floors behind smoke you walk through. This is Vigil World (`mods/moonmod.vigil`,
-setting *Vigil World preview*); `VIGIL_PLAN.md` sections 9 and 10 have the full history. The pieces stack, and each
+setting *Vigil World preview*); [`VIGIL_PLAN.md`](../plans/VIGIL_PLAN.md) sections 9 and 10 have the full history. The pieces stack, and each
 works on its own, so take the ones you need.
 
 ### 1. Turn the rules on before the place is made
@@ -372,7 +372,7 @@ frames})`; `render.bar_register({id, label, current, max})` for its HP; `dungeon
 - Update the HP bar on a timer (every 10-15 frames), not on every hit event.
 
 **In the Gauntlet:** `warden_cleared`, `scale_enemies`, and the Warden handlers. Design notes are in
-[`GAUNTLET.md`](../../GAUNTLET.md).
+[`GAUNTLET.md`](../plans/GAUNTLET.md).
 
 ---
 
@@ -485,7 +485,7 @@ loop) for the kinds you have a brain for, and hand everything else to `game.scri
 where the player is (`GET_POSITION`), whether the player just swung (`GUARD_SEARCH`) and its own motion frame
 (`CHK_MOTION_FRM`), then walks, steps, guards or attacks with `SET_MOVE` and `SET_MOTION`. Vigil's Dashers and
 Skeleton Soldiers take turns with one attack token. `ctx.model` is the floor's slot, not the monster's kind: key brains
-by `entities.query`'s `native_model_id` ([API](../API.md)). To find where a monster's blows land, read its own script:
+by `entities.query`'s `native_model_id` ([API](../api/combat.md#dungeon-entities-query-stats-spawn-and-despawn-entities)). To find where a monster's blows land, read its own script:
 `python tools/stb/stbdis.py data/dun/monstor/<model>.stb --table monster --port <Chronicle>/port` lists its
 `SET_DMG_COL(bone, radius, from, to)` windows, its `SET_GUARD_FRAME(from, to)` span and the motions it plays, and
 `tools/anim/moonanim.py`'s `Rig(...).motions` gives each motion's frame range (`tools/vigil/monster_survey.py` does both). (Or play each motion number on it,
@@ -634,7 +634,7 @@ local opar = try(game.characters.register_playable, {
 - Up to ten registered characters. The table is open-ended by design, so don't hard-code "the seventh".
 - `player.form_set({pack})` swaps the active character's model for another for a while (Opar's giant-frog form).
 
-**In the mods:** `mods/moonmod.opar`; the design and engine work in [OPAR_PLAN.md](../OPAR_PLAN.md).
+**In the mods:** `mods/moonmod.opar`; the design and engine work in [OPAR_PLAN.md](../plans/OPAR_PLAN.md).
 
 ---
 
@@ -646,7 +646,7 @@ Mods can ship authored motions and bind them to the attack buttons (`animations.
 full sets for all six characters are documented in [GAUNTLET_ANIMATIONS.md](../GAUNTLET_ANIMATIONS.md).
 
 A move out of a run can push off whichever foot is leading: give it `variants`, each another motion and the stretch of
-a native motion (his run) it is for. Vigil's dive roll does this ([API](../API.md), *Chronicle mod moves*).
+a native motion (his run) it is for. Vigil's dive roll does this ([API](../api/player.md#mod-moves-playermoves_set-chronicle)).
 
 Locked on, a `dodge` with `direction = "left"` or `"right"` keeps him facing the target while the stick carries him
 sideways: Vigil's side rolls are its dive roll with his body turned a quarter into the way he goes
@@ -722,7 +722,7 @@ Vigil's are `tools/anim/vigil_criticals.py` (Toan) and the `crumple` in `vigil_m
 `text.set({key, text})` replaces one of the game's own messages, and `text.clear` puts it back. Opar rewrites lines
 of the house scene in Norune while he is waiting to join, and puts them back afterwards (`words()` in
 `mods/moonmod.opar/main.lua`). Keys and the glyph tokens (`{icon-jar}`, `{insert1}`, `{name2}`) are in the
-[API map](../API.md).
+[API reference](../api/assets.md#game-text-text-chronicle).
 
 ---
 

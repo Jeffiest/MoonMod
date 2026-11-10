@@ -2,7 +2,7 @@
 
 The Gauntlet's seventh playable character: a frog mage with a staff, spit attacks, and a jump-slam that turns him
 into the game's own Opar monster (`e104a`). The concept is `concept.jpg`; how he plays is
-[docs/OPAR_PLAN.md](../../docs/OPAR_PLAN.md).
+[docs/OPAR_PLAN.md](../../docs/plans/OPAR_PLAN.md).
 
 - `make_opar.py`: makes the model, its paint and its weights in `opar.blend`. Shapes, colours and gear are in the
   script, so a change is an edit and a rerun:
