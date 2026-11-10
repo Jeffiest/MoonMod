@@ -39,9 +39,11 @@ if ! command -v "clang++-$llvm" >/dev/null; then
     echo "deb https://apt.llvm.org/noble/ llvm-toolchain-noble-$llvm main" > /etc/apt/sources.list.d/llvm-$llvm.list
 fi
 apt-get update
-# g++-14 supplies the libstdc++ the port's C++26 code needs; clang picks the newest one installed.
+# The port's C++26 code needs a newer standard library than Ubuntu 24.04's libstdc++ 14, so it builds
+# against LLVM's libc++ (env.sh sets -stdlib=libc++).
 apt-get install -y --no-install-recommends \
-    build-essential g++-14 "clang-$llvm" "lld-$llvm" "llvm-$llvm" "libclang-rt-$llvm-dev" \
+    build-essential "clang-$llvm" "lld-$llvm" "llvm-$llvm" "libclang-rt-$llvm-dev" \
+    "libc++-$llvm-dev" "libc++abi-$llvm-dev" "libunwind-$llvm-dev" \
     cmake ninja-build ccache nasm git pkg-config python3 glslang-tools \
     mesa-vulkan-drivers vulkan-validationlayers \
     libxkbcommon-dev libwayland-dev libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev \
@@ -144,6 +146,7 @@ export RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=$CARGO_HOME RUSTUP_TOOLCHAIN=$rust
 export PATH=$CARGO_HOME/bin:/usr/lib/llvm-$llvm/bin:\$PATH
 export CMAKE_PREFIX_PATH=$prefix\${CMAKE_PREFIX_PATH:+:\$CMAKE_PREFIX_PATH}
 export KZ_FFMPEG_DIR=$prefix/ffmpeg CT_DEPS_ROOT=$prefix/deps
+export CXXFLAGS="-stdlib=libc++\${CXXFLAGS:+ \$CXXFLAGS}" LDFLAGS="-stdlib=libc++\${LDFLAGS:+ \$LDFLAGS}"
 export LD_LIBRARY_PATH=$prefix/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
 # No GPU is needed: the tests render with Mesa's software driver.
 export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
