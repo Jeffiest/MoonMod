@@ -1,8 +1,8 @@
 diff --git a/port/CMakeLists.txt b/port/CMakeLists.txt
-index a33893e0..9d87e668 100644
+index a33893e0..33e8181b 100644
 --- a/port/CMakeLists.txt
 +++ b/port/CMakeLists.txt
-@@ -12,6 +12,19 @@ if(NOT CMAKE_CXX_COMPILER)
+@@ -12,6 +12,20 @@ if(NOT CMAKE_CXX_COMPILER)
      set(CMAKE_CXX_COMPILER clang++)
  endif()
  enable_language(CXX)
@@ -10,7 +10,8 @@ index a33893e0..9d87e668 100644
 +if(NOT CMAKE_C_COMPILER AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 +    get_filename_component(moonmod_cxx_dir ${CMAKE_CXX_COMPILER} DIRECTORY)
 +    get_filename_component(moonmod_cxx_name ${CMAKE_CXX_COMPILER} NAME)
-+    string(REGEX REPLACE "clang\\+\\+(-[0-9]+)?([.]exe)?$" "clang\\1\\2" moonmod_c_name ${moonmod_cxx_name})
++    # A plain replacement: CMake before 4 rejects a regex replacement naming a group that matched nothing.
++    string(REPLACE "clang++" "clang" moonmod_c_name ${moonmod_cxx_name})
 +    if(NOT moonmod_c_name STREQUAL moonmod_cxx_name)
 +        set(moonmod_sibling_c "${moonmod_cxx_dir}/${moonmod_c_name}")
 +        if(EXISTS ${moonmod_sibling_c})
@@ -22,7 +23,7 @@ index a33893e0..9d87e668 100644
  include(${CMAKE_SOURCE_DIR}/tools/cmake/sanitizers.cmake)
  
  set(CMAKE_CXX_STANDARD 26)
-@@ -93,6 +106,21 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+@@ -93,6 +107,21 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
      set(CT_WARNINGS -Wall -Wextra)
  endif()
  find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -44,7 +45,7 @@ index a33893e0..9d87e668 100644
  kz_port_host_library(ct_host)
  if(NINTENDO_SWITCH)
      kz_switch_host(ct_host)
-@@ -394,7 +422,8 @@ endif()
+@@ -394,7 +423,8 @@ endif()
  
  function(ct_link_game target)
      target_sources(${target} PRIVATE $<TARGET_OBJECTS:ct_port> $<TARGET_OBJECTS:ct_port_bridge> $<TARGET_OBJECTS:ct_host> $<TARGET_OBJECTS:ct_native>)

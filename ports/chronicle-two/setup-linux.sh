@@ -6,7 +6,12 @@
 #   sudo ports/chronicle-two/setup-linux.sh <ChronicleTwo checkout>
 #
 # Everything built from source goes under $CT_PREFIX (default /opt/chronicletwo). The script ends by
-# writing $CT_PREFIX/env.sh; source it before running cmake or ctest.
+# writing $CT_PREFIX/env.sh; source it, then configure with the pinned dependency sources:
+#
+#   . /opt/chronicletwo/env.sh
+#   cmake --preset linux-x64 -C tools/ci/dependencies.cmake
+#   cmake --build port/build/pc
+#   ctest --test-dir port/build/pc -R MoonMod
 set -euo pipefail
 
 game=${1:?usage: setup-linux.sh <ChronicleTwo checkout>}
@@ -76,10 +81,57 @@ if [ ! -f "$prefix/ffmpeg/include/libavcodec/avcodec.h" ]; then
     python3 "$game/tools/kazarov/tools/ffmpeg/kz-ffmpeg" --out "$prefix/ffmpeg" --jobs "$jobs"
 fi
 
-export RUSTUP_HOME=${RUSTUP_HOME:-$prefix/rustup} CARGO_HOME=${CARGO_HOME:-$prefix/cargo}
-if ! command -v rustup >/dev/null && [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-    wget --tries=5 --retry-connrefused -qO "$src/rustup-init.sh" https://sh.rustup.rs
-    sh "$src/rustup-init.sh" -y --no-modify-path --profile minimal --default-toolchain none
+# The CMake dependencies (Tracy, Luau, GoogleTest and so on) are pinned in the build files as archive
+# downloads. Fetch the same tags and commits with git instead, which also works where only git reaches
+# GitHub, into the layout tools/ci/dependencies.cmake reads ($CT_DEPS_ROOT/sources and /vendor).
+python3 - "$game" "$prefix/deps" <<'PY'
+import pathlib, re, shutil, subprocess, sys
+game, deps = map(pathlib.Path, sys.argv[1:])
+def checkout(repo, ref, destination):
+    if (destination / '.git').is_dir():
+        if (destination / '.ref').is_file() and (destination / '.ref').read_text() == ref:
+            return
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    git = ['git', '-C', str(destination)]
+    subprocess.run(git + ['init', '--quiet'], check=True)
+    subprocess.run(git + ['fetch', '--quiet', '--depth', '1', f'https://github.com/{repo}', ref], check=True)
+    subprocess.run(git + ['checkout', '--quiet', '--detach', 'FETCH_HEAD'], check=True)
+    (destination / '.ref').write_text(ref)
+patterns = [r'https://codeload\.github\.com/([^/]+/[^/]+)/tar\.gz/(?:refs/tags/)?(\S+)',
+            r'https://github\.com/([^/]+/[^/]+)/archive/(?:refs/tags/)?(\S+?)\.(?:tar\.gz|zip)',
+            r'https://github\.com/([^/]+/[^/]+)/releases/download/([^/]+)/\S+']
+files = [game / 'port/CMakeLists.txt', game / 'port/src/tests/CMakeLists.txt',
+         *(game / 'port/cmake').glob('*.cmake'), *(game / 'tools/kazarov/cmake').glob('*.cmake')]
+for file in files:
+    text = file.read_text()
+    for name, body in re.findall(r'FetchContent_Declare\((\w+)\s+(.*?)\)', text, re.S | re.I):
+        url = re.search(r'\bURL\s+(https://\S+)', body)
+        if not url or name.lower() == 'kz_vulkan_runtime':
+            continue
+        for pattern in patterns:
+            if found := re.fullmatch(pattern, url[1]):
+                checkout(found[1], found[2], deps / 'sources' / name.lower())
+                break
+        else:
+            sys.exit(f'{file}: {name}: no git source known for {url[1]}')
+    vendor = r'_kz_port_vendor\(\w+\s+(\S+)\s+https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([0-9a-f]{40})/(\S+)\s'
+    for name, repo, commit, path in re.findall(vendor, text):
+        source = deps / 'vendor-src' / repo.replace('/', '-')
+        checkout(repo, commit, source)
+        (deps / 'vendor').mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / path, deps / 'vendor' / name)
+PY
+
+# An existing rustup keeps its own home; otherwise Rust is installed under the prefix.
+if command -v rustup >/dev/null; then
+    export RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup} CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}
+else
+    export RUSTUP_HOME=${RUSTUP_HOME:-$prefix/rustup} CARGO_HOME=${CARGO_HOME:-$prefix/cargo}
+    if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+        wget --tries=5 --retry-connrefused -qO "$src/rustup-init.sh" https://sh.rustup.rs
+        sh "$src/rustup-init.sh" -y --no-modify-path --profile minimal --default-toolchain none
+    fi
 fi
 export PATH=$CARGO_HOME/bin:$PATH
 rustup toolchain install "$rust" --profile minimal
@@ -91,7 +143,7 @@ cat > "$prefix/env.sh" <<EOF
 export RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=$CARGO_HOME RUSTUP_TOOLCHAIN=$rust
 export PATH=$CARGO_HOME/bin:/usr/lib/llvm-$llvm/bin:\$PATH
 export CMAKE_PREFIX_PATH=$prefix\${CMAKE_PREFIX_PATH:+:\$CMAKE_PREFIX_PATH}
-export KZ_FFMPEG_DIR=$prefix/ffmpeg
+export KZ_FFMPEG_DIR=$prefix/ffmpeg CT_DEPS_ROOT=$prefix/deps
 export LD_LIBRARY_PATH=$prefix/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
 # No GPU is needed: the tests render with Mesa's software driver.
 export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
