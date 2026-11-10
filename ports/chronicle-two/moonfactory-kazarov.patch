@@ -37,10 +37,10 @@ index 3a686a9..536349d 100644
  void InputResetBindings();
  
 diff --git a/src/cpp/gfx/displaylist.cpp b/src/cpp/gfx/displaylist.cpp
-index a1a0667..a7f469b 100644
+index 7456194..ed6bc19 100644
 --- a/src/cpp/gfx/displaylist.cpp
 +++ b/src/cpp/gfx/displaylist.cpp
-@@ -855,8 +855,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
+@@ -870,8 +870,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
      }
      cache.cameras.assign(list.cameras.size(), -1);
      if (!list.camera_cut) {

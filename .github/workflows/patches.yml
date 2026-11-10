@@ -19,7 +19,7 @@ jobs:
             patch: moonfactory-chronicle.patch
           - port: chronicle-two
             repo: TheMoonPeople/ChronicleTwo
-            base: 7a7d7f29ae544a04e65634278d244b785d801066
+            base: 1dc0c47affa3a49935081e2c0593b6516285d3a3
             patch: moonfactory-chronicle-two.patch
     steps:
       - uses: actions/checkout@v4

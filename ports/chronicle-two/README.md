@@ -4,9 +4,9 @@ This integration embeds MoonMod / MoonFactory in the Chronicle Two PC port. It i
 shared Lua and native plugin runtime, Chronicle Two adapter, Mod Manager, game hooks, vendored
 Lua 5.5.1, native tests, and a two-launch executable smoke test. No retail data is distributed.
 
-The supported source revision is **7a7d7f29ae544a04e65634278d244b785d801066** of
-[TheMoonPeople/ChronicleTwo](https://github.com/TheMoonPeople/ChronicleTwo) (its `master` of November 2, 2026),
-with Kazarov at **fd72338a6aebf5c119947bb3150bba580217fec9**, the submodule commit that revision pins. The
+The supported source revision is **1dc0c47affa3a49935081e2c0593b6516285d3a3** of
+[TheMoonPeople/ChronicleTwo](https://github.com/TheMoonPeople/ChronicleTwo) (its `master` of November 8, 2026),
+with Kazarov at **584cd2ef008d8c51b519b6e8d36212e49e8215dc**, the submodule commit that revision pins. The
 installer pins these revisions; applying this patch to newer upstream source is not verified.
 
 | File | Purpose |

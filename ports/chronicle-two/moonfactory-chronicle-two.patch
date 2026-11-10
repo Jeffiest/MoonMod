@@ -141,10 +141,10 @@ index 941ec119..849eb6a5 100644
 +
 +#include "moonmod/mapselect_moonmod.hpp"
 diff --git a/port/include/monster.hpp b/port/include/monster.hpp
-index d017d6f4..7d398df8 100644
+index 14b4be61..e0f1d44a 100644
 --- a/port/include/monster.hpp
 +++ b/port/include/monster.hpp
-@@ -40,6 +40,8 @@ enum MONSTER_MAN_SIZE {
+@@ -41,6 +41,8 @@ enum MONSTER_MAN_SIZE {
      MONSTER_SHARE_MAX = 128  /**< Variables that every monster's script shares. */
  };
  
@@ -153,7 +153,7 @@ index d017d6f4..7d398df8 100644
  /**
   *
   * Kinds of monster that the code singles out by number.
-@@ -579,6 +581,15 @@ public:
+@@ -591,6 +593,15 @@ public:
       */
      CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
  
@@ -169,7 +169,7 @@ index d017d6f4..7d398df8 100644
      /**
       *
       * Draws the monsters on the mini-map.
-@@ -749,6 +760,21 @@ extern BASE_MONSTER_TBL base_monster_define[344];
+@@ -760,6 +771,21 @@ extern BASE_MONSTER_TBL base_monster_define[344];
   */
  BASE_MONSTER_TBL *GetMonsterTable(int id);
  
@@ -1646,7 +1646,7 @@ index 00000000..41ac8c0a
 +}
 +
 diff --git a/port/src/main.cpp b/port/src/main.cpp
-index 309f3fab..12716239 100644
+index a3e586e2..3feb4258 100644
 --- a/port/src/main.cpp
 +++ b/port/src/main.cpp
 @@ -30,6 +30,8 @@
@@ -1667,16 +1667,16 @@ index 309f3fab..12716239 100644
      const char           *log_level = nullptr;
      bool                  fast_load = false;
      int                   perf_seconds = 0;
-@@ -88,7 +92,7 @@ Options g_options;
+@@ -89,7 +93,7 @@ Options g_options;
  
  [[noreturn]] void Usage(const char *program) {
      CT_LOG_ERROR(Main,
--                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
-+                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --pickup ITEM      test-only: spawn one native dungeon item pickup on arrival\n  --georama-stock TOWN:MOD:PIECE:COUNT  test-only stock for a registered Georama piece\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
+-                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --perf-ack-halloween-preamble  test-only: acknowledge the first fully shown Halloween tutorial before measurement\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
++                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --pickup ITEM      test-only: spawn one native dungeon item pickup on arrival\n  --georama-stock TOWN:MOD:PIECE:COUNT  test-only stock for a registered Georama piece\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --perf-ack-halloween-preamble  test-only: acknowledge the first fully shown Halloween tutorial before measurement\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
                   program);
      LogFlush();
      std::exit(kExitUsage);
-@@ -141,6 +145,10 @@ Options ParseOptions(int argc, const char **argv) {
+@@ -142,6 +146,10 @@ Options ParseOptions(int argc, const char **argv) {
              options.jump = OptionValue(argc, argv, i);
          } else if (arg == "--give") {
              options.give = OptionValue(argc, argv, i);
@@ -1687,7 +1687,7 @@ index 309f3fab..12716239 100644
          } else if (arg == "--log-level") {
              options.log_level = OptionValue(argc, argv, i);
              if (!LogSpecValid(options.log_level)) {
-@@ -300,6 +308,34 @@ void ShutdownWindow() {
+@@ -305,6 +313,34 @@ void ShutdownWindow() {
      }
  }
  
@@ -1722,7 +1722,7 @@ index 309f3fab..12716239 100644
  // A closed window ends the process here: the game has no stop request to ask its loop to return.
  void PumpHost() {
      if (!WindowPollEvents()) {
-@@ -397,7 +433,9 @@ int Run(int argc, const char **argv) {
+@@ -402,7 +438,9 @@ int Run(int argc, const char **argv) {
      const char *jump = options.jump ? options.jump : SettingsEnv("JUMP");
      const char *give = options.give ? options.give : SettingsEnv("GIVE");
      if ((jump && (options.jump || *jump) && !GameSetJump(jump)) ||
@@ -1733,7 +1733,7 @@ index 309f3fab..12716239 100644
          Usage(argv[0]);
      }
      PortAutosave = !options.headless && !GameHasJump() && options.input.empty();
-@@ -513,6 +551,8 @@ int Run(int argc, const char **argv) {
+@@ -530,6 +568,8 @@ int Run(int argc, const char **argv) {
      ClockSetTickRate(kConfigTickRateDefault);
      ClockSetUnbounded(options.headless);
      ClockAddPumpHook(PumpHost);
@@ -1742,7 +1742,7 @@ index 309f3fab..12716239 100644
      ClockSetTickCallback(dc2::timing::OnVerticalBlank);
      ConfigSetChangeHook(ApplyConfigChange);
  
-@@ -528,7 +568,9 @@ int Run(int argc, const char **argv) {
+@@ -545,7 +585,9 @@ int Run(int argc, const char **argv) {
      CT_PROFILE_THREAD("Game / host");
      MainLoop();
  
@@ -18622,10 +18622,10 @@ index fdee1a6e..dcc27681 100644
 +int DngLayoutRoomMin = 0;
 +int DngLayoutRoomMax = 0;
 diff --git a/port/src/object/dun/dng_event.cpp b/port/src/object/dun/dng_event.cpp
-index 8ac0b9ed..8170b801 100644
+index b07b90e2..dbf33cde 100644
 --- a/port/src/object/dun/dng_event.cpp
 +++ b/port/src/object/dun/dng_event.cpp
-@@ -2098,7 +2098,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
+@@ -2100,7 +2100,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
          grid_cells[static_cast<std::size_t>(cell)].Initialize();
      }
  
@@ -18634,7 +18634,7 @@ index 8ac0b9ed..8170b801 100644
          AutoMapGen.room[room].no_door = 0;
      }
  
-@@ -2218,7 +2218,17 @@ void PrepareMonsterMemory(CMonsterMan &manager) {
+@@ -2220,7 +2220,17 @@ void PrepareMonsterMemory(CMonsterMan &manager) {
      }
  }
  
@@ -18652,16 +18652,16 @@ index 8ac0b9ed..8170b801 100644
      if (!ActiveMonster) {
          return;
      }
-@@ -2251,6 +2261,8 @@ void LoadMonsterFile() {
-             ActiveMonster->EntryRefer(id, memory);
+@@ -2254,6 +2264,8 @@ void LoadMonsterFile() {
          }
      }
+     dc2::debug::RosterStressLoadMonsters(memory);
 +    moonmod::PreloadChronicleTwoCharacterTemplates(ActiveMonster, memory);
 +    g_ready_monster_manager_scene = DngMainScene;
  }
  
  void LoadMonsterFile(int monster_id, int initialize) {
-@@ -2262,6 +2274,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
+@@ -2265,6 +2277,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
      }
  
      if (initialize != 0) {
@@ -18669,7 +18669,7 @@ index 8ac0b9ed..8170b801 100644
          manager->Initialize(scene);
          scene->AssignStack(3);
          scene->ClearStack(3);
-@@ -2276,6 +2289,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
+@@ -2279,6 +2292,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
          // Retail places these at +4 with a 0x30 stride; host pointers enlarge both fields.
          PrepareMonsterMemory(*manager);
          sndInitPort(5);
@@ -18677,7 +18677,7 @@ index 8ac0b9ed..8170b801 100644
      }
  
      if (manager->SearchBaseIndex(monster_id) < 0) {
-@@ -2479,5 +2493,10 @@ bool dc2::dungeon::LoadTreasureBoxInfo(TRESURE_BOX_FLOOR_INFO &table, std::strin
+@@ -2482,5 +2496,10 @@ bool dc2::dungeon::LoadTreasureBoxInfo(TRESURE_BOX_FLOOR_INFO &table, std::strin
          std::copy_n(source.group_id.begin(), count, floor.group_id);
          floor.group_num = static_cast<int>(count);
      }
@@ -18785,7 +18785,7 @@ index 3a177a37..86f75cea 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 58420ea4..0b3bd1fe 100644
+index c970da0f..de24d017 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
 @@ -721,6 +721,11 @@ void CActiveMonster::Initialize() {
@@ -18888,7 +18888,7 @@ index 252459f6..d2f66723 100644
  
      for (int i = 0; i < 7; i++) {
 diff --git a/port/src/object/event/event.cpp b/port/src/object/event/event.cpp
-index 216dd7da..3e9c3c27 100644
+index 5f6bad63..fab33b8a 100644
 --- a/port/src/object/event/event.cpp
 +++ b/port/src/object/event/event.cpp
 @@ -28,6 +28,7 @@
@@ -18899,30 +18899,36 @@ index 216dd7da..3e9c3c27 100644
  #include "nd_meswin.hpp"
  #include "padcontrol.hpp"
  #include "runscript.hpp"
-@@ -135,7 +136,20 @@ void InitEvent(CScene *scene) {
- int RunEvent(int event_no, CScene *scene) {
+@@ -137,11 +138,23 @@ int RunEvent(int event_no, CScene *scene) {
      EventScene = scene;
-     ++event_script_generation;
--    return EventScript.run(event_no);
+     const auto generation = ++event_script_generation;
+     dc2::debug::ObserveHalloweenPreambleEvent(event_no, scene, nullptr, 0);
+-    const int result = EventScript.run(event_no);
+-    if (event_script_generation == generation && EventScript.prog != nullptr && !EventScript.end) {
+-        dc2::debug::ObserveHalloweenPreambleEvent(event_no, scene, &EventScript, result);
 +    // Mods may observe or replace an event program; the dispatcher runs the native program when none does.
 +    const moonmod::Json payload = {{"game", "chronicle-two"}, {"program_no", event_no},
 +                                   {"frame", moonmod::SharedRuntime().Frame()}};
 +    const moonmod::ApiCallResult hooked = moonmod::SharedRuntime().DispatchNativeScriptHook(
-+        "native.event.run", payload, [event_no]() {
-+            return moonmod::ApiCallResult{moonmod::ApiCallStatus::Ok,
-+                                          {{"run_status", EventScript.run(event_no)}}, {}};
++        "native.event.run", payload, [event_no, scene, generation]() {
++            const int result = EventScript.run(event_no);
++            if (event_script_generation == generation && EventScript.prog != nullptr && !EventScript.end) {
++                dc2::debug::ObserveHalloweenPreambleEvent(event_no, scene, &EventScript, result);
++            }
++            return moonmod::ApiCallResult{moonmod::ApiCallStatus::Ok, {{"run_status", result}}, {}};
 +        });
 +    if (hooked.status == moonmod::ApiCallStatus::Ok && hooked.value.is_object() &&
 +        hooked.value.contains("run_status") && hooked.value["run_status"].is_number_integer()) {
 +        return hooked.value["run_status"].get<int>();
-+    }
+     }
+-    return result;
 +    // The dispatcher owns native fall-through. Re-entering here could run an event twice.
 +    return -1;
  }
  
  int EventDoorLoop(int frame, int use_scene_se) {
 diff --git a/port/src/object/event/event_func.cpp b/port/src/object/event/event_func.cpp
-index 4fda5f79..7027e5ef 100644
+index 39cf1e36..d47dac25 100644
 --- a/port/src/object/event/event_func.cpp
 +++ b/port/src/object/event/event_func.cpp
 @@ -5190,6 +5190,7 @@ static int _DNG_SET_FLOOR_ID(dc2::script::RunArguments stack) {
@@ -20103,7 +20109,7 @@ index f29d256c..e6612f3c 100644
          save->tour.base_day = 7;
      }
 diff --git a/port/src/present.cpp b/port/src/present.cpp
-index d93b2523..dd7fd840 100644
+index d00a169f..9f592faf 100644
 --- a/port/src/present.cpp
 +++ b/port/src/present.cpp
 @@ -19,6 +19,7 @@
@@ -20114,7 +20120,7 @@ index d93b2523..dd7fd840 100644
  #include "platform/clock.hpp"
  #include "platform/frame_timing.hpp"
  #include "platform/input.hpp"
-@@ -410,15 +411,32 @@ void PollFpsToggle() {
+@@ -389,15 +390,32 @@ void PollFpsToggle() {
      }
  }
  
@@ -20150,7 +20156,7 @@ index d93b2523..dd7fd840 100644
                          pixel * kOverlayPadding, pixel * kOverlayPadding);
      }
      MenuMouseDraw();
-@@ -433,7 +451,7 @@ const gfx::DisplayList *DisplayOverlayList() {
+@@ -412,7 +430,7 @@ const gfx::DisplayList *DisplayOverlayList() {
          InputPoll();
      }
      MouseSetPointerCursor(MenuMousePointerVisible());
@@ -20159,7 +20165,7 @@ index d93b2523..dd7fd840 100644
          return nullptr;
      }
      overlay.list = RecordHostOverlay(overlay.on);
-@@ -544,7 +562,7 @@ void RepublishMouse() {
+@@ -523,7 +541,7 @@ void RepublishMouse() {
      const bool pointer = MenuMousePointerVisible();
      MouseSetPointerCursor(pointer);
      gfx::DisplayListRef overlay_list;
@@ -20168,7 +20174,7 @@ index d93b2523..dd7fd840 100644
          // Recording shares the renderer's state with the worker's display frames.
          gfx::RenderLease lease;
          overlay_list = RecordHostOverlay(overlay.on);
-@@ -1110,7 +1128,7 @@ TickPublication PrepareTick(int start, int frames, bool canonical_endpoint_allow
+@@ -1219,7 +1237,7 @@ TickPublication PrepareTick(int start, int frames, bool canonical_endpoint_allow
      // The game thread records the host overlay and reads the mouse, as DisplayOverlayList does for a display.
      tick.pointer = MenuMousePointerVisible();
      MouseSetPointerCursor(tick.pointer);
@@ -20178,7 +20184,7 @@ index d93b2523..dd7fd840 100644
      }
  
 diff --git a/port/src/render/mglib.cpp b/port/src/render/mglib.cpp
-index bc390050..504b3c7d 100644
+index cba6ef8c..81535f8b 100644
 --- a/port/src/render/mglib.cpp
 +++ b/port/src/render/mglib.cpp
 @@ -1202,7 +1202,13 @@ gfx::Rect ScaleRectangle(gfx::Rect rect, float scale) {
@@ -20256,10 +20262,10 @@ index bc390050..504b3c7d 100644
  
  mgPortInterpScope::~mgPortInterpScope() {
 diff --git a/port/src/script/runscript_opcodes.cpp b/port/src/script/runscript_opcodes.cpp
-index 7a89bbb5..3bf53abf 100644
+index 4c665de3..2516ccd5 100644
 --- a/port/src/script/runscript_opcodes.cpp
 +++ b/port/src/script/runscript_opcodes.cpp
-@@ -3037,7 +3037,9 @@ int _SET_DEAD_START(dc2::script::RunArguments args, int argc) {
+@@ -3038,7 +3038,9 @@ int _SET_DEAD_START(dc2::script::RunArguments args, int argc) {
          return 0;
      }
  
@@ -20270,7 +20276,7 @@ index 7a89bbb5..3bf53abf 100644
      pallet->duration = 0;
      pallet->elapsed = 0;
 diff --git a/port/src/test_hooks.cpp b/port/src/test_hooks.cpp
-index 7901f5ca..4eeab70b 100644
+index 578c28de..6843a252 100644
 --- a/port/src/test_hooks.cpp
 +++ b/port/src/test_hooks.cpp
 @@ -21,6 +21,8 @@
@@ -20282,15 +20288,15 @@ index 7901f5ca..4eeab70b 100644
  #include "editloop.hpp"
  #include "event.hpp"
  #include "event_func.hpp"
-@@ -35,6 +37,7 @@
+@@ -36,6 +38,7 @@
  #include "mg_camera.hpp"
  #include "mg_math.hpp"
  #include "monster.hpp"
 +#include "moonmod/chronicle_two_adapter.hpp"
+ #include "nd_meswin.hpp"
+ #include "object/dun/floor_monster_ids.hpp"
  #include "options/screen.hpp"
- #include "platform/config.hpp"
- #include "platform/game_loop_state.hpp"
-@@ -54,6 +57,10 @@ extern unsigned char PortGameBootInit asm("Title_GameBootInit");
+@@ -59,6 +62,10 @@ extern unsigned char PortGameBootInit asm("Title_GameBootInit");
  namespace {
  std::optional<GameJump>      target;
  std::vector<int>             gifts;
@@ -20301,7 +20307,7 @@ index 7901f5ca..4eeab70b 100644
  bool                         fast_load = false;
  bool                         skip_events = false;
  bool                         invincible = false;
-@@ -1556,6 +1563,55 @@ bool GameParseGive(std::string_view text, std::vector<int> &items) {
+@@ -1991,6 +1998,55 @@ bool GameParseGive(std::string_view text, std::vector<int> &items) {
      return true;
  }
  
@@ -20357,7 +20363,7 @@ index 7901f5ca..4eeab70b 100644
  bool GameSetJump(std::string_view text) {
      GameJump parsed;
      if (!GameParseJump(text, parsed)) {
-@@ -1764,6 +1820,9 @@ void GamePrepareJump(int &mode, INIT_LOOP_ARG &arg) {
+@@ -2204,6 +2260,9 @@ void GamePrepareJump(int &mode, INIT_LOOP_ARG &arg) {
      for (int item : gifts) {
          RequireKnownItem(item);
      }
@@ -20367,7 +20373,7 @@ index 7901f5ca..4eeab70b 100644
      const char *stress_option = std::getenv("DC2_PERF_DUNGEON_STRESS");
      const bool  stress_requested = stress_option != nullptr && std::string_view(stress_option) == "1";
      if (stress_option != nullptr && *stress_option != '\0' && std::string_view(stress_option) != "0" && !stress_requested) {
-@@ -1874,6 +1933,50 @@ void GameGiveOnArrival(int mode) {
+@@ -2320,6 +2379,50 @@ void GameGiveOnArrival(int mode) {
              user.GetItem(item, 1);
          }
      }
@@ -20419,7 +20425,7 @@ index 7901f5ca..4eeab70b 100644
  
  bool GameDeveloperMenuRequested(int mode) {
 diff --git a/port/src/test_hooks.hpp b/port/src/test_hooks.hpp
-index 0e925f69..9677998f 100644
+index 46852add..91dd73be 100644
 --- a/port/src/test_hooks.hpp
 +++ b/port/src/test_hooks.hpp
 @@ -4,11 +4,13 @@
@@ -20435,8 +20441,8 @@ index 0e925f69..9677998f 100644
 +class CEditMap;
  class mgCCamera;
  class mgCFrame;
- struct CCPoly;
-@@ -30,6 +32,13 @@ struct GameJump {
+ class CScene;
+@@ -33,6 +35,13 @@ struct GameJump {
      int      event = 0;
  };
  
@@ -20450,7 +20456,7 @@ index 0e925f69..9677998f 100644
  namespace dc2::debug {
  
  /**
-@@ -167,6 +176,13 @@ bool GameParseJump(std::string_view text, GameJump &jump);
+@@ -264,6 +273,13 @@ bool GameParseJump(std::string_view text, GameJump &jump);
  bool GameParseGive(std::string_view text, std::vector<int> &items);
  bool GameSetJump(std::string_view text);
  bool GameSetGive(std::string_view text);
@@ -20465,10 +20471,10 @@ index 0e925f69..9677998f 100644
  bool GameDebugEnabled();
  void GameSetFastLoad(bool fast);
 diff --git a/port/src/tests/CMakeLists.txt b/port/src/tests/CMakeLists.txt
-index a7ea168f..e07a8510 100644
+index a6ce7bf0..547992a1 100644
 --- a/port/src/tests/CMakeLists.txt
 +++ b/port/src/tests/CMakeLists.txt
-@@ -28,6 +28,39 @@ add_test(NAME NativeArchitecture.Check
+@@ -56,6 +56,39 @@ endforeach()
  
  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp)
  add_executable(darkchronicle_tests ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${TEST_SOURCES})
@@ -20508,7 +20514,7 @@ index a7ea168f..e07a8510 100644
  if(WIN32)
      include(${KZ_ROOT}/cmake/KazarovWindowsRuntime.cmake)
      kz_windows_runtime_post_build(darkchronicle_tests)
-@@ -49,7 +82,7 @@ target_sources(darkchronicle_tests PRIVATE ${LOCAL_LAYOUT_PROBES})
+@@ -77,7 +110,7 @@ target_sources(darkchronicle_tests PRIVATE ${LOCAL_LAYOUT_PROBES})
  target_include_directories(darkchronicle_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
  ct_link_game(darkchronicle_tests)
  kz_port_tests(darkchronicle_tests)
@@ -20517,7 +20523,7 @@ index a7ea168f..e07a8510 100644
  # The painters' geometry is checked against the numbers the fonts were fitted with.
  target_compile_definitions(darkchronicle_tests PRIVATE
      CT_MESSAGE_FONT_PARAMETERS="${CMAKE_SOURCE_DIR}/scripts/font/message_font.json"
-@@ -230,6 +263,1097 @@ set_tests_properties(Smoke.HeadlessFramesScreenshot PROPERTIES
+@@ -258,6 +291,1097 @@ set_tests_properties(Smoke.HeadlessFramesScreenshot PROPERTIES
      ENVIRONMENT "DC2_SAVE=${CMAKE_BINARY_DIR}/smoke-fixture/save;DC2_DATA=${CMAKE_BINARY_DIR}/smoke-fixture/data"
      TIMEOUT 120 RUN_SERIAL TRUE LABELS gpu)
  
@@ -21616,7 +21622,7 @@ index a7ea168f..e07a8510 100644
  foreach(f IN LISTS ct_stream_cmake)
      include(${f})
 diff --git a/port/src/tests/dataread_test.cpp b/port/src/tests/dataread_test.cpp
-index 5428f26d..c26add51 100644
+index 422b21a9..4eddea62 100644
 --- a/port/src/tests/dataread_test.cpp
 +++ b/port/src/tests/dataread_test.cpp
 @@ -27,6 +27,7 @@
@@ -31302,10 +31308,10 @@ index c615a878..1f0aabe0 100644
      Write(SaveSlotPath(0));
      Corrupt(SaveSlotPath(0));
 diff --git a/port/src/tests/test_hooks_test.cpp b/port/src/tests/test_hooks_test.cpp
-index 99085d54..a5dc93d7 100644
+index 4fa7974d..563c44d5 100644
 --- a/port/src/tests/test_hooks_test.cpp
 +++ b/port/src/tests/test_hooks_test.cpp
-@@ -125,6 +125,31 @@ TEST(TestHooks, GiveRejectsMalformedListsWithoutChangingThePreviousList) {
+@@ -302,6 +302,31 @@ TEST(TestHooks, GiveRejectsMalformedListsWithoutChangingThePreviousList) {
      }
  }
  
