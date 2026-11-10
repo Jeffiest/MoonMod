@@ -1051,5 +1051,210 @@ do
   check(g.gave_up == true and g.down_rule == false, "a player who leaves while down gets the game's knockout")
 end
 
+print("Hardening: nothing another game sends is taken on trust")
+do
+  relay.rooms = {}
+  local function enter(g)
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+        g.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+    g.emit("game.title.selected", {entry = "join"})
+  end
+  local function said(to, from, data) queue(to, {kind = "message", peer = from, data = data}) end
+  local h, g = make_game("Toan"), make_game("Xiao")
+  h.keys.host_key = true
+  both(h, g, 2)
+  enter(g)
+  both(h, g, 10)
+  g.settings.follow_offers, h.settings.follow_offers = false, false
+  h.map = {context = "dungeon", dungeon_id = 1, floor_id = 2, floor_seed = 77}
+  g.map = {context = "dungeon", dungeon_id = 1, floor_id = 2, floor_seed = 77}
+  h.player = {character = "toan", hp = 40, max_hp = 60, position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "xiao", hp = 30, max_hp = 45, position = {x = 30, y = 0, z = 0}, heading = 0, motion = 0}
+  both(h, g, 60)
+  local scene = "D1:2:77"
+
+  -- messages no game would write, and one honest gift behind them in the same answer
+  said(h, 1, "E " .. scene .. " 1  2 3")
+  said(h, 1, "E " .. scene .. " " .. string.rep("9 ", 4000))
+  said(h, 1, "PONG -1e300")
+  said(h, 1, "PONG 1e300")
+  said(h, 1, "PING " .. string.rep("7", 5000))
+  said(h, 1, "P D0:99999999999999999999:1 xiao - 0 0 0 0 0")
+  said(h, 1, "P D1:2:77 xiao - nan inf -inf 1e300 1e300")
+  said(h, 1, "M " .. string.rep("x", 20000))
+  said(h, 1, "DN " .. string.rep("down", 100))
+  said(h, 1, "N " .. string.rep("\255", 300))
+  said(h, 1, "V g nan")
+  said(h, 1, "V i")
+  said(h, 1, "H 1 2 3")
+  said(h, 1, "KEEP 1 1 garbage")
+  said(h, 1, "TOWN 9 2 x")
+  said(h, 1, "")
+  queue(h, {kind = "message", peer = 1})
+  queue(h, {kind = "message", peer = "one", data = "V g 5"})
+  said(h, 1, "V g 500")
+  local ok = pcall(both, h, g, 90)
+  check(ok and h.gilda == 1500, "an honest gift behind a batch of nonsense still arrives, and the game plays on", h.gilda)
+  check(next(h.accounts) == nil or not (function() for _, a in pairs(h.accounts) do if a.data == "garbage" then return true end end end)(),
+        "what isn't a game's things is never kept as a guest's")
+  check(#h.doors_run == 0, "a door no game would write opens nothing")
+  both(h, g, 30)
+  check(h.mod.state.names[1] ~= nil and #h.mod.state.names[1] <= 24, "a name stays a name", h.mod.state.names[1])
+
+  -- gifts: no more than a wallet, twice a minute; what is over goes back, and nothing "comes back" that wasn't given
+  h.gilda = 0
+  local before = g.gilda
+  said(h, 1, "V g 1000000")
+  both(h, g, 4)
+  check(h.gilda == 65535, "one gift of Gilda is a wallet at most", h.gilda)
+  check(g.gilda == before, "the rest sent back is only taken by a game that gave it", g.gilda)
+  h.gilda = 0
+  said(h, 1, "V g 65535")
+  both(h, g, 2)
+  h.gilda = 0
+  said(h, 1, "V g 65535")
+  both(h, g, 2)
+  check(h.gilda == 0 and find_toast(h, "more than a gift can hold"), "and two wallets a minute from one player", h.gilda)
+  said(h, 1, "V back g 5000")
+  said(h, 7, "V g 100")
+  both(h, g, 2)
+  check(h.gilda == 0, "Gilda never given doesn't come back, and a stranger gives nothing", h.gilda)
+  h.bag, h.bag_room = {}, 100000
+  said(h, 1, "V i chronicle:item:bread 999 Bread")
+  both(h, g, 2)
+  check(h.bag[1] and h.bag[1].count == 99, "an item gift is a slot's worth at most", h.bag[1] and h.bag[1].count)
+  for _ = 1, 60 do said(h, 1, "V i chronicle:item:bread 1 Bread") end
+  both(h, g, 2)
+  check(h.bag[1].count == 99 + 39, "and forty gifts a minute", h.bag[1].count)
+  said(h, 1, "V back i chronicle:item:bread 50 Bread")
+  both(h, g, 2)
+  check(h.bag[1].count == 99 + 39, "items never given don't come back")
+  -- a minute on, the same player can give again
+  both(h, g, 3700)
+  h.gilda = 0
+  said(h, 1, "V g 250")
+  both(h, g, 2)
+  check(h.gilda == 250, "a minute later gifts are gifts again", h.gilda)
+
+  -- a gift that can't leave stays with its giver
+  do
+    local net = h.net
+    h.gilda = 800
+    h.net = nil
+    h.mod.together.give_gilda(1, 300)
+    h.net = net
+    check(h.gilda == 800 and find_toast(h, "couldn't be sent; you still have it"), "Gilda that couldn't be sent is still the giver's", h.gilda)
+    h.mod.together.give_gilda(7, 300)
+    check(h.gilda == 800 and find_toast(h, "they have left the room"), "and none goes to a player who has left", h.gilda)
+    g.gilda = 100
+    h.mod.together.give_gilda(1, 300)
+    both(h, g, 4)
+    check(h.gilda == 500 and g.gilda == 400, "an honest gift still goes through", h.gilda .. "/" .. g.gilda)
+    g.gilda = 65535
+    h.mod.together.give_gilda(1, 200)
+    both(h, g, 6)
+    check(h.gilda == 500, "and what doesn't fit comes back to the one who gave it", h.gilda)
+  end
+
+  -- a second hello on one connection sends no second world
+  g.net_events = {}
+  said(h, 1, "HELLO " .. g.storage.me.id .. " Xiao")
+  said(h, 1, "BACK " .. g.storage.me.id .. " Xiao")
+  h.tick()
+  local big = 0
+  for _, e in ipairs(g.net_events) do if e.kind == "message" and (e.data:match("^WORLD") or e.data:match("^PLAYER") or e.data:match("^RESUME")) then big = big + 1 end end
+  check(big == 0, "a game says hello once: a second hello gets no second world", big)
+  both(h, g, 4)
+
+  -- a blow is a blow; a town is the host's; "the host" is the host's name
+  h.mirror_hits = {}
+  said(h, 1, "H 3 1000000")
+  said(h, 1, "H 4000 5")
+  h.tick()
+  check(#h.mirror_hits == 1 and h.mirror_hits[1].damage == 9999, "a guest's blow is never more than the game's most",
+        h.mirror_hits[1] and h.mirror_hits[1].damage)
+  local town = h.towns[0]
+  said(h, 1, "TOWN 1 1 DCT10:flattened")
+  both(h, g, 4)
+  check(h.towns[0] == town, "a whole town from a guest (not what it changed) is not taken", h.towns[0])
+  said(h, 1, "N The Host")
+  h.tick()
+  check(h.mod.state.names[1] ~= "The Host", "a guest can't call itself the host", h.mod.state.names[1])
+  said(h, 1, "N " .. string.rep("a", 23) .. "\195\169\195\169")
+  h.tick()
+  check(h.mod.state.names[1] == string.rep("a", 23), "a long name is cut between characters, not through one", h.mod.state.names[1])
+  both(h, g, 40)
+
+  -- doors: only as many as a floor could have are remembered, and those of a floor left are let go
+  for i = 1, 400 do said(h, 1, string.format("E %s %d 0 0 1.0 2.0 3.0 0 0 0", scene, i)) end
+  both(h, g, 4)
+  local log = h.mod.door.log[scene] or {}
+  check(#log <= 256, "no more doors are remembered than a floor could have", #log)
+  said(h, 1, "E " .. scene .. " 99999 0 0 1 2 3 0 0 0")
+  said(h, 1, "E " .. scene .. " 5 7 0 1 2 3 0 0 0")
+  said(h, 1, "E D1:3:78 6 0 0 1 2 3 0 0 0")
+  h.tick()
+  check(#(h.mod.door.log[scene] or {}) == #log and h.mod.door.log["D1:3:78"] == nil, "a door out of the game's range, or on another floor, is no door")
+
+  -- reviving: only a player standing here; the party's fall only from one who fell
+  h.player.down, h.player.hp = true, 0
+  both(h, g, 10)
+  said(h, 7, "RV hold")
+  said(h, 1, "DN fell")
+  both(h, g, 4)
+  check(h.player.down == true and #h.entered == 0, "a stranger revives no one, and a standing player can't call the party's fall")
+  g.player.position = {x = 30000, y = 0, z = 0}
+  both(h, g, 12)
+  said(h, 1, "RV powder")
+  both(h, g, 2)
+  check(h.player.down == true, "nor does a player far across the floor")
+  g.player.position = {x = 30, y = 0, z = 0}
+  both(h, g, 12)
+  -- a powder is only used when it worked: the fallen player got up before it reached them
+  g.bag = {{id = "chronicle:item:revival-powder", name = "Revival Powder", count = 1}}
+  h.player.down, h.player.hp = false, 20
+  h.tick() -- up again, its word not yet with the guest
+  g.keys.revive = true
+  g.tick()
+  both(h, g, 700)
+  check(g.bag[1].count == 1, "a Revival Powder that revived no one is not used up", g.bag[1].count)
+
+  -- the host's game leaves its story: the room closes, so nothing of a guest's reaches another save
+  h.session = {kind = "title"}
+  both(h, g, 70)
+  check(h.mod.state.role == nil and h.net == nil and h.down_rule == false, "a host whose game leaves its story closes the room")
+  check(g.mod.state.role == nil, "and its guests are let go")
+
+  -- a refusal in the middle of a visit ends the visit (the player isn't left in a world with no room)
+  do
+    relay.rooms = {}
+    local h2, g2 = make_game("Toan"), make_game("Xiao")
+    h2.keys.host_key = true
+    both(h2, g2, 2)
+    enter(g2)
+    both(h2, g2, 10)
+    check(g2.session.kind == "visit", "(a visit, to refuse)")
+    said(g2, 0, "REFUSE the host changed its mind")
+    g2.tick(3)
+    check(g2.session.kind == "title" and g2.mod.state.role == nil, "a refusal mid-visit ends the visit", g2.session.kind)
+    check(tostring(g2.mod.state.status):find("turned the visit away", 1, true), "and the title page says why", g2.mod.state.status)
+  end
+
+  -- the mod switched off with a room open, its player down
+  do
+    relay.rooms = {}
+    local h3 = make_game("Toan")
+    h3.keys.host_key = true
+    h3.tick(3)
+    h3.player = {character = "toan", hp = 0, max_hp = 60, down = true, position = {x = 0, y = 0, z = 0}}
+    h3.emit("runtime.unloaded", {})
+    check(h3.net == nil and h3.down_rule == false and h3.gave_up == true, "switched off in a room: the room closes and no one is left lying down")
+  end
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed > 0 and 1 or 0)

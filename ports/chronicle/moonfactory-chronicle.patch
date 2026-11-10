@@ -3764,10 +3764,10 @@ index 00000000..f296b272
 +     (row) <= DngExitRoomY + 3)
 diff --git a/port/include/moonmod/editloop_moonmod.hpp b/port/include/moonmod/editloop_moonmod.hpp
 new file mode 100644
-index 00000000..c29bbbc0
+index 00000000..badb117f
 --- /dev/null
 +++ b/port/include/moonmod/editloop_moonmod.hpp
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,38 @@
 +#pragma once
 +
 +// MoonMod town villagers (port/src/moonmod/editloop3_moonmod.cpp). ps2/include/editloop.hpp
@@ -3780,9 +3780,23 @@ index 00000000..c29bbbc0
 +   villager slots, so up to 4 more stand in the free ones, at a fixed place, whenever the town picks its villagers.
 +   name is a model in the town's chara folder (gedit/<town>/chara/<name>.chr; a mod may add a new one). A talk_event
 +   above 0 runs that native event; 0 publishes game.npc.talk instead. An empty name clears the entry. */
-+constexpr int CHRONICLE_MOD_VILLAGER_COUNT = 4;
++constexpr int CHRONICLE_MOD_VILLAGER_COUNT = 16; // registered across the towns; each town still fills only its free slots
 +bool SetChronicleModVillager(int index, int town_id, const char *name, const float *position, float rotation_y,
 +                             int talk_event);
++/* Port-only: entry `index` is the town's own resident `name` (characters.register native = true). While a native
++   villager of that name is in the town, the talk button on them reaches the mod (game.npc.talk) instead of their own
++   chat; a story event of theirs still comes first. stand_in false: nothing stands in while they are away; true: the
++   entry stands at its own position, as a mod villager, until they are back. Call after SetChronicleModVillager. */
++void SetChronicleModVillagerNative(int index, bool native, bool stand_in);
++bool ChronicleModVillagerIsNative(int index);
++/* The mod villager entry whose native resident stands in villager slot `slot` (0-9), or -1. */
++int ChronicleModVillagerHookInSlot(int slot);
++/* The villager slot of entry `index`'s native resident, or -1 while they are not in the town. */
++int ChronicleModVillagerNativeSlot(int index);
++/* Port-only: the mod asks for the resident's own chat (characters.villager_chat); the next town frame that can, runs it.
++   -1 cancels. */
++void ChronicleRequestVillagerChat(int slot);
++int ChronicleTakeVillagerChat();
 +/* The mod villager entry standing in villager slot `slot` (0-9), or -1. */
 +int ChronicleModVillagerInSlot(int slot);
 +/* The villager slot mod villager entry `index` stands in, or -1 while it is not in the town. */
@@ -3848,10 +3862,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..cd11cff4
+index 00000000..294c208d
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,312 @@
+@@ -0,0 +1,314 @@
 +#pragma once
 +
 +/**
@@ -4067,6 +4081,8 @@ index 00000000..cd11cff4
 +bool  ChronicleBackroomEntranceAsk();
 +void  RestoreBackroomKey();
 +float ApplyChroniclePlayerDamageFormula(float damage, int character, int weapon_id);
++// The party walked onto a mod's dropped bag (dungeons.drop_token, CRandomItem id 3) in slot `slot` (0-31).
++void  ChronicleDropTokenTaken(int slot);
 +
 +// The menus and the town.
 +bool TakeManagerMenuOpenRequest();
@@ -4876,10 +4892,10 @@ index 00000000..56ee5ec6
 +} // namespace moonmod
 diff --git a/port/include/moonmod/net_session.hpp b/port/include/moonmod/net_session.hpp
 new file mode 100644
-index 00000000..73384372
+index 00000000..9b36df24
 --- /dev/null
 +++ b/port/include/moonmod/net_session.hpp
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,159 @@
 +#pragma once
 +
 +// Online play (net.*): one session at a time, through the co-op relay (coop/relay/README.md). A player hosts a room or
@@ -4893,6 +4909,7 @@ index 00000000..73384372
 +#include <deque>
 +#include <functional>
 +#include <memory>
++#include <mutex>
 +#include <optional>
 +#include <string>
 +#include <string_view>
@@ -4902,6 +4919,11 @@ index 00000000..73384372
 +
 +inline constexpr std::size_t kMessageMax = 16 * 1024; // bytes of one message's data
 +inline constexpr std::size_t kQueueMax = 4096;        // events waiting for the mod; past it the oldest messages go
++inline constexpr std::size_t kReceiveBytes = 48 * 1024; // what one Receive hands over at most, as JSON; the rest waits
++inline constexpr std::size_t kNameMax = 24;           // bytes of a player's name
++inline constexpr std::size_t kPeersMax = 64;          // players a relay can name in one room
++inline constexpr std::size_t kTransportFrames = 8192; // frames a socket holds while no one takes them (a load screen)
++inline constexpr std::size_t kTransportBytes = 8 * 1024 * 1024; // and their bytes; past either the oldest messages go
 +inline constexpr int         kPlayersMax = 4;
 +inline constexpr int         kBroadcast = 255;
 +
@@ -4919,6 +4941,43 @@ index 00000000..73384372
 +    virtual void Send(std::string_view bytes) = 0; // one binary frame
 +    virtual bool Poll(Frame &frame) = 0;
 +    virtual void Close() = 0;
++};
++
++// What a socket received and the game hasn't taken yet. Any thread may Push; the game's thread Pops. It holds
++// kTransportFrames frames and kTransportBytes bytes at most: past that the oldest player messages are dropped (as the
++// session's own queue does), never the relay's own frames or the close, so a game that isn't reading for a while (or
++// a room that floods it) can't use up memory.
++class FrameQueue {
++public:
++    void Push(Frame frame) {
++        const std::lock_guard lock(mutex_);
++        bytes_ += frame.data.size();
++        frames_.push_back(std::move(frame));
++        while (frames_.size() > kTransportFrames || bytes_ > kTransportBytes) {
++            auto oldest = frames_.begin();
++            while (oldest != frames_.end() && oldest->kind != Frame::Kind::Binary) ++oldest;
++            if (oldest == frames_.end()) break; // only the relay's own frames wait: they stay
++            bytes_ -= oldest->data.size();
++            frames_.erase(oldest);
++        }
++    }
++    bool Pop(Frame &frame) {
++        const std::lock_guard lock(mutex_);
++        if (frames_.empty()) return false;
++        frame = std::move(frames_.front());
++        frames_.pop_front();
++        bytes_ -= frame.data.size();
++        return true;
++    }
++    std::size_t size() {
++        const std::lock_guard lock(mutex_);
++        return frames_.size();
++    }
++
++private:
++    std::mutex        mutex_;
++    std::deque<Frame> frames_;
++    std::size_t       bytes_ = 0;
 +};
 +
 +// Opens a socket to url (wss://, or ws:// to this machine for testing), or says why it can't.
@@ -4987,6 +5046,8 @@ index 00000000..73384372
 +std::string RelayAddress(const std::string &asked);
 +bool        ValidRelay(const std::string &url);
 +bool        ValidUtf8(std::string_view text);
++// text cut to max_bytes without splitting a character; empty when it isn't UTF-8 at all.
++std::string CutUtf8(std::string_view text, std::size_t max_bytes);
 +// Percent-encodes a query value.
 +std::string Escape(std::string_view text);
 +
@@ -5502,6 +5563,82 @@ index 00000000..4b2e1444
 +
 +void ResetTitleModesForTests();
 +
++} // namespace moonmod
+diff --git a/port/include/moonmod/weapon_actions.hpp b/port/include/moonmod/weapon_actions.hpp
+new file mode 100644
+index 00000000..5c1aba42
+--- /dev/null
++++ b/port/include/moonmod/weapon_actions.hpp
+@@ -0,0 +1,70 @@
++#pragma once
++
++// Mods' own buttons on the weapon menu's action list (weapons.menu_actions_set), under the game's Upgrade,
++// Status Break and Build-up. Each is a row of the same dialog: the pad and the mouse reach it as they reach the
++// game's rows, and pressing it sends game.weapon.menu_action to the mods with the weapon it was pressed on.
++
++#include <array>
++#include <string>
++#include <string_view>
++#include <vector>
++
++namespace dc::game {
++
++struct WEAPON_HAVE;
++
++// The cursor value of the first mod row (the game's rows are 0-6).
++inline constexpr int kWeaponModActionFirst = 7;
++// Mod rows at most, across every mod (the dialog has room for three more under Build-up).
++inline constexpr int kWeaponModActionsMost = 3;
++// The dialog's rows: the game's seven and the mods'.
++inline constexpr int kWeaponActionRowsMost = kWeaponModActionFirst + kWeaponModActionsMost;
++
++enum WeaponModActionWhen {
++    WEAPON_ACTION_ALWAYS = 0,   // on every weapon but the bare-handed default
++    WEAPON_ACTION_ABS_FULL = 1, // only while the weapon's ABS bar is full (and it is under level 99)
++};
++
++struct WeaponModAction {
++    std::string owner;
++    std::string id;
++    std::string label;
++    int         when = WEAPON_ACTION_ALWAYS;
++    int         color = 0; // 0 gold, 1 green, 2 blue, 3 red (the buttons' presets)
++};
++
++// The rows shown, in order (the game's first, then each mod's in the order the mods set them).
++const std::vector<WeaponModAction> &WeaponModActions();
++// Replaces one mod's rows (empty takes them away). False when the total would pass kWeaponModActionsMost.
++bool SetWeaponModActions(std::string_view owner, std::vector<WeaponModAction> actions);
++void ClearWeaponModActions(std::string_view owner);
++
++// Whether mod row `index` (0 up) shows for this weapon of character `chara`.
++bool WeaponModActionShown(int index, WEAPON_HAVE *weapon, int chara);
++// The cursor values of the rows the cursor can be on, top to bottom: Equip, Customize, Attribute and Repair, the
++// game's three where `native_options` (NowWeaponStatusValue: bit 1 Upgrade, 2 Status Break, 3 Build-up) has them,
++// then the mod rows shown for the weapon. Returns how many.
++int WeaponActionRowList(WEAPON_HAVE *weapon, int chara, int native_options, std::array<int, kWeaponActionRowsMost> &rows);
++// The row above or below `cursor`, wrapping round.
++int WeaponActionRowStep(WEAPON_HAVE *weapon, int chara, int native_options, int cursor, int step);
++
++// A mod's line of text under the action list (weapons.menu_note_set): a running total the mod keeps, say. One per
++// mod, kWeaponMenuNotesMost across the mods.
++inline constexpr int kWeaponMenuNotesMost = 2;
++inline constexpr int kWeaponMenuNoteBytesMost = 24;
++struct WeaponMenuNote {
++    std::string owner;
++    std::string text;
++    int         color = 0; // as WeaponModAction::color
++};
++const std::vector<WeaponMenuNote> &WeaponMenuNotes();
++// Sets (or, with empty text, takes away) one mod's line. False when it would be one past kWeaponMenuNotesMost.
++bool SetWeaponMenuNote(std::string_view owner, std::string text, int color);
++void ClearWeaponMenuNote(std::string_view owner);
++
++} // namespace dc::game
++
++namespace moonmod {
++// The player pressed mod row `index` on character `chara`'s weapon in slot `slot`: sends game.weapon.menu_action.
++void ChronicleWeaponModActionPressed(int index, int chara, int slot);
 +} // namespace moonmod
 diff --git a/port/lang/de_de.json b/port/lang/de_de.json
 index 693c0b45..c7b3a2c8 100644
@@ -6342,23 +6479,24 @@ index 2f2fa1cc..19e96a09 100644
              case BTLMENU_PAGE_QUIT: {
                  quit_confirm_active = true;
 diff --git a/port/src/battlemenu/weapon_menu.cpp b/port/src/battlemenu/weapon_menu.cpp
-index 1f7211a1..115348df 100644
+index 1f7211a1..f8a09a96 100644
 --- a/port/src/battlemenu/weapon_menu.cpp
 +++ b/port/src/battlemenu/weapon_menu.cpp
-@@ -1,6 +1,12 @@
+@@ -1,6 +1,13 @@
  #include <array>
  
  #include "battlemenu/internal.hpp"
 +#include "moonmod/game_hooks.hpp"
 +#include "moonmod/item_icon_override.hpp"
 +#include "moonmod/run_menu.hpp"
++#include "moonmod/weapon_actions.hpp"
 +
 +#include <format>
 +#include <string>
  
  namespace dc::battlemenu {
  
-@@ -79,6 +85,15 @@ void WeaponNameDrawPort(int y, int selected_only, int alpha) {
+@@ -79,6 +86,15 @@ void WeaponNameDrawPort(int y, int selected_only, int alpha) {
  
      int x = static_cast<int>(22.0f + WeaponPos + static_cast<float>(slot * 0xD6));
      AtoraNameMes.value_signed = true;
@@ -6374,7 +6512,7 @@ index 1f7211a1..115348df 100644
  
      for (int i = 0; i < 3; i++) {
          int mes_no = 999;
-@@ -100,6 +115,18 @@ void WeaponNameDrawPort(int y, int selected_only, int alpha) {
+@@ -100,6 +116,18 @@ void WeaponNameDrawPort(int y, int selected_only, int alpha) {
                  AtoraNameMes.GetMesWidth_system(mes_no);
                  level = DngWepHavePt[slot].level;
              }
@@ -6393,7 +6531,7 @@ index 1f7211a1..115348df 100644
          }
  
          int width = AtoraNameMes.GetMesWidth_system(mes_no);
-@@ -138,6 +165,10 @@ void WeaponNameDrawPort(int y, int selected_only, int alpha) {
+@@ -138,6 +166,10 @@ void WeaponNameDrawPort(int y, int selected_only, int alpha) {
  
      AtoraNameMes.edge_alpha = alpha;
      AtoraNameMes.Step();
@@ -6404,7 +6542,37 @@ index 1f7211a1..115348df 100644
      AtoraNameMes.DrawMesWin();
  
      if (WepMenu.mode == WEP_MENU_LIST && WepMenu.state == WEP_STATE_IDLE) {
-@@ -454,11 +485,12 @@ void PortDrawAallWeapon(int x, int y, float depth, CCharacter *model,
+@@ -367,6 +399,29 @@ void PortDrawWeaponSelectDialog(int x, int y, int alpha) {
+         }
+     }
+ 
++    // MoonMod: the mods' own rows (weapons.menu_actions_set) under the game's, those shown for this weapon.
++    for (int index = 0; index < static_cast<int>(WeaponModActions().size()); ++index) {
++        if (!WeaponModActionShown(index, weapon, WepMenu.chara)) {
++            continue;
++        }
++        static constexpr std::array<ui::ButtonPreset, 4> kPresets = {ui::ButtonPreset::AmberGold, ui::ButtonPreset::StoneGreen,
++                                                                     ui::ButtonPreset::SlateBlue, ui::ButtonPreset::Terracotta};
++        const WeaponModAction &action = WeaponModActions()[index];
++        const int bright = 0x80 + std::abs(static_cast<int>(40.0f * std::sin(static_cast<float>(level_blink_cnt) / 12.0f)));
++        ui::BevelButton::Draw(ui::Rect(left, dest_y, btn_w, btn_h), action.label,
++                              ui::ButtonStyle::Thin(kPresets[static_cast<std::size_t>(action.color) % kPresets.size()],
++                                                    action.when == WEAPON_ACTION_ABS_FULL ? bright : 0x80),
++                              alpha);
++        dest_y += row_stride;
++    }
++
++    // MoonMod: the mods' lines under the rows (weapons.menu_note_set), a bank's total say.
++    for (const WeaponMenuNote &note : WeaponMenuNotes()) {
++        static constexpr unsigned char kNoteRgb[4][3] = {{255, 214, 110}, {160, 230, 150}, {160, 200, 255}, {255, 150, 125}};
++        MoonModMenuText(note.text, kNoteRgb[static_cast<std::size_t>(note.color) % 4], left + btn_w / 2, dest_y + 3, alpha);
++        dest_y += 0x12;
++    }
++
+     if (WepMenu.state == WEP_STATE_SCRAP_PROMPT || WepMenu.state == WEP_STATE_SCRAP_CONFIRM) {
+         ui::BevelButton::Draw(
+             ui::Rect(x + 0x64, y + 0x33, btn_w, btn_h),
+@@ -454,11 +509,12 @@ void PortDrawAallWeapon(int x, int y, float depth, CCharacter *model,
              }
          }
  
@@ -6419,7 +6587,7 @@ index 1f7211a1..115348df 100644
          model->SetScale(scale, scale, scale);
  
          if (selected != 0) {
-@@ -608,7 +640,7 @@ void PortBtlWeaponDraw(int x, float depth, int chara, int alpha) {
+@@ -608,7 +664,7 @@ void PortBtlWeaponDraw(int x, float depth, int chara, int alpha) {
                  if (is_equipped != 0) {
                      MenuTextureReload(MenuShadowReadBlock);
                      constexpr const char *shadows[6] = {"kagetoan", "kagesyao", "kagegoro", "kageruby", "kageunga", "kageozu"};
@@ -6428,7 +6596,7 @@ index 1f7211a1..115348df 100644
                                       CRect_i_(x + 0x24, 0x96, 0x64, 0x63),
                                       CRect_i_(0, 0, 0x64, 0x64), draw_alpha * 9 / 40);
                      MenuTextureReload(MenuExtendReadBlock);
-@@ -680,6 +712,55 @@ void PortBtlWeaponDraw(int x, float depth, int chara, int alpha) {
+@@ -680,6 +736,55 @@ void PortBtlWeaponDraw(int x, float depth, int chara, int alpha) {
      }
  }
  
@@ -6484,7 +6652,7 @@ index 1f7211a1..115348df 100644
  void PortWeaponMenuDraw() {
      RefreshBtlMenuTextures();
      int alpha = 0x80;
-@@ -706,7 +787,7 @@ void PortWeaponMenuDraw() {
+@@ -706,7 +811,7 @@ void PortWeaponMenuDraw() {
          case WEP_MENU_BUILDUP_SELECT:
          case WEP_MENU_BUILDUP_CONFIRM:
          case WEP_MENU_BUILDUP_PREVIEW:
@@ -6493,7 +6661,7 @@ index 1f7211a1..115348df 100644
                  const int target = (SysChara[i].chara - WepMenu.chara) * 0x6E + 0x10E;
                  SysChara[i].x += (static_cast<float>(target) - SysChara[i].x) / 4.0f;
  
-@@ -714,20 +795,31 @@ void PortWeaponMenuDraw() {
+@@ -714,20 +819,31 @@ void PortWeaponMenuDraw() {
                      CTexture *face = MenuCharaFace;
                      int       face_u = 0;
                      const int face_char = SysChara[i].chara;
@@ -6507,7 +6675,8 @@ index 1f7211a1..115348df 100644
                          face_u = 0x6A;
 -                        face_v = (face_char - 3) * 0x6A;
 +                        face_v = (face_cell - 3) * 0x6A;
-+                    }
+                     }
+-                    if (BtlMenuStatusPt->party_size <= i) {
 +                    // MoonMod: a registered character's face is a picture of its own.
 +                    {
 +                        if (CTexture *portrait = CharaPortraitTexture(face_char)) {
@@ -6516,8 +6685,7 @@ index 1f7211a1..115348df 100644
 +                            face_v = 0;
 +                            face_size = 0x80;
 +                        }
-                     }
--                    if (BtlMenuStatusPt->party_size <= i) {
++                    }
 +                    if (!InParty(*BtlMenuStatusPt, i)) {
                          face = BtStatus;
                          face_v = 0x8C;
@@ -6530,7 +6698,7 @@ index 1f7211a1..115348df 100644
                  }
              }
  
-@@ -778,7 +870,12 @@ void PortWeaponMenuDraw() {
+@@ -778,7 +894,12 @@ void PortWeaponMenuDraw() {
  
      BtlWeaponDraw(static_cast<int>(WeaponPos), WepPolyPos, WepMenu.chara, weapon_alpha);
  
@@ -6544,7 +6712,7 @@ index 1f7211a1..115348df 100644
          constexpr u8 repair_x[7] = {78, 78, 78, 26, 64, 64, 66};
          RepairAndLevelUpDraw(repair_x[BtlMenuNowLang], 0x164, alpha);
      }
-@@ -818,7 +915,7 @@ void PortWeaponMenuDraw() {
+@@ -818,7 +939,7 @@ void PortWeaponMenuDraw() {
              }
              break;
          case WEP_MENU_LIST:
@@ -6553,7 +6721,28 @@ index 1f7211a1..115348df 100644
                  MenuTextureReload(BtlMenuReadBlock);
                  DrawBtlMenuLRCursor(0xE6, 0x12, 0x96, alpha);
              }
-@@ -1046,3 +1143,11 @@ void PortWeaponMenuDraw() {
+@@ -939,11 +1060,15 @@ void PortWeaponMenuDraw() {
+             if (WepMenu.board.cursor >= WEP_ACTION_LEVELUP &&
+                 WepMenu.state != WEP_STATE_SCRAP_PROMPT &&
+                 WepMenu.state != WEP_STATE_SCRAP_CONFIRM) {
+-                int       offset_y = 0;
+-                const int options = NowWeaponStatusValuePort(&DngWepHavePt[static_cast<int>(WepMenu.weapon_slot)]);
+-                for (int i = 4; WepMenu.board.cursor >= i; i++) {
+-                    if (options & (1 << (i - 3))) {
+-                        offset_y += 0x1A;
++                // MoonMod: the cursor's place among the rows shown, the mods' own (weapons.menu_actions_set) too.
++                WEAPON_HAVE *shown = &DngWepHavePt[static_cast<int>(WepMenu.weapon_slot)];
++                const int    options = NowWeaponStatusValuePort(shown);
++                std::array<int, kWeaponActionRowsMost> rows{};
++                const int    count = WeaponActionRowList(shown, WepMenu.chara, options, rows);
++                int          offset_y = 0;
++                for (int k = 4; k < count; ++k) {
++                    if (rows[k] == WepMenu.board.cursor) {
++                        offset_y = (k - 3) * 0x1A;
+                     }
+                 }
+                 cursor_y = dialog_pos + 0x4E + offset_y;
+@@ -1046,3 +1171,11 @@ void PortWeaponMenuDraw() {
  }
  
  } // namespace dc::battlemenu
@@ -6651,7 +6840,7 @@ index 4488d8fb..f649fa44 100644
      }
  
 diff --git a/port/src/game/battlemenu.cpp b/port/src/game/battlemenu.cpp
-index 622865b9..ee6b01c8 100644
+index 622865b9..09c16401 100644
 --- a/port/src/game/battlemenu.cpp
 +++ b/port/src/game/battlemenu.cpp
 @@ -5,11 +5,19 @@
@@ -6674,7 +6863,7 @@ index 622865b9..ee6b01c8 100644
  #include "battlemenu/internal.hpp"
  #include "btactstatus.hpp"
  #include "camera.hpp"
-@@ -36,15 +44,22 @@
+@@ -36,15 +44,23 @@
  #include "mglib.hpp"
  #include "monstorunit.hpp"
  #include "rect.hpp"
@@ -6690,6 +6879,7 @@ index 622865b9..ee6b01c8 100644
  #include "weapon_buildup.hpp"
  #include "weaponlevelup.hpp"
 +#include "moonmod/game_hooks.hpp"
++#include "moonmod/weapon_actions.hpp"
 +#include "moonmod/item_icon_override.hpp"
 +#include "moonmod/run_menu.hpp"
 +#include "ui/framework.hpp"
@@ -6697,7 +6887,7 @@ index 622865b9..ee6b01c8 100644
  
  namespace dc::game {
  
-@@ -92,14 +107,15 @@ s16 BtlDrawTbl[2][8] = {
+@@ -92,14 +108,15 @@ s16 BtlDrawTbl[2][8] = {
      {0, 1, 2, 3, 8, 5, 4, 6}
  };
  
@@ -6720,7 +6910,7 @@ index 622865b9..ee6b01c8 100644
  
  s16 MenuDefaultWeaponNo[7] = {ITEM_WEAPON_DAGGER_BROKEN, ITEM_WEAPON_WOODENSLINGSHOT_BROKEN, ITEM_WEAPON_MALLET_BROKEN, ITEM_WEAPON_GOLD_RING_BROKEN, ITEM_WEAPON_FIGHTING_STICK_BROKEN, ITEM_WEAPON_MACHINE_GUN_BROKEN, 81};
  
-@@ -199,7 +215,7 @@ s32             MenuWarningMsgFlag;
+@@ -199,7 +216,7 @@ s32             MenuWarningMsgFlag;
  u_long128      *BtlMenuCharaChangeBuf;
  
  int GetDefaultWeaponNo(int character_no) {
@@ -6729,7 +6919,7 @@ index 622865b9..ee6b01c8 100644
  }
  
  int IsDefaultWeapon(int weapon_no) {
-@@ -886,7 +902,9 @@ void BattleMenuInit(int *texture_blocks, int mode) {
+@@ -886,7 +903,9 @@ void BattleMenuInit(int *texture_blocks, int mode) {
      SetInteriorOutFlag(0);
      DngWepHavePt = BtlMenuStatusPt->chara_weapons[0];
      MenuItemPackPt = &BtlMenuStatusPt->item_pack;
@@ -6740,7 +6930,7 @@ index 622865b9..ee6b01c8 100644
      PosAngle = TWO_PI / MenuChara.slot_count;
  
      // Debug builds hand the controlled character a place in the party along with a weapon.
-@@ -1231,7 +1249,7 @@ void Btl_InitMenuChara(u_long128 *buffer) {
+@@ -1231,7 +1250,7 @@ void Btl_InitMenuChara(u_long128 *buffer) {
  
      int message_no = chara + 30;
  
@@ -6749,7 +6939,7 @@ index 622865b9..ee6b01c8 100644
          message_no = 39;
      }
  
-@@ -1244,7 +1262,8 @@ int BattleMenuCharaKey() {
+@@ -1244,7 +1263,8 @@ int BattleMenuCharaKey() {
          case MENU_CHARA_CHANGE_LOAD:
              MenuChara.change_counter++;
  
@@ -6759,7 +6949,7 @@ index 622865b9..ee6b01c8 100644
                  BtMenuLoadChara();
                  BreakReadBG();
                  StartReadBG();
-@@ -1256,7 +1275,7 @@ int BattleMenuCharaKey() {
+@@ -1256,7 +1276,7 @@ int BattleMenuCharaKey() {
          case MENU_CHARA_CHANGE_EXIT:
              MenuChara.change_counter++;
  
@@ -6768,7 +6958,7 @@ index 622865b9..ee6b01c8 100644
                  BtMenuLoad2(1);
                  LockOffTargte();
                  ExitBattleMenu(1);
-@@ -1361,7 +1380,7 @@ int BattleMenuCharaKey() {
+@@ -1361,7 +1381,7 @@ int BattleMenuCharaKey() {
                          int chara = sys_chara.chara;
                          int mes_no = chara + 0x1E;
  
@@ -6777,7 +6967,7 @@ index 622865b9..ee6b01c8 100644
                              mes_no = 0x27;
                          }
  
-@@ -1394,7 +1413,7 @@ int BattleMenuCharaKey() {
+@@ -1394,7 +1414,7 @@ int BattleMenuCharaKey() {
                  MenuChara.chara--;
  
                  if (MenuChara.chara < 0) {
@@ -6786,7 +6976,7 @@ index 622865b9..ee6b01c8 100644
                  }
  
                  ComMenuSePlay(MENU_SOUND_CURSOR);
-@@ -1404,7 +1423,7 @@ int BattleMenuCharaKey() {
+@@ -1404,7 +1424,7 @@ int BattleMenuCharaKey() {
                  MenuChara.timer = 0.0f;
                  MenuChara.chara++;
  
@@ -6795,7 +6985,7 @@ index 622865b9..ee6b01c8 100644
                      MenuChara.chara = 0;
                  }
  
-@@ -1436,7 +1455,7 @@ int BattleMenuCharaKey() {
+@@ -1436,7 +1456,7 @@ int BattleMenuCharaKey() {
  
                                  int chara = SysChara[i].chara;
  
@@ -6804,7 +6994,7 @@ index 622865b9..ee6b01c8 100644
                                      ComMenuSePlay(MENU_SOUND_REFUSE);
                                      return 1;
                                  }
-@@ -1467,7 +1486,7 @@ int BattleMenuCharaKey() {
+@@ -1467,7 +1487,7 @@ int BattleMenuCharaKey() {
                  }
              }
  
@@ -6813,7 +7003,7 @@ index 622865b9..ee6b01c8 100644
                  BreakReadBG();
                  CharaChangeInitToGL(BtlMenuCharaChangeBuf, MenuChara.chara);
              }
-@@ -1647,7 +1666,7 @@ void DrawCharaSelect() {
+@@ -1647,7 +1667,7 @@ void DrawCharaSelect() {
              }
          }
  
@@ -6822,7 +7012,7 @@ index 622865b9..ee6b01c8 100644
              float box_x = 23.0f + face_x;
              float box_y = 86.0f + face_y;
  
-@@ -1676,11 +1695,22 @@ void DrawCharaSelect() {
+@@ -1676,11 +1696,22 @@ void DrawCharaSelect() {
          int       u = 0;
          int       v = 0;
          int       width = 0x6A;
@@ -6848,7 +7038,7 @@ index 622865b9..ee6b01c8 100644
          }
  
          int shade = 0x80;
-@@ -1691,7 +1721,7 @@ void DrawCharaSelect() {
+@@ -1691,7 +1722,7 @@ void DrawCharaSelect() {
              shade = 0x50;
          }
  
@@ -6857,7 +7047,7 @@ index 622865b9..ee6b01c8 100644
              face = NonCharaFace;
  
              if (SysChara[i].place == 0) {
-@@ -1748,13 +1778,13 @@ void DrawCharaSelect() {
+@@ -1748,13 +1779,13 @@ void DrawCharaSelect() {
              int cursor_x = 0x3C;
              int i = 0;
  
@@ -6873,7 +7063,7 @@ index 622865b9..ee6b01c8 100644
                  cursor_x = 0xA0;
                  waku_x = static_cast<float>(0x18A + chara_r_long * cos(angle) - 30.0);
                  width = 0x6E;
-@@ -1842,6 +1872,38 @@ void DrawWepStatus(int x, int y, WEAPON_HAVE *weapon, int selected, int alpha) {
+@@ -1842,6 +1873,38 @@ void DrawWepStatus(int x, int y, WEAPON_HAVE *weapon, int selected, int alpha) {
      DrawWepDamageDraw(rect, weapon, alpha);
  }
  
@@ -6912,7 +7102,7 @@ index 622865b9..ee6b01c8 100644
  void DrawWepVolumeDisplay(int x, int y, WEAPON_HAVE *weapon, int alpha) {
      WEAPON_DATA *data = GetWeaponData(weapon->item_no);
  
-@@ -1875,7 +1937,11 @@ void DrawWepVolumeDisplay(int x, int y, WEAPON_HAVE *weapon, int alpha) {
+@@ -1875,7 +1938,11 @@ void DrawWepVolumeDisplay(int x, int y, WEAPON_HAVE *weapon, int alpha) {
      for (int i = 0; i < 4; i++, dest.y += source.height, source.y += source.height) {
          values[i] = std::min(limit[i], values[i]);
  
@@ -6925,7 +7115,7 @@ index 622865b9..ee6b01c8 100644
          DrawMenuNumber(values[i], dest.x + source.width + digits.width * 3 - 2, dest.y + 2, WepStatus, digits, 1, alpha);
      }
  }
-@@ -1948,6 +2014,7 @@ void WeaponNameDraw(int y, int selected_only, int alpha) {
+@@ -1948,6 +2015,7 @@ void WeaponNameDraw(int y, int selected_only, int alpha) {
                  mes_no = 999;
              }
  
@@ -6933,7 +7123,7 @@ index 622865b9..ee6b01c8 100644
              if (mes_no > 100) {
                  AtoraNameMes.GetMesWidth_system(mes_no);
                  level = DngWepHavePt[slot].level;
-@@ -1991,6 +2058,7 @@ void WeaponNameDraw(int y, int selected_only, int alpha) {
+@@ -1991,6 +2059,7 @@ void WeaponNameDraw(int y, int selected_only, int alpha) {
      AtoraNameMes.Step();
      AtoraNameMes.DrawMesWin();
  
@@ -6941,7 +7131,7 @@ index 622865b9..ee6b01c8 100644
      if (WepMenu.mode == WEP_MENU_LIST && WepMenu.state == WEP_STATE_IDLE) {
          CTexture *frame = TexManager.GetTexture("frame_image", -1);
  
-@@ -2079,6 +2147,24 @@ void DrawBtlMenuLRCursor(int x, int y, int width, int alpha) {
+@@ -2079,6 +2148,24 @@ void DrawBtlMenuLRCursor(int x, int y, int width, int alpha) {
  void DrawWeaponStatusTag(int x, int y, WEAPON_HAVE *weapon, int build, int weapon_no, int alpha) {
      WEAPON_DATA *built = nullptr;
  
@@ -6966,7 +7156,7 @@ index 622865b9..ee6b01c8 100644
      if (build == 1) {
          built = GetWeaponData(weapon_no);
      }
-@@ -3222,7 +3308,7 @@ int WeaponMenuKastumSelectDown(int row, int enabled_rows) {
+@@ -3222,7 +3309,7 @@ int WeaponMenuKastumSelectDown(int row, int enabled_rows) {
   */
  int WeaponSelectKey() {
      int result = 0;
@@ -6975,6 +7165,36 @@ index 622865b9..ee6b01c8 100644
      int prev_chara = WepMenu.chara;
  
      switch (WepMenu.mode) {
+@@ -3409,20 +3496,19 @@ int WeaponSelectKey() {
+             WEAPON_HAVE *weapon = GetNowSelectWeapon();
+             int          status = NowWeaponStatusValue(weapon);
+ 
++            // MoonMod: up and down walk the rows shown, the mods' own (weapons.menu_actions_set) under the game's,
++            // wrapping as the game's walk does; a mod row that went (its weapon's bar emptied) gives the cursor back.
++            if (WepMenu.board.cursor >= kWeaponModActionFirst &&
++                !WeaponModActionShown(WepMenu.board.cursor - kWeaponModActionFirst, weapon, WepMenu.chara)) {
++                WepMenu.board.cursor = WeaponActionRowStep(weapon, WepMenu.chara, status, WEP_ACTION_REPAIR, 0);
++            }
++
+             if (GamePad.Down(PAD_UP)) {
+-                if (0 < WepMenu.board.cursor && WepMenu.board.cursor < 5) {
+-                    WepMenu.board.cursor--;
+-                } else {
+-                    WepMenu.board.cursor = WeaponMenuKastumSelectUp(WepMenu.board.cursor, status);
+-                }
++                WepMenu.board.cursor = WeaponActionRowStep(weapon, WepMenu.chara, status, WepMenu.board.cursor, -1);
+             }
+ 
+             if (GamePad.Down(PAD_DOWN)) {
+-                if (WepMenu.board.cursor >= 3) {
+-                    WepMenu.board.cursor = WeaponMenuKastumSelectDown(WepMenu.board.cursor + 1, status);
+-                } else {
+-                    WepMenu.board.cursor++;
+-                }
++                WepMenu.board.cursor = WeaponActionRowStep(weapon, WepMenu.chara, status, WepMenu.board.cursor, 1);
+             }
+ 
+             if (GamePad.Down(PAD_RIGHT) && WepMenu.board.cursor == WEP_ACTION_EQUIP) {
 @@ -3445,7 +3531,7 @@ int WeaponSelectKey() {
                              WepMenu.state = WEP_STATE_WARNING;
                              WepMenu.warning_no = 4;
@@ -6984,7 +7204,20 @@ index 622865b9..ee6b01c8 100644
                              WepMenu.state = WEP_STATE_WARNING;
                              WepMenu.warning_no = 2;
                              ComMenuSePlay(MENU_SOUND_REFUSE);
-@@ -3661,7 +3747,7 @@ int WeaponSelectKey() {
+@@ -3624,6 +3710,12 @@ int WeaponSelectKey() {
+                         ComMenuSePlay(MENU_SOUND_CONFIRM);
+                         break;
+                     default:
++                        // MoonMod: a mod's row: its owner hears of it and does the rest (the menu stays as it is).
++                        if (WepMenu.board.cursor >= kWeaponModActionFirst &&
++                            WeaponModActionShown(WepMenu.board.cursor - kWeaponModActionFirst, weapon, WepMenu.chara)) {
++                            moonmod::ChronicleWeaponModActionPressed(WepMenu.board.cursor - kWeaponModActionFirst, WepMenu.chara, slot);
++                            ComMenuSePlay(MENU_SOUND_CONFIRM);
++                        }
+                         break;
+                 }
+             } else if (GamePad.Down(PAD_CIRCLE)) {
+@@ -3661,7 +3753,7 @@ int WeaponSelectKey() {
              } else if (GamePad.Down(PAD_CIRCLE)) {
                  WepMenu.mode = WEP_MENU_ACTION;
  
@@ -6993,7 +7226,7 @@ index 622865b9..ee6b01c8 100644
                      StartReadBG();
                      DngWepEffectReadStart();
                  }
-@@ -3930,7 +4016,7 @@ void WepAttachHaveCancel() {
+@@ -3930,7 +4022,7 @@ void WepAttachHaveCancel() {
          WepMenu.sockets_enabled = false;
          GetNowSelectWeapon();
  
@@ -7002,7 +7235,7 @@ index 622865b9..ee6b01c8 100644
              StartReadBG();
              DngWepEffectReadStart();
          }
-@@ -4597,7 +4683,7 @@ int ItemTrushKey(int *thrown, int *thrown_vol, int slot) {
+@@ -4597,7 +4689,7 @@ int ItemTrushKey(int *thrown, int *thrown_vol, int slot) {
                  int          equip = WhoIsWeaponEquip(held);
  
                  if (equip < 0) {
@@ -7011,7 +7244,7 @@ index 622865b9..ee6b01c8 100644
                          CDngStatusData *status = BtlMenuStatusPt;
                          WEAPON_HAVE    *row = status->chara_weapons[i];
                          weapon = &row[10];
-@@ -4619,7 +4705,7 @@ int ItemTrushKey(int *thrown, int *thrown_vol, int slot) {
+@@ -4619,7 +4711,7 @@ int ItemTrushKey(int *thrown, int *thrown_vol, int slot) {
  
                  int is_default = 0;
  
@@ -7020,7 +7253,7 @@ index 622865b9..ee6b01c8 100644
                      int default_no = GetDefaultWeaponNo(chara);
  
                      if (ItemMenuMode.board.weapon.item_no == default_no || ItemMenuMode.board.weapon.item_no == default_no + 1) {
-@@ -4688,6 +4774,11 @@ void DrawTrushItem() {
+@@ -4688,6 +4780,11 @@ void DrawTrushItem() {
      }
  
      int page = ItemMenuMode.board.page;
@@ -7032,7 +7265,7 @@ index 622865b9..ee6b01c8 100644
      int count[3] = {3, 1, 3};
      int first[3] = {0, 3, 4};
      int entry = first[page];
-@@ -4732,6 +4823,7 @@ namespace {
+@@ -4732,6 +4829,7 @@ namespace {
   * Remembers where the item page's cursor stood and closes it.
   */
  void ExitItemSelect() {
@@ -7040,7 +7273,7 @@ index 622865b9..ee6b01c8 100644
      CommonMenuMes3.rows = 3;
      CommonMenuMes3.narrow_gaiji = false;
      CommonMenuMes3.char_width = 11;
-@@ -4925,135 +5017,1839 @@ void InitItemTrushStart() {
+@@ -4925,135 +5023,1839 @@ void InitItemTrushStart() {
          BtlEffectFlag = BTLEFFECT_PAGE_OPEN;
          BtlEffectCt = 0.0f;
      }
@@ -8976,7 +9209,7 @@ index 622865b9..ee6b01c8 100644
  int ItemMenuMainKey() {
      float effect_x = 0.0f;
      float effect_y = 0.0f;
-@@ -5231,7 +7027,9 @@ int ItemMenuMainKey() {
+@@ -5231,7 +7033,9 @@ int ItemMenuMainKey() {
                      int done = PersonalBoardKey();
                      int row = ItemMenuMode.board.cursor / 5 - ItemMenuMode.board.top_row;
  
@@ -8987,7 +9220,7 @@ index 622865b9..ee6b01c8 100644
                          if (row < 2) {
                              ItemMenuMode.mode = ITEM_MENU_QUICK_SLOTS;
                              ItemMenuMode.board.cursor = 2;
-@@ -5240,9 +7038,9 @@ int ItemMenuMainKey() {
+@@ -5240,9 +7044,9 @@ int ItemMenuMainKey() {
                          }
  
                          int page = ItemMenuMode.board.page;
@@ -8999,7 +9232,7 @@ index 622865b9..ee6b01c8 100644
                              ItemMenuMode.mode = ITEM_MENU_TRUSH;
                              ItemMenuMode.board.cursor = row;
  
-@@ -5259,7 +7057,28 @@ int ItemMenuMainKey() {
+@@ -5259,7 +7063,28 @@ int ItemMenuMainKey() {
              }
  
              if (MenuExTextureReadFlag >= MENU_EX_TEX_READY && MenuWepLevelUp.operation_kind == WEP_EFFECT_NONE) {
@@ -9029,7 +9262,7 @@ index 622865b9..ee6b01c8 100644
                      int            cursor = ItemMenuMode.board.cursor;
                      COM_ITEM_INFO *info = GetCommonItemInfo(BtlHaveItemPt->item_no);
  
-@@ -5267,7 +7086,9 @@ int ItemMenuMainKey() {
+@@ -5267,7 +7092,9 @@ int ItemMenuMainKey() {
                          case ITEM_MENU_QUICK_SLOTS: {
                              int held = BtlHaveItemPt->item_no;
  
@@ -9040,7 +9273,7 @@ index 622865b9..ee6b01c8 100644
                                  ComMenuSePlay(MENU_SOUND_REFUSE);
                              } else if (IconAutoGet.IsMoveIcon() != 0) {
                                  ComMenuSePlay(MENU_SOUND_REFUSE);
-@@ -5573,7 +7394,7 @@ int ItemMenuMainKey() {
+@@ -5573,7 +7400,7 @@ int ItemMenuMainKey() {
                                              if (ItemMenuMode.chara == who) {
                                                  EquipWeaponFrame(&DefaultWeapon, ItemMenuMode.chara, CharaMainHandViewFlag);
  
@@ -9049,7 +9282,7 @@ index 622865b9..ee6b01c8 100644
                                                      NowMainEffect = &CharaMainEffectCrash;
                                                      BtActStatus.gun_type = 0;
                                                  }
-@@ -5760,6 +7581,19 @@ int ItemMenuMainKey() {
+@@ -5760,6 +7587,19 @@ int ItemMenuMainKey() {
                                  break;
                              case ITEM_MENU_QUICK_SLOTS: {
                                  int slot = BtlHaveItemPt->from_slot;
@@ -9069,7 +9302,7 @@ index 622865b9..ee6b01c8 100644
                                  slot_item = &MenuItemPackPt->quick_item_slot[slot];
                                  slot_qty = &MenuItemPackPt->quick_item_qty[slot];
                                  auto *status = static_cast<CUserStatus *>(BtlMenuStatusPt);
-@@ -5813,6 +7647,17 @@ int ItemMenuMainKey() {
+@@ -5813,6 +7653,17 @@ int ItemMenuMainKey() {
                          case ITEM_MENU_QUICK_SLOTS: {
                              int        cursor = ItemMenuMode.board.cursor;
                              ITEM_PACK *pack = MenuItemPackPt;
@@ -9087,7 +9320,7 @@ index 622865b9..ee6b01c8 100644
                              s16       *items = pack->item;
                              s16       *vols = pack->item_vol;
                              s16       *slot_item = &pack->quick_item_slot[cursor];
-@@ -5877,6 +7722,11 @@ int ItemMenuMainKey() {
+@@ -5877,6 +7728,11 @@ int ItemMenuMainKey() {
  
                      switch (ItemMenuMode.mode) {
                          case ITEM_MENU_QUICK_SLOTS: {
@@ -9099,7 +9332,7 @@ index 622865b9..ee6b01c8 100644
                              s16 *slot_item = &MenuItemPackPt->quick_item_slot[cursor];
                              s16 *slot_qty = &MenuItemPackPt->quick_item_qty[cursor];
  
-@@ -6189,10 +8039,12 @@ int ItemMenuMainKey() {
+@@ -6189,10 +8045,12 @@ int ItemMenuMainKey() {
  
      switch (ItemMenuMode.mode) {
          case ITEM_MENU_QUICK_SLOTS: {
@@ -9115,7 +9348,7 @@ index 622865b9..ee6b01c8 100644
              }
  
              break;
-@@ -6217,7 +8069,7 @@ int ItemMenuMainKey() {
+@@ -6217,7 +8075,7 @@ int ItemMenuMainKey() {
                      break;
                  }
                  case BOARD_PAGE_WEAPON:
@@ -9124,7 +9357,7 @@ index 622865b9..ee6b01c8 100644
                          CDngStatusData *status = BtlMenuStatusPt;
                          WEAPON_HAVE    *weapons = status->chara_weapons[i];
                          WEAPON_HAVE    *weapon = &weapons[10];
-@@ -6322,7 +8174,7 @@ int ItemMenuMainKey() {
+@@ -6322,7 +8180,7 @@ int ItemMenuMainKey() {
          int made_no = CommonMenuMes2.mes_no[0];
          int made_value = CommonMenuMes2.value;
  
@@ -9133,7 +9366,7 @@ index 622865b9..ee6b01c8 100644
              remake = 1;
          }
  
-@@ -6336,7 +8188,8 @@ int ItemMenuMainKey() {
+@@ -6336,7 +8194,8 @@ int ItemMenuMainKey() {
              }
  
              if (chara_mes >= 0) {
@@ -9143,7 +9376,7 @@ index 622865b9..ee6b01c8 100644
              }
  
              CommonMenuMes2.mes_made = -1;
-@@ -6374,6 +8227,11 @@ void ItemMenuModeDraw() {
+@@ -6374,6 +8233,11 @@ void ItemMenuModeDraw() {
      BtlMenuTexBlockEnter();
      CharaStatus = TexManager.GetTexture("status", -1);
  
@@ -9155,7 +9388,7 @@ index 622865b9..ee6b01c8 100644
      switch (ItemMenuMode.mode) {
          case ITEM_MENU_QUICK_SLOTS:
          case ITEM_MENU_CHARA:
-@@ -6381,14 +8239,20 @@ void ItemMenuModeDraw() {
+@@ -6381,14 +8245,20 @@ void ItemMenuModeDraw() {
          case ITEM_MENU_DEFENSE:
          case ITEM_MENU_BOARD:
          case ITEM_MENU_TRUSH: {
@@ -9178,7 +9411,7 @@ index 622865b9..ee6b01c8 100644
              MenuTextureReload(BtlMenuReadBlock);
              int arrow_x = -1;
              int arrow_y = arrow_x;
-@@ -6399,10 +8263,10 @@ void ItemMenuModeDraw() {
+@@ -6399,10 +8269,10 @@ void ItemMenuModeDraw() {
                  case ITEM_MENU_CHARA:
                  case ITEM_MENU_WEAPON:
                  case ITEM_MENU_DEFENSE:
@@ -9192,7 +9425,7 @@ index 622865b9..ee6b01c8 100644
                      }
  
                      break;
-@@ -6410,7 +8274,7 @@ void ItemMenuModeDraw() {
+@@ -6410,7 +8280,7 @@ void ItemMenuModeDraw() {
                  case ITEM_MENU_TRUSH:
                      arrow_x = 0x146;
                      arrow_y = 0x2A;
@@ -9201,7 +9434,7 @@ index 622865b9..ee6b01c8 100644
                      break;
                  default:
                      break;
-@@ -6432,12 +8296,20 @@ void ItemMenuModeDraw() {
+@@ -6432,12 +8302,20 @@ void ItemMenuModeDraw() {
          s8    shift[7] = {0, 0, 0, 0, 0, -16, -16};
          float heights[7] = {1.2f, 1.2f, 1.2f, 1.2f, 1.2f, 2.4f, 2.4f};
          MenuHelpWinDraw(0x36, 0x174 + shift[BtlMenuNowLang], widths[BtlMenuNowLang], heights[BtlMenuNowLang], 0x80);
@@ -9228,7 +9461,7 @@ index 622865b9..ee6b01c8 100644
      }
  
      MenuTextureReload(BtlMenuReadBlock);
-@@ -6455,10 +8327,27 @@ void ItemMenuModeDraw() {
+@@ -6455,10 +8333,27 @@ void ItemMenuModeDraw() {
          {0x11A, 0   },
          {0,     0   }
      };
@@ -9257,7 +9490,7 @@ index 622865b9..ee6b01c8 100644
      PERSONAL_BOARD *board = &ItemMenuMode.board;
  
      switch (ItemMenuMode.mode) {
-@@ -6496,17 +8385,26 @@ void ItemMenuModeDraw() {
+@@ -6496,17 +8391,26 @@ void ItemMenuModeDraw() {
          frame_y = y - 0x26;
      }
  
@@ -9288,7 +9521,7 @@ index 622865b9..ee6b01c8 100644
                      vibe = 1;
                  }
  
-@@ -6520,6 +8418,10 @@ void ItemMenuModeDraw() {
+@@ -6520,6 +8424,10 @@ void ItemMenuModeDraw() {
                      vibe = 1;
                  }
  
@@ -9299,7 +9532,7 @@ index 622865b9..ee6b01c8 100644
                  if (ItemMenuMode.board.cursor_area == PERSONAL_BOARD_AREA_TRASH && board->held_item.item_no < ITEM_ATTACH_START) {
                      vibe = 0;
                  }
-@@ -6558,6 +8460,16 @@ void ItemMenuModeDraw() {
+@@ -6558,6 +8466,16 @@ void ItemMenuModeDraw() {
          DrawMenuVibeItem(static_cast<int>(SysCur[0]), static_cast<int>(SysCur[1]), 2, -0xC, 0x80);
      }
  
@@ -9316,7 +9549,7 @@ index 622865b9..ee6b01c8 100644
      switch (ItemMenuMode.state) {
          case ITEM_MENU_STATE_LOADING:
          case ITEM_MENU_STATE_OPEN:
-@@ -6657,6 +8569,9 @@ int ItemMenuModeKey() {
+@@ -6657,6 +8575,9 @@ int ItemMenuModeKey() {
          if (count <= ItemMenuMode.board.cursor) {
              ItemMenuMode.board.cursor = count - 1;
          }
@@ -9326,7 +9559,7 @@ index 622865b9..ee6b01c8 100644
      }
  
      if (GamePad.Down(PAD_UP) != 0) {
-@@ -6674,6 +8589,13 @@ int ItemMenuModeKey() {
+@@ -6674,6 +8595,13 @@ int ItemMenuModeKey() {
                  ItemMenuMode.board.cursor = std::max(ItemMenuMode.board.cursor, 0);
  
                  break;
@@ -9340,7 +9573,7 @@ index 622865b9..ee6b01c8 100644
              default:
                  ItemMenuMode.board.cursor = 1;
                  ItemMenuMode.mode = ITEM_MENU_QUICK_SLOTS;
-@@ -6696,6 +8618,11 @@ int ItemMenuModeKey() {
+@@ -6696,6 +8624,11 @@ int ItemMenuModeKey() {
                  break;
              }
              case ITEM_MENU_QUICK_SLOTS:
@@ -9352,7 +9585,7 @@ index 622865b9..ee6b01c8 100644
                  if (ItemMenuMode.board.cursor == 0) {
                      ItemMenuMode.mode = ITEM_MENU_WEAPON;
                      break;
-@@ -6709,7 +8636,9 @@ int ItemMenuModeKey() {
+@@ -6709,7 +8642,9 @@ int ItemMenuModeKey() {
      if (GamePad.Down(PAD_LEFT) != 0) {
          switch (ItemMenuMode.mode) {
              case ITEM_MENU_QUICK_SLOTS:
@@ -9363,7 +9596,7 @@ index 622865b9..ee6b01c8 100644
                      ItemMenuMode.board.cursor--;
                  }
  
-@@ -6739,7 +8668,13 @@ int ItemMenuModeKey() {
+@@ -6739,7 +8674,13 @@ int ItemMenuModeKey() {
                  ItemMenuMode.board.cursor = (ItemMenuMode.board.top_row + ItemMenuMode.board.cursor) * 5;
                  break;
              case ITEM_MENU_QUICK_SLOTS:
@@ -9378,7 +9611,7 @@ index 622865b9..ee6b01c8 100644
                      ItemMenuMode.board.cursor++;
                  } else {
                      ItemMenuMode.mode = ITEM_MENU_BOARD;
-@@ -6752,7 +8687,13 @@ int ItemMenuModeKey() {
+@@ -6752,7 +8693,13 @@ int ItemMenuModeKey() {
                  ItemMenuMode.mode = ITEM_MENU_DEFENSE;
                  break;
              case ITEM_MENU_DEFENSE:
@@ -9393,7 +9626,7 @@ index 622865b9..ee6b01c8 100644
                  break;
              case ITEM_MENU_CHARA:
                  ItemMenuMode.mode = ITEM_MENU_BOARD;
-@@ -6785,7 +8726,14 @@ void ActiveItemDraw(int x, int y, int alpha) {
+@@ -6785,7 +8732,14 @@ void ActiveItemDraw(int x, int y, int alpha) {
      MenuTextureReload(ItemMenuWeaponIconReadBlock);
      int slot_x = x + 0xE;
      int slot_y = 0;
@@ -9409,7 +9642,7 @@ index 622865b9..ee6b01c8 100644
      s16 *items = MenuItemPackPt->quick_item_slot;
      s16 *counts = MenuItemPackPt->quick_item_qty;
  
-@@ -6848,7 +8796,7 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
+@@ -6848,7 +8802,7 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
          RECT number_rect = {0x100, 0x60, 0xC, 0xE};
          DrawMenuNumber(level, x + 0x64, y + 0x24, CharaStatus, number_rect, 1, alpha);
  
@@ -9418,7 +9651,7 @@ index 622865b9..ee6b01c8 100644
              MenuTextureReload(MenuExtendReadBlock);
              MGSetWindowRect(CRect_i_(x + 0x82, 0x5D, 0x76, 0x3F));
              MenuPolygonDraw(alpha, MenuCharaPolyDraw);
-@@ -6997,7 +8945,13 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
+@@ -6997,7 +8951,13 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
          }
  
          draw_y = y - 0x14;
@@ -9433,7 +9666,7 @@ index 622865b9..ee6b01c8 100644
          int tab = 0;
          int i = 0;
          int after = 0;
-@@ -7005,9 +8959,9 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
+@@ -7005,9 +8965,9 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
          int tex_y = 0;
  
          for (; i <= party_size; i++) {
@@ -9445,7 +9678,7 @@ index 622865b9..ee6b01c8 100644
                      DrawMenu2DSprite(CharaStatus, CRect_i_(draw_x, draw_y - 1, 0x20, 0x1B), CRect_i_(0, 0xD8, 0x20, 0x1C), alpha);
                      DrawMenu2DSprite(CharaStatus, CRect_i_(draw_x + 0x20, draw_y - 1, 0x5E, 0x1B), CRect_i_(0x20, 0xD8, 0x4A, 0x1C), alpha);
                      DrawMenu2DSprite(CharaStatus, CRect_i_(draw_x + 0x7E, draw_y - 1, 0x20, 0x1B), CRect_i_(0x6A, 0xD8, 0x20, 0x1C), alpha);
-@@ -7039,8 +8993,9 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
+@@ -7039,8 +8999,9 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
          int item_no = weapon->item_no;
          draw_x = x + 0x16;
          draw_y = y + 0x10;
@@ -9457,7 +9690,7 @@ index 622865b9..ee6b01c8 100644
  
          if (icon != nullptr && item_no >= ITEM_WEAPON_START) {
              MenuTextureReload(ItemMenuWeaponIconReadBlock);
-@@ -7051,7 +9006,8 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
+@@ -7051,7 +9012,8 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
          }
  
          MenuTextureReload(CommonMenuMes3.tex_block);
@@ -9467,7 +9700,7 @@ index 622865b9..ee6b01c8 100644
  
          if (CommonMenuMes3.mes_made != mes_no) {
              CommonMenuMes3.MakeMesWin(mes_no);
-@@ -7063,7 +9019,7 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
+@@ -7063,7 +9025,7 @@ void ItemMenuCharaStatusDraw(int x, int y, int chara, int alpha) {
          s8  char_width[7] = {8, 6, 6, 6, 6, 6, 6};
          s8  name_offset[7] = {0, 6, 6, 6, 6, 6, 6};
          int lang = BtlMenuNowLang;
@@ -9476,7 +9709,7 @@ index 622865b9..ee6b01c8 100644
      }
  }
  
-@@ -7186,7 +9142,7 @@ void CharaStatusMsgDraw(int x, int y, int chara, int per_member, int alpha) {
+@@ -7186,7 +9148,7 @@ void CharaStatusMsgDraw(int x, int y, int chara, int per_member, int alpha) {
      float period = 0.0f;
  
      if (per_member != 0) {
@@ -9485,7 +9718,7 @@ index 622865b9..ee6b01c8 100644
          period = 50.0f * count;
      } else {
          period = 50.0f;
-@@ -8806,4 +10762,147 @@ void MenuClsMes::Draw1(int x, int y, int draw_alpha) {
+@@ -8806,4 +10768,147 @@ void MenuClsMes::Draw1(int x, int y, int draw_alpha) {
      }
  }
  
@@ -19841,7 +20074,7 @@ index bd9c1093..b9171040 100644
      }
  
 diff --git a/port/src/game/ebattle.cpp b/port/src/game/ebattle.cpp
-index 62cd5924..3ce50bb1 100644
+index 62cd5924..35736ade 100644
 --- a/port/src/game/ebattle.cpp
 +++ b/port/src/game/ebattle.cpp
 @@ -17,6 +17,8 @@
@@ -19853,10 +20086,18 @@ index 62cd5924..3ce50bb1 100644
  #include "edit.hpp"
  #include "editground.hpp"
  #include "editloop.hpp"
-@@ -2050,6 +2052,19 @@ void EdMoveChara() {
+@@ -2050,11 +2052,40 @@ void EdMoveChara() {
              near_villager = -1;
          }
  
++        // A mod asked for a resident's own chat (characters.villager_chat): run it now the town can.
++        if (const int chat = ChronicleTakeVillagerChat(); chat >= 0 && acted == 0 && key_lock == 0 &&
++                                                           (viewMode == 0 || interior != 0) &&
++                                                           EdTalkModeInit(&EdVillager[chat], -1) != 0) {
++            event_no = 0x100;
++            acted = true;
++        }
++
 +        // A mod's villager: the talk button runs its native event, or tells the mod.
 +        if (acted == 0 && PadDown(0x40) != 0 && (viewMode == 0 || interior != 0) && key_lock == 0 && near_villager >= 0 &&
 +            ChronicleModVillagerInSlot(near_villager) >= 0) {
@@ -19873,7 +20114,20 @@ index 62cd5924..3ce50bb1 100644
          if (acted == 0 && (viewMode == 0 || interior != 0) && near_villager >= 0 && EdVillagerInfo[near_villager].talk_event_no > 0 && EdVillagerInfo[near_villager].talk_event_level != 0 && EdTalkModeInit(&EdVillager[near_villager], -1) != 0) {
              event_no = EdVillagerInfo[near_villager].talk_event_no;
              acted = true;
-@@ -2261,6 +2276,7 @@ void EdMoveChara() {
+         }
+ 
++        // A town resident a mod hooked (characters.register native = true): after their story events, the talk
++        // button tells the mod; characters.villager_chat runs their own chat after.
++        if (acted == 0 && PadDown(0x40) != 0 && (viewMode == 0 || interior != 0) && key_lock == 0 && near_villager >= 0 &&
++            ChronicleModVillagerHookInSlot(near_villager) >= 0) {
++            moonmod::ChronicleModVillagerTalked(ChronicleModVillagerHookInSlot(near_villager));
++            acted = true;
++        }
++
+         if (acted == 0 && PadDown(0x40) != 0 && (viewMode == 0 || interior != 0) && key_lock == 0) {
+             if (near_villager >= 0) {
+                 if (EdTalkModeInit(&EdVillager[near_villager], -1) != 0) {
+@@ -2261,6 +2292,7 @@ void EdMoveChara() {
                  EdFishingAngleHelpMEs(FishingGetEsaItemNo());
  
                  if (FishingFishStatus(nullptr) != 8) {
@@ -24826,10 +25080,10 @@ index 00000000..923eecf7
 +
 +} // namespace dc::game
 diff --git a/port/src/game/randomitem.cpp b/port/src/game/randomitem.cpp
-index 17541cbc..7bce2d61 100644
+index 17541cbc..07183270 100644
 --- a/port/src/game/randomitem.cpp
 +++ b/port/src/game/randomitem.cpp
-@@ -2,12 +2,14 @@
+@@ -2,16 +2,19 @@
  
  #include <libvu0.h>
  
@@ -24844,7 +25098,12 @@ index 17541cbc..7bce2d61 100644
  #include "gameutil.hpp"
  #include "hitvalue.hpp"
  #include "mathutil.hpp"
-@@ -80,9 +82,25 @@ void CRandomItem::MapSymbolDraw() {
+ #include "mglib.hpp"
++#include "moonmod/game_hooks.hpp"
+ #include "rect.hpp"
+ #include "shot_freefuncs.hpp"
+ #include "snd.hpp"
+@@ -80,9 +83,25 @@ void CRandomItem::MapSymbolDraw() {
  
      for (int i = 0; i < 32; i++) {
          if (id[i] != -1 && amount[i] == -1) {
@@ -24870,16 +25129,28 @@ index 17541cbc..7bce2d61 100644
          }
      }
  }
-@@ -128,7 +146,8 @@ int CRandomItem::CheckPosition() {
+@@ -128,9 +147,20 @@ int CRandomItem::CheckPosition() {
              pickup_blocked[i] = 0;
          }
  
 -        if (pickup_blocked[i] != 0 || distance[i] > 5.0f) {
-+        // MoonMod: a pile a mod put down (dungeons.drop_gilda, id 2) is taken from a step away, the game's own underfoot.
-+        if (pickup_blocked[i] != 0 || distance[i] > (id[i] == 2 ? 90.0f : 5.0f)) {
++        // MoonMod: a pile a mod put down (dungeons.drop_gilda, id 2) is taken from a step away, the game's own underfoot;
++        // a mod's bag (dungeons.drop_token, id 3) from close by, and it goes to the mod, not the bag.
++        if (pickup_blocked[i] != 0 || distance[i] > (id[i] == 2 ? 90.0f : id[i] == 3 ? 24.0f : 5.0f)) {
++            continue;
++        }
++
++#ifdef PORT
++        if (id[i] == 3) {
++            state[i] = RandomItemState::TAKEN;
++            SndSePlay(SE_ITEM_GET, -1, 0);
++            moonmod::ChronicleDropTokenTaken(i);
              continue;
          }
++#endif
  
+         if (amount[i] == -1 && item_no[i] != -1) {
+             int blocked = static_cast<CDngStatusData *>(UserStatus)->CheckItemGet(item_no[i]);
 diff --git a/port/src/game/runeffect.cpp b/port/src/game/runeffect.cpp
 index fbbda9ee..43a8ed93 100644
 --- a/port/src/game/runeffect.cpp
@@ -28185,10 +28456,10 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..242075b9
+index 00000000..dec32aea
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,682 @@
+@@ -0,0 +1,688 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -28357,6 +28628,7 @@ index 00000000..242075b9
 +    {"dungeons.set_zones", "dungeons", "set_zones", "simulation", "game.write", "Lay Chronicle floors built from now on out as 2-24 zones joined by locked gates; a monster in each zone carries the next gate's key; open lists gates built open; shrines = true puts a spring in each zone's shrine room; a zone's source_floor gives it that floor's monsters, atla and chest items; a zone's source_dungeon builds it from that dungeon's rooms, corridors and pillars and gives it that dungeon's monsters (its main floor pack loads beside the floor's own); exit_floor is where the floor's exit gate leads; smoke lists gates no key opens (game.dungeon.smoke_touched); shrine_heal = false keeps the springs from healing HP; sanctuary = true keeps monsters out of a shrine's circle; {} turns zones off."},
 +    {"dungeons.set_exits", "dungeons", "set_exits", "simulation", "game.write", "Keep the party from leaving a Chronicle dungeon for town by the Escape menu or the exit gate (town = \"shrines\"; the gate leads on), or give the exits back (town = \"any\")."},
 +    {"dungeons.warp", "dungeons", "warp", "simulation", "game.write", "Move the player at once to a cell (x, y) of the dungeon floor they are on."},
++    {"dungeons.drop_token", "dungeons", "drop_token", "simulation", "game.write", "Put a bag on the dungeon floor the player is on, at a world position (x, y, z), drawn as the game's own dropped item; walking onto it sends game.dungeon.token_taken {tag} to this mod instead of filling the bag."},
 +    {"dungeons.drop_gilda", "dungeons", "drop_gilda", "simulation", "game.write", "Put a pile of gold (amount) on the dungeon floor the player is on, at a world position (x, y, z); the player takes it by walking onto it."},
 +    {"dungeons.enter_floor", "dungeons", "enter_floor", "simulation", "game.write", "Build floor floor_id of the current dungeon (or, from a town, of dungeon_id) again from the start (its monsters come back) and enter it, the player arriving at cell x, y when given."},
 +    {"dungeons.set_arrival", "dungeons", "set_arrival", "simulation", "game.write", "Start the player on the next floor built at cell x, y, or in front of a zone's shrine (zone)."},
@@ -28450,6 +28722,8 @@ index 00000000..242075b9
 +    {"shops.set_price", "shops", "set_price", "content", "content.register", "Set the buy and sell prices for an item or weapon in native shops."},
 +    {"weapons.list", "weapons", "list", "any", "game.read", "List built-in and registered weapon definitions."},
 +    {"weapons.get", "weapons", "get", "any", "game.read", "Read a weapon definition and current state."},
++    {"weapons.menu_note_set", "weapons", "menu_note_set", "simulation", "game.write", "Show a mod's one line of text (up to 24 bytes) under the weapon menu's action list; empty takes it away."},
++    {"weapons.menu_actions_set", "weapons", "menu_actions_set", "simulation", "game.write", "Put up to 3 of a mod's own buttons on the weapon menu's action list, under Build-up; pressing one sends game.weapon.menu_action."},
 +    {"weapons.stat_label_set", "weapons", "stat_label_set", "simulation", "game.write", "Show a mod's own image as a weapon stat's label on the weapon cards (Lightness for Speed, say)."},
 +    {"weapons.definition_set", "weapons", "definition_set", "content", "content.register", "Apply an owner-scoped override to a built-in Chronicle weapon definition; Chronicle restores the original data when that owner unloads."},
 +    {"weapons.register", "weapons", "register", "content", "content.register", "Register a data-defined weapon, optionally with its own model and menu icon."},
@@ -28476,7 +28750,8 @@ index 00000000..242075b9
 +    {"inventions.craft", "inventions", "craft", "simulation", "game.write", "Craft an unlocked native or mod-registered invention through native inventory and material rules."},
 +    {"characters.list", "characters", "list", "any", "game.read", "List character definitions and visible instances."},
 +    {"characters.get", "characters", "get", "any", "game.read", "Read character stats, state, and stable handle."},
-+    {"characters.register", "characters", "register", "content", "content.register", "Register a data-defined enemy or town villager (kind = 'npc')."},
++    {"characters.register", "characters", "register", "content", "content.register", "Register a data-defined enemy or town villager (kind = 'npc'; native = true hooks the town's own resident)."},
++    {"characters.villager_chat", "characters", "villager_chat", "simulation", "game.write", "Run a hooked town resident's own chat (a native npc of this mod), the next town frame that can."},
 +    {"characters.register_playable", "characters", "register_playable", "content", "content.register", "Register a playable character past the game's six (pack, portrait, the character he fights as); never in a save."},
 +    {"characters.spawn", "characters", "spawn", "simulation", "game.write", "Spawn a registered character or enemy."},
 +    {"quests.get", "quests", "get", "any", "game.read", "Read this mod's quest definitions and objective progress."},
@@ -28628,6 +28903,7 @@ index 00000000..242075b9
 +    {"game.dungeon.zone_gate_locked", "dungeons", "chronicle", "The player reached a locked zone gate without its key: zone, key, x, y."},
 +    {"game.dungeon.smoke_touched", "dungeons", "chronicle", "The player walked up to a smoke gate (dungeons.set_zones smoke): zone, x, y; once until they walk away."},
 +    {"game.dungeon.door_opened", "dungeons", "chronicle", "The player opened a shortcut door with its key: key, x, y."},
++    {"game.dungeon.token_taken", "dungeons", "chronicle", "The party walked onto a bag this mod dropped (dungeons.drop_token): tag, x, y, z."},
 +    {"game.dungeon.wall_opened", "dungeons", "chronicle", "A blow opened an illusory wall: wall (its number on the floor), x, y."},
 +    {"game.dungeon.door_locked", "dungeons", "chronicle", "The player reached a locked shortcut door without its key: key, x, y."},
 +    {"game.companion.hit", "party", "chronicle", "The companion's blow landed on an enemy: entity, damage, killed, reward_exp."},
@@ -28638,6 +28914,7 @@ index 00000000..242075b9
 +    {"game.enemy_hit", "combat", "chronicle", "A native weapon hit damaged an enemy; includes attacker, weapon, target, model, element, and final damage."},
 +    {"game.weapon.upgraded", "weapons", "both", "A native weapon upgrade changed the weapon."},
 +    {"game.weapon.equipped", "weapons", "both", "The active weapon changed through a supported API."},
++    {"game.weapon.menu_action", "weapons", "chronicle", "The player pressed a mod's button on the weapon menu (weapons.menu_actions_set): {action, id, item_no, character, slot, level, abs, source_mod}."},
 +    {"game.weapon.abs_gained", "weapons", "both", "An owned weapon gained ABS experience or synthesis points."},
 +    {"game.weapon.built_up", "weapons", "both", "A weapon evolved into a build-up target or synthesized into a sphere/spectol."},
 +    {"game.weapon.broken", "weapons", "both", "A weapon broke or was status-broken / spectrumized."},
@@ -28656,7 +28933,7 @@ index 00000000..242075b9
 +    {"game.georama.river_changed", "georama", "chronicle-two", "A Chronicle Two river cell changed."},
 +    {"game.georama.piece_placed", "georama", "both", "A Georama piece was placed."},
 +    {"game.georama.piece_removed", "georama", "both", "A Georama piece was removed."},
-+    {"game.npc.talk", "characters", "chronicle", "The player pressed talk at a town villager the mod registered (characters.register kind = 'npc') that has no native talk event."},
++    {"game.npc.talk", "characters", "chronicle", "The player pressed talk at a town villager the mod registered (characters.register kind = 'npc') that has no native talk event, or at a town resident it hooked (native = true)."},
 +    {"game.title.opened", "title", "chronicle", "The player opened this mod's title mode screen from the title menu."},
 +    {"game.title.selected", "title", "chronicle", "The player confirmed an entry on this mod's title mode screen, or pressed Circle (entry 'back')."},
 +    {"game.session.started", "session", "chronicle", "A mod's sandbox session started: a fresh game with no save slot."},
@@ -29733,10 +30010,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..f63c16d5
+index 00000000..c2ae8727
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17515 @@
+@@ -0,0 +1,17770 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -29746,6 +30023,7 @@ index 00000000..f63c16d5
 +#include "moonmod/map_screen.hpp"
 +#include "moonmod/sky_screen.hpp"
 +#include "moonmod/run_menu.hpp"
++#include "moonmod/weapon_actions.hpp"
 +#include "game/dungeoneventman.hpp"
 +#include "game/mod_atla.hpp"
 +#include "game/randomitem.hpp"
@@ -30304,6 +30582,8 @@ index 00000000..f63c16d5
 +    float facing_degrees = 0.0f;
 +    int talk_event = 0;
 +    int index = -1;
++    bool native = false;   // the town's own resident `model` is this villager
++    bool stand_in = false; // native: stands at position while the resident is away
 +};
 +
 +std::map<std::string, ModNpc, std::less<>> g_mod_npcs;
@@ -30992,29 +31272,45 @@ index 00000000..f63c16d5
 +}
 +
 +Json ModNpcJson(const ModNpc &npc) {
-+    const int slot = ChronicleModVillagerSlot(npc.index);
-+    return {{"id", npc.id}, {"kind", "npc"}, {"name", npc.name}, {"owner", npc.owner}, {"town_id", npc.town_id},
-+            {"model", npc.model}, {"game_path", "gedit/e0" + std::to_string(npc.town_id + 1) + "/chara/" + npc.model + ".chr"},
-+            {"position", {{"x", npc.position[0]}, {"y", npc.position[1]}, {"z", npc.position[2]}}},
-+            {"facing", npc.facing_degrees}, {"talk_event", npc.talk_event == 0 ? Json(nullptr) : Json(npc.talk_event)},
-+            {"in_town", slot >= 0}, {"villager_slot", slot < 0 ? Json(nullptr) : Json(slot)}, {"status", "registered"}};
++    const int own_slot = ChronicleModVillagerSlot(npc.index);
++    const int native_slot = npc.native ? ChronicleModVillagerNativeSlot(npc.index) : -1;
++    const int slot = native_slot >= 0 ? native_slot : own_slot;
++    Json json = {{"id", npc.id}, {"kind", "npc"}, {"name", npc.name}, {"owner", npc.owner}, {"town_id", npc.town_id},
++                 {"model", npc.model}, {"game_path", "gedit/e0" + std::to_string(npc.town_id + 1) + "/chara/" + npc.model + ".chr"},
++                 {"position", {{"x", npc.position[0]}, {"y", npc.position[1]}, {"z", npc.position[2]}}},
++                 {"facing", npc.facing_degrees}, {"talk_event", npc.talk_event == 0 ? Json(nullptr) : Json(npc.talk_event)},
++                 {"in_town", slot >= 0}, {"villager_slot", slot < 0 ? Json(nullptr) : Json(slot)}, {"status", "registered"}};
++    if (npc.native) {
++        json["native"] = true;
++        json["stand_in"] = npc.stand_in;
++        json["resident_in_town"] = native_slot >= 0;
++    }
++    return json;
 +}
 +
 +ApiCallResult RegisterNpc(std::string_view mod_id, const Json &definition) {
 +    for (auto field = definition.begin(); field != definition.end(); ++field) {
 +        if (field.key() != "id" && field.key() != "kind" && field.key() != "name" && field.key() != "town_id" &&
 +            field.key() != "model" && field.key() != "position" && field.key() != "facing" &&
-+            field.key() != "talk_event") {
-+            return Invalid("npc definitions accept only id, kind, name, town_id, model, position, facing, and talk_event");
++            field.key() != "talk_event" && field.key() != "native") {
++            return Invalid("npc definitions accept only id, kind, name, town_id, model, position, facing, talk_event, and native");
 +        }
++    }
++    bool native = false;
++    if (const auto native_it = definition.find("native"); native_it != definition.end()) {
++        if (!native_it->is_boolean()) return Invalid("native must be a boolean");
++        native = native_it->get<bool>();
 +    }
 +    const auto id_it = definition.find("id");
 +    const auto name_it = definition.find("name");
 +    const auto model_it = definition.find("model");
 +    const auto position_it = definition.find("position");
 +    if (id_it == definition.end() || !id_it->is_string() || name_it == definition.end() || !name_it->is_string() ||
-+        model_it == definition.end() || !model_it->is_string() || position_it == definition.end()) {
-+        return Invalid("npc definition requires string id, name and model fields and a position");
++        model_it == definition.end() || !model_it->is_string() || (position_it == definition.end() && !native)) {
++        return Invalid("npc definition requires string id, name and model fields and a position (optional when native)");
++    }
++    if (native && definition.contains("talk_event")) {
++        return Invalid("a native npc is the town's own resident: talk reaches the mod, so it takes no talk_event");
 +    }
 +    std::string qualified_id;
 +    if (!QualifyModContentId(mod_id, id_it->get_ref<const std::string &>(), qualified_id, "npc")) {
@@ -31039,7 +31335,10 @@ index 00000000..f63c16d5
 +                      ") or this mod's own 1 byte through 2 MiB resources.override for it");
 +    }
 +    std::array<float, 4> position{};
-+    if (!ReadVector3(*position_it, position, 100000.0f)) return Invalid("position must be {x, y, z} within 100000");
++    if (position_it != definition.end() && !ReadVector3(*position_it, position, 100000.0f)) {
++        return Invalid("position must be {x, y, z} within 100000");
++    }
++    const bool stand_in = native && position_it != definition.end();
 +    double facing = 0.0;
 +    if (const auto facing_it = definition.find("facing"); facing_it != definition.end()) {
 +        if (!facing_it->is_number() || !std::isfinite(facing_it->get<double>())) return Invalid("facing must be degrees");
@@ -31058,12 +31357,14 @@ index 00000000..f63c16d5
 +            index = candidate;
 +        }
 +    }
-+    if (index < 0) return Failed("Chronicle supports up to 4 mod villagers (the free villager slots)");
++    if (index < 0) return Failed("Chronicle supports up to 16 mod villagers across the towns");
 +    const float facing_radians = static_cast<float>(facing * 3.14159265358979323846 / 180.0);
 +    if (!SetChronicleModVillager(index, town_id, model.c_str(), position.data(), facing_radians, talk_event)) {
 +        return Failed("the native villager table rejected this npc");
 +    }
-+    ModNpc npc{qualified_id, std::string(mod_id), name, town_id, model, position, static_cast<float>(facing), talk_event, index};
++    SetChronicleModVillagerNative(index, native, stand_in);
++    ModNpc npc{qualified_id, std::string(mod_id), name, town_id, model, position, static_cast<float>(facing), talk_event, index,
++               native, stand_in};
 +    auto [entry, inserted] = g_mod_npcs.emplace(qualified_id, std::move(npc));
 +    (void)inserted;
 +    return {ApiCallStatus::Ok, ModNpcJson(entry->second), {}};
@@ -31072,12 +31373,35 @@ index 00000000..f63c16d5
 +void UnloadModNpcs(std::string_view mod_id) {
 +    for (auto it = g_mod_npcs.begin(); it != g_mod_npcs.end();) {
 +        if (mod_id.empty() || it->second.owner == mod_id) {
++            if (const int slot = ChronicleModVillagerNativeSlot(it->second.index); slot >= 0) {
++                ChronicleRequestVillagerChat(-1);
++            }
 +            SetChronicleModVillager(it->second.index, 0, "", nullptr, 0.0f, 0);
 +            it = g_mod_npcs.erase(it);
 +        } else {
 +            ++it;
 +        }
 +    }
++}
++
++// characters.villager_chat({id}): the hooked town resident's own chat, the next town frame that can run it (after a
++// mod's panel for them closes, say). Only for this mod's native npc while the resident is in town.
++ApiCallResult VillagerChat(std::string_view mod_id, const Json &args) {
++    const Json &definition = args.is_array() && args.size() == 1 ? args[0] : args;
++    if (!definition.is_object() || definition.size() != 1 || !definition.contains("id") || !definition["id"].is_string()) {
++        return Invalid("characters.villager_chat expects {id}");
++    }
++    std::string qualified_id;
++    if (!QualifyModContentId(mod_id, definition["id"].get_ref<const std::string &>(), qualified_id, "npc")) {
++        return Invalid("id must be one of this mod's npcs");
++    }
++    const auto npc = g_mod_npcs.find(qualified_id);
++    if (npc == g_mod_npcs.end() || npc->second.owner != mod_id) return Invalid("id must be one of this mod's npcs");
++    if (!npc->second.native) return Invalid("only a native npc (the town's own resident) has a chat of their own");
++    const int slot = ChronicleModVillagerNativeSlot(npc->second.index);
++    if (slot < 0) return Failed("that resident is not in the town now");
++    ChronicleRequestVillagerChat(slot);
++    return {ApiCallStatus::Ok, {{"id", qualified_id}, {"villager_slot", slot}}, {}};
 +}
 +
 +// characters.register_playable: a playable character past the game's six (playable_chara.hpp), e.g. the Gauntlet's
@@ -36491,6 +36815,94 @@ index 00000000..f63c16d5
 +    return {ApiCallStatus::Ok, {{"labels", std::move(set)}}, {}};
 +}
 +
++// weapons.menu_note_set({text, color?}): this mod's line under the weapon menu's action list (moonmod/weapon_actions.hpp).
++// Empty text or {} takes it away.
++ApiCallResult SetWeaponMenuNoteOp(std::string_view owner, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected {text, color = \"gold\", \"green\", \"blue\" or \"red\"}");
++    }
++    const Json &request = args[0];
++    std::string text;
++    int color = 0;
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() == "text") {
++            if (!field->is_string()) return Invalid("text must be a string");
++            text = field->get<std::string>();
++            if (static_cast<int>(text.size()) > kWeaponMenuNoteBytesMost || text.find('\0') != std::string::npos ||
++                text.find('\n') != std::string::npos) {
++                return Invalid("text must be one line of at most 24 bytes");
++            }
++        } else if (field.key() == "color") {
++            static constexpr std::array<std::string_view, 4> colors = {"gold", "green", "blue", "red"};
++            const auto found = field->is_string() ? std::ranges::find(colors, field->get<std::string>()) : colors.end();
++            if (found == colors.end()) return Invalid("color must be gold, green, blue or red");
++            color = static_cast<int>(found - colors.begin());
++        } else {
++            return Invalid("weapons.menu_note_set does not take " + field.key());
++        }
++    }
++    if (!SetWeaponMenuNote(owner, text, color)) return Failed("the weapon menu has room for 2 mods' lines, and both are taken");
++    return {ApiCallStatus::Ok, {{"text", text}}, {}};
++}
++
++// weapons.menu_actions_set({actions = {{id, label, when?, color?}, ...}}): this mod's own rows on the weapon menu's
++// action list, under Build-up (moonmod/weapon_actions.hpp). {} or no actions takes them away.
++ApiCallResult SetWeaponMenuActions(std::string_view owner, const Json &args) {
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
++        return Invalid("expected {actions = {{id, label, when = \"always\" or \"abs_full\", color = \"gold\", \"green\", \"blue\" or \"red\"}, ...}}");
++    }
++    const Json &request = args[0];
++    for (auto field = request.begin(); field != request.end(); ++field) {
++        if (field.key() != "actions") return Invalid("weapons.menu_actions_set does not take " + field.key());
++    }
++    std::vector<WeaponModAction> actions;
++    // An empty Lua table arrives as an empty object: no rows.
++    if (request.contains("actions") && !(request["actions"].is_object() && request["actions"].empty())) {
++        const Json &list = request["actions"];
++        if (!list.is_array() || list.size() > kWeaponModActionsMost) return Invalid("actions lists up to 3 rows");
++        static constexpr std::array<std::string_view, 2> kWhen = {"always", "abs_full"};
++        static constexpr std::array<std::string_view, 4> kColors = {"gold", "green", "blue", "red"};
++        for (const Json &entry : list) {
++            if (!entry.is_object()) return Invalid("each action is {id, label, when?, color?}");
++            for (auto field = entry.begin(); field != entry.end(); ++field) {
++                if (field.key() != "id" && field.key() != "label" && field.key() != "when" && field.key() != "color") {
++                    return Invalid("an action does not take " + field.key());
++                }
++            }
++            WeaponModAction action;
++            if (!entry.contains("id") || !entry["id"].is_string() || entry["id"].get_ref<const std::string &>().empty() ||
++                entry["id"].get_ref<const std::string &>().size() > 32) {
++                return Invalid("an action's id is a string of 1-32 bytes");
++            }
++            if (!entry.contains("label") || !entry["label"].is_string() || entry["label"].get_ref<const std::string &>().empty() ||
++                entry["label"].get_ref<const std::string &>().size() > 14) {
++                return Invalid("an action's label is a string of 1-14 bytes (the button's width)");
++            }
++            action.id = entry["id"].get<std::string>();
++            action.label = entry["label"].get<std::string>();
++            if (std::ranges::any_of(actions, [&](const WeaponModAction &a) { return a.id == action.id; })) {
++                return Invalid("two actions share the id " + action.id);
++            }
++            if (entry.contains("when")) {
++                const auto found = entry["when"].is_string() ? std::ranges::find(kWhen, entry["when"].get<std::string>()) : kWhen.end();
++                if (found == kWhen.end()) return Invalid("when is \"always\" or \"abs_full\"");
++                action.when = static_cast<int>(found - kWhen.begin());
++            }
++            if (entry.contains("color")) {
++                const auto found = entry["color"].is_string() ? std::ranges::find(kColors, entry["color"].get<std::string>()) : kColors.end();
++                if (found == kColors.end()) return Invalid("color is \"gold\", \"green\", \"blue\" or \"red\"");
++                action.color = static_cast<int>(found - kColors.begin());
++            }
++            actions.push_back(std::move(action));
++        }
++    }
++    const std::size_t count = actions.size();
++    if (!SetWeaponModActions(owner, std::move(actions))) {
++        return Failed("the weapon menu holds 3 mod rows at most, and other mods have the rest");
++    }
++    return {ApiCallStatus::Ok, {{"actions", count}}, {}};
++}
++
 +ApiCallResult SetGearPage(const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() > 2 ||
 +        (!args[0].empty() && !args[0].contains("icons")) || (args[0].size() == 2 && !args[0].contains("parts"))) {
@@ -37301,6 +37713,9 @@ index 00000000..f63c16d5
 +    return name.empty() ? "Item " + std::to_string(item_no) : name;
 +}
 +
++// The attachment board's cells (the item page's attachments, which a shop's attach page shows too).
++constexpr int kChronicleAttachBoardCells = 40;
++
 +ApiCallResult GiveItems(const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected {id = Chronicle item id, count = optional integer}");
@@ -37377,6 +37792,25 @@ index 00000000..f63c16d5
 +        return Invalid("expected a Chronicle item number or stable item id");
 +    }
 +    const COM_ITEM_INFO *common = GetCommonItemInfo(item_no);
++    if (common != nullptr && common->kind == ITEMKIND_ATTACH && GetAttachData(item_no) != nullptr) {
++        // An attachment comes off the attachment board (the last of its kind first), as a shop's sale takes one.
++        int count = 1;
++        if (query.contains("count") && !ReadBoundedInt(query, "count", 1, 999, count)) return Invalid("count must be an integer from 1 to 999");
++        CDngStatusData *status = CurrentStatus();
++        if (status == nullptr) return Failed("the game has no active save inventory");
++        auto *board = reinterpret_cast<ATTACH_LIST *>(status->consumable_items);
++        int removed = 0;
++        for (int cell = kChronicleAttachBoardCells - 1; cell >= 0 && removed < count; --cell) {
++            if (board[cell].item_no != item_no) continue;
++            std::memset(&board[cell], 0, sizeof(ATTACH_LIST));
++            ++removed;
++        }
++        int remaining = 0;
++        for (int cell = 0; cell < kChronicleAttachBoardCells; ++cell) remaining += board[cell].item_no == item_no ? 1 : 0;
++        return {ApiCallStatus::Ok,
++                {{"id", ItemStableId(item_no)}, {"requested", count}, {"removed", removed}, {"remaining", remaining}},
++                {}};
++    }
 +    const ITEM_DATA *item = GetItemData(item_no);
 +    if (common == nullptr || common->kind != ITEMKIND_ITEM || item == nullptr) {
 +        return Failed("no built-in Chronicle item has that id");
@@ -38626,6 +39060,7 @@ index 00000000..f63c16d5
 +// party.companion_set: the Gauntlet's companion. {character = id or nil, stance = passive|target|aggressive,
 +// damage_scale = 0..10}; the weapon is the character's equipped one.
 +std::string g_companion_owner;
++std::string g_down_rule_owner; // the mod that switched player.down_rule_set on
 +ApiCallResult SetCompanion(std::string_view owner, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected {character = optional id, stance = optional passive|target|aggressive, damage_scale = optional 0..10}");
@@ -41076,6 +41511,38 @@ index 00000000..f63c16d5
 +    return {ApiCallStatus::Ok, {{"x", x}, {"y", y}}, {}};
 +}
 +
++// dungeons.drop_token({x, y, z, tag}): a bag on the floor the player is on, drawn as the game's own dropped item, that
++// goes to the mod when the party walks onto it (game.dungeon.token_taken {tag, x, y, z}, to that mod only), not into
++// the bag. Shares the floor's 32 dropped things with the game's; gone when the floor is built again.
++struct ChronicleDropToken {
++    std::string owner;
++    std::string tag;
++    float       at[3]{};
++};
++std::array<ChronicleDropToken, 32> g_drop_tokens;
++
++ApiCallResult DropToken(std::string_view owner, const Json &args) {
++    const std::string usage = "expected {x = number, y = number, z = number, tag = 1-32 bytes} (a world position, 160 to a cell)";
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 4) return Invalid(usage);
++    const Json &request = args[0];
++    float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    const char *axes[3] = {"x", "y", "z"};
++    for (int i = 0; i < 3; ++i) {
++        if (!request.contains(axes[i]) || !request[axes[i]].is_number()) return Invalid(usage);
++        at[i] = request[axes[i]].get<float>();
++        if (!std::isfinite(at[i])) return Invalid(usage);
++    }
++    if (!request.contains("tag") || !request["tag"].is_string()) return Invalid(usage);
++    const std::string tag = request["tag"].get<std::string>();
++    if (tag.empty() || tag.size() > 32 || tag.find('\0') != std::string::npos) return Invalid(usage);
++    if (mode != GAME_MODE_DUNGEON || RandomItem == nullptr || NowDngMap == nullptr) return Failed("the player is not on a dungeon floor");
++    const int slot = RandomItem->CheckID();
++    if (slot < 0) return Failed("the floor already holds as many dropped things as it can");
++    RandomItem->Set(at, 3, -1, -1); // id 3: a mod's bag (CRandomItem::CheckPosition)
++    g_drop_tokens[static_cast<std::size_t>(slot)] = {std::string(owner), tag, {at[0], at[1], at[2]}};
++    return {ApiCallStatus::Ok, {{"tag", tag}, {"slot", slot}}, {}};
++}
++
 +// dungeons.drop_gilda: a pile of gold on the floor the player is on, at a world position, as a monster that stole
 +// Gilda drops it: the player takes it by walking within about half a cell of it (it shows on the corner map). Gone when the floor is built
 +// again; up to 32 things lie on a floor at once.
@@ -43215,6 +43682,7 @@ index 00000000..f63c16d5
 +    if (operation.path == "animations.play") return PlayAnimation(mod_id, args);
 +    if (operation.path == "animations.stop") return StopAnimation(mod_id, args);
 +    if (operation.path == "characters.register") return RegisterCharacter(mod_id, args);
++    if (operation.path == "characters.villager_chat") return VillagerChat(mod_id, args);
 +    if (operation.path == "characters.register_playable") return RegisterPlayable(mod_id, args);
 +    if (operation.path == "models.register") return RegisterModel(mod_id, args);
 +    if (operation.path == "models.unregister") return UnregisterModel(mod_id, args);
@@ -43284,6 +43752,7 @@ index 00000000..f63c16d5
 +    if (operation.path == "dungeons.set_exits") return SetExits(mod_id, args);
 +    if (operation.path == "dungeons.warp") return WarpPlayer(args);
 +    if (operation.path == "dungeons.drop_gilda") return DropGilda(args);
++    if (operation.path == "dungeons.drop_token") return DropToken(mod_id, args);
 +    if (operation.path == "dungeons.enter_floor") return EnterFloor(args);
 +    if (operation.path == "dungeons.set_arrival") return SetArrival(args);
 +    if (operation.path == "dungeons.set_character_blocks") return SetCharacterBlocks(mod_id, args);
@@ -43755,6 +44224,7 @@ index 00000000..f63c16d5
 +            return Invalid("expected {enabled = true or false}");
 +        }
 +        MoonModCoopSetDownRule(args[0]["enabled"].get<bool>());
++        g_down_rule_owner = MoonModCoopDownRule() ? std::string(mod_id) : std::string();
 +        return {ApiCallStatus::Ok, {{"enabled", MoonModCoopDownRule()}}, {}};
 +    }
 +    if (operation.path == "player.revive") {
@@ -43916,6 +44386,8 @@ index 00000000..f63c16d5
 +    if (operation.path == "weapons.register") return RegisterWeapon(mod_id, save_root, args);
 +    if (operation.path == "weapons.definition_set") return SetWeaponDefinition(mod_id, args);
 +    if (operation.path == "weapons.stat_label_set") return SetWeaponStatLabels(args);
++    if (operation.path == "weapons.menu_actions_set") return SetWeaponMenuActions(mod_id, args);
++    if (operation.path == "weapons.menu_note_set") return SetWeaponMenuNoteOp(mod_id, args);
 +    if (operation.path == "weapons.give") return GiveWeapon(args);
 +    if (operation.path == "weapons.equip") return EquipWeapon(args);
 +    if (operation.path == "weapons.remove") return RemoveWeapon(args);
@@ -43963,7 +44435,23 @@ index 00000000..f63c16d5
 +            items.push_back({{"id", ItemStableId(item_no)}, {"item_no", item_no}, {"count", count},
 +                             {"name", OwnedItemName(item_no)}});
 +        }
-+        return {ApiCallStatus::Ok, {{"items", std::move(items)}}, {}};
++        // The attachment board, by kind, in the order the board holds them.
++        std::vector<std::pair<int, int>> attached;
++        const auto *board = reinterpret_cast<const ATTACH_LIST *>(status->consumable_items);
++        for (int cell = 0; cell < kChronicleAttachBoardCells; ++cell) {
++            const int item_no = board[cell].item_no;
++            if (item_no < ITEM_ATTACH_START || item_no >= ITEM_DUNGEON_START) continue;
++            const auto found = std::ranges::find_if(attached, [item_no](const auto &entry) { return entry.first == item_no; });
++            if (found == attached.end()) attached.emplace_back(item_no, 1); else ++found->second;
++        }
++        Json attachments = Json::array();
++        for (const auto &[item_no, count] : attached) {
++            attachments.push_back({{"id", ItemStableId(item_no)}, {"item_no", item_no}, {"count", count},
++                                   {"name", OwnedItemName(item_no)}});
++        }
++        Json result = {{"items", std::move(items)}};
++        if (!attachments.empty()) result["attachments"] = std::move(attachments);
++        return {ApiCallStatus::Ok, std::move(result), {}};
 +    }
 +    if (operation.path == "items.charm_slots") return GetCharmSlots(args);
 +    if (operation.path == "items.charm_slots_set") return SetCharmSlots(args);
@@ -44717,6 +45205,13 @@ index 00000000..f63c16d5
 +    if (monster.exp > 0) payload["reward_exp"] = monster.exp;
 +    if (monster.money > 0) payload["reward_money"] = monster.money;
 +    if (monster.max_hp > 0) payload["enemy_max_hp"] = monster.max_hp;
++    {
++        // Where it fell, on the ground under it (a drop goes there, as the game's own do).
++        sceVu0FVECTOR position{};
++        unit->chara[slot][0].GetPosition(position);
++        position[1] -= monster.ground_distance;
++        payload["position"] = {{"x", position[0]}, {"y", position[1]}, {"z", position[2]}};
++    }
 +    if (monster.last_hit_damage > 0) payload["damage"] = monster.last_hit_damage;
 +    if (monster.base_model >= 0 && monster.base_model < static_cast<int>(g_loaded_monster_model_ids.size())) {
 +        const int model_id = g_loaded_monster_model_ids[monster.base_model];
@@ -46910,12 +47405,12 @@ index 00000000..f63c16d5
 +                             "georama.register", "georama.place", "georama.remove",
 +                             "georama.atla_list", "georama.atla_collect", "georama.atla_spawn", "georama.satisfaction_get",
 +                             "locations.list", "locations.get", "locations.register",
-+                             "georama.request_set", "dungeons.list", "dungeons.get", "dungeons.register", "dungeons.set_layout", "dungeons.set_seed", "dungeons.set_opened_chests", "dungeons.chests_get", "dungeons.set_zones", "dungeons.zones_get", "dungeons.set_exits", "dungeons.warp", "dungeons.drop_gilda", "dungeons.enter_floor", "dungeons.set_arrival", "dungeons.set_exit_room", "dungeons.set_population", "dungeons.set_enemy_survival",
++                             "georama.request_set", "dungeons.list", "dungeons.get", "dungeons.register", "dungeons.set_layout", "dungeons.set_seed", "dungeons.set_opened_chests", "dungeons.chests_get", "dungeons.set_zones", "dungeons.zones_get", "dungeons.set_exits", "dungeons.warp", "dungeons.drop_gilda", "dungeons.drop_token", "dungeons.enter_floor", "dungeons.set_arrival", "dungeons.set_exit_room", "dungeons.set_population", "dungeons.set_enemy_survival",
 +                             "dungeons.floor_rules_get", "dungeons.floor_rules_set", "dungeons.floor_redirect", "dungeons.set_shortcuts", "dungeons.shortcuts_get", "dungeons.set_weapon_drops", "dungeons.chest_weapons_add", "dungeons.chest_weapons_clear", "dungeons.set_backrooms", "dungeons.set_story_exits", "dungeons.set_floor_select", "dungeons.set_quick_passage", "world.set_roads", "dungeons.play_event", "dungeons.set_npc_marks", "dungeons.set_npc_models", "dungeons.set_warden_room", "dungeons.set_character_blocks", "weapons.style_set", "weapons.style_clear", "effects.burst", "entities.tint", "entities.knockback", "dungeons.warden_room_get", "dungeons.warden_room_release", "dungeons.room_seal", "dungeons.room_release", "dungeons.zone_gate_open", "dungeons.set_rest_room", "dungeons.rest_room_get", "ui.choice_open", "ui.choice_close", "ui.map_open", "ui.map_close", "ui.sky_open", "ui.sky_close", "dungeons.map_snapshot", "dungeons.set_seen", "dungeons.set_waypoint", "ui.boss_card", "world.dungeon_npc_set", "world.dungeon_npc_clear", "world.ghost_get", "world.ghost_play", "ui.run_menu_set", "ui.run_menu_clear", "ui.run_menu_open", "ui.run_menu_close", "dungeons.loot_get", "dungeons.loot_override",
 +                             "dungeons.back_floor_get", "dungeons.back_floor_enter",
 +                             "world.register_dungeon",
 +                             "weapons.list", "weapons.get", "weapons.give", "weapons.register", "weapons.equip", "weapons.remove", "weapons.upgrade",
-+                             "weapons.definition_set", "weapons.stat_label_set", "weapons.stats_set", "weapons.durability_set", "weapons.abs_get", "weapons.abs_add", "weapons.attachments_get", "weapons.attachment_insert",
++                             "weapons.definition_set", "weapons.stat_label_set", "weapons.menu_actions_set", "weapons.menu_note_set", "weapons.stats_set", "weapons.durability_set", "weapons.abs_get", "weapons.abs_add", "weapons.attachments_get", "weapons.attachment_insert",
 +                             "weapons.attachment_remove", "weapons.build_up_list", "weapons.build_up_register", "weapons.synthesize",
 +                             "shops.list", "shops.get", "shops.register_item", "shops.remove_item", "shops.set_items", "shops.set_price",
 +                             "combat.get", "combat.damage", "combat.status_add", "combat.strike_player", "combat.feel_set", "combat.feel_clear", "combat.register_formula",
@@ -46928,6 +47423,7 @@ index 00000000..f63c16d5
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
 +    config.api_capabilities.push_back({"characters.register", true, {}});
++    config.api_capabilities.push_back({"characters.villager_chat", true, {}});
 +    for (const char *path : {"messages.post", "messages.list", "messages.rate", "messages.remove"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
@@ -47000,6 +47496,12 @@ index 00000000..f63c16d5
 +    }
 +    config.api_owner_unloaded = [](std::string_view mod_id) {
 +        if (moonmod::net::Shared().owner() == mod_id) moonmod::net::Shared().Leave("the mod left");
++        if (g_down_rule_owner == mod_id) {
++            // Nobody is left to revive a player who lies down, or to give up for them: the game's own end takes over.
++            g_down_rule_owner.clear();
++            MoonModCoopSetDownRule(false);
++            MoonModCoopRequestGiveUp();
++        }
 +        const std::string prefix = std::string(mod_id) + ":";
 +        InputUnbindModActionsByPrefix(prefix);
 +        g_input_contexts.UnloadOwner(mod_id);
@@ -47121,6 +47623,8 @@ index 00000000..f63c16d5
 +            g_floor_number = 0;
 +        }
 +        RemoveTitleModesByOwner(mod_id);
++        ClearWeaponModActions(mod_id);
++        ClearWeaponMenuNote(mod_id);
 +    };
 +    ConfigureAudioApi(config);
 +    CompleteApiCapabilityLedger(config.game_id, config.api_capabilities);
@@ -47167,12 +47671,40 @@ index 00000000..f63c16d5
 +    ResetMoonModWeaponSlotsForTests();
 +}
 +
++void ChronicleWeaponModActionPressed(int index, int chara, int slot) {
++    const auto &actions = WeaponModActions();
++    CDngStatusData *status = CurrentStatus();
++    if (index < 0 || index >= static_cast<int>(actions.size()) || status == nullptr || chara < 0 ||
++        chara >= static_cast<int>(kCharacterIds.size()) || slot < 0 || slot >= 11) {
++        return;
++    }
++    const WEAPON_HAVE &weapon = status->chara_weapons[chara][slot];
++    SharedRuntime().QueueEvent("game.weapon.menu_action",
++                               {{"action", actions[index].id}, {"id", WeaponStableId(weapon.item_no)},
++                                {"item_no", weapon.item_no}, {"character", kCharacterIds[chara]}, {"slot", slot},
++                                {"level", weapon.level}, {"abs", weapon.experience},
++                                {"source_mod", actions[index].owner}, {"frame", SharedRuntime().Frame()}});
++}
++
++void ChronicleDropTokenTaken(int slot) {
++    if (slot < 0 || slot >= static_cast<int>(g_drop_tokens.size())) return;
++    ChronicleDropToken &token = g_drop_tokens[static_cast<std::size_t>(slot)];
++    if (token.owner.empty()) return;
++    SharedRuntime().PublishToMod(token.owner, "game.dungeon.token_taken",
++                                     {{"tag", token.tag},
++                                      {"x", token.at[0]}, {"y", token.at[1]}, {"z", token.at[2]},
++                                      {"frame", SharedRuntime().Frame()}});
++    token = {};
++}
++
 +void ChronicleModVillagerTalked(int index) {
 +    const auto npc = std::ranges::find_if(g_mod_npcs, [index](const auto &entry) { return entry.second.index == index; });
 +    if (npc == g_mod_npcs.end()) return;
++    // native: the town's own resident (not their stand-in) was talked to; characters.villager_chat gives their own chat.
++    const bool resident = npc->second.native && ChronicleModVillagerNativeSlot(index) >= 0;
 +    SharedRuntime().QueueEvent("game.npc.talk", {{"id", npc->second.id}, {"name", npc->second.name},
 +                                                 {"town_id", npc->second.town_id}, {"source_mod", npc->second.owner},
-+                                                 {"frame", SharedRuntime().Frame()}});
++                                                 {"native", resident}, {"frame", SharedRuntime().Frame()}});
 +}
 +
 +void ResetChronicleCharactersForTests() {
@@ -48760,10 +49292,10 @@ index 00000000..59b3cfa0
 +} // namespace dc::game
 diff --git a/port/src/moonmod/coop_save_moonmod.cpp b/port/src/moonmod/coop_save_moonmod.cpp
 new file mode 100644
-index 00000000..80afcef1
+index 00000000..3932ed8f
 --- /dev/null
 +++ b/port/src/moonmod/coop_save_moonmod.cpp
-@@ -0,0 +1,401 @@
+@@ -0,0 +1,457 @@
 +// Co-op's split of a save into the host's world and a player's own things (moonmod/coop_save.hpp).
 +
 +#include "moonmod/coop_save.hpp"
@@ -48782,6 +49314,7 @@ index 00000000..80afcef1
 +#include <nlohmann/json.hpp>
 +
 +#include "game/savedata.hpp"
++#include "moonmod/net_session.hpp"
 +#include "platform/files.hpp"
 +
 +namespace moonmod::coop {
@@ -48942,6 +49475,10 @@ index 00000000..80afcef1
 +            error = "the data comes from another build of the game; play on the same build";
 +            return false;
 +        }
++        if (std::ranges::any_of(found, [&field](const auto &entry) { return entry.first == &*field; })) {
++            error = "the data is damaged (a part comes twice)";
++            return false;
++        }
 +        found.emplace_back(&*field, at);
 +        at += size;
 +    }
@@ -49071,13 +49608,35 @@ index 00000000..80afcef1
 +std::string ExportPlayer(const CSaveData &save) { return Export(kPlayerTag, SaveAccess::Player(const_cast<CSaveData &>(save))); }
 +
 +bool ImportPlayer(std::string_view text, CSaveData &save, std::string &error) {
-+    return Import(kPlayerTag, text, SaveAccess::Player(save), error);
++    if (!Import(kPlayerTag, text, SaveAccess::Player(save), error)) return false;
++    // The text is another game's: a weapon slot outside a character's weapons would be read as one.
++    CDngStatusData &dng = *save.GetDngStatus();
++    constexpr int   kWeapons = static_cast<int>(std::extent_v<std::remove_reference_t<decltype(dng.chara_weapons.data[0])>>);
++    for (s8 &slot : dng.equipped_weapon_slot.data) {
++        if (slot < -1 || slot >= kWeapons) slot = 0;
++    }
++    return true;
 +}
 +
 +namespace {
 +
 +constexpr char kAccountsFile[] = "coop_accounts.json";
++constexpr char kAccountsBadFile[] = "coop_accounts.json.bad";
 +std::map<std::string, Account, std::less<>> g_accounts;
++// The slot whose guests file was there but couldn't be read: its guests aren't known, so "none" mustn't delete it.
++std::filesystem::path g_accounts_unread;
++
++bool PlainText(std::string_view text) {
++    return std::ranges::all_of(text, [](char c) { return c >= 0x20 && c < 0x7F; });
++}
++
++// Puts a guests file that can't be read aside, so the next save neither deletes it nor writes over it.
++void KeepBadAccounts(const std::filesystem::path &save_directory) {
++    std::error_code error;
++    if (!std::filesystem::exists(save_directory / kAccountsFile, error)) return;
++    std::filesystem::remove(save_directory / kAccountsBadFile, error);
++    std::filesystem::rename(save_directory / kAccountsFile, save_directory / kAccountsBadFile, error);
++}
 +
 +} // namespace
 +
@@ -49096,11 +49655,12 @@ index 00000000..80afcef1
 +        error = "an account id is 8-64 of a-z, 0-9 and -";
 +        return false;
 +    }
-+    if (!account.player.starts_with("DCP1") || account.player.size() > kAccountMax) {
++    if (!account.player.starts_with("DCP1") || account.player.size() > kAccountMax || !PlainText(account.player)) {
 +        error = "an account holds save.player_export text";
 +        return false;
 +    }
-+    if (account.name.size() > 24) account.name.resize(24);
++    // A name comes from another player: cut between characters, and kept only when it is text the save can hold.
++    account.name = moonmod::net::CutUtf8(account.name, 24);
 +    if (!g_accounts.contains(account.id) && g_accounts.size() >= kAccountsMax) {
 +        error = "this save keeps " + std::to_string(kAccountsMax) + " guests at most; remove one first";
 +        return false;
@@ -49123,7 +49683,10 @@ index 00000000..80afcef1
 +    return out;
 +}
 +
-+void AccountsClear() { g_accounts.clear(); }
++void AccountsClear() {
++    g_accounts.clear();
++    g_accounts_unread.clear();
++}
 +
 +void AccountsDelete(const std::filesystem::path &save_directory) {
 +    std::error_code error;
@@ -49131,13 +49694,25 @@ index 00000000..80afcef1
 +}
 +
 +bool AccountsSave(const std::filesystem::path &save_directory) {
++    const bool unread = !g_accounts_unread.empty() && g_accounts_unread == save_directory;
 +    if (g_accounts.empty()) {
-+        AccountsDelete(save_directory);
++        if (!unread) AccountsDelete(save_directory); // a file that couldn't be read stays: its guests aren't ours to drop
 +        return true;
 +    }
-+    nlohmann::json accounts = nlohmann::json::object();
-+    for (const auto &[id, account] : g_accounts) accounts[id] = {{"name", account.name}, {"player", account.player}};
-+    const std::string text = nlohmann::json{{"format", 1}, {"accounts", std::move(accounts)}}.dump();
++    if (unread) {
++        KeepBadAccounts(save_directory);
++        g_accounts_unread.clear();
++    }
++    std::string text;
++    try {
++        nlohmann::json accounts = nlohmann::json::object();
++        for (const auto &[id, account] : g_accounts) accounts[id] = {{"name", account.name}, {"player", account.player}};
++        // Saving the game must never fail on a guest's name: bytes that aren't text are replaced, not thrown on.
++        text = nlohmann::json{{"format", 1}, {"accounts", std::move(accounts)}}.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
++    } catch (const std::exception &failure) {
++        std::fprintf(stderr, "co-op: could not write %s (%s)\n", (save_directory / kAccountsFile).string().c_str(), failure.what());
++        return false;
++    }
 +    if (::FilesWrite(save_directory / kAccountsFile, text.data(), text.size(), true) != ::FilesResult::kWritten) {
 +        std::fprintf(stderr, "co-op: could not write %s\n", (save_directory / kAccountsFile).string().c_str());
 +        return false;
@@ -49147,20 +49722,33 @@ index 00000000..80afcef1
 +
 +void AccountsLoad(const std::filesystem::path &save_directory) {
 +    g_accounts.clear();
++    g_accounts_unread.clear();
++    std::error_code exists_error;
++    if (!std::filesystem::exists(save_directory / kAccountsFile, exists_error)) return;
 +    std::string text;
++    bool        opened = false;
 +    if (std::ifstream stream(save_directory / kAccountsFile, std::ios::binary); stream) {
++        opened = true;
 +        text.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
 +    }
-+    if (text.empty()) return;
-+    const nlohmann::json file = nlohmann::json::parse(text, nullptr, false);
-+    if (!file.is_object() || file.value("format", 0) != 1 || !file.contains("accounts") || !file["accounts"].is_object()) {
-+        std::fprintf(stderr, "co-op: %s could not be read; this save keeps no guests\n", (save_directory / kAccountsFile).string().c_str());
++    const nlohmann::json file = text.empty() ? nlohmann::json() : nlohmann::json::parse(text, nullptr, false);
++    const bool           readable = opened && file.is_object() && file.contains("format") && file["format"].is_number_integer() &&
++                                    file["format"].get<int>() == 1 && file.contains("accounts") && file["accounts"].is_object();
++    if (!readable) {
++        // Locked, cut short or damaged. The file stays where it is until this slot is saved with guests again (then it
++        // is kept as coop_accounts.json.bad), so a bad read never ends in the guests' things being deleted.
++        std::fprintf(stderr, "co-op: %s could not be read; this save's guests are not loaded, and the file is kept\n",
++                     (save_directory / kAccountsFile).string().c_str());
++        g_accounts_unread = save_directory;
 +        return;
 +    }
 +    for (const auto &[id, entry] : file["accounts"].items()) {
 +        if (!entry.is_object()) continue;
++        const auto text_of = [&entry](const char *key) {
++            return entry.contains(key) && entry[key].is_string() ? entry[key].get<std::string>() : std::string();
++        };
 +        std::string error;
-+        AccountSet({id, entry.value("name", std::string()), entry.value("player", std::string())}, error);
++        AccountSet({id, text_of("name"), text_of("player")}, error);
 +    }
 +}
 +
@@ -49607,10 +50195,10 @@ index 00000000..b3c9dd37
 +} // namespace dc::game
 diff --git a/port/src/moonmod/editloop3_moonmod.cpp b/port/src/moonmod/editloop3_moonmod.cpp
 new file mode 100644
-index 00000000..53fa9304
+index 00000000..b3516beb
 --- /dev/null
 +++ b/port/src/moonmod/editloop3_moonmod.cpp
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,195 @@
 +// MoonMod town villagers that used to live in ps2/src/editloop3.cpp: the registry, and the hooks
 +// EdSelectVillager and EdInitVilagerPosition call to fill free villager slots and place them.
 +
@@ -49638,10 +50226,15 @@ index 00000000..53fa9304
 +    float rotation_y;
 +    int   talk_event;
 +    int   slot;
++    int   native;       // the town's own resident of this name is the villager
++    int   stand_in;     // native: stand at position while the resident is away
++    int   native_slot;  // native: the resident's villager slot, or -1
 +};
 +
 +ChronicleModVillager g_mod_villagers[CHRONICLE_MOD_VILLAGER_COUNT];
 +int                  g_mod_villager_slots[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
++int                  g_native_hook_slots[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
++int                  g_villager_chat_slot = -1;
 +
 +} // namespace
 +
@@ -49653,6 +50246,7 @@ index 00000000..53fa9304
 +    ChronicleModVillager &villager = g_mod_villagers[index];
 +    std::memset(&villager, 0, sizeof(villager));
 +    villager.slot = -1;
++    villager.native_slot = -1;
 +    if (name[0] == '\0') {
 +        return true;
 +    }
@@ -49682,18 +50276,67 @@ index 00000000..53fa9304
 +    return index >= 0 && index < CHRONICLE_MOD_VILLAGER_COUNT ? g_mod_villagers[index].talk_event : 0;
 +}
 +
++void SetChronicleModVillagerNative(int index, bool native, bool stand_in) {
++    if (index < 0 || index >= CHRONICLE_MOD_VILLAGER_COUNT) return;
++    g_mod_villagers[index].native = native ? 1 : 0;
++    g_mod_villagers[index].stand_in = native && stand_in ? 1 : 0;
++    g_mod_villagers[index].native_slot = -1;
++}
++
++bool ChronicleModVillagerIsNative(int index) {
++    return index >= 0 && index < CHRONICLE_MOD_VILLAGER_COUNT && g_mod_villagers[index].native != 0;
++}
++
++int ChronicleModVillagerHookInSlot(int slot) {
++    return slot >= 0 && slot < 10 ? g_native_hook_slots[slot] : -1;
++}
++
++int ChronicleModVillagerNativeSlot(int index) {
++    return index >= 0 && index < CHRONICLE_MOD_VILLAGER_COUNT && g_mod_villagers[index].name[0] != '\0'
++               ? g_mod_villagers[index].native_slot
++               : -1;
++}
++
++void ChronicleRequestVillagerChat(int slot) {
++    g_villager_chat_slot = slot >= 0 && slot < 10 ? slot : -1;
++}
++
++int ChronicleTakeVillagerChat() {
++    const int slot = g_villager_chat_slot;
++    g_villager_chat_slot = -1;
++    return slot;
++}
++
 +void ResetChronicleModVillagersForTests() {
 +    std::memset(g_mod_villagers, 0, sizeof(g_mod_villagers));
 +    for (int &slot : g_mod_villager_slots) slot = -1;
++    for (int &slot : g_native_hook_slots) slot = -1;
++    g_villager_chat_slot = -1;
 +}
 +
 +void ChronicleAddModVillagers(VILLAGER_INFO *villagers, VILLAGER_INFO *restore) {
 +    for (int &slot : g_mod_villager_slots) slot = -1;
++    for (int &slot : g_native_hook_slots) slot = -1;
++    g_villager_chat_slot = -1;
 +    for (int index = 0; index < CHRONICLE_MOD_VILLAGER_COUNT; index++) {
 +        ChronicleModVillager &mod = g_mod_villagers[index];
 +        mod.slot = -1;
++        mod.native_slot = -1;
 +        if (mod.name[0] == '\0' || mod.town_id != NowEditMap || MapNo > 10) {
 +            continue;
++        }
++        if (mod.native != 0) {
++            // The town's own resident: hook them when the town picked them, else stand in (or not) until they are back.
++            for (int native = 0; native < 10 && villagers[native].name[0] != '\0'; native++) {
++                if (std::strcmp(villagers[native].name, mod.name) == 0 && g_native_hook_slots[native] < 0) {
++                    mod.native_slot = native;
++                    g_native_hook_slots[native] = index;
++                    break;
++                }
++            }
++            if (mod.native_slot >= 0 || mod.stand_in == 0) {
++                continue;
++            }
 +        }
 +        int slot = 0;
 +        while (slot < 10 && villagers[slot].name[0] != '\0') {
@@ -59726,10 +60369,10 @@ index 00000000..e29c7329
 +} // namespace moonmod
 diff --git a/port/src/moonmod/net_session.cpp b/port/src/moonmod/net_session.cpp
 new file mode 100644
-index 00000000..4765c069
+index 00000000..2cb51850
 --- /dev/null
 +++ b/port/src/moonmod/net_session.cpp
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,307 @@
 +// Online play's session (moonmod/net_session.hpp): the relay's protocol over whatever socket the platform gives.
 +
 +#include "moonmod/net_session.hpp"
@@ -59765,6 +60408,8 @@ index 00000000..4765c069
 +    }
 +}
 +
++// Strict UTF-8: no overlong forms, no surrogates, nothing past U+10FFFF. What passes here is what the JSON writer
++// accepts, so text from another player can always be handed to a mod and written to a save.
 +bool ValidUtf8(std::string_view text) {
 +    for (std::size_t i = 0; i < text.size();) {
 +        const auto c = static_cast<unsigned char>(text[i]);
@@ -59778,10 +60423,43 @@ index 00000000..4765c069
 +        for (int k = 1; k <= more; ++k) {
 +            if ((static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) return false;
 +        }
++        if (more >= 2) {
++            const auto second = static_cast<unsigned char>(text[i + 1]);
++            if (c == 0xE0 && second < 0xA0) return false; // overlong
++            if (c == 0xED && second > 0x9F) return false; // a surrogate
++            if (c == 0xF0 && second < 0x90) return false; // overlong
++            if (c == 0xF4 && second > 0x8F) return false; // past U+10FFFF
++        }
 +        i += static_cast<std::size_t>(more) + 1;
 +    }
 +    return true;
 +}
++
++std::string CutUtf8(std::string_view text, std::size_t max_bytes) {
++    if (text.size() > max_bytes) {
++        std::size_t end = max_bytes;
++        while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end; // not inside a character
++        text = text.substr(0, end);
++    }
++    return ValidUtf8(text) ? std::string(text) : std::string();
++}
++
++namespace {
++
++// How many bytes text takes inside a JSON answer (quotes, backslashes and control characters grow).
++std::size_t JsonBytes(std::string_view text) {
++    std::size_t size = 2;
++    for (const char ch : text) {
++        const auto c = static_cast<unsigned char>(ch);
++        size += c == '"' || c == '\\' ? 2 : c < 0x20 ? 6 : 1;
++    }
++    return size;
++}
++
++// What one event costs in net.receive's answer, counted generously.
++std::size_t EventBytes(const Event &event) { return 64 + JsonBytes(event.data) + JsonBytes(event.name); }
++
++} // namespace
 +
 +std::string Escape(std::string_view text) {
 +    static constexpr char kHex[] = "0123456789ABCDEF";
@@ -59854,7 +60532,12 @@ index 00000000..4765c069
 +        transport_->Close();
 +        transport_.reset();
 +    }
-+    if (state_ != State::Idle) Push({"closed", -1, why, {}});
++    if (state_ != State::Idle) {
++        // The reason may come from the relay or the socket: only text a mod can be handed, and not a page of it.
++        std::string reason = CutUtf8(why, 200);
++        if (reason.empty()) reason = "the connection to the relay closed";
++        Push({"closed", -1, std::move(reason), {}});
++    }
 +    state_ = State::Idle;
 +    id_ = -1;
 +    peers_.clear();
@@ -59892,8 +60575,9 @@ index 00000000..4765c069
 +        peers_.clear();
 +        if (message.contains("peers") && message["peers"].is_array()) {
 +            for (const Json &peer : message["peers"]) {
-+                if (peer.is_object() && peer.contains("id") && peer["id"].is_number_integer()) {
-+                    peers_.push_back({peer["id"].get<int>(), peer.value("name", std::string())});
++                if (peer.is_object() && peer.contains("id") && peer["id"].is_number_integer() && peers_.size() < kPeersMax) {
++                    const std::string name = peer.contains("name") && peer["name"].is_string() ? peer["name"].get<std::string>() : std::string();
++                    peers_.push_back({peer["id"].get<int>(), CutUtf8(name, kNameMax)});
 +                }
 +            }
 +        }
@@ -59901,11 +60585,14 @@ index 00000000..4765c069
 +        Push({"connected", id_, code_, {}});
 +    } else if (t == "join") {
 +        const int id = number("id");
++        if (id < 0) return; // not a player: the relay's message is damaged
++        const std::string name = CutUtf8(text_of("name"), kNameMax);
 +        std::erase_if(peers_, [id](const Peer &peer) { return peer.id == id; });
-+        peers_.push_back({id, text_of("name")});
-+        Push({"joined", id, {}, text_of("name")});
++        if (peers_.size() < kPeersMax) peers_.push_back({id, name});
++        Push({"joined", id, {}, name});
 +    } else if (t == "leave") {
 +        const int id = number("id");
++        if (id < 0) return;
 +        std::erase_if(peers_, [id](const Peer &peer) { return peer.id == id; });
 +        Push({"left", id, {}, {}});
 +    } else if (t == "error" || t == "closed") {
@@ -59924,7 +60611,10 @@ index 00000000..4765c069
 +            case Frame::Kind::Binary:
 +                if (frame.data.size() >= 1 && frame.data.size() - 1 <= kMessageMax) {
 +                    std::string data = frame.data.substr(1);
-+                    if (ValidUtf8(data)) Push({"message", static_cast<unsigned char>(frame.data[0]), std::move(data), {}});
++                    // Only text a mod can be handed, and that fits net.receive's answer by itself.
++                    if (ValidUtf8(data) && JsonBytes(data) <= kReceiveBytes / 2) {
++                        Push({"message", static_cast<unsigned char>(frame.data[0]), std::move(data), {}});
++                    }
 +                }
 +                break;
 +            case Frame::Kind::Closed:
@@ -59966,7 +60656,12 @@ index 00000000..4765c069
 +std::vector<Event> Session::Receive(std::size_t max) {
 +    Pump();
 +    std::vector<Event> out;
++    // No more than the answer can carry: what doesn't fit waits for the next call instead of being lost.
++    std::size_t bytes = 0;
 +    while (!events_.empty() && out.size() < max) {
++        const std::size_t cost = EventBytes(events_.front());
++        if (!out.empty() && bytes + cost > kReceiveBytes) break;
++        bytes += cost;
 +        out.push_back(std::move(events_.front()));
 +        events_.pop_front();
 +    }
@@ -59987,10 +60682,10 @@ index 00000000..4765c069
 +} // namespace moonmod::net
 diff --git a/port/src/moonmod/net_transport_curl.cpp b/port/src/moonmod/net_transport_curl.cpp
 new file mode 100644
-index 00000000..727106b5
+index 00000000..da227437
 --- /dev/null
 +++ b/port/src/moonmod/net_transport_curl.cpp
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,280 @@
 +// Online play's socket on Linux and macOS (moonmod/net_session.hpp): libcurl makes the TLS connection (CONNECT_ONLY),
 +// and the WebSocket on top of it is ours, the handshake and RFC 6455 framing, so any libcurl does, not only one built
 +// with its own WebSocket support. One thread per socket does all the I/O; the game's thread only queues and takes.
@@ -60000,6 +60695,7 @@ index 00000000..727106b5
 +#include "moonmod/net_session.hpp"
 +
 +#include <atomic>
++#include <chrono>
 +#include <cstring>
 +#include <mutex>
 +#include <poll.h>
@@ -60036,24 +60732,16 @@ index 00000000..727106b5
 +
 +    void Send(std::string_view bytes) override {
 +        const std::lock_guard lock(mutex_);
-+        outgoing_.emplace_back(Encode(0x2, bytes));
++        // A link that takes nothing any more is about to be closed by the thread (SendAll's limit): don't pile up.
++        if (outgoing_.size() < kTransportFrames) outgoing_.emplace_back(Encode(0x2, bytes));
 +    }
 +
-+    bool Poll(Frame &frame) override {
-+        const std::lock_guard lock(mutex_);
-+        if (incoming_.empty()) return false;
-+        frame = std::move(incoming_.front());
-+        incoming_.pop_front();
-+        return true;
-+    }
++    bool Poll(Frame &frame) override { return incoming_.Pop(frame); }
 +
 +    void Close() override { stop_ = true; }
 +
 +private:
-+    void Deliver(Frame::Kind kind, std::string data) {
-+        const std::lock_guard lock(mutex_);
-+        incoming_.push_back({kind, std::move(data)});
-+    }
++    void Deliver(Frame::Kind kind, std::string data) { incoming_.Push({kind, std::move(data)}); }
 +
 +    std::string Encode(int opcode, std::string_view payload) {
 +        std::string frame;
@@ -60082,9 +60770,14 @@ index 00000000..727106b5
 +        return poll(&fd, 1, ms) > 0;
 +    }
 +
-+    bool SendAll(std::string_view bytes) {
++    // False when the connection is gone, when it takes nothing for ten seconds (a dead link), or when the game left
++    // meanwhile. goodbye: the close frame, sent after the game left, with half a second at most.
++    bool SendAll(std::string_view bytes, bool goodbye = false) {
++        const auto  limit = std::chrono::steady_clock::now() + (goodbye ? std::chrono::milliseconds(500) : std::chrono::milliseconds(10000));
 +        std::size_t done = 0;
 +        while (done < bytes.size()) {
++            if (!goodbye && stop_) return false;
++            if (std::chrono::steady_clock::now() > limit) return false;
 +            std::size_t sent = 0;
 +            const CURLcode result = curl_easy_send(curl_, bytes.data() + done, bytes.size() - done, &sent);
 +            if (result == CURLE_AGAIN) {
@@ -60124,6 +60817,7 @@ index 00000000..727106b5
 +                failure_ = "the relay refused: " + head.substr(0, line);
 +                return false;
 +            }
++            if (stop_) return false;
 +            Wait(false, 100);
 +            if (!ReadSome()) return false;
 +        }
@@ -60176,12 +60870,20 @@ index 00000000..727106b5
 +                message_kind_ = opcode;
 +                message_ = std::move(payload);
 +            } else if (opcode == 0x0) {
++                if (message_.size() + payload.size() > 1024 * 1024) {
++                    failure_ = "the relay sent too much";
++                    return false;
++                }
 +                message_.append(payload);
 +            } else {
 +                continue;
 +            }
 +            if (fin) Deliver(message_kind_ == 0x1 ? Frame::Kind::Text : Frame::Kind::Binary, std::move(message_));
 +        }
++    }
++
++    static int Progress(void *self, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
++        return static_cast<CurlTransport *>(self)->stop_ ? 1 : 0;
 +    }
 +
 +    void Run() {
@@ -60194,6 +60896,10 @@ index 00000000..727106b5
 +        curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY, 1L);
 +        curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 15L);
 +        curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
++        // Leaving while the connection is still being made ends it, instead of holding the game for the timeout.
++        curl_easy_setopt(curl_, CURLOPT_NOPROGRESS, 0L);
++        curl_easy_setopt(curl_, CURLOPT_XFERINFODATA, this);
++        curl_easy_setopt(curl_, CURLOPT_XFERINFOFUNCTION, &CurlTransport::Progress);
 +        CURLcode result = curl_easy_perform(curl_);
 +        if (result == CURLE_OK) result = curl_easy_getinfo(curl_, CURLINFO_ACTIVESOCKET, &socket_);
 +        if (result != CURLE_OK) {
@@ -60216,7 +60922,7 @@ index 00000000..727106b5
 +                if (Wait(false, 15)) alive = ReadSome() && Frames();
 +            }
 +            if (stop_) {
-+                SendAll(Encode(0x8, "\x03\xE8"));
++                SendAll(Encode(0x8, "\x03\xE8"), true);
 +            } else {
 +                Deliver(Frame::Kind::Closed, failure_.empty() ? std::string("the connection to the relay closed") : failure_);
 +            }
@@ -60226,8 +60932,8 @@ index 00000000..727106b5
 +    }
 +
 +    std::string             origin_, target_, host_;
-+    std::mutex              mutex_;
-+    std::deque<Frame>       incoming_;
++    std::mutex              mutex_; // outgoing_
++    FrameQueue              incoming_;
 +    std::deque<std::string> outgoing_;
 +    std::atomic<bool>       stop_{false};
 +    std::mt19937            random_{std::random_device{}()};
@@ -60262,10 +60968,10 @@ index 00000000..727106b5
 +#endif
 diff --git a/port/src/moonmod/net_transport_web.cpp b/port/src/moonmod/net_transport_web.cpp
 new file mode 100644
-index 00000000..17be2652
+index 00000000..03685d2d
 --- /dev/null
 +++ b/port/src/moonmod/net_transport_web.cpp
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,116 @@
 +// Online play's socket in the browser (moonmod/net_session.hpp): Emscripten's WebSocket API over the page's own
 +// WebSocket. The game runs on a pthread (PROXY_TO_PTHREAD); the socket lives on the page's main thread, whose callbacks
 +// queue frames under a lock for the game's thread to take, and sends are proxied to it by Emscripten.
@@ -60307,13 +61013,7 @@ index 00000000..17be2652
 +        if (open_) emscripten_websocket_send_binary(socket_, const_cast<char *>(bytes.data()), static_cast<uint32_t>(bytes.size()));
 +    }
 +
-+    bool Poll(Frame &frame) override {
-+        const std::lock_guard lock(mutex_);
-+        if (incoming_.empty()) return false;
-+        frame = std::move(incoming_.front());
-+        incoming_.pop_front();
-+        return true;
-+    }
++    bool Poll(Frame &frame) override { return incoming_.Pop(frame); }
 +
 +    void Close() override {
 +        if (!closed_) {
@@ -60323,10 +61023,7 @@ index 00000000..17be2652
 +    }
 +
 +private:
-+    void Deliver(Frame::Kind kind, std::string data) {
-+        const std::lock_guard lock(mutex_);
-+        incoming_.push_back({kind, std::move(data)});
-+    }
++    void Deliver(Frame::Kind kind, std::string data) { incoming_.Push({kind, std::move(data)}); }
 +
 +    static EM_BOOL OnOpen(int, const EmscriptenWebSocketOpenEvent *, void *user) {
 +        auto *self = static_cast<WebTransport *>(user);
@@ -60337,6 +61034,11 @@ index 00000000..17be2652
 +
 +    static EM_BOOL OnMessage(int, const EmscriptenWebSocketMessageEvent *event, void *user) {
 +        auto       *self = static_cast<WebTransport *>(user);
++        if (event->numBytes > 1024 * 1024) { // as the other platforms' sockets: no frame of the relay's is this long
++            self->Deliver(Frame::Kind::Closed, "the relay sent too much");
++            self->Close();
++            return EM_TRUE;
++        }
 +        std::string data(reinterpret_cast<const char *>(event->data), event->numBytes);
 +        // A text frame's bytes end with the terminating zero Emscripten adds.
 +        if (event->isText && !data.empty() && data.back() == '\0') data.pop_back();
@@ -60358,8 +61060,7 @@ index 00000000..17be2652
 +    }
 +
 +    EMSCRIPTEN_WEBSOCKET_T socket_;
-+    std::mutex             mutex_;
-+    std::deque<Frame>      incoming_;
++    FrameQueue             incoming_;
 +    std::atomic<bool>      open_{false};
 +    bool                   closed_ = false;
 +};
@@ -60389,10 +61090,10 @@ index 00000000..17be2652
 +#endif
 diff --git a/port/src/moonmod/net_transport_winhttp.cpp b/port/src/moonmod/net_transport_winhttp.cpp
 new file mode 100644
-index 00000000..f2b8c625
+index 00000000..2df4afb6
 --- /dev/null
 +++ b/port/src/moonmod/net_transport_winhttp.cpp
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,199 @@
 +// Online play's socket on Windows (moonmod/net_session.hpp): WinHTTP's own WebSocket (Windows 8 and later), TLS and
 +// proxies as the system has them. One thread connects and receives; sends come from the game's thread under a lock
 +// (WinHTTP allows one send and one receive at a time on a socket).
@@ -60438,29 +61139,31 @@ index 00000000..f2b8c625
 +        }
 +    }
 +
-+    bool Poll(Frame &frame) override {
-+        const std::lock_guard lock(mutex_);
-+        if (incoming_.empty()) return false;
-+        frame = std::move(incoming_.front());
-+        incoming_.pop_front();
-+        return true;
-+    }
++    bool Poll(Frame &frame) override { return incoming_.Pop(frame); }
 +
 +    void Close() override {
 +        if (stop_.exchange(true)) return;
 +        const std::lock_guard lock(send_mutex_);
-+        // Closing the handle ends the receive the thread waits in.
++        // Closing a handle ends whatever the thread waits in: the receive on an open socket, or the connect and the
++        // relay's answer before that (a relay that takes the connection and then says nothing would otherwise hold the
++        // thread, and the game's thread with it when it joins).
 +        if (socket_ != nullptr) {
-+            WinHttpWebSocketClose(socket_, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
++            // Says goodbye without waiting for the relay's answer: on a dead link that answer never comes.
++            WinHttpWebSocketShutdown(socket_, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
 +            WinHttpCloseHandle(socket_);
 +            socket_ = nullptr;
 +        }
++        CloseConnecting();
 +    }
 +
 +private:
-+    void Deliver(Frame::Kind kind, std::string data) {
-+        const std::lock_guard lock(mutex_);
-+        incoming_.push_back({kind, std::move(data)});
++    void Deliver(Frame::Kind kind, std::string data) { incoming_.Push({kind, std::move(data)}); }
++
++    // With send_mutex_ held: lets go of the handles the connect uses.
++    void CloseConnecting() {
++        if (request_ != nullptr) WinHttpCloseHandle(request_);
++        if (connection_ != nullptr) WinHttpCloseHandle(connection_);
++        request_ = connection_ = nullptr;
 +    }
 +
 +    void Fail(const char *what) {
@@ -60480,31 +61183,42 @@ index 00000000..f2b8c625
 +        if (connection == nullptr) return Fail("the relay can't be reached");
 +        HINTERNET request = WinHttpOpenRequest(connection, L"GET", path_.c_str(), nullptr, WINHTTP_NO_REFERER,
 +                                               WINHTTP_DEFAULT_ACCEPT_TYPES, secure_ ? WINHTTP_FLAG_SECURE : 0);
++        {
++            // Close() can reach the handles from here on, and ends the waits below by closing them.
++            const std::lock_guard lock(send_mutex_);
++            connection_ = connection;
++            request_ = request;
++            if (stop_) {
++                CloseConnecting();
++                return;
++            }
++        }
++        // request and connection are only used below while they are known to be open, or in calls that Close() ends.
 +        bool ok = request != nullptr && WinHttpSetOption(request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) &&
 +                  WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
 +                  WinHttpReceiveResponse(request, nullptr);
-+        DWORD status = 0, size = sizeof(status);
-+        if (ok) {
-+            WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-+                                &status, &size, WINHTTP_NO_HEADER_INDEX);
++        DWORD     status = 0, size = sizeof(status);
++        HINTERNET socket = nullptr;
++        {
++            const std::lock_guard lock(send_mutex_);
++            if (stop_) {
++                CloseConnecting(); // left while connecting: Close() has the handles, or takes them now
++                return;
++            }
++            if (ok) {
++                WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
++                                    &status, &size, WINHTTP_NO_HEADER_INDEX);
++            }
++            socket = ok && status == 101 ? WinHttpWebSocketCompleteUpgrade(request, 0) : nullptr;
++            CloseConnecting();
++            socket_ = socket;
 +        }
-+        HINTERNET socket = ok && status == 101 ? WinHttpWebSocketCompleteUpgrade(request, 0) : nullptr;
-+        if (request != nullptr) WinHttpCloseHandle(request);
-+        WinHttpCloseHandle(connection);
 +        if (socket == nullptr) {
 +            if (ok) {
 +                if (!stop_) Deliver(Frame::Kind::Closed, "the relay refused (HTTP " + std::to_string(status) + ")");
 +                return;
 +            }
 +            return Fail("the relay can't be reached");
-+        }
-+        {
-+            const std::lock_guard lock(send_mutex_);
-+            if (stop_) {
-+                WinHttpCloseHandle(socket);
-+                return;
-+            }
-+            socket_ = socket;
 +        }
 +        Deliver(Frame::Kind::Open, {});
 +        std::string message;
@@ -60545,11 +61259,12 @@ index 00000000..f2b8c625
 +    INTERNET_PORT      port_;
 +    std::wstring       path_;
 +    bool               secure_;
-+    std::mutex         mutex_, send_mutex_;
-+    std::deque<Frame>  incoming_;
++    std::mutex         send_mutex_; // socket_, request_ and connection_
++    FrameQueue         incoming_;
 +    std::atomic<bool>  stop_{false};
 +    HINTERNET          session_ = nullptr;
 +    HINTERNET          socket_ = nullptr;
++    HINTERNET          request_ = nullptr, connection_ = nullptr; // set while connecting
 +    std::thread        thread_; // last: it starts Run, which uses everything above
 +};
 +
@@ -64195,6 +64910,109 @@ index 00000000..134f271f
 +}
 +
 +} // namespace moonmod
+diff --git a/port/src/moonmod/weapon_actions_moonmod.cpp b/port/src/moonmod/weapon_actions_moonmod.cpp
+new file mode 100644
+index 00000000..9f64f39f
+--- /dev/null
++++ b/port/src/moonmod/weapon_actions_moonmod.cpp
+@@ -0,0 +1,97 @@
++// Mods' own buttons on the weapon menu's action list (weapons.menu_actions_set): see moonmod/weapon_actions.hpp.
++
++#include "moonmod/weapon_actions.hpp"
++
++#include <algorithm>
++#include <utility>
++
++#include "battlemenu.hpp"
++#include "itemdata.hpp"
++#include "menu_inventory.hpp"
++
++namespace dc::game {
++
++namespace {
++
++std::vector<WeaponModAction> g_actions;
++std::vector<WeaponMenuNote>  g_notes;
++
++} // namespace
++
++const std::vector<WeaponMenuNote> &WeaponMenuNotes() {
++    return g_notes;
++}
++
++bool SetWeaponMenuNote(std::string_view owner, std::string text, int color) {
++    const auto mine = std::ranges::find_if(g_notes, [owner](const WeaponMenuNote &n) { return n.owner == owner; });
++    if (text.empty()) {
++        if (mine != g_notes.end()) g_notes.erase(mine);
++        return true;
++    }
++    if (mine != g_notes.end()) {
++        mine->text = std::move(text);
++        mine->color = color;
++        return true;
++    }
++    if (static_cast<int>(g_notes.size()) >= kWeaponMenuNotesMost) return false;
++    g_notes.push_back({std::string(owner), std::move(text), color});
++    return true;
++}
++
++void ClearWeaponMenuNote(std::string_view owner) {
++    std::erase_if(g_notes, [owner](const WeaponMenuNote &n) { return owner.empty() || n.owner == owner; });
++}
++
++const std::vector<WeaponModAction> &WeaponModActions() {
++    return g_actions;
++}
++
++bool SetWeaponModActions(std::string_view owner, std::vector<WeaponModAction> actions) {
++    const auto others = std::ranges::count_if(g_actions, [owner](const WeaponModAction &a) { return a.owner != owner; });
++    if (others + static_cast<long long>(actions.size()) > kWeaponModActionsMost) return false;
++    // The owner's rows keep their place among the others' (or go last when it had none).
++    auto first = std::ranges::find_if(g_actions, [owner](const WeaponModAction &a) { return a.owner == owner; });
++    const auto at = first - g_actions.begin();
++    std::erase_if(g_actions, [owner](const WeaponModAction &a) { return a.owner == owner; });
++    for (WeaponModAction &action : actions) action.owner = std::string(owner);
++    g_actions.insert(g_actions.begin() + std::min<std::ptrdiff_t>(at, static_cast<std::ptrdiff_t>(g_actions.size())),
++                     std::make_move_iterator(actions.begin()), std::make_move_iterator(actions.end()));
++    return true;
++}
++
++void ClearWeaponModActions(std::string_view owner) {
++    std::erase_if(g_actions, [owner](const WeaponModAction &a) { return owner.empty() || a.owner == owner; });
++}
++
++bool WeaponModActionShown(int index, WEAPON_HAVE *weapon, int chara) {
++    if (index < 0 || index >= static_cast<int>(g_actions.size()) || weapon == nullptr) return false;
++    if (weapon->item_no < ITEM_WEAPON_START || weapon->item_no == GetDefaultWeaponNo(chara)) return false;
++    if (g_actions[index].when == WEAPON_ACTION_ABS_FULL) {
++        return weapon->level < 99 && weapon->experience >= GetWeaponMaxExp(weapon);
++    }
++    return true;
++}
++
++int WeaponActionRowList(WEAPON_HAVE *weapon, int chara, int native_options, std::array<int, kWeaponActionRowsMost> &rows) {
++    int count = 0;
++    for (int row = 0; row < 4; ++row) rows[count++] = row;
++    for (int bit = 1; bit <= 3; ++bit) {
++        if ((native_options & (1 << bit)) != 0) rows[count++] = bit + 3;
++    }
++    for (int index = 0; index < static_cast<int>(g_actions.size()) && count < kWeaponActionRowsMost; ++index) {
++        if (WeaponModActionShown(index, weapon, chara)) rows[count++] = kWeaponModActionFirst + index;
++    }
++    return count;
++}
++
++int WeaponActionRowStep(WEAPON_HAVE *weapon, int chara, int native_options, int cursor, int step) {
++    std::array<int, kWeaponActionRowsMost> rows{};
++    const int count = WeaponActionRowList(weapon, chara, native_options, rows);
++    int at = 0;
++    for (int k = 0; k < count; ++k) {
++        if (rows[k] == cursor) at = k;
++    }
++    return rows[((at + step) % count + count) % count];
++}
++
++} // namespace dc::game
 diff --git a/port/src/options/draw.cpp b/port/src/options/draw.cpp
 index 0ccbba78..166c88c8 100644
 --- a/port/src/options/draw.cpp
@@ -71205,10 +72023,10 @@ index 00000000..4ac4f6c9
 +}
 diff --git a/port/src/tests/moonmod_coop_save_test.cpp b/port/src/tests/moonmod_coop_save_test.cpp
 new file mode 100644
-index 00000000..890e0c84
+index 00000000..b7a05c01
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_save_test.cpp
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,318 @@
 +// Co-op's split of a save (moonmod/coop_save.hpp): the world and a player's own things go across whole, each without
 +// the other, and a damaged or foreign one changes nothing.
 +#include <gtest/gtest.h>
@@ -71259,6 +72077,7 @@ index 00000000..890e0c84
 +    auto second = std::make_unique<RawSave>(0x44);
 +    first->dng().money = 500;
 +    first->dng().max_hp[2] = 180;
++    for (auto &slot : first->dng().equipped_weapon_slot.data) slot = 0; // a slot a character has, as a real save's is
 +    first->dng().equipped_weapon_slot[1] = 3;
 +    second->dng().floor_reached[3] = 5;
 +    const std::string player = moonmod::coop::ExportPlayer(first->save());
@@ -71449,6 +72268,68 @@ index 00000000..890e0c84
 +    std::ofstream(slot.path / "coop_accounts.json") << "{not json";
 +    AccountsLoad(slot.path); // a damaged file keeps no guests, and says so
 +    EXPECT_TRUE(Accounts().empty());
++}
++
++TEST(MoonModCoopSave, ANameThatIsNotTextNeverBreaksTheHostsSave) {
++    using namespace moonmod::coop;
++    auto save = std::make_unique<RawSave>(0x10);
++    const std::string things = ExportPlayer(save->save());
++    AccountsClear();
++    std::string error;
++    ASSERT_TRUE(AccountSet({"guest-0001", "\xFF\xFE\x80 broken", things}, error)) << error;
++    ASSERT_TRUE(AccountSet({"guest-0002", std::string(23, 'a') + "\xC3\xA9", things}, error)) << error; // cut mid-character
++    EXPECT_FALSE(AccountSet({"guest-0003", "x", things + "\xFF"}, error));
++    TempDir slot;
++    EXPECT_NO_THROW(EXPECT_TRUE(AccountsSave(slot.path)));
++    AccountsClear();
++    AccountsLoad(slot.path);
++    ASSERT_NE(AccountGet("guest-0001"), nullptr);
++    ASSERT_NE(AccountGet("guest-0002"), nullptr);
++    EXPECT_EQ(AccountGet("guest-0002")->name, std::string(23, 'a'));
++    EXPECT_EQ(AccountGet("guest-0001")->player, things);
++    AccountsClear();
++}
++
++TEST(MoonModCoopSave, AGuestsFileThatCannotBeReadIsNeverThrownAway) {
++    using namespace moonmod::coop;
++    auto save = std::make_unique<RawSave>(0x10);
++    const std::string things = ExportPlayer(save->save());
++    TempDir slot;
++    std::ofstream(slot.path / "coop_accounts.json") << "{not json";
++    AccountsClear();
++    AccountsLoad(slot.path);
++    EXPECT_TRUE(Accounts().empty());
++    ASSERT_TRUE(AccountsSave(slot.path)); // no guests known: the file that might hold some stays
++    EXPECT_TRUE(std::filesystem::exists(slot.path / "coop_accounts.json"));
++    std::string error;
++    ASSERT_TRUE(AccountSet({"guest-0001", "Xiao", things}, error)) << error;
++    ASSERT_TRUE(AccountsSave(slot.path)); // new guests: the old file is put aside, not written over
++    EXPECT_TRUE(std::filesystem::exists(slot.path / "coop_accounts.json.bad"));
++    AccountsClear();
++    AccountsLoad(slot.path);
++    EXPECT_NE(AccountGet("guest-0001"), nullptr);
++
++    // Right shape, wrong kinds: nothing is taken, nothing throws.
++    std::ofstream(slot.path / "coop_accounts.json") << R"({"format":1,"accounts":{"guest-0009":5,"guest-0008":{"name":[],"player":{}},"guest-0007":{"name":"x"}}})";
++    AccountsClear();
++    EXPECT_NO_THROW(AccountsLoad(slot.path));
++    EXPECT_TRUE(Accounts().empty());
++    AccountsClear();
++}
++
++TEST(MoonModCoopSave, AnotherGamesThingsCannotPointOutsideTheirOwn) {
++    auto host = std::make_unique<RawSave>(0x00);
++    auto guest = std::make_unique<RawSave>(0x00);
++    host->dng().equipped_weapon_slot[0] = 100;
++    host->dng().equipped_weapon_slot[1] = -77;
++    host->dng().equipped_weapon_slot[2] = 5;
++    host->dng().equipped_weapon_slot[3] = -1;
++    std::string error;
++    ASSERT_TRUE(moonmod::coop::ImportPlayer(moonmod::coop::ExportPlayer(host->save()), guest->save(), error)) << error;
++    EXPECT_EQ(guest->dng().equipped_weapon_slot[0], 0);
++    EXPECT_EQ(guest->dng().equipped_weapon_slot[1], 0);
++    EXPECT_EQ(guest->dng().equipped_weapon_slot[2], 5);
++    EXPECT_EQ(guest->dng().equipped_weapon_slot[3], -1);
 +}
 +
 +TEST(MoonModCoopSave, ASaveKeepsSixtyFourGuestsAtMost) {
@@ -76924,10 +77805,10 @@ index 00000000..eeff1dcd
 +}
 diff --git a/port/src/tests/moonmod_net_test.cpp b/port/src/tests/moonmod_net_test.cpp
 new file mode 100644
-index 00000000..4f7c2e47
+index 00000000..dadea607
 --- /dev/null
 +++ b/port/src/tests/moonmod_net_test.cpp
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,279 @@
 +// Online play's session (moonmod/net_session.hpp) over a scripted transport: the relay's protocol, the event queue
 +// and the checks on what a mod sends. The real sockets are tested against a relay by coop/relay/test.
 +#include <gtest/gtest.h>
@@ -77093,11 +77974,103 @@ index 00000000..4f7c2e47
 +    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":0,"code":"AB3CD","peers":[]})"});
 +    for (std::size_t i = 0; i < kQueueMax + 10; ++i) wire->incoming.push_back({Frame::Kind::Binary, "\x01" + std::to_string(i)});
 +    session.Pump();
-+    auto events = session.Receive(kQueueMax + 100);
++    std::vector<Event> events;
++    for (;;) { // one answer holds only so much: the rest waits for the next
++        const auto more = session.Receive(kQueueMax + 100);
++        if (more.empty()) break;
++        events.insert(events.end(), more.begin(), more.end());
++    }
 +    ASSERT_EQ(events.size(), kQueueMax);
 +    EXPECT_EQ(events[0].kind, "connected"); // kept: only messages are dropped
 +    EXPECT_EQ(events[1].data, "11"); // the connected event takes a place too: eleven of the oldest messages went
 +    EXPECT_EQ(events.back().data, std::to_string(kQueueMax + 9));
++}
++
++TEST(MoonModNet, OnlyWellFormedUtf8PassesAndCutsKeepWholeCharacters) {
++    EXPECT_FALSE(ValidUtf8("\xE0\x80\xAF"));     // a slash written the long way
++    EXPECT_FALSE(ValidUtf8("\xED\xA0\x80"));     // half of a pair, not a character
++    EXPECT_FALSE(ValidUtf8("\xF0\x80\x80\xAF")); // long again
++    EXPECT_FALSE(ValidUtf8("\xF4\x90\x80\x80")); // past the last character
++    EXPECT_TRUE(ValidUtf8("\xED\x9F\xBF \xEE\x80\x80 \xF4\x8F\xBF\xBF"));
++    EXPECT_EQ(CutUtf8("abc", 8), "abc");
++    EXPECT_EQ(CutUtf8("ab\xC3\xA9", 3), "ab"); // never half a character
++    EXPECT_EQ(CutUtf8("ab\xC3\xA9", 4), "ab\xC3\xA9");
++    EXPECT_TRUE(ValidUtf8(CutUtf8("\xF0\x9F\x8E\xAE\xF0\x9F\x8E\xAE", 6)));
++    EXPECT_TRUE(ValidUtf8(CutUtf8("\xFF\xFE not text", 8))); // what isn't text comes out as text, or empty
++}
++
++TEST(MoonModNet, ARelaySendingNonsenseNeitherThrowsNorFillsTheGame) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "AB3CD", "Xiao", "chronicle", 1, error));
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":2,"code":"AB3CD","host":0,"peers":[{"id":0,"name":7},{"id":"x"},5,{"id":1,"name":"A name far longer than the relay ever lets one be"}]})"});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"join","id":3,"name":{"not":"a name"}})"});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"join","id":-4,"name":"Nobody"})"});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"join","id":"3"})"});
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":7})"});
++    wire->incoming.push_back({Frame::Kind::Text, R"([1,2,3])"});
++    wire->incoming.push_back({Frame::Kind::Text, "{not json"});
++    wire->incoming.push_back({Frame::Kind::Binary, {}});
++    std::vector<Event> events;
++    EXPECT_NO_THROW(events = session.Receive(64));
++    EXPECT_EQ(session.state(), State::Joined);
++    for (const Peer &peer : session.peers()) {
++        EXPECT_GE(peer.id, 0);
++        EXPECT_LE(peer.name.size(), kNameMax);
++        EXPECT_TRUE(ValidUtf8(peer.name));
++    }
++    for (const Event &e : events) EXPECT_TRUE(ValidUtf8(e.name));
++    for (int i = 0; i < 500; ++i) wire->incoming.push_back({Frame::Kind::Text, R"({"t":"join","id":)" + std::to_string(10 + i) + "}"});
++    EXPECT_NO_THROW(session.Receive(1000));
++    EXPECT_LE(session.peers().size(), kPeersMax);
++}
++
++TEST(MoonModNet, OneAnswerNeverCarriesMoreThanAModCanTake) {
++    auto        wire = std::make_shared<Wire>();
++    Session     session(Fake(wire));
++    std::string error;
++    ASSERT_TRUE(session.Start("coop", "wss://relay.example", "", "", "chronicle", 1, error));
++    wire->incoming.push_back({Frame::Kind::Text, R"({"t":"welcome","id":0,"code":"AB3CD","peers":[]})"});
++    const std::string big(kMessageMax - 1, 'x');
++    for (int i = 0; i < 20; ++i) wire->incoming.push_back({Frame::Kind::Binary, "\x01" + big});
++    std::size_t messages = 0;
++    for (int round = 0; round < 40 && messages < 20; ++round) {
++        const auto  events = session.Receive(64);
++        std::size_t bytes = 0;
++        for (const Event &e : events) {
++            bytes += e.data.size();
++            if (e.kind == "message") ++messages;
++        }
++        EXPECT_LE(bytes, kReceiveBytes + kMessageMax);
++        ASSERT_FALSE(events.empty()); // each answer makes headway
++    }
++    EXPECT_EQ(messages, 20u); // and none is lost for being held back
++}
++
++TEST(MoonModNet, ASocketsWaitingFramesAreBoundedAndKeepTheRelaysWord) {
++    FrameQueue queue;
++    queue.Push({Frame::Kind::Text, "welcome"});
++    for (std::size_t i = 0; i < kTransportFrames + 50; ++i) queue.Push({Frame::Kind::Binary, std::to_string(i)});
++    queue.Push({Frame::Kind::Closed, "bye"});
++    EXPECT_LE(queue.size(), kTransportFrames + 2);
++    Frame frame;
++    ASSERT_TRUE(queue.Pop(frame));
++    EXPECT_EQ(frame.kind, Frame::Kind::Text); // the relay's own word is never dropped
++    ASSERT_TRUE(queue.Pop(frame));
++    EXPECT_EQ(frame.kind, Frame::Kind::Binary);
++    EXPECT_NE(frame.data, "0"); // the oldest messages went
++    Frame last;
++    while (queue.Pop(frame)) last = frame;
++    EXPECT_EQ(last.kind, Frame::Kind::Closed);
++
++    FrameQueue heavy;
++    const std::string big(1024 * 1024, 'x');
++    for (int i = 0; i < 20; ++i) heavy.Push({Frame::Kind::Binary, big});
++    std::size_t bytes = 0;
++    while (heavy.Pop(frame)) bytes += frame.data.size();
++    EXPECT_LE(bytes, kTransportBytes);
++    EXPECT_GT(bytes, 0u);
 +}
 +
 +TEST(MoonModNet, Utf8AndEscaping) {
@@ -82450,7 +83423,7 @@ index 00000000..e464523d
 +
 +} // namespace dc::ui::journal_character
 diff --git a/port/src/ui/menu_mouse.cpp b/port/src/ui/menu_mouse.cpp
-index b8040302..3ced7840 100644
+index b8040302..2cde349d 100644
 --- a/port/src/ui/menu_mouse.cpp
 +++ b/port/src/ui/menu_mouse.cpp
 @@ -14,6 +14,7 @@
@@ -82461,16 +83434,17 @@ index b8040302..3ced7840 100644
  #include "itemdata.hpp"
  #include "memcard.hpp"
  #include "menu_draw.hpp"
-@@ -21,6 +22,8 @@
+@@ -21,6 +22,9 @@
  #include "menu_manual.hpp"
  #include "menu_misc.hpp"
  #include "menu_save.hpp"
 +#include "moonmod/manager_ui.hpp"
 +#include "moonmod/run_menu.hpp"
++#include "moonmod/weapon_actions.hpp"
  #include "options/menu_option.hpp"
  #include "platform/input.hpp"
  #include "save/save_slots.hpp"
-@@ -266,6 +269,9 @@ constexpr int kDiscardPlateY = 0xE8;
+@@ -266,6 +270,9 @@ constexpr int kDiscardPlateY = 0xE8;
  
  bool HoldingItem() { return BtlHaveItemPt != nullptr && BtlHaveItemPt->item_no >= ITEM_ATTACH_START; }
  
@@ -82480,7 +83454,7 @@ index b8040302..3ced7840 100644
  void AskToDiscard() {
      if (IsEnableTrushThrow(BtlHaveItemPt->item_no) == 0) {
          ComMenuSePlay(MENU_SOUND_REFUSE);
-@@ -477,10 +483,17 @@ const Rect kItemPageLeft = {322, 38, 356, 72};
+@@ -477,10 +484,17 @@ const Rect kItemPageLeft = {322, 38, 356, 72};
  const Rect kItemPageRight = {552, 38, 586, 72};
  
  Rect ItemPageTab(int page) {
@@ -82498,7 +83472,7 @@ index b8040302..3ced7840 100644
  bool ItemPanelMode(int mode) {
      return mode == ITEM_MENU_QUICK_SLOTS || mode == ITEM_MENU_CHARA || mode == ITEM_MENU_WEAPON ||
             mode == ITEM_MENU_DEFENSE;
-@@ -520,18 +533,26 @@ void ItemMouse(const MenuPointerTake &take) {
+@@ -520,18 +534,26 @@ void ItemMouse(const MenuPointerTake &take) {
      int area = board.cursor_area;
      int tab = -1;
      int arrow = 0;
@@ -82527,7 +83501,7 @@ index b8040302..3ced7840 100644
      } else if (kItemBoard.Contains(x, y)) {
          int column = static_cast<int>((x - kItemBoard.left) / 40);
          int row = static_cast<int>((y - kItemBoard.top) / 40);
-@@ -545,15 +566,18 @@ void ItemMouse(const MenuPointerTake &take) {
+@@ -545,15 +567,18 @@ void ItemMouse(const MenuPointerTake &take) {
          mode = ITEM_MENU_BOARD;
          area = PERSONAL_BOARD_AREA_TRASH;
      }
@@ -82550,7 +83524,7 @@ index b8040302..3ced7840 100644
              arrow = 1;
          }
      }
-@@ -591,12 +615,16 @@ void ItemMouse(const MenuPointerTake &take) {
+@@ -591,12 +616,16 @@ void ItemMouse(const MenuPointerTake &take) {
      // over empty ground and the question about throwing it away comes up, over the same place and it stays held.
      if ((take.released & 1) != 0 && g_item_dragging) {
          g_item_dragging = false;
@@ -82569,7 +83543,7 @@ index b8040302..3ced7840 100644
              }
          }
          return;
-@@ -604,13 +632,16 @@ void ItemMouse(const MenuPointerTake &take) {
+@@ -604,13 +633,16 @@ void ItemMouse(const MenuPointerTake &take) {
  
      if (clicked) {
          if (mode >= 0) {
@@ -82587,7 +83561,7 @@ index b8040302..3ced7840 100644
          } else if (HoldingItem() && tab < 0 && arrow == 0) {
              // Set down on empty ground.
              AskToDiscard();
-@@ -623,8 +654,10 @@ void ItemMouse(const MenuPointerTake &take) {
+@@ -623,8 +655,10 @@ void ItemMouse(const MenuPointerTake &take) {
              }
              int steps = arrow;
              if (steps == 0) {
@@ -82600,7 +83574,36 @@ index b8040302..3ced7840 100644
              }
              if (steps > 0) {
                  MenuPointerPress(kInputR1);
-@@ -845,8 +878,9 @@ bool WeaponMouse(const MenuPointerTake &take) {
+@@ -777,11 +811,7 @@ int g_weapon_chara_target = -1;
+ 
+ // The rows of the action dialog the cursor can be on, top to bottom: Equip, Attach, Element and Repair,
+ // then Level up, Break down and Build up where the weapon allows them. Gives how many.
+-int WeaponActionRows(std::span<int, 7> cursors) {
+-    int count = 0;
+-    for (int i = 0; i < 4; ++i) {
+-        cursors[count++] = i;
+-    }
++int WeaponActionRows(std::span<int, kWeaponActionRowsMost> cursors) {
+     // The game's NowWeaponStatusValue: bit 1 is Level up, bit 2 Break down, bit 3 Build up.
+     WEAPON_HAVE *weapon = &DngWepHavePt[static_cast<int>(WepMenu.weapon_slot)];
+     int          options = 0;
+@@ -800,11 +830,10 @@ int WeaponActionRows(std::span<int, 7> cursors) {
+     if (IsNotBuildUpWeapon(weapon->item_no) != 0) {
+         options &= ~8;
+     }
+-    for (int i = 1; i <= 3; ++i) {
+-        if ((options & (1 << i)) != 0) {
+-            cursors[count++] = i + 3;
+-        }
+-    }
++    // MoonMod: and the mods' own rows (weapons.menu_actions_set) shown for the weapon.
++    std::array<int, kWeaponActionRowsMost> rows{};
++    const int count = WeaponActionRowList(weapon, WepMenu.chara, options, rows);
++    std::ranges::copy(rows, cursors.begin());
+     return count;
+ }
+ 
+@@ -845,8 +874,9 @@ bool WeaponMouse(const MenuPointerTake &take) {
                  if (WepMenu.chara == g_weapon_chara_target) {
                      g_weapon_chara_target = -1;
                  } else {
@@ -82612,7 +83615,7 @@ index b8040302..3ced7840 100644
                      return true;
                  }
              }
-@@ -858,7 +892,7 @@ bool WeaponMouse(const MenuPointerTake &take) {
+@@ -858,7 +888,7 @@ bool WeaponMouse(const MenuPointerTake &take) {
                  return true;
              }
              if (clicked) {
@@ -82621,7 +83624,16 @@ index b8040302..3ced7840 100644
                      // The row of faces: the one clicked comes to the front.
                      for (const SYS_CHARA_INFO &member : SysChara) {
                          int left = static_cast<int>(member.x);
-@@ -1073,6 +1107,19 @@ void BattleMouse() {
+@@ -884,7 +914,7 @@ bool WeaponMouse(const MenuPointerTake &take) {
+             if (!take.pointing) {
+                 return true;
+             }
+-            std::array<int, 7> cursors{};
++            std::array<int, kWeaponActionRowsMost> cursors{};
+             int                count = WeaponActionRows(cursors);
+             int                hit = -1;
+             for (int k = 0; k < count; ++k) {
+@@ -1073,6 +1103,19 @@ void BattleMouse() {
      MenuPointerShow(&g_battle);
      MenuPointerTake take = g_battle.Take(SysCur[0], SysCur[1]);
  

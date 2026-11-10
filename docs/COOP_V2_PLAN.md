@@ -91,6 +91,25 @@ and the live scenario `down` in `tools/tests/coop/live/run_live.py`. Not done: c
 others while out (the camera stays on the fallen hero), coming back at the floor's entrance when it's cleared, the
 floor resetting after a party falls, and the shared faint limit setting.
 
+**Hardened in 0.11.1 (protocol still 9).** Co-op trusts friends, but nothing another game sends may stop this game,
+fill its memory, empty a save or hand out unlimited value:
+
+- One unreadable message costs that message only; every text and number from another game is bounded and checked
+  (places, positions, names, doors, monster lists, mod lists, settings).
+- A gift is at most a wallet of Gilda or 99 of an item, and from one player in a minute at most two wallets and forty
+  gifts; the rest goes back, and only what was given a moment ago is taken back. A gift that can't be sent stays with
+  its giver. A guest's things go to the host right after a gift.
+- A Revival Powder is used only when the fallen player says it worked. A revive counts only from a player standing
+  on the same floor and near; "the party fell" only from a player who fell.
+- A host takes a guest's things and town changes only from a guest whose visit it began, one hello per connection,
+  and never a whole town from a guest. A guest's blow is at most 9999.
+- The room closes when the host's game leaves its story or the mod is switched off, and a visit always ends with its
+  room. A dropped guest keeps the down rule while it gets back in.
+- The engine side: relay text is checked as UTF-8 and bounded, waiting frames and peers are capped, a guests' file
+  that can't be read is put aside rather than written over, and the down rule goes off with the mod that set it.
+
+Still open: an allowlist of which door scripts may be shared, and key items can still be given.
+
 Dark Cloud's own rule is that HP at 0 means game over, unless Revival Powder brings you back. Co-op needs a kinder rule.
 
 | What | From | Dark Cloud detail |

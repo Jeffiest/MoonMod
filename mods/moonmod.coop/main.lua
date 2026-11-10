@@ -30,17 +30,28 @@ local function call(fn, ...)
   return value, err
 end
 local function errmsg(err) return type(err) == "table" and tostring(err.message) or tostring(err) end
+-- At most n bytes of a text, and never half a character (a name may be in any script).
+local function cut(text, n)
+  text = tostring(text)
+  if #text <= n then return text end
+  while n > 0 do
+    local b = text:byte(n + 1)
+    if not b or b < 0x80 or b >= 0xC0 then break end
+    n = n - 1
+  end
+  return text:sub(1, n)
+end
 local function setting(id, fallback)
   local value = moonmod.settings.get(id)
   if type(value) ~= type(fallback) then return fallback end
   return value
 end
 local function toast(message)
-  try(game.ui.notify, {message = tostring(message):sub(1, 196), duration_frames = 300})
-  moonmod.log("info", "toast " .. tostring(message):sub(1, 196)) -- in the log too, for bug reports and the live tests
+  try(game.ui.notify, {message = cut(message, 196), duration_frames = 300})
+  moonmod.log("info", "toast " .. cut(message, 196)) -- in the log too, for bug reports and the live tests
 end
 local function hud(text)
-  if text then try(game.render.layer_register, {id = "coop", text = text:sub(1, 48)})
+  if text then try(game.render.layer_register, {id = "coop", text = cut(text, 48)})
   else try(game.render.layer_remove, {id = "coop"}) end
 end
 
@@ -63,6 +74,19 @@ local S = {role = nil, code = nil, players = {}, pieces = {}, guest = nil, frame
 -- guest's way back in after its connection drops, a host closing its room.
 local link = {heard = {}, ping = {}, quiet = {}, fails = 0, fails_since = 0, warned_at = -100000, refused_since = nil,
               out_of_step = {}}
+-- What another game sends is a friend's, but never taken as well made: nothing in a message may stop this game,
+-- fill its memory, or hand out more than a player could give. A number from a message: finite and in the world.
+function S.num(v)
+  v = tonumber(v)
+  if not v or v ~= v or v > 1000000 or v < -1000000 then return 0 end
+  return v
+end
+-- A place as scene_of writes it: a town "T2", a house "H14", a dungeon floor "D0:3:seed".
+function S.scene_ok(scene)
+  if type(scene) ~= "string" or #scene > 32 then return false end
+  return scene:match("^[TH]%d+$") ~= nil or scene:match("^D%d+:%d+:%-?%d+$") ~= nil
+end
+S.greeted = {} -- peer -> true once it has said hello on this connection
 local code = moonmod.storage.get("code") or "-----" -- the code being typed on the title page
 -- A live test run (tools/tests/coop/live) puts its wishes here: {role = "host"|"guest", code?, follow?, where?, at?}. Players never
 -- have it: nothing but that harness writes this storage key.
@@ -108,6 +132,7 @@ local function take_piece(from, kind, rest)
   local key = from .. ":" .. kind
   local p = S.pieces[key]
   if not p or p.n ~= n or i == 1 then p = {n = n, got = 0, parts = {}}; S.pieces[key] = p end
+  p.at = S.frame -- half a text that stops coming is let go (link.step)
   if not p.parts[i] then p.parts[i] = piece; p.got = p.got + 1 end
   if p.got < n then return nil end
   S.pieces[key] = nil
@@ -131,10 +156,10 @@ local function show_room()
   local names = {}
   for peer, name in pairs(S.names) do
     local ms = link.ping[peer]
-    names[#names + 1] = link.quiet[peer] and (name .. " (no signal)") or ms and string.format("%s %dms", name, ms) or name
+    names[#names + 1] = link.quiet[peer] and (name .. " (no signal)") or ms and string.format("%s %.0fms", name, ms) or name
   end
   table.sort(names)
-  if #names > 0 then try(game.render.layer_register, {id = "coop_who", text = table.concat(names, ", "):sub(1, 48)})
+  if #names > 0 then try(game.render.layer_register, {id = "coop_who", text = cut(table.concat(names, ", "), 48)})
   else try(game.render.layer_remove, {id = "coop_who"}) end
 end
 
@@ -197,24 +222,33 @@ local function hear_position(peer, rest)
   local o = others[peer] or {}
   others[peer] = o
   o.heard = S.frame
-  if not scene or scene == "-" then o.scene, o.state = nil, nil return end
+  -- a place that isn't one (or a report too long to be one) is nowhere
+  if not scene or #rest > 160 or not S.scene_ok(scene) then o.scene, o.state = nil, nil return end
   local moved = o.scene ~= scene
   o.scene = scene
   if moved and S.moved then S.moved(peer, scene) end
-  o.state = {character = character, weapon = tonumber(weapon), x = tonumber(x) or 0, y = tonumber(y) or 0,
-             z = tonumber(z) or 0, heading = tonumber(heading) or 0, motion = math.floor(tonumber(motion) or 0)}
+  o.state = {character = character, weapon = tonumber(weapon), x = S.num(x), y = S.num(y),
+             z = S.num(z), heading = S.num(heading), motion = math.floor(S.num(motion))}
 end
 
 -- Names: each game says its player's name ("N name") on joining, and the others answer with theirs.
 local function say_name(to)
-  send(to, "N", (my_name() or ("Player " .. tostring(S.me_peer or "?"))):sub(1, 24))
+  send(to, "N", cut(my_name() or ("Player " .. tostring(S.me_peer or "?")), 24))
 end
 
 local function hear_name(peer, rest)
   local o = others[peer] or {}
   others[peer] = o
-  local first = o.name == nil
-  o.name = rest ~= "" and rest:sub(1, 24) or nil
+  local first = not o.named
+  o.named = true
+  -- a name is a line of text: no control characters, 24 bytes, and "the host" is the host's alone
+  local name = cut((rest:gsub("%c", " ")), 24):match("^%s*(.-)%s*$")
+  local lower = name:lower()
+  if peer ~= 0 and (lower == "host" or lower == "the host") then name = "" end
+  for other, taken in pairs(S.names) do
+    if other ~= peer and name ~= "" and taken == name then name = cut(name, 20) .. " (" .. peer .. ")" break end
+  end
+  o.name = name ~= "" and name or nil
   S.names[peer] = o.name or ("Player " .. peer)
   if first then say_name(peer) end
   show_room()
@@ -330,7 +364,7 @@ function mon.release()
 end
 
 function mon.hear(peer, rest)
-  if S.role ~= "guest" or peer ~= 0 then return end
+  if S.role ~= "guest" or peer ~= 0 or #rest > 12000 then return end
   local scene, list = rest:match("^(%S+) (%S+)$")
   if not scene or scene ~= my_scene then mon.release() return end
   local monsters = {}
@@ -374,7 +408,10 @@ function mon.hit_on_host(peer, rest)
   local o = others[peer]
   if not (o and o.scene and o.scene == my_scene) then return end
   local slot, damage = rest:match("^(%d+) (%d+)$")
-  if slot then try(game.monsters and game.monsters.mirror_hit, {slot = tonumber(slot), damage = tonumber(damage)}) end
+  slot, damage = tonumber(slot), tonumber(damage)
+  if slot and damage and slot <= 255 then -- one blow is a blow: never more than the game's most
+    try(game.monsters and game.monsters.mirror_hit, {slot = slot, damage = math.min(9999, damage)})
+  end
 end
 
 -- The host's monster struck this guest.
@@ -402,18 +439,29 @@ end
 
 local door = {log = {}, done = {}, waiting = {}}
 
-function door.key(scene, text) return scene .. "|" .. text:match("^(%S+ %S+ %S+ %S+ %S+)") end
+door.MOST = 256 -- doors remembered on one floor: far more than a floor has
+
+function door.key(scene, text) return scene .. "|" .. (text:match("^(%S+ %S+ %S+ %S+ %S+)") or text) end
 
 function door.remember(scene, text)
   local key = door.key(scene, text)
   if door.done[key] then return false end
+  local log = door.log[scene] or {}
+  if #log >= door.MOST then return false end
   door.done[key] = true
-  door.log[scene] = door.log[scene] or {}
-  table.insert(door.log[scene], text)
+  door.log[scene] = log
+  table.insert(log, text)
   return true
 end
 
 function door.step()
+  -- somewhere new: the doors of the place left are let go (that floor is built afresh when walked onto again)
+  if my_scene and door.scene ~= my_scene then
+    door.scene = my_scene
+    local mine = my_scene .. "|"
+    for scene in pairs(door.log) do if scene ~= my_scene then door.log[scene] = nil end end
+    for key in pairs(door.done) do if key:sub(1, #mine) ~= mine then door.done[key] = nil end end
+  end
   if not on_floor() then return end
   if not setting("shared_doors", true) then
     try(game.dungeons and game.dungeons.shared_events_get) -- this game's are kept to itself
@@ -451,9 +499,19 @@ function door.step()
 end
 
 function door.hear(rest)
+  if #rest > 200 then return end
   local scene, text = rest:match("^(%S+) (.+)$")
-  if not scene or select(2, text:gsub("%S+", "")) ~= 9 then return end
-  if scene ~= my_scene or not door.remember(scene, text) then return end -- elsewhere, or opened here already
+  if not scene or scene ~= my_scene then return end -- elsewhere
+  -- exactly a script, a mode, an ext and six numbers, each as this game would write them
+  if not text:match("^%d+ %d+ %d+ [%d%.%-]+ [%d%.%-]+ [%d%.%-]+ [%d%.%-]+ [%d%.%-]+ [%d%.%-]+$") then return end
+  local f = {}
+  for v in text:gmatch("%S+") do
+    local n = tonumber(v)
+    if not n or n ~= n or n > 1000000 or n < -1000000 then return end
+    f[#f + 1] = n
+  end
+  if #f ~= 9 or f[1] > 9999 or f[2] > 2 or f[3] > 1 then return end
+  if not door.remember(scene, text) then return end -- opened here already
   table.insert(door.waiting, {scene = scene, text = text})
 end
 
@@ -485,7 +543,10 @@ end
 local DUNGEONS = {[0] = "Divine Beast Cave", "Wise Owl Forest", "Shipwreck", "Sun and Moon Temple", "Moon Sea",
                   "Gallery of Time", "Demon Shaft"}
 local TOWN_NAMES = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
-local together = {queue = {}, open = nil}
+local together = {queue = {}, open = nil, owed = {}, got = {}}
+-- A gift's bounds: no more Gilda than a wallet holds, no more of an item than a bag's slot; and from one player in a
+-- minute, no more than two wallets and forty gifts. What is over goes back to the giver.
+together.GILDA_MAX, together.GILDA_MINUTE, together.ITEM_MAX, together.GIFTS_MINUTE, together.OWED_FOR = 65535, 131070, 99, 40, 600
 
 function together.name(peer)
   local o = others[peer]
@@ -494,7 +555,7 @@ end
 
 function together.place(scene)
   local d, f = scene:match("^D(%d+):(%-?%d+):")
-  if d then return string.format("%s, floor %d", DUNGEONS[tonumber(d)] or "a dungeon", tonumber(f) + 1) end
+  if d then return string.format("%s, floor %s", DUNGEONS[tonumber(d)] or "a dungeon", tostring((tonumber(f) or 0) + 1)) end
   local t = scene:match("^T(%d+)$")
   if t then return TOWN_NAMES[tonumber(t)] or "a town" end
   if scene:match("^H%d+$") then return "a house" end
@@ -514,8 +575,8 @@ function together.tick()
     return
   end
   local cards = {}
-  for i, o in ipairs(p.options) do cards[i] = {title = o.title:sub(1, 48), subtitle = o.subtitle and o.subtitle:sub(1, 64) or nil} end
-  local ok, err = call(game.ui.choice_open, {id = "coop_together", title = p.title:sub(1, 64), subtitle = p.subtitle and p.subtitle:sub(1, 96) or nil,
+  for i, o in ipairs(p.options) do cards[i] = {title = cut(o.title, 48), subtitle = o.subtitle and cut(o.subtitle, 64) or nil} end
+  local ok, err = call(game.ui.choice_open, {id = "coop_together", title = cut(p.title, 64), subtitle = p.subtitle and cut(p.subtitle, 96) or nil,
                                           cancel = true, town = true, options = cards})
   if ok then together.open = p else moonmod.log("warn", "co-op panel: " .. errmsg(err)) end
 end
@@ -575,6 +636,13 @@ end
 
 function S.moved(peer, scene)
   if not scene or scene == my_scene or not setting("follow_offers", true) then return end
+  -- six offers from one player in half a minute at most: more is no one walking
+  local o = others[peer]
+  if o then
+    if S.frame - (o.offers_since or -100000) > 1800 then o.offers_since, o.offers = S.frame, 0 end
+    o.offers = o.offers + 1
+    if o.offers > 6 then return end
+  end
   -- a guest still on the title page (its visit not begun) has nowhere to follow from
   if S.role == "guest" and not (S.guest and S.guest.visiting) then return end
   -- one offer per player: a newer move replaces one not yet shown
@@ -621,7 +689,43 @@ local function wallet()
   return type(w) == "table" and tonumber(w.amount) or 0
 end
 
+-- Someone to give to: still in the room, and this game in touch with it (a gift is taken from the giver first).
+function together.can_give(peer)
+  if S.rejoin or not (S.role and S.code) then
+    toast("Co-op: you're out of the room right now; give once you're back in")
+    return false
+  end
+  if not (S.names[peer] or S.players[peer]) then toast("Co-op: they have left the room") return false end
+  return true
+end
+
+-- What this game gave a player a moment ago: only that much is taken back from them as "didn't fit".
+function together.owe(peer, id, n)
+  local o = together.owed[peer]
+  if not o or S.frame - o.at > together.OWED_FOR then o = {g = 0, items = {}}; together.owed[peer] = o end
+  o.at = S.frame
+  if id then o.items[id] = (o.items[id] or 0) + n else o.g = o.g + n end
+end
+
+-- What a player gave this game in the last minute.
+function together.from(peer)
+  local a = together.got[peer]
+  if not a or S.frame - a.since > 3600 then a = {since = S.frame, gilda = 0, gifts = 0}; together.got[peer] = a end
+  return a
+end
+
+function together.add_gilda(amount)
+  local left = amount
+  while left > 0 do
+    local chunk = math.min(32767, left)
+    if not try(game.economy.add, {amount = chunk}) then break end
+    left = left - chunk
+  end
+end
+
 function together.give_gilda(peer, amount)
+  if not together.can_give(peer) then return end
+  amount = math.min(amount, together.GILDA_MAX)
   local spent = 0
   while spent < amount do
     local chunk = math.min(32767, amount - spent)
@@ -629,15 +733,28 @@ function together.give_gilda(peer, amount)
     spent = spent + chunk
   end
   if spent <= 0 then toast("Co-op: you don't have that much Gilda") return end
-  send(peer, "V", "g " .. spent)
+  if not send(peer, "V", "g " .. spent) then -- it never left: back in the wallet
+    together.add_gilda(spent)
+    toast("Co-op: the Gilda couldn't be sent; you still have it")
+    return
+  end
+  together.owe(peer, nil, spent)
+  S.keep_soon = S.frame + 30 -- a guest's things go to the host soon after, so a drop doesn't undo the gift
   toast(string.format("Co-op: you gave %s %d Gilda", together.name(peer), spent))
 end
 
 function together.give_item(peer, item, count)
-  local got = try(game.items.remove, {id = item.id, count = count})
+  if not together.can_give(peer) then return end
+  local got = try(game.items.remove, {id = item.id, count = math.min(count, together.ITEM_MAX)})
   local removed = type(got) == "table" and tonumber(got.removed) or 0
   if removed <= 0 then toast("Co-op: you no longer have " .. item.name) return end
-  send(peer, "V", string.format("i %s %d %s", item.id, removed, item.name))
+  if not send(peer, "V", string.format("i %s %d %s", item.id, removed, item.name)) then
+    try(game.items.give, {id = item.id, count = removed})
+    toast("Co-op: " .. item.name .. " couldn't be sent; you still have it")
+    return
+  end
+  together.owe(peer, item.id, removed)
+  S.keep_soon = S.frame + 30
   toast(string.format("Co-op: you gave %s %d x %s", together.name(peer), removed, item.name))
 end
 
@@ -700,30 +817,74 @@ function together.give()
 end
 
 -- Receiving (and taking back what didn't fit)
+function together.over(peer, a)
+  moonmod.log("warn", "co-op: more than a gift from player " .. tostring(peer) .. "; the rest went back")
+  if not a.warned then
+    a.warned = true
+    toast("Co-op: " .. together.name(peer) .. " sent more than a gift can hold; the rest went back to them")
+  end
+end
+
 function together.hear(peer, rest)
+  if #rest > 160 then return end
   local back, kind, tail = rest:match("^(back) (%a) (.+)$")
   if not back then kind, tail = rest:match("^(%a) (.+)$") end
+  if kind ~= "g" and kind ~= "i" then return end
+  -- only from a player of this room, and only into a save that is in it (a guest's visit, the host's story)
+  local known = S.names[peer] ~= nil or S.players[peer] ~= nil or (S.role == "guest" and peer == 0)
+  local playing = S.role == "host" or (S.role == "guest" and S.guest and S.guest.visiting)
+  local owed = together.owed[peer]
+  if owed and S.frame - owed.at > together.OWED_FOR then owed, together.owed[peer] = nil, nil end
+  local a = together.from(peer)
   if kind == "g" then
-    local amount = math.floor(tonumber(tail) or 0)
-    if amount <= 0 or amount > 1000000 then return end
-    local before, left = wallet(), amount
-    while left > 0 do
-      local chunk = math.min(32767, left)
-      if not try(game.economy.add, {amount = chunk}) then break end
-      left = left - chunk
+    local amount = tonumber(tail)
+    if not amount or amount ~= amount or amount < 1 then return end
+    amount = math.floor(math.min(amount, 1000000))
+    if back then
+      -- no more comes back than was given
+      amount = math.min(amount, owed and owed.g or 0)
+      if amount <= 0 then return end
+      owed.g = owed.g - amount
+    else
+      local take = (known and playing) and math.min(amount, together.GILDA_MAX, math.max(0, together.GILDA_MINUTE - a.gilda)) or 0
+      if take < amount then
+        send(peer, "V", string.format("back g %d", amount - take))
+        if known and playing then together.over(peer, a) end
+      end
+      if take <= 0 then return end
+      amount, a.gilda = take, a.gilda + take
     end
+    local before = wallet()
+    together.add_gilda(amount)
     local got = wallet() - before
-    if back then toast(string.format("Co-op: %d Gilda came back (their wallet was full)", got)) return end
+    S.keep_soon = S.frame + 30
+    if back then toast(string.format("Co-op: %d Gilda came back (it didn't fit)", got)) return end
     if got < amount then send(peer, "V", "back g " .. (amount - got)) end
     toast(string.format("Co-op: %s gave you %d Gilda%s", together.name(peer), got, got < amount and " (your wallet is full)" or ""))
-  elseif kind == "i" then
+  else
     local id, count, name = tail:match("^(%S+) (%d+) ?(.*)$")
     count = tonumber(count)
-    if not id or not count or count <= 0 or count > 999 then return end
+    if not id or #id > 64 or not count or count < 1 then return end
+    count = math.floor(math.min(count, 999))
+    name = cut((name:gsub("%c", " ")), 40)
+    name = name ~= "" and name or id
+    if back then
+      count = math.min(count, owed and owed.items[id] or 0)
+      if count <= 0 then return end
+      owed.items[id] = owed.items[id] - count
+    else
+      local take = (known and playing and a.gifts < together.GIFTS_MINUTE) and math.min(count, together.ITEM_MAX) or 0
+      if take < count then
+        send(peer, "V", string.format("back i %s %d %s", id, count - take, name))
+        if known and playing then together.over(peer, a) end
+      end
+      if take <= 0 then return end
+      count, a.gifts = take, a.gifts + 1
+    end
     local got = try(game.items.give, {id = id, count = count})
     local added = type(got) == "table" and tonumber(got.added) or 0
-    name = name ~= "" and name or id
-    if back then toast(string.format("Co-op: %d x %s came back (their bag was full)", added, name)) return end
+    S.keep_soon = S.frame + 30
+    if back then toast(string.format("Co-op: %d x %s came back (it didn't fit)", added, name)) return end
     if added < count then send(peer, "V", string.format("back i %s %d %s", id, count - added, name)) end
     toast(string.format("Co-op: %s gave you %d x %s%s", together.name(peer), added, name, added < count and " (your bag is full)" or ""))
   end
@@ -775,6 +936,13 @@ local function town_from(peer, payload)
   local base = cut and payload:sub(cut + 1) or nil
   local town = tonumber(data:match("^DCT1(%d+):"))
   if S.role == "host" then
+    -- a guest's word is only what it changed (it comes with the town it started from): the whole town is the host's
+    -- to say, so one without that is not taken, and the guest gets the host's town back
+    if not base then
+      moonmod.log("warn", "co-op: a town from player " .. tostring(peer) .. " came without what it was changed from; not taken")
+      if town then send_merged(town) end
+      return
+    end
     if take_town(data, peer, base) and town then send_merged(town) end
   elseif peer == 0 then
     take_town(data, 0)
@@ -846,7 +1014,7 @@ end
 -- values for its required mods, one "id\tkey\tvalue" a line, value typed "b:", "i:", "n:" or "s:") comes before the
 -- world, and the guest's game holds them for the visit only (game.mods.settings_overlay): never saved, dropped when
 -- the visit ends. A guest turned away keeps the list (storage "needed") and the title page shows it until it joins.
-local rm = {}
+local rm = {MOST = 256}
 
 function rm.loaded()
   local got = try(game.mods and game.mods.list)
@@ -870,10 +1038,12 @@ function rm.encode_list(mods)
 end
 
 function rm.decode_list(text)
-  local out = {}
+  local out, n = {}, 0
   for entry in tostring(text):gmatch("[^;]+") do
+    n = n + 1
+    if n > rm.MOST then break end -- no game plays that many
     local id, version, role = entry:match("^(%S+) (%S+) (%S+)$")
-    if id then out[id] = {id = id, version = version, role = role} end
+    if id and #id <= 64 and #version <= 32 and #role <= 12 then out[id] = {id = id, version = version, role = role} end
   end
   return out
 end
@@ -908,10 +1078,14 @@ function rm.encode_need(need)
 end
 
 function rm.decode_need(text)
-  local out = {}
+  local out, n = {}, 0
   for line in tostring(text):gmatch("[^\n]+") do
+    n = n + 1
+    if n > rm.MOST then break end
     local what, id, version, name = line:match("^(%a+)\t([^\t]+)\t([^\t]+)\t(.*)$")
-    if what then out[#out + 1] = {what = what, id = id, version = version, name = name} end
+    if (what == "enable" or what == "version" or what == "disable") and #id <= 64 and #version <= 32 then
+      out[#out + 1] = {what = what, id = id, version = version, name = cut((name:gsub("%c", " ")), 64)}
+    end
   end
   return out
 end
@@ -962,12 +1136,16 @@ end
 -- A guest takes the host's settings for the visit. Returns how many mods took them.
 rm.overlaid = false
 function rm.apply_settings(text)
-  local by_mod = {}
+  -- only for the mods this game plays as the room's (never one that is each player's own), and no more than a
+  -- mod's settings could be
+  local mine = rm.loaded()
+  local by_mod, keys = {}, {}
   for line in tostring(text):gmatch("[^\n]+") do
     local id, key, value = line:match("^([^\t]+)\t([^\t]+)\t(.*)$")
-    if id and id ~= "moonmod.coop" then
+    if id and id ~= "moonmod.coop" and (not mine or (mine[id] and mine[id].role == "required")) and #key <= 64 and #value <= 4096 then
       local v = rm.decode_value(value)
-      if v ~= nil then by_mod[id] = by_mod[id] or {}; by_mod[id][key] = v end
+      keys[id] = (keys[id] or 0) + 1
+      if v ~= nil and keys[id] <= 256 then by_mod[id] = by_mod[id] or {}; by_mod[id][key] = v end
     end
   end
   local count = 0
@@ -1014,6 +1192,7 @@ function rm.summary(list)
 end
 
 local function stop(reason)
+  local visiting = S.role == "guest" and S.guest and S.guest.visiting
   rm.clear_settings()
   try(game.net.leave)
   forget_all()
@@ -1024,8 +1203,19 @@ local function stop(reason)
   S.role, S.code, S.players, S.pieces, S.guest, S.names, S.guest_mods = nil, nil, {}, {}, nil, {}, {}
   S.rejoin, S.closing, S.host_bye, S.joined_at = nil, nil, nil, nil
   link.heard, link.ping, link.quiet, link.refused_since, link.out_of_step = {}, {}, {}, nil, {}
-  together.queue = {}
+  S.greeted, S.keep_soon = {}, nil
+  together.queue, together.owed, together.got, together.waiting = {}, {}, {}, nil
+  if together.open then -- a panel of the room's goes with the room
+    together.open = nil
+    try(game.ui.choice_close, {})
+  end
+  waiting_towns, editing_town, editing_base = {}, nil, nil
+  door.scene = nil
+  if S.stopped then S.stopped() end
   show_room()
+  -- A visit is the host's world: it ends with the room, however the room ended (the session's end comes back here
+  -- with no room left to stop).
+  if visiting then try(game.session.finish) end
 end
 
 -- Host --------------------------------------------------------------------------------------------------------------
@@ -1055,7 +1245,21 @@ end
 local function welcome(peer, hello)
   local id = type(hello) == "table" and hello.id
   if type(id) ~= "string" or not id:match("^[a-z0-9-]+$") then send(peer, "REFUSE", "your game sent no player id") return end
-  local name = type(hello.name) == "string" and hello.name ~= "" and hello.name or ("Player " .. (peer + 1))
+  if #id > 64 then send(peer, "REFUSE", "your game sent no player id") return end
+  -- one player, one place in the room: a second game saying the same id waits until the first has gone (a guest
+  -- coming back after a drop may be here before the host has seen its old connection go)
+  for other, p in pairs(S.players) do
+    if other ~= peer and p.id == id then
+      if S.frame - (link.heard[other] or -100000) < 45 then
+        S.greeted[peer] = nil
+        send(peer, "REFUSE", "that player is already in the room")
+        return
+      end
+      p.id, p.in_visit = nil, nil -- gone quiet: the newcomer is that player now
+    end
+  end
+  local name = type(hello.name) == "string" and cut((hello.name:gsub("%c", " ")), 24):match("^%s*(.-)%s*$") or ""
+  if name == "" then name = "Player " .. (peer + 1) end
   S.players[peer] = {id = id, name = name}
   -- the room's mods first: a guest without them is sent the list instead of the world
   local host_mods = rm.loaded()
@@ -1075,6 +1279,7 @@ local function welcome(peer, hello)
   end
   -- back after a dropped connection: their visit went on, so no world, only "carry on"
   if hello.back then
+    S.players[peer].in_visit = true
     send(peer, "RESUME")
     toast("Co-op: " .. name .. " is back in (reconnected)")
     show_room()
@@ -1091,13 +1296,15 @@ local function welcome(peer, hello)
     send(peer, "NEW")
     toast("Co-op: " .. name .. " joins for the first time")
   end
+  S.players[peer].in_visit = true
   send(peer, "START", tostring(arrival_town()))
   show_room()
 end
 
 local function keep(peer, data)
   local player = S.players[peer]
-  if not player then return end
+  -- only a guest whose visit this host began, and only what a game's things look like
+  if not (player and player.id and player.in_visit) or data:sub(1, 4) ~= "DCP1" then return end
   local ok, err = call(game.save.account_set, {id = player.id, name = player.name, data = data})
   if not ok then
     moonmod.log("warn", "co-op: keeping " .. player.name .. "'s things: " .. errmsg(err))
@@ -1122,7 +1329,7 @@ local function join()
   local kept = moonmod.storage.get("needed")
   if type(kept) == "table" and kept.code ~= code then moonmod.storage.set("needed", nil) end
   local ok, err = net_open("join", {code = code})
-  if not ok then S.status = "Can't join: " .. errmsg(err):sub(1, 60) return end
+  if not ok then S.status = "Can't join: " .. cut(errmsg(err), 60) return end
   S.role = "guest"
   S.guest = {world = nil, player = nil, new = false, map = nil, started = false}
   S.joined_at = S.frame
@@ -1181,11 +1388,15 @@ end
 
 function link.pong(peer, rest)
   local at = tonumber(rest)
-  if at and at <= S.frame then link.ping[peer] = math.floor((S.frame - at) * 1000 / 60 + 0.5) end
+  -- a frame this game sent, not long ago: anything else is no answer
+  if at and at <= S.frame and at >= S.frame - 36000 then link.ping[peer] = math.floor((S.frame - at) * 1000 / 60 + 0.5) end
 end
 
 function link.step()
-  if S.frame % PING_EVERY == 0 then send("all", "PING", tostring(S.frame)) end
+  if S.frame % PING_EVERY == 0 then send("all", "PING", string.format("%d", S.frame)) end
+  if S.frame % 600 == 0 then
+    for key, p in pairs(S.pieces) do if S.frame - (p.at or 0) > 1800 then S.pieces[key] = nil end end
+  end
   for peer, at in pairs(link.heard) do
     if not link.quiet[peer] and S.frame - at > QUIET_LINK then
       link.quiet[peer] = true
@@ -1216,16 +1427,17 @@ function link.lost(reason)
 end
 
 function link.give_up(why)
-  local visiting = S.guest and S.guest.visiting
   S.status = "Couldn't get back into the room."
-  stop(why .. "; your things were last kept " .. kept_ago())
-  if visiting then try(game.session.finish) end
+  stop(why .. "; your things were last kept " .. kept_ago()) -- and the visit ends with it
 end
 
 function link.rejoin_step()
   local r = S.rejoin
   if S.frame - r.since > REJOIN_WAIT then link.give_up("couldn't get back into the room") return end
   if S.frame < r.next_try then return end
+  -- in the room again and waiting for the host's word: no new try on top of it, for ten seconds
+  if r.linked and S.frame - r.linked < 600 then return end
+  if r.linked then r.linked = nil; try(game.net.leave) end
   r.next_try, r.tries = S.frame + REJOIN_EVERY, r.tries + 1
   local ok, err = net_open("join", {code = S.code})
   if not ok then moonmod.log("warn", "co-op rejoin: " .. errmsg(err)) end
@@ -1237,6 +1449,7 @@ function link.closed(reason)
   reason = tostring(reason)
   if S.rejoin then
     -- a try that failed: the room is gone, or the next try may do it
+    S.rejoin.linked = nil
     if reason:find("no room", 1, true) or reason:find("host left", 1, true) then link.give_up("the room is gone") end
     return
   end
@@ -1245,10 +1458,9 @@ function link.closed(reason)
   if S.host_bye then why = "the host closed the room; your things were kept"
   elseif visiting then why = "the host's game left the room; your things were last kept " .. kept_ago()
   else why = "the room closed: " .. reason end
-  S.status = "The room closed: " .. reason
-  stop(why)
-  -- The host's world went with the host: back to the title.
-  if visiting then try(game.session.finish) end
+  S.status = "The room closed: " .. cut(reason, 80)
+  stop(why) -- the host's world went with the host: a visit ends, back to the title
+  S.refresh_title = true
 end
 
 -- The host closing: guests' things first.
@@ -1341,30 +1553,47 @@ local fall = {state = "up", since = 0, deaths = 0, floor = nil, rule = nil, hold
 fall.DOWN_FOR, fall.OUT_FIRST, fall.OUT_MORE, fall.REVIVE_HOLD, fall.REVIVE_REACH, fall.WIPE_AFTER = 1800, 1800, 900, 180, 48, 120
 
 -- The rule follows the room: on while in one (and the setting is on), off otherwise.
+-- A guest whose connection dropped keeps the rule while it gets back in (a blip is not a knockout): alone on the
+-- floor it is down, then out, then up again by itself.
 function fall.rule_step()
-  local want = S.role ~= nil and S.code ~= nil and not S.rejoin and setting("down_not_out", true)
+  local want = S.role ~= nil and S.code ~= nil and setting("down_not_out", true)
   if want ~= fall.rule then
-    if not want and fall.state ~= "up" then -- out of the room while down: the game's own knockout
-      call(game.player and game.player.give_up)
-      fall.state = "up"
+    if not want then
+      fall.release() -- out of the room while down: the game's own knockout
+      fall.off_at = S.frame
     end
     local ok = call(game.player and game.player.down_rule_set, {enabled = want})
     if ok or not want then fall.rule = want end
+  end
+  -- Just off: a player knocked out in the very frame the room went is lying under a rule no one keeps any more.
+  if not fall.rule and fall.off_at then
+    if S.frame - fall.off_at > 120 then fall.off_at = nil else fall.release() end
+  end
+end
+
+-- No one will revive a player once the rule is off: whoever is down then gets the game's own knockout. What the
+-- game says counts (player.get's down), not only what this mod last saw.
+function fall.release()
+  local p = try(game.player and game.player.get)
+  if fall.state ~= "up" or (type(p) == "table" and p.down == true) then
+    call(game.player and game.player.give_up)
+    fall.state = "up"
   end
 end
 
 function fall.say(state)
   fall.state, fall.since = state, S.frame
-  send("all", "DN", state)
+  if not S.rejoin then send("all", "DN", state) end -- out of the room: no one to tell
 end
 
 function fall.hear(peer, rest)
-  local o = others[peer] or {}
-  others[peer] = o
+  local o = others[peer]
+  if not o or not (rest == "down" or rest == "out" or rest == "up" or rest == "fell") then return end
   local was = o.down
   o.down = (rest == "down" or rest == "out") and rest or "up"
-  if rest == "fell" and fall.state ~= "up" and o.scene and o.scene == my_scene and not fall.wiping then
-    fall.forced = true -- the party fell: this one goes too
+  -- the party fell: this one goes too. Only the word of a player who lay here themselves, to one who lies here.
+  if rest == "fell" and was and was ~= "up" and fall.state ~= "up" and o.scene and o.scene == my_scene and not fall.wiping then
+    fall.forced = true
   end
   if o.down ~= "up" and (was == nil or was == "up") and o.scene and o.scene == my_scene then
     toast("Co-op: " .. peer_name(peer) .. " is down! Stand beside them and hold Revive (R / right stick)")
@@ -1425,8 +1654,11 @@ function fall.self_step()
     local wait = fall.OUT_FIRST + fall.OUT_MORE * (fall.deaths - 1)
     if #mates == 0 then fall.get_up(1 / 3, nil, "no one else is on the floor: you get back up") return end
     if S.frame - fall.since >= wait and standing then
-      fall.get_up(1 / 3, {x = standing.state.x, y = standing.state.y, z = standing.state.z},
-                  "back on your feet beside the others")
+      -- beside them, where that is on this floor; a spot far off anything here is no spot: up in place
+      local at = {x = standing.state.x, y = standing.state.y, z = standing.state.z}
+      local here = type(p) == "table" and p.position or nil
+      if here and (math.abs(at.x - here.x) > 4000 or math.abs(at.z - here.z) > 4000 or math.abs(at.y - here.y) > 1000) then at = nil end
+      fall.get_up(1 / 3, at, "back on your feet beside the others")
     end
   end
 end
@@ -1471,8 +1703,15 @@ function fall.powder()
 end
 
 function fall.bar(text)
-  if text then try(game.render.layer_register, {id = "coop_revive", text = text:sub(1, 48)})
+  if text then try(game.render.layer_register, {id = "coop_revive", text = cut(text, 48)})
   else try(game.render.layer_remove, {id = "coop_revive"}) end
+end
+
+-- The room stopped: nothing of a fall is left to happen in the next one.
+function S.stopped()
+  fall.wiping, fall.forced, fall.wipe_since, fall.pending = nil, nil, nil, nil
+  if fall.hold then fall.bar(nil) end
+  fall.hold = nil
 end
 
 function fall.reviver_step()
@@ -1496,12 +1735,12 @@ function fall.reviver_step()
     return
   end
   if press and press.pressed then
+    -- the powder is used when the fallen player says it worked ("THX powder"), so none is lost on someone who
+    -- got up, or left, in the meantime
     local powder = fall.powder()
-    if powder then
-      local took = try(game.items.remove, {id = powder.id, count = 1})
-      if type(took) == "table" and (tonumber(took.removed) or 0) > 0 then
-        send(target, "RV", "powder")
-        toast("Co-op: you used a Revival Powder on " .. peer_name(target))
+    if powder and not (fall.pending and S.frame - fall.pending.at < 120) then
+      if send(target, "RV", "powder") then
+        fall.pending = {peer = target, id = powder.id, at = S.frame}
         fall.hold = nil
         return
       end
@@ -1530,9 +1769,31 @@ end
 -- Another player revived this one.
 function fall.revived(peer, rest)
   if fall.state == "up" then return end
-  if fall.get_up(rest == "powder" and 1 / 2 or 1 / 3, nil, peer_name(peer) .. " revived you") then
-    send(peer, "THX")
+  -- only a player standing on this floor, and beside this one where both games know where they stand
+  local o = others[peer]
+  if not (o and o.scene and o.scene == my_scene and (o.down or "up") == "up") then return end
+  local p = try(game.player and game.player.get)
+  if type(p) == "table" and p.position and o.state then
+    local d = math.sqrt((o.state.x - p.position.x) ^ 2 + (o.state.z - p.position.z) ^ 2)
+    if d > fall.REVIVE_REACH + 400 then return end -- (what each game knows of the other is a moment old)
   end
+  local powder = rest == "powder"
+  if fall.get_up(powder and 1 / 2 or 1 / 3, nil, peer_name(peer) .. " revived you") then
+    send(peer, "THX", powder and "powder" or nil)
+  end
+end
+
+-- The player this one revived is up.
+function fall.thanked(peer, rest)
+  local w = fall.pending
+  if rest == "powder" and w and w.peer == peer and S.frame - w.at <= 600 then
+    fall.pending = nil
+    local took = try(game.items.remove, {id = w.id, count = 1})
+    if type(took) == "table" and (tonumber(took.removed) or 0) > 0 then
+      toast("Co-op: you used a Revival Powder on " .. peer_name(peer))
+    end
+  end
+  toast("Co-op: " .. peer_name(peer) .. " is back on their feet")
 end
 
 function fall.step()
@@ -1545,15 +1806,26 @@ end
 
 -- Messages ----------------------------------------------------------------------------------------------------------
 
+-- What a host takes from a game that has joined the room but whose visit it hasn't begun, and what a guest leaves
+-- alone until its own visit has.
+S.BEFORE_VISIT = {PING = true, PONG = true, N = true, P = true, MODS = true, HELLO = true, BACK = true, LEAVING = true}
+S.VISIT_ONLY = {TOWN = true, C = true, RV = true, M = true, D = true, E = true, B = true}
+
 local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
   if not kind then return end
   link.heard_from(peer)
-  if kind == "PING" then send(peer, "PONG", rest) return end
+  if S.role == "host" then
+    local p = S.players[peer]
+    if not (p and p.in_visit) and not S.BEFORE_VISIT[kind] then return end
+  elseif S.VISIT_ONLY[kind] and not (S.guest and S.guest.visiting) then
+    return
+  end
+  if kind == "PING" then if #rest <= 12 and rest:match("^%d+$") then send(peer, "PONG", rest) end return end
   if kind == "PONG" then link.pong(peer, rest) return end
   if kind == "DN" then fall.hear(peer, rest) return end
   if kind == "RV" then fall.revived(peer, rest) return end
-  if kind == "THX" then toast("Co-op: " .. peer_name(peer) .. " is back on their feet") return end
+  if kind == "THX" then fall.thanked(peer, rest) return end
   if kind == "P" then hear_position(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
@@ -1573,6 +1845,8 @@ local function message(peer, data)
       local whole = take_piece(peer, kind, rest)
       if whole then S.guest_mods[peer] = rm.decode_list(whole) end
     elseif kind == "HELLO" or kind == "BACK" then
+      if S.greeted[peer] then return end -- once a connection: a second hello would send the world again
+      S.greeted[peer] = true
       local id, name = rest:match("^(%S+) ?(.*)$")
       welcome(peer, {id = id, name = name, back = kind == "BACK"})
     elseif kind == "LEAVING" then
@@ -1587,7 +1861,7 @@ local function message(peer, data)
     local g = S.guest
     if kind == "K" then link.guest_check(rest) return end
     if kind == "BYE" then
-      S.host_bye = true
+      S.host_bye = S.frame
       send_things()
       toast("Co-op: the host is closing the room; your things are going to them")
       return
@@ -1607,9 +1881,8 @@ local function message(peer, data)
         for _, n in ipairs(list) do if n.what == "disable" and mine[n.id] then n.name = mine[n.id].name end end
         moonmod.storage.set("needed", {list = list, code = S.code})
         S.status = string.format("This room needs %d mod change%s first.", #list, #list == 1 and "" or "s")
-        local visiting = g and g.visiting -- back after a drop, with mods changed since
+        -- (back after a drop, with mods changed since: the visit ends with the room)
         stop("this room needs mods you don't have: " .. rm.summary(list))
-        if visiting then try(game.session.finish) end
         S.refresh_title = true
       end
       return
@@ -1625,7 +1898,17 @@ local function message(peer, data)
     elseif kind == "PLAYER" then g.player = take_piece(peer, kind, rest) or g.player
     elseif kind == "NEW" then g.new = true
     elseif kind == "START" then g.map = tonumber(rest)
-    elseif kind == "REFUSE" then stop("the host turned the visit away: " .. rest) return
+    elseif kind == "REFUSE" then
+      if S.rejoin and rest:find("already in the room", 1, true) then
+        -- the host hasn't seen this game's old connection go yet: the next try may do it
+        try(game.net.leave)
+        S.rejoin.linked = nil
+        return
+      end
+      S.status = "The host turned the visit away: " .. cut(rest, 80)
+      stop("the host turned the visit away: " .. rest)
+      S.refresh_title = true
+      return
     end
     begin_visit()
   end
@@ -1647,11 +1930,13 @@ local function pump()
         if mine then send_pieces(0, "MODS", rm.encode_list(mine)) end
         send(0, S.rejoin and "BACK" or "HELLO", me.id .. " " .. (my_name() or ""))
         if not S.rejoin then S.status = "Joined " .. tostring(e.code) .. "; the host is sending their world..." end
+        if S.rejoin then S.rejoin.linked = S.frame end
       end
       if S.role == "guest" then link.heard_from(0) end -- the host is there from the start; a host doesn't hear itself
       show_room()
     elseif e.kind == "joined" then
       if S.role == "host" then S.players[e.peer] = S.players[e.peer] or {id = nil, name = e.name} end
+      if e.peer ~= nil then S.greeted[e.peer] = nil end
       show_room()
     elseif e.kind == "left" then
       local p = S.players[e.peer]
@@ -1659,6 +1944,11 @@ local function pump()
       S.guest_mods[e.peer] = nil
       forget(e.peer)
       builders[e.peer] = nil
+      if e.peer ~= nil then
+        S.greeted[e.peer], together.owed[e.peer], together.got[e.peer] = nil, nil, nil
+        local mine = tostring(e.peer) .. ":"
+        for key in pairs(S.pieces) do if key:sub(1, #mine) == mine then S.pieces[key] = nil end end
+      end
       if S.closing then S.closing.waiting[e.peer] = nil end
       if S.role == "host" and p then
         if p.leaving or not p.id then toast("Co-op: " .. tostring(p.name or "a player") .. " left")
@@ -1666,7 +1956,16 @@ local function pump()
       end
       show_room()
     elseif e.kind == "message" then
-      message(e.peer, e.data)
+      -- one message that can't be read costs that message, never the rest of this frame's (a gift among them)
+      if type(e.data) == "string" and type(e.peer) == "number" then
+        local ok, err = pcall(message, e.peer, e.data)
+        if not ok then
+          link.unread = (link.unread or 0) + 1
+          if link.unread <= 20 then
+            moonmod.log("warn", "co-op: a message from player " .. tostring(e.peer) .. " couldn't be read: " .. tostring(err):sub(1, 160))
+          end
+        end
+      end
     elseif e.kind == "closed" then
       if S.role == "host" then
         S.status = "The room closed: " .. tostring(e.reason)
@@ -1689,6 +1988,15 @@ moonmod.on("game.tick", function(e)
   if S.rejoin then link.rejoin_step() return end
   if S.closing then link.closing_step() end
   if S.role and S.code then link.step() end
+  -- A room is one save's: a host whose game leaves its story (to the title, to another mode) closes it, so no
+  -- guest's things or town reach whatever loads next.
+  if S.role == "host" and S.frame % 60 == 0 then
+    local session = try(game.session.get)
+    if type(session) == "table" and session.kind ~= nil and session.kind ~= "story" then
+      stop("your game left its story, so the room is closed")
+      return
+    end
+  end
   if S.role == "host" and S.code and S.frame % CHECK_EVERY == 0 then link.host_check() end
   -- a host that never answers a join
   if S.role == "guest" and S.guest and not S.guest.started and S.joined_at and S.frame - S.joined_at > 1800 then
@@ -1711,10 +2019,16 @@ moonmod.on("game.tick", function(e)
   end
   if S.role == "guest" and S.guest and S.guest.visiting then
     local every = math.max(15, math.min(600, setting("keep_every", 60))) * 60
-    if S.frame - S.kept_at >= every then
+    local soon = S.keep_soon and S.frame >= S.keep_soon -- after a gift, given or got
+    if soon then S.keep_soon = nil end
+    if soon or S.frame - S.kept_at >= every then
       S.kept_at = S.frame
       send_things()
     end
+    -- a host that said goodbye and then didn't go
+    if S.host_bye and S.frame - S.host_bye > 1200 then S.host_bye = nil end
+  elseif S.keep_soon then
+    S.keep_soon = nil -- the host's things are in its own save
   end
 end)
 
@@ -1727,13 +2041,29 @@ moonmod.on("game.session.started", function(e)
 end)
 
 moonmod.on("game.session.ended", function(e)
-  if type(e) == "table" and e.kind == "visit" and S.role == "guest" then stop() end
+  if type(e) == "table" and e.kind == "visit" and S.role == "guest" then
+    -- ended from the game's own menu: the host hears it was a leave, not a drop. (This game's things can't go with
+    -- it any more: the visit they were in is over. They are as last kept.)
+    if S.guest and S.guest.visiting and S.code and not S.rejoin then try(game.net.send, {to = 0, data = "LEAVING"}) end
+    if S.guest then S.guest.visiting = false end
+    stop()
+  end
+end)
+
+-- This mod switched off (or the game closing) with a room open: the room closes, and no one is left lying under a
+-- rule that nothing keeps.
+moonmod.on("runtime.unloaded", function()
+  if S.role then stop() end
+  fall.release()
+  if fall.rule then call(game.player and game.player.down_rule_set, {enabled = false}) end
+  fall.rule, fall.off_at = false, nil
 end)
 
 moonmod.on("game.session.failed", function(e)
   if type(e) == "table" and e.kind == "visit" then
-    S.status = "The visit could not start: " .. tostring(e.reason):sub(1, 60)
+    S.status = "The visit could not start: " .. cut(tostring(e.reason), 60)
     stop()
+    S.refresh_title = true
   end
 end)
 
@@ -1741,8 +2071,7 @@ end)
 local function leave()
   if S.role == "guest" and S.guest and S.guest.visiting then
     if S.rejoin then
-      stop("you left while out of the room; your things were last kept " .. kept_ago())
-      try(game.session.finish)
+      stop("you left while out of the room; your things were last kept " .. kept_ago()) -- the visit ends with it
       return
     end
     send(0, "LEAVING")
@@ -2066,4 +2395,4 @@ if AUTOTEST then
 end
 
 -- For the tests: the state, and the pieces' size.
-return {state = S, me = me, piece = PIECE, mods = rm, link = link, fall = fall}
+return {state = S, me = me, piece = PIECE, mods = rm, link = link, fall = fall, together = together, door = door}
