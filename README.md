@@ -91,6 +91,7 @@ anyone making a mod.
   | `moonmod.vigil` Vigil | Souls-lite combat for the story game: stamina-gated rolls and backsteps, harder-hitting enemies, and floors that stay the same between visits ([guide](mods/moonmod.vigil/README.md)) |
   | `moonmod.challenges` Challenges | Boss fights worth the name, and challenge modes on the title menu's Challenges row ([guide](mods/moonmod.challenges/README.md)) |
   | `moonmod.randomizer` Randomizer | A new Dark Cloud from one seed: shop stock, weapon stats, monster drops and steals, chest contents and floor layouts, all shuffled ([guide](mods/moonmod.randomizer/README.md)) |
+  | `moonmod.openworld` Open World | Dark Cloud as one world to walk, built in steps: no loading card between a town and its dungeon, and a town's gate is the road to the next town wherever the story has opened the way ([guide](mods/moonmod.openworld/README.md)) |
   | `moonmod.living-towns` Living Towns | The towns ask things of you after their houses are rebuilt ([guide](mods/moonmod.living-towns/README.md)) |
   | `moonmod.opar` Opar in the Story | Opar, the frog mage, joins the story with Xiao as a seventh playable hero |
   | `moonmod.modern-cloud` Modern Cloud | Quality of life for the story game, each part its own setting: thirst, weapon wear and a break guard, map and monster reveal, and more ([guide](mods/moonmod.modern-cloud/README.md)) |

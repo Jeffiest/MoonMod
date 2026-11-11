@@ -20074,19 +20074,34 @@ index bd9c1093..b9171040 100644
      }
  
 diff --git a/port/src/game/ebattle.cpp b/port/src/game/ebattle.cpp
-index 62cd5924..35736ade 100644
+index 62cd5924..15803893 100644
 --- a/port/src/game/ebattle.cpp
 +++ b/port/src/game/ebattle.cpp
-@@ -17,6 +17,8 @@
+@@ -17,6 +17,10 @@
  #include "dataread.hpp"
  #include "dataset.hpp"
  #include "ebattle.hpp"
 +
++#include "moonmod/choice_panel.hpp"
 +#include "moonmod/game_hooks.hpp"
++#include "moonmod/map_screen.hpp"
  #include "edit.hpp"
  #include "editground.hpp"
  #include "editloop.hpp"
-@@ -2050,11 +2052,40 @@ void EdMoveChara() {
+@@ -1087,6 +1091,12 @@ namespace {
+  * Returns the low two character-control lock bits.
+  */
+ int keylock() {
++    // MoonMod: a mod's panel or map over the town walk holds the sticks as it holds the buttons (the pad's own
++    // lock stops buttons only, so a held stick walked the party on under the panel).
++    if (dc::game::MoonModChoiceUp() || dc::game::MoonModMapUp()) {
++        return 1;
++    }
++
+     return chara_mode & 3;
+ }
+ 
+@@ -2050,11 +2060,40 @@ void EdMoveChara() {
              near_villager = -1;
          }
  
@@ -20127,7 +20142,7 @@ index 62cd5924..35736ade 100644
          if (acted == 0 && PadDown(0x40) != 0 && (viewMode == 0 || interior != 0) && key_lock == 0) {
              if (near_villager >= 0) {
                  if (EdTalkModeInit(&EdVillager[near_villager], -1) != 0) {
-@@ -2261,6 +2292,7 @@ void EdMoveChara() {
+@@ -2261,6 +2300,7 @@ void EdMoveChara() {
                  EdFishingAngleHelpMEs(FishingGetEsaItemNo());
  
                  if (FishingFishStatus(nullptr) != 8) {
@@ -20239,7 +20254,7 @@ index c00195f0..a54e8ef8 100644
          }
  
 diff --git a/port/src/game/editloop.cpp b/port/src/game/editloop.cpp
-index 12cad0dd..96232934 100644
+index 12cad0dd..a8a2d556 100644
 --- a/port/src/game/editloop.cpp
 +++ b/port/src/game/editloop.cpp
 @@ -1,3 +1,4 @@
@@ -20267,7 +20282,7 @@ index 12cad0dd..96232934 100644
  
  namespace dc::game {
  
-@@ -168,9 +175,31 @@ int start_event_no;
+@@ -168,9 +175,32 @@ int start_event_no;
  int          start_system_event;
  int          move_count;
  int          interior_test;
@@ -20285,9 +20300,10 @@ index 12cad0dd..96232934 100644
  char       **interior_name;
  int          oldGameMode;
  CEditGround *pEditGround;
-+// MoonMod (quick passage, O2 C0): this town was walked into from a dungeon. Its walk frames are counted (an arrival
-+// event pauses the count) and a few in, with the camera settled, the held picture goes.
++// MoonMod (quick passage, O2 C0): this place was arrived in under a held picture. Its frames are counted, whatever it
++// opens with (the walk, an arrival scene, a field's own script), and a few in the held picture goes.
 +bool g_walked_in = false;
++bool g_arrived_held = false;
 +int  g_walked_frames = 0;
 +// MoonMod (open world): frames since the party last stood in the town's gate (the road asks once each time it walks in)
 +int g_gate_away = 0;
@@ -20299,7 +20315,7 @@ index 12cad0dd..96232934 100644
  CEditArea   *EditArea;
  CMapParts   *ObjParts;
  CMapParts   *RiverParts;
-@@ -574,7 +603,8 @@ int FadeOutToEvent(int event_no, int level) {
+@@ -574,7 +604,8 @@ int FadeOutToEvent(int event_no, int level) {
  void EditSave() {
      int map_no = MapNo;
  
@@ -20309,7 +20325,7 @@ index 12cad0dd..96232934 100644
          pEditGround->Save(NowEditMap, SaveData);
          EditPartsInfo.Save(NowEditMap, SaveData);
      }
-@@ -593,6 +623,7 @@ void EditLoad() {
+@@ -593,6 +624,7 @@ void EditLoad() {
      if (MapNo < TOWN_COUNT) {
          EditPartsInfo.Load(NowEditMap, SaveData, 0);
          pEditGround->Load(NowEditMap, SaveData);
@@ -20317,7 +20333,7 @@ index 12cad0dd..96232934 100644
      }
  
      EditPartsObjectOnOff();
-@@ -853,6 +884,111 @@ void FormatInto(char (&buffer)[N], std::format_string<Args...> format, Args &&..
+@@ -853,6 +885,111 @@ void FormatInto(char (&buffer)[N], std::format_string<Args...> format, Args &&..
  }
  } // namespace
  
@@ -20429,7 +20445,7 @@ index 12cad0dd..96232934 100644
  int EditInit(void * /*param*/) {
      std::string map_path;
      std::string save_path;
-@@ -896,6 +1032,25 @@ int EditInit(void * /*param*/) {
+@@ -896,6 +1033,25 @@ int EditInit(void * /*param*/) {
  
      bgm_play_flag = 0;
      bgm_play_start = 0;
@@ -20455,7 +20471,7 @@ index 12cad0dd..96232934 100644
      InitializeDataBuffer();
      SetDataBuffer(&VisualData, 100);
      SetDataBuffer(&EtcDataBuffer, 40000);
-@@ -905,7 +1060,7 @@ int EditInit(void * /*param*/) {
+@@ -905,7 +1061,7 @@ int EditInit(void * /*param*/) {
      SetDataBuffer(&EdScriptBuffer, 16000);
  #endif
      SetDataBuffer(&EPartsInfoBuff, 8000);
@@ -20464,7 +20480,7 @@ index 12cad0dd..96232934 100644
      SetDataBuffer(&TextureData, 10);
      SetDataBuffer(&MotionData, 7900);
      SetDataBuffer(&EdMesBuffer, 13000);
-@@ -917,7 +1072,8 @@ int EditInit(void * /*param*/) {
+@@ -917,7 +1073,8 @@ int EditInit(void * /*param*/) {
      EPartsInfoBuff.used = 0;
      EditArea = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CEditArea>(4)))) CEditArea[4];
      pEditGround = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CEditGround>(1)))) CEditGround;
@@ -20474,7 +20490,7 @@ index 12cad0dd..96232934 100644
      MotionParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CCharacter>(4)))) CCharacter[4];
      RiverParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CMapParts>(16)))) CMapParts[16];
      RoadParts = new (reinterpret_cast<u_long128 *>(EtcDataBuffer.Alloc(Quadwords<CMapParts>(6)))) CMapParts[6];
-@@ -964,39 +1120,7 @@ int EditInit(void * /*param*/) {
+@@ -964,39 +1121,7 @@ int EditInit(void * /*param*/) {
          interior_name[row][0] = '\0';
      }
  
@@ -20515,7 +20531,7 @@ index 12cad0dd..96232934 100644
      EdEventInfo.world_coord_enable = false;
      EdEventInfo.main_character = Chara;
      EdEventInfo.main_texture_animation = CharaTexAnimeData;
-@@ -1112,6 +1236,10 @@ int EditInit(void * /*param*/) {
+@@ -1112,6 +1237,10 @@ int EditInit(void * /*param*/) {
      EdVillagerBuffer.base = reinterpret_cast<u_char *>(free_start);
      EdVillagerBuffer.limit = free_quads - 4;
      EdVillagerBuffer.used = 0;
@@ -20526,7 +20542,7 @@ index 12cad0dd..96232934 100644
      EdNPCReadBuffer = reinterpret_cast<u_long128 *>(EdNPCBuffer.base + EdNPCBuffer.used * 16 + (free_quads >> 1) * 16);
      const auto read_address = reinterpret_cast<std::uintptr_t>(EdNPCReadBuffer);
      EdNPCReadBuffer = reinterpret_cast<u_long128 *>(read_address + ((0x40 - (read_address & 0x3F)) & 0x3F));
-@@ -1119,13 +1247,17 @@ int EditInit(void * /*param*/) {
+@@ -1119,13 +1248,18 @@ int EditInit(void * /*param*/) {
      EdCreateVillagerTable(EditMapInfo);
      EdInitVillagerControl();
      EdInitVillagerTable(NowTime, EditMapInfo);
@@ -20540,13 +20556,14 @@ index 12cad0dd..96232934 100644
 -    EdFadeIn(128, static_cast<float>(static_cast<int>(fade[0])), static_cast<float>(static_cast<int>(fade[1])), static_cast<float>(static_cast<int>(fade[2])));
 +    // MoonMod (quick passage, O2 C0): walked out of a dungeon, the town is there at once, not faded in from black
 +    g_walked_in = moonmod::ChronicleTakeWalkArrival();
++    g_arrived_held = g_walked_in || moonmod::ChronicleHoldingPicture(); // an arrival scene's jump marks no walk
 +    g_walked_frames = 0;
 +    EdFadeIn(g_walked_in ? 1 : 128, static_cast<float>(static_cast<int>(fade[0])), static_cast<float>(static_cast<int>(fade[1])),
 +             static_cast<float>(static_cast<int>(fade[2])));
      Chara->SetPosition(start_position);
      Chara->SetRotation(start_rotation);
      float yaw = start_rotation[1] - PI_SHORT;
-@@ -1202,64 +1334,48 @@ int EditInit(void * /*param*/) {
+@@ -1202,64 +1336,49 @@ int EditInit(void * /*param*/) {
      CommonMenuMes1.SetBuff_system(SystemMes);
      CommonMenuMes2.SetBuff_system(SystemMes);
      CommonMenuMes3.SetBuff_system(SystemMes);
@@ -20639,6 +20656,7 @@ index 12cad0dd..96232934 100644
 +    sceVu0FVECTOR fade;
 +    EdGetFadeColor(fade);
 +    g_walked_in = moonmod::ChronicleTakeWalkArrival();
++    g_arrived_held = g_walked_in || moonmod::ChronicleHoldingPicture();
 +    g_walked_frames = 0;
 +    EdFadeIn(g_walked_in ? 1 : 128, static_cast<float>(static_cast<int>(fade[0])), static_cast<float>(static_cast<int>(fade[1])),
 +             static_cast<float>(static_cast<int>(fade[2])));
@@ -20650,7 +20668,7 @@ index 12cad0dd..96232934 100644
  /**
   * Returns the sum of the editor category indices from zero through nine.
   */
-@@ -1287,8 +1403,19 @@ struct ED_GRD_DATA {
+@@ -1287,8 +1406,19 @@ struct ED_GRD_DATA {
  /**
   * Runs one frame of the editor and reports what it is to do next.
   */
@@ -20670,7 +20688,7 @@ index 12cad0dd..96232934 100644
  
      // Pausing is a walking action: an event must not open the pause menu, which reads state only
      // valid outside an event, over itself.
-@@ -1427,6 +1554,23 @@ int EditLoop() {
+@@ -1427,6 +1557,23 @@ int EditLoop() {
  
      EdInteriorFlag = 0;
  
@@ -20694,7 +20712,7 @@ index 12cad0dd..96232934 100644
      if (interior_test != 0) {
          static int             select = 0;
          std::array<char *, 64> menu{};
-@@ -1534,6 +1678,29 @@ int EditLoop() {
+@@ -1534,6 +1681,29 @@ int EditLoop() {
  
              break;
          case ED_MODE_WALK:
@@ -20717,14 +20735,27 @@ index 12cad0dd..96232934 100644
 +                    MainCamera.Step(-1);
 +                }
 +            }
-+            if (g_walked_in && ++g_walked_frames >= 4) {
-+                g_walked_in = false;
++            if (g_arrived_held && ++g_walked_frames >= 4) {
++                g_arrived_held = false;
 +                moonmod::ChronicleWalkPlaceReady(); // the party stands in the town: the held picture can go
 +            }
              if (loop_counter > 0) {
                  TownMouseBegin(&MainCamera, pEditGround, MapNo, GameMode);
                  if (EdCheckViewMode() == 0) {
-@@ -1808,6 +1975,8 @@ int EditLoop() {
+@@ -1571,6 +1741,12 @@ int EditLoop() {
+ 
+             break;
+         case ED_MODE_EVENT:
++            // MoonMod (OW1): the place opens with a scene (a town's arrival scene, a field's script): the held picture
++            // goes for it as it does for the walk, not ten seconds into the scene
++            if (g_arrived_held && NextMapNo < 0 && ++g_walked_frames >= 4) {
++                g_arrived_held = false;
++                moonmod::ChronicleWalkPlaceReady();
++            }
+             NowCamera = static_cast<CCamera *>(&EventCamera);
+             MainEditMode();
+             EventMode();
+@@ -1808,6 +1984,8 @@ int EditLoop() {
  
      TownZoomEnd();
      TownMouseApply(NowCamera, pEditGround, MapNo, GameMode);
@@ -20733,7 +20764,7 @@ index 12cad0dd..96232934 100644
  
      sceVu0FMATRIX view;
      sceVu0FVECTOR eye;
-@@ -1815,6 +1984,7 @@ int EditLoop() {
+@@ -1815,6 +1993,7 @@ int EditLoop() {
      NowCamera->GetCameraMatrix(view);
      NowCamera->GetPos(eye);
      MGSetViewMatrix(view, eye);
@@ -20741,7 +20772,7 @@ index 12cad0dd..96232934 100644
  
      if (GameMode != ED_MODE_GEORAMA && GameMode != ED_MODE_GEORAMA_MENU_INIT && GameMode != ED_MODE_RETURN_MENU_GEORAMA) {
          if (move_count > 0) {
-@@ -1968,6 +2138,19 @@ int EditLoop() {
+@@ -1968,6 +2147,19 @@ int EditLoop() {
          }
      }
  
@@ -20761,7 +20792,7 @@ index 12cad0dd..96232934 100644
      if (GameMode == ED_MODE_WALK && (EdPadDown(0x10, 1) != 0 || goto_menu != 0 || (SystemMesCheck() == 0 && EdCheckItemOver() != 0))) {
          int menu_no = ED_MENU_BATTLE;
  
-@@ -2104,8 +2287,15 @@ int EditLoop() {
+@@ -2104,8 +2296,15 @@ int EditLoop() {
      if (GameMode != ED_MODE_EVENT) {
          auto *player = static_cast<CMainChara *>(Chara);
  
@@ -20778,7 +20809,7 @@ index 12cad0dd..96232934 100644
              player->move_info.ground_poly.attr.ground_kind = 0;
          }
      }
-@@ -2311,6 +2501,38 @@ bool EdDrawBeyondRetailReach(int *far_marks, const GameDrawTrace &draw_trace) {
+@@ -2311,6 +2510,38 @@ bool EdDrawBeyondRetailReach(int *far_marks, const GameDrawTrace &draw_trace) {
      return drawn;
  }
  
@@ -20817,7 +20848,7 @@ index 12cad0dd..96232934 100644
  /**
   * Draws the editor's world for one frame (retail's MainDraw).
   */
-@@ -2320,6 +2542,7 @@ void EditMainDraw() {
+@@ -2320,6 +2551,7 @@ void EditMainDraw() {
      bool                far_drawn = false;
  
      if (EdDrawOffFlag == 0) {
@@ -20825,7 +20856,7 @@ index 12cad0dd..96232934 100644
          if (EdPauseFlag != 0 || GameMode == ED_MODE_RETURN_MENU_WALK || GameMode == ED_MODE_RETURN_MENU_GEORAMA) {
              CTextureAnime::stop_anime = 1;
          } else {
-@@ -2429,6 +2652,11 @@ void EditMainDraw() {
+@@ -2429,6 +2661,11 @@ void EditMainDraw() {
  
              pEditGround->DrawRipple(0x15);
              draw_trace.Finish(GameDrawPhase::Water, water_start);
@@ -20837,7 +20868,7 @@ index 12cad0dd..96232934 100644
  
              if (depth_of_field != 0) {
                  const auto far_dof_start = draw_trace.Start();
-@@ -2463,6 +2691,14 @@ void EditMainDraw() {
+@@ -2463,6 +2700,14 @@ void EditMainDraw() {
          }
  
          switch (GameMode) {
@@ -20852,7 +20883,7 @@ index 12cad0dd..96232934 100644
              case ED_MODE_RETURN_MENU_WALK:
              case ED_MODE_MENU_INIT: {
                  const auto step_start = draw_trace.Start();
-@@ -2578,6 +2814,8 @@ void EditMainDraw() {
+@@ -2578,6 +2823,8 @@ void EditMainDraw() {
                  draw_trace.Finish(GameDrawPhase::CharacterLights, lights_start);
                  const auto draw_start = draw_trace.Start();
                  EdDrawCharacter(Chara, detail, 0xA, EdVillager, marks, shadow_on, event);
@@ -20861,7 +20892,7 @@ index 12cad0dd..96232934 100644
                  draw_trace.Finish(GameDrawPhase::CharacterDraw, draw_start);
                  break;
              }
-@@ -3295,6 +3533,9 @@ void DrawSysGra() {
+@@ -3295,6 +3542,9 @@ void DrawSysGra() {
              set2DSprite(GetVif1Packet(), pause, screen, texel, 0x80);
          }
      }
@@ -20871,7 +20902,7 @@ index 12cad0dd..96232934 100644
  }
  
  // Kept in the window's top right corner.
-@@ -3542,6 +3783,12 @@ void MainEditMode() {
+@@ -3542,6 +3792,12 @@ void MainEditMode() {
      char night_window[10] = "win2";
  
      for (level = 0; level < 4; level++) {
@@ -20884,7 +20915,7 @@ index 12cad0dd..96232934 100644
          CMapParts *obj = &ObjParts[parts];
          CFrame    *frame = obj->frame[level];
  
-@@ -3551,7 +3798,7 @@ void MainEditMode() {
+@@ -3551,7 +3807,7 @@ void MainEditMode() {
  
      parts++;
  
@@ -20893,7 +20924,7 @@ index 12cad0dd..96232934 100644
          parts = 0;
      }
  
-@@ -3914,6 +4161,18 @@ void MoveChara() {
+@@ -3914,6 +4170,18 @@ void MoveChara() {
      EdMoveCharaInfo.fishing = (GameMode == ED_MODE_FISHING);
      EdMoveChara();
  
@@ -20912,7 +20943,7 @@ index 12cad0dd..96232934 100644
      if (EdMoveCharaInfo.system_event_no > 0) {
          RunSystemEvent(EdMoveCharaInfo.system_event_no, &MainCamera);
      } else if (EdMoveCharaInfo.event_no > 0) {
-@@ -3923,7 +4182,15 @@ void MoveChara() {
+@@ -3923,7 +4191,15 @@ void MoveChara() {
  
          if (param->kind == ED_EVENT_POINT_DOOR) {
              if (std::string_view(param->point->destination) == "dungeon") {
@@ -20929,7 +20960,7 @@ index 12cad0dd..96232934 100644
              } else if (EdPadDown(0x40, 1) != 0 && EdCheckViewMode() == 0 && key_lock == 0) {
                  ED_EVENT_POINT *point = param->point;
  
-@@ -4832,6 +5099,9 @@ void LoadGroundData() {
+@@ -4832,6 +5108,9 @@ void LoadGroundData() {
  
      EditPartsInfo.Initialize(NowEditMap);
      LoadObjectParts();
@@ -28522,7 +28553,7 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..dec32aea
+index 00000000..acf933ec
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,688 @@
@@ -28711,7 +28742,7 @@ index 00000000..dec32aea
 +    {"dungeons.set_npc_models", "dungeons", "set_npc_models", "simulation", "game.write", "Chronicle: {models = {{dungeon_id, npc = 1-3, pack = \"dun/.../<stem>.chr\" or \"gedit/...\", cfg (default <stem>.cfg; base.cfg for dun/mainchara), motion}}} loads characters into a dungeon's free NPC slots when its map loads, for set_npc_marks to stand; {} stops."},
 +    {"dungeons.play_event", "dungeons", "play_event", "simulation", "game.write", "Chronicle: {program = n} plays program n of the dungeon's event script (a scene) on the floor the player is on, as a monster's script asks for one; game.dungeon.event_ended follows when it is over."},
 +    {"world.set_roads", "world", "set_roads", "simulation", "game.write", "Chronicle: {enabled = true} makes walking into a town's gate game.town.road, the mod's to take (world.transition), not the world map."},
-+    {"dungeons.set_quick_passage", "dungeons", "set_quick_passage", "simulation", "game.write", "Chronicle: {enabled = true} goes between a town and a dungeon with no loading card, only the fades; {enabled = false} gives the card back."},
++    {"dungeons.set_quick_passage", "dungeons", "set_quick_passage", "simulation", "game.write", "Chronicle: {enabled = true} goes from one place to another (town, field, dungeon, floor) with no loading card: the last picture stays up while the next place loads; {enabled = false} gives the card back."},
 +    {"dungeons.set_floor_select", "dungeons", "set_floor_select", "simulation", "game.write", "Chronicle: {enabled = false} turns the dungeon entrance's floor menu off, so it takes the player straight to the first floor; {enabled = true} gives it back."},
 +    {"dungeons.set_story_exits", "dungeons", "set_story_exits", "simulation", "game.write", "Chronicle floors of the game's own design: the gate that asks for the floor's key asks the mod's question (leave this floor?) instead; the gate stays shut and the mod takes the player on (game.dungeon.story_exit)."},
 +    {"dungeons.set_backrooms", "dungeons", "set_backrooms", "simulation", "game.write", "Free Chronicle back floors: the stairs ask whether to go down (enter at your own risk) instead of asking for the gate key."},
@@ -30076,10 +30107,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..c2ae8727
+index 00000000..21cdc08c
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17770 @@
+@@ -0,0 +1,17791 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -39851,8 +39882,8 @@ index 00000000..c2ae8727
 +    return {ApiCallStatus::Ok, {{"program", program}}, {}};
 +}
 +
-+// dungeons.set_quick_passage: with it on, going between a town and a dungeon shows no loading card (the area's
-+// title held for seconds), only the fade out and in.
++// dungeons.set_quick_passage: with it on, going from one place to another (town, field, dungeon, floor) shows no
++// loading card (the area's title held for seconds): the last picture is held while the next place loads.
 +std::string g_quick_passage_owner;
 +ApiCallResult SetQuickPassage(std::string_view owner, const Json &args) {
 +    const std::string usage = "expected {enabled = true or false}";
@@ -46893,24 +46924,41 @@ index 00000000..c2ae8727
 +int g_hold_release = -1; // frames left once the place walked into is ready, or -1
 +bool g_road_jump = false; // the jump under way is a town's road to another town, or a floor to another of its dungeon
 +bool g_floor_jump = false; // the latter: let go once the floor is played on (a story floor's fixed map says no more)
++// DC_PERF_TRANSITIONS=1 (the load trace's switch): each held picture's start and end, for counting the frames a trip
++// shows something that is not the world.
++bool HeldTrace() {
++    static const bool on = [] {
++        const char *value = std::getenv("DC_PERF_TRANSITIONS");
++        return value != nullptr && std::string_view(value) == "1";
++    }();
++    return on;
++}
 +}
 +void ChronicleMapJumped(int map_no) {
 +    g_road_jump = g_floor_jump = false;
 +    if (!ChronicleQuickPassage()) return;
-+    const bool into_dungeon = mode == GAME_MODE_EDIT && map_no >= 200 && map_no < 200 + DUNGEON_COUNT;
-+    // a town, not a field a story floor's scene goes out to (Sun and Moon Temple's to the desert, s32): nothing there
-+    // would let the held picture go before its ten seconds were up
-+    const bool into_town = mode == GAME_MODE_DUNGEON && map_no >= 0 && map_no < TOWN_COUNT;
-+    const bool by_road = mode == GAME_MODE_EDIT && MapNo >= 0 && MapNo < TOWN_COUNT && map_no >= 0 && map_no < TOWN_COUNT &&
-+                         map_no != MapNo;
-+    // a floor of the same dungeon (dungeons.enter_floor: a story floor through its smoke, a shrine's travel)
-+    const bool between_floors = mode == GAME_MODE_DUNGEON && map_no == MapNo && map_no >= 200 && map_no < 200 + DUNGEON_COUNT;
-+    if (!into_dungeon && !into_town && !by_road && !between_floors) return;
++    // Every trip from a place to a place (OW1): the title's and the menus' own jumps keep their card.
++    const bool from_town = mode == GAME_MODE_EDIT; // a town, a field, any map the town loop runs
++    const bool from_dungeon = mode == GAME_MODE_DUNGEON;
++    const bool to_dungeon = map_no >= 200 && map_no < 200 + DUNGEON_COUNT;
++    const bool to_town = map_no >= 0 && map_no < 200;
++    if ((!from_town && !from_dungeon) || (!to_dungeon && !to_town)) return;
++    // through a town's dungeon door, either way: the doorway's arrival stands the party at the door
++    const bool into_dungeon = from_town && to_dungeon;
++    const bool into_town = from_dungeon && map_no < TOWN_COUNT;
++    // anything else: a town's road or the world map to another town, a field, the same map again, a dungeon's way out
++    // to its field, a floor to another floor (dungeons.enter_floor: a story floor through its smoke, a shrine's travel)
++    const bool by_road = !into_dungeon && !into_town;
++    const bool between_floors = from_dungeon && to_dungeon;
 +    g_hold_frames = 0;
 +    g_hold_release = -1;
-+    g_road_jump = by_road || between_floors;
++    g_road_jump = by_road;
 +    g_floor_jump = between_floors;
-+    if (!by_road && !between_floors) dc::game::DoorwayJumped(MapNo, map_no);
++    if (HeldTrace()) {
++        std::fprintf(stderr, "perf held begin from %d to %d frame %llu\n", MapNo, map_no,
++                     static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++    if (!by_road) dc::game::DoorwayJumped(MapNo, map_no);
 +}
 +bool ChronicleTakeRoadJump() {
 +    // read by both the loader's and the dungeon's mode start; the jump's end (StepHeldPicture) clears it
@@ -46944,6 +46992,10 @@ index 00000000..c2ae8727
 +        g_hold_release = 4;
 +    }
 +    if (++g_hold_frames > 600 || (g_hold_release >= 0 && --g_hold_release <= 0)) {
++        if (HeldTrace()) {
++            std::fprintf(stderr, "perf held end map %d ticks %d reason %s frame %llu\n", MapNo, g_hold_frames,
++                         g_hold_frames > 600 ? "timeout" : "ready", static_cast<unsigned long long>(SharedRuntime().Frame()));
++        }
 +        g_hold_frames = -1;
 +        g_hold_release = -1;
 +        g_road_jump = g_floor_jump = false;

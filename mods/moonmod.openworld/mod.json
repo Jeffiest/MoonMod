@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "moonmod.openworld",
+  "name": "Open World",
+  "version": "0.1.0",
+  "author": "Jeffiest",
+  "description": "Dark Cloud as one world to walk, built in steps (OPEN_WORLD_PLAN.md). This first step, for any story save: no loading card on the way from one place to another, a town's dungeon seen through its door; and a town's gate is the road to the next town, wherever the story has opened the way.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["game.read", "game.write"],
+  "settings": [
+    {"id": "passage", "name": "No loading card on the way from one place to another", "type": "boolean", "default": true},
+    {"id": "roads", "name": "A town's gate is the road to the next town, not the world map", "type": "boolean", "default": true},
+    {"id": "story_gates", "name": "The road only leads where the story has opened the way", "type": "boolean", "default": true}
+  ]
+}

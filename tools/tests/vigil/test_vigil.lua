@@ -848,6 +848,7 @@ local function new_game(opts)
   S.game.world = {transition = function(a) S.transition = a.id return {queued = true} end,
                   set_roads = function(a)
                     assert(type(a) == "table" and type(a.enabled) == "boolean", "set_roads takes {enabled}")
+                    if S.roads_taken then return nil, {code = "failed", message = "another mod already has the roads"} end
                     S.roads = a.enabled
                     return {enabled = a.enabled}
                   end}
@@ -2258,6 +2259,13 @@ do
   T.emit("game.world.location_changed", {context = "georama", area_id = 0})
   T.emit("game.town.road", {town_id = 0})
   check(T.roads == false and T.panel == nil, "without Vigil World the gates are the world map, as ever")
+  -- the roads are one mod's at a time: with them another mod's (Open World), its panel is the one that answers
+  S.panel, S.roads_taken = nil, true
+  S.emit("game.town.road", {town_id = 1})
+  check(S.panel == nil, "a gate whose roads another mod holds is left to that mod")
+  S.roads_taken = nil
+  S.emit("game.town.road", {town_id = 1})
+  check(S.panel and S.panel.id == "vigil.road", "and answered again once the roads are Vigil's")
 end
 
 print("24. Gear: pieces from chests and monsters, the item page's Equipment tab (G4, G5)")

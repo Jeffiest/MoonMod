@@ -484,9 +484,13 @@ Smaller floor rules and things to stand on a floor, one entry each:
   the road itself, with `world.transition` to another town or `dungeons.enter_floor({dungeon_id, floor_id = 0})`; with
   quick passage on, a jump between two towns holds the picture as one between a town and a dungeon does. One mod at a
   time; unloading the mod gives the world map back. Returns `{enabled}`. Vigil turns it on for a Vigil World save.
-- `dungeons.set_quick_passage({enabled})`: `{enabled = true}` goes between a town and a dungeon (either way) with no
-  loading card, no title the game holds for several seconds and no fade: the last picture stays on screen while the
-  other side builds (at most ten seconds) and the first picture of the other side replaces it. The town and the dungeon
+- `dungeons.set_quick_passage({enabled})`: `{enabled = true}` goes from one place to another with no loading card, no
+  title the game holds for several seconds and no fade: the last picture stays on screen while the other side builds
+  (at most ten seconds) and the first picture of the other side replaces it. That is every jump made while walking a
+  town, a field or a floor to another town, field or dungeon: a town's door, the world map, a road, a scene's own
+  jump, `world.enter_map`, `world.transition`, `dungeons.enter_floor`. A place that opens with a scene (Matataki's
+  arrival) shows the scene from its first frames. Loading a save from the title and the title's own screens keep the
+  card. Between a town and its dungeon there is more: the town and the dungeon
   both stay loaded (each keeps its own memory and textures), and each is drawn live through the other's way through,
   from where the camera stands: the cave seen through the town's door, the town seen through a doorway in the cave wall
   behind where the party arrived.

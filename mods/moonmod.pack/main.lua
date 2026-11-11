@@ -10526,6 +10526,8 @@ end
 
 moonmod.on("game.town.road", function(e)
   if in_sandbox or type(e) ~= "table" or not ROAD[e.town_id] or not world_save(false) then return end
+  -- the gate is told to every mod: only the one whose roads these are answers (Open World may hold them)
+  if not call(game.world.set_roads, {enabled = true}) then return end
   road_from = e.town_id
   local options = {}
   for _, way in ipairs(ROAD[e.town_id]) do

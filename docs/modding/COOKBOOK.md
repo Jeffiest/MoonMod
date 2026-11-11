@@ -153,7 +153,7 @@ end)
 | `dungeons.set_rest_room({enabled})` | A two-room rest layout (spring, exit, stairs) |
 | `dungeons.set_character_blocks({characters})` | Character-only doors and jumps appear only for these |
 | `dungeons.set_backrooms({free, title, text, stay, lines})` | Back-floor stairs ask with a panel instead of taking the key |
-| `dungeons.set_quick_passage({enabled = true})` | Town to dungeon and back with only a fade, no loading card |
+| `dungeons.set_quick_passage({enabled = true})` | No loading card on any trip from one place to another; a town and its dungeon both stay loaded |
 | `world.set_roads({enabled = true})` + `game.town.road` | A town's gate asks the mod instead of opening the world map: answer with a `ui.choice_open({..., town = true})` panel of places, then `world.transition` or `dungeons.enter_floor` |
 | `dungeons.set_floor_select({enabled = false})` | The dungeon entrance skips its floor menu and goes straight to floor 1 |
 | `dungeons.set_npc_models` + `dungeons.set_npc_marks` | Stand a character (a scene's pack) at cells of a dungeon floor |
@@ -198,12 +198,20 @@ moonmod.on("game.world.location_changed", passage_rules)
 
 All three are **one mod at a time** and given back when the mod unloads.
 
+**Sharing them.** A second mod's call is refused (`nil` and an error), so two mods can both want the passage or the
+roads if each keeps to four habits: ask each time you need the rule (it is free once its holder lets go), remember
+whether *your* call succeeded, answer the rule's event (`game.town.road`) only while it did, and give the rule back
+on `game.session.ended` as well as on unload. Open World (`mods/moonmod.openworld/main.lua`) and Vigil share both
+rules this way: Vigil sets the roads as a Vigil World town loads, Open World asks only once the party stands in a
+town, and whichever holds the roads opens the one panel at the gate.
+
 ### 2. Town and dungeon, both live (quick passage)
 
 With `dungeons.set_quick_passage({enabled = true})` the engine does the rest:
 
-- **No loading card.** A jump between a town and a dungeon, between two towns, or between two floors of one dungeon
-  holds the last picture on screen until the other side is ready (at most ten seconds), then cuts.
+- **No loading card.** Any jump from a town, a field or a floor to another place (a door, the world map, a road, a
+  scene's own jump, `world.enter_map`, a floor to a floor) holds the last picture on screen until the other side is
+  ready (at most ten seconds), then cuts. Loading a save from the title keeps its card.
 - **Connected worlds.** Each place keeps its own memory (town `100 + map`, dungeon its map), so walking back out of
   the dungeon resumes the town as it was left, villagers where they stood, and walking back in resumes floor 1.
 - **The door is a window.** Norune's cave door, once opened, stays open, and the cave is drawn live through it; inside,
