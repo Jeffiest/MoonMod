@@ -10,8 +10,8 @@ workspace: the toolkit that converts Dark Cloud's files (dc1tk), two forks of th
 (Chronicle, DC_Web) and a Bloodborne decompilation and runtime (Paleblood).
 
 Current goal (2026-11-11): a proof of concept that puts a Bloodborne enemy, read from the user's own dump,
-into Dark Cloud's Divine Beast Cave as a full replacement for one of its monsters, by a route that can be
-repeated for other assets.
+into Dark Cloud's Divine Beast Cave as a full replacement for one of its monsters (the Dasher), on the
+beast's own skeleton, motions and textures, by a route that can be repeated for other assets.
 
 ## Rules
 
@@ -21,7 +21,9 @@ repeated for other assets.
    and a "Done when:" check that can be run or seen: a test that passes, a file that exists, a number on
    the screen.
 3. Before accepting any worker's output, the orchestrator runs the check itself. If it fails, the work goes
-   back to the worker with the failure attached. A worker's report is never passed on unchecked.
+   back to the worker with the failure attached. A worker's report is never passed on unchecked. Where a
+   worker's test only reads back what its own code wrote, the orchestrator adds one check on input the
+   worker didn't make.
 4. Start of every session: read this file and the three docs. End of every session: update
    `docs/progress.md`, add new decisions and gotchas, and propose skill edits with the evidence from the
    session (`/reflect`). The user approves them before they are applied.
@@ -46,6 +48,7 @@ repeated for other assets.
 | `docs/` | Modder's guide, API reference (`docs/api/`), asset guides, plans (`docs/plans/`) |
 | `tools/chr/` | Character packs (`.chr`) built from glTF on a template pack; modelling rules in its README |
 | `tools/anim/` | Motion tools; `reference/` reads FromSoftware animations from the user's own install |
+| `tools/bb/` | Bloodborne model out of the user's dump (`BbModel`), to glTF (`model_gltf.py`), and a monster pack's facts (`template_facts.py`); its README has the commands |
 | `tools/stb/` | Monster and event script disassembler and patcher |
 | `tools/tests/` | Tests for the tools and examples |
 | `art/` | Sources for characters the mods add (Opar, Seda) |

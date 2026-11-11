@@ -13,3 +13,9 @@
   be seen and changed without the dump.
 - 2026-11-11: The first pass keeps the Dasher's own motions and AI: only its body and textures become the beast's.
   Bloodborne's animations and sounds come after the body is seen in game.
+- 2026-11-11: The beast comes in on its own data, not on the Dasher's skeleton (the user's choice; this replaces
+  the "first pass keeps the Dasher's own motions and AI" line above). Its skeleton, skin and motions are read
+  from the dump and built into a pack of its own; the Dasher gives only its place in the cave (its monster
+  slot), and whatever of its AI script still fits. What that asks of the tools is in `docs/progress.md`.
+- 2026-11-11: CLAUDE.md edits the user approved: `tools/bb/` in the folder map, and rule 3's extra check on input
+  the worker didn't make.
