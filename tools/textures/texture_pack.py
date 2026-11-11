@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -42,6 +43,8 @@ PLACES = ("e01", "e03", "e04", "dungeon:0", "dungeon:1", "dungeon:2", "dungeon:3
 PROVIDERS = {"dml": "DmlExecutionProvider", "cuda": "CUDAExecutionProvider", "cpu": "CPUExecutionProvider"}
 # The engine's limits (ModsTextureMaxSide, ModsTextureMaxScale): the desktop game, and the browser one.
 LIMITS = {"desktop": (4096, 8), "browser": (2048, 2)}
+# In a dump folder: the pictures of names that hold more than one, as <texture name>.<place>.png.
+SHARED = "shared-names"
 
 
 def kept_size(width: int, height: int, native_width: int, native_height: int, max_side: int, max_scale: int):
@@ -194,6 +197,22 @@ def bleed(rgb: np.ndarray, visible: np.ndarray, rounds: int = 64) -> np.ndarray:
     return rgb
 
 
+def keep_black(large: np.ndarray, native: np.ndarray) -> np.ndarray:
+    """Pure black where the picture had it and nowhere else; both are 8-bit RGB. The game draws some pictures that
+    have no transparency with pure black as see-through (the debug font is one), so a texel the model darkens to
+    black would be a hole, and a black one it lightens would close one."""
+    key = (native == 0).all(axis=2)
+    if key.any():
+        plane = Image.fromarray(key.astype(np.uint8) * 255)
+        key = np.asarray(plane.resize((large.shape[1], large.shape[0]), Image.BICUBIC)) >= 128
+    else:
+        key = np.zeros(large.shape[:2], dtype=bool)
+    large = large.copy()
+    large[key] = 0
+    large[~key & (large == 0).all(axis=2)] = 1
+    return large
+
+
 def upscale_picture(upscaler, image: Image.Image, edge: str = "auto", alpha: str = "model") -> Image.Image:
     """The picture at the upscaler's scale. `edge`: wrap (it tiles), reflect (it does not) or auto (look at its
     edges, each way apart). `alpha`: through the model as grey (crisp cut-outs) or bicubic (soft glows)."""
@@ -208,7 +227,7 @@ def upscale_picture(upscaler, image: Image.Image, edge: str = "auto", alpha: str
         rgb = bleed(rgb, opacity > 0.02)
     large = np.clip(upscaler.upscale(rgb, wrap_x, wrap_y), 0.0, 1.0)
     if not has_alpha:
-        return Image.fromarray((large * 255.0 + 0.5).astype(np.uint8))
+        return Image.fromarray(keep_black((large * 255.0 + 0.5).astype(np.uint8), rgba[..., :3]))
     scale = upscaler.scale
     if alpha == "model":
         grey = np.repeat(opacity[..., None], 3, axis=2)
@@ -239,9 +258,42 @@ def dumped_pictures(dump: Path, only: list[str], skip: list[str]):
             left_out.append((file, "the game loads it another way; a package cannot replace it"))
         elif (only and not matches(name, only)) or matches(name, skip):
             continue
+        elif shared_pictures(dump, name):
+            left_out.append((file, f"the game has more than one picture of this name (see {SHARED})"))
         else:
             chosen[name] = file
     return list(chosen.items()), left_out
+
+
+def merge_places(places: dict[str, Path], out: Path) -> dict[str, list[str]]:
+    """Each place's dumped pictures, copied into out. The game matches a package's picture by texture name alone, and
+    some names hold a different picture from place to place (every dungeon has a "frame" of its own): one picture
+    would land on all of them. Those go to out/shared-names/<name>.<place>.png and stay out of the package.
+    Returns {name: the first place of each of its pictures}."""
+    seen: dict[str, dict[str, tuple[str, Path]]] = {}
+    for place, folder in places.items():
+        for file in sorted(folder.glob("*.png")):
+            digest = hashlib.sha1(file.read_bytes()).hexdigest()
+            seen.setdefault(file.name.lower(), {}).setdefault(digest, (place, file))
+    shared: dict[str, list[str]] = {}
+    for name, kinds in sorted(seen.items()):
+        if len(kinds) == 1:
+            (out / name).write_bytes(next(iter(kinds.values()))[1].read_bytes())
+            continue
+        folder = out / SHARED
+        folder.mkdir(exist_ok=True)
+        stem = name[:-len(".png")]
+        for place, file in kinds.values():
+            (folder / f"{stem}.{re.sub('[^a-z0-9]+', '_', place.lower())}.png").write_bytes(file.read_bytes())
+        if (out / name).exists():  # from an earlier dump, when the name looked like one picture
+            (out / name).replace(folder / f"{stem}.earlier.png")
+        shared[stem] = [place for place, _ in kinds.values()]
+    return shared
+
+
+def shared_pictures(dump: Path, name: str) -> list[Path]:
+    """The pictures a dump holds for a name that has more than one."""
+    return sorted((dump / SHARED).glob(f"{name}.*.png"))
 
 
 def write_package_files(package: Path, package_id: str, name: str, author: str, model: str) -> None:
@@ -318,19 +370,34 @@ def command_dump(arguments) -> int:
         print("the game is running: every texture it loads is dumped; close it when you have seen enough")
         subprocess.run([str(game), *common], cwd=game.parent, env=environment, check=False)
     else:
-        # A save of its own, so the dump never reads or writes yours, and no package's pictures are loaded.
+        # A save of its own, so the dump never reads or writes yours, and no package's pictures are loaded. Each
+        # place dumps into a folder of its own, so a name that holds another picture elsewhere is seen.
         with tempfile.TemporaryDirectory(prefix="moonmod-texture-dump-") as scratch:
-            for place in arguments.jump or PLACES:
-                command = [str(game), *common, "--save", scratch, "--headless", "--jump", place, "--fast-load",
+            save = Path(scratch) / "save"
+            save.mkdir()
+            places: dict[str, Path] = {}
+            for index, place in enumerate(arguments.jump or PLACES):
+                places[place] = Path(scratch) / f"place{index}"
+                places[place].mkdir()
+                command = [str(game), *common, "--save", str(save), "--headless", "--jump", place, "--fast-load",
                            "--frames", str(arguments.frames)]
-                result = subprocess.run(command, cwd=game.parent, env=environment, capture_output=True, check=False)
-                count = len(list(out.glob("*.png")))
-                print(f"{place}: {'ok' if result.returncode == 0 else f'exit {result.returncode}'}, {count} pictures so far",
+                result = subprocess.run(command, cwd=game.parent, env=dict(environment, DC_TEXTURE_DUMP=str(places[place])),
+                                        capture_output=True, check=False)
+                count = len(list(places[place].glob("*.png")))
+                print(f"{place}: {'ok' if result.returncode == 0 else f'exit {result.returncode}'}, {count} pictures",
                       flush=True)
+            shared = merge_places(places, out)
+            for name, where in shared.items():
+                print(f"{name}: {len(where)} different pictures ({', '.join(where)}); kept apart in {SHARED}")
+            if shared:
+                print(f"{len(shared)} names hold more than one picture. A package's picture goes on every texture of its "
+                      f"name, so these are left out of the dump; they are in {out / SHARED}")
     after = len(list(out.glob("*.png")))
     print(f"{after} pictures in {out} ({after - before} new)")
     if not arguments.play:
         print("the headless run sees only what those places load; run again with --play and walk through the rest")
+    else:
+        print("a name that holds more than one picture keeps the last one the game loaded: look before you upscale")
     return 0 if after else 1
 
 
@@ -362,6 +429,12 @@ def command_check(arguments) -> int:
         native = dump / f"{name}.png" if dump else None
         if native is None:
             print(f"{file.name}: {width}x{height}")
+            continue
+        others = shared_pictures(dump, name)
+        if others:
+            print(f"{file.name}: {width}x{height}, goes on {len(others)} different pictures of that name "
+                  f"({', '.join(other.name for other in others)})")
+            problems += 1
             continue
         if not native.is_file():
             print(f"{file.name}: {width}x{height}, no dumped texture of that name")

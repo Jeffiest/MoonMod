@@ -44,6 +44,9 @@ surfaces) keep working when the frames they are copied from are larger too.
   texture's own size, as before.
 - A file over 64 MiB or over 16 million pixels is skipped.
 - `stayframe`, a menu sheet, is loaded another way and cannot be replaced.
+- A file goes on every texture of its name, and a few names hold a different picture from place to place (each
+  dungeon has its own `frame`): a picture made from one of them shows up on the others too. The tool below
+  finds such names in its windowless dump and leaves them out.
 - The log names each picture taken: `mods: replaced texture e01t03 from <file> (1024x1024 for 256x256)`.
 
 Start the game with `DC_TEXTURE_DUMP=<folder>` and it writes every texture it loads to `<folder>/<texture name>.png`,

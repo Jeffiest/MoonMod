@@ -136,6 +136,33 @@ class TexturePack(unittest.TestCase):
         filled = self.tool.bleed(rgb, visible)
         self.assertTrue(np.allclose(filled, (1.0, 0.5, 0.25), atol=1e-5))
 
+    def test_pure_black_stays_where_it_was(self):
+        """The game draws some pictures without transparency with pure black as see-through."""
+        tool = self.tool
+
+        class Darken(tool.OnnxModel):
+            """Repeats each texel and takes a little off, so dark texels land on black and black stays black."""
+            def __init__(self):
+                self.scale, self.tile, self.overlap, self.name = 2, 8, 2, "darken"
+
+            def _run(self, rgb):
+                return np.repeat(np.repeat(rgb, 2, axis=0), 2, axis=1).astype(np.float32) - 2.0 / 255.0
+
+        # A font like the debug one: a backdrop of (1, 1, 1), white letters, and no black anywhere.
+        font = np.full((16, 16, 3), 1, np.uint8)
+        font[4:12, 6:10] = 255
+        large = np.asarray(tool.upscale_picture(Darken(), Image.fromarray(font)))
+        self.assertEqual(large.shape, (32, 32, 3))
+        self.assertFalse((large == 0).all(axis=2).any())
+
+        # A picture whose black is its cut-out: the cut-out stays pure black, and nothing else turns into it.
+        cut = np.full((16, 16, 3), 2, np.uint8)
+        cut[:, :8] = 0
+        large = np.asarray(tool.upscale_picture(Darken(), Image.fromarray(cut), edge="reflect"))
+        black = (large == 0).all(axis=2)
+        self.assertTrue(black[:, :16].all())
+        self.assertFalse(black[:, 16:].any())
+
     def test_check_reads_a_package(self):
         self.picture("e01t03.png", 16, 16)
         package = self.root / "mods" / "me.hires"
@@ -155,6 +182,39 @@ class TexturePack(unittest.TestCase):
         self.assertIn("stayframe.png: never used", text)
         self.assertIn("nothing.png: 8x8, no dumped texture of that name", text)
         self.assertIn("it will be stretched", text)
+
+    def test_a_name_with_more_than_one_picture_is_kept_apart(self):
+        """Every dungeon has its own "frame": one package picture would land on all of them."""
+        places = {}
+        for index, place in enumerate(("dungeon:0", "dungeon:1", "title")):
+            places[place] = self.root / f"place{index}"
+            places[place].mkdir()
+        for place, seed in (("dungeon:0", 1), ("dungeon:1", 2)):
+            values = np.random.default_rng(seed).integers(0, 256, (8, 8, 3), dtype=np.uint8)
+            Image.fromarray(values).save(places[place] / "frame.png")
+            Image.new("RGB", (8, 8), (9, 9, 9)).save(places[place] / "gaiji.png")   # the same in both
+        Image.new("RGB", (8, 8), (9, 9, 9)).save(places["title"] / "gaiji.png")
+        Image.new("RGB", (8, 8)).save(places["title"] / "logo.png")
+        self.picture("frame.png", 8, 8, seed=3)                                    # from an earlier dump
+
+        shared = self.tool.merge_places(places, self.dump)
+        self.assertEqual(shared, {"frame": ["dungeon:0", "dungeon:1"]})
+        self.assertEqual(sorted(file.name for file in self.dump.glob("*.png")), ["gaiji.png", "logo.png"])
+        self.assertEqual(sorted(file.name for file in (self.dump / "shared-names").iterdir()),
+                         ["frame.dungeon_0.png", "frame.dungeon_1.png", "frame.earlier.png"])
+
+        # A dump made by playing puts the name back; it is still left out, and check names a package that has it.
+        self.picture("frame.png", 8, 8, seed=4)
+        chosen, left_out = self.tool.dumped_pictures(self.dump, [], [])
+        self.assertEqual([name for name, _ in chosen], ["gaiji", "logo"])
+        self.assertEqual([file.name for file, _ in left_out], ["frame.png"])
+        package = self.root / "mods" / "me.hires"
+        run(self.tool, "upscale", "--dump", str(self.dump), "--package", str(package))
+        self.assertFalse((package / "textures" / "frame.png").exists())
+        Image.new("RGB", (32, 32)).save(package / "textures" / "frame.png")
+        code, text = run(self.tool, "check", "--package", str(package), "--dump", str(self.dump))
+        self.assertEqual(code, 1)
+        self.assertIn("frame.png: 32x32, goes on 3 different pictures of that name", text)
 
 
 if __name__ == "__main__":

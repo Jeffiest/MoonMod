@@ -37,6 +37,12 @@ what you want to cover, open the menus, then close the game. Run it as often as 
 `menu`, `title`, `edit:<map>`. `--data <folder>` names the game's data folder if the game does not find it by itself.
 Text pictures are dumped in the language the game is set to.
 
+The game matches a package's picture by texture name alone, and a few names hold a different picture from place to
+place: every dungeon has a `frame` of its own, and the towns and the dungeons each have their own `fx_foot`. One
+upscaled picture would land on all of them. The windowless run dumps each place apart, so it sees these: it puts
+them in `dumps/shared-names/<texture name>.<place>.png`, and `upscale` leaves those names out. A `--play` dump cannot
+tell: it keeps the last picture the game loaded under each name, so look at what you upscale from it.
+
 The game itself does the dumping: setting `DC_TEXTURE_DUMP=<folder>` before starting it is all `dump` does.
 
 ## 2. Upscale
@@ -63,7 +69,8 @@ that does nothing. Turn the package on in the Mod Manager.
 
 What the tool does besides running the model: transparent texels get their neighbours' colour first, so cut-outs have
 no dark fringe; pictures are cut into overlapping tiles that are cross-faded, so no seams show; tiling pictures are
-given their own far side as context, so they still tile.
+given their own far side as context, so they still tile; and in a picture without transparency, pure black stays
+exactly where it was, because the game draws some of those (the debug font is one) with pure black as see-through.
 
 Models are trained on photographs and game art, not on letters. Fonts and small menu symbols often come out worse
 than they went in: look at them, and leave them out with `--skip` or delete their files from the package.
