@@ -9,7 +9,7 @@
 |---|---|---|
 | 1 | `tools/bb/BbModel`: the beast's model and textures out of the dump (`model.json`, `.dds`) | Written, **not built or run** (needs DSAnimStudio and a dump) |
 | 2 | `tools/bb/model_gltf.py`: `model.json` to a skinned glTF | Done: its test passes, and its output imports into Blender 5.3 with the skin following the bones (made-up model) |
-| 3 | `tools/bb/template_facts.py`: what the Dasher's pack and its export hold, as text | In review |
+| 3 | `tools/bb/template_facts.py`: what the Dasher's pack and its export hold, as text | Done: its test passes, and it read one real export (Opar's `c07d.chr`) correctly. Not yet run on `e06a` |
 | 4 | Fit the beast to the Dasher's skeleton (Blender): pose, scale, weights, triangle budget, textures | Not started: needs step 3's output for `e06a` |
 | 5 | Build the pack and the mod (`dc2tk model-build`, `mod-pack`), see it on the cave's first floor | Not started |
 | 6 | The beast's own animations and sounds | Later |

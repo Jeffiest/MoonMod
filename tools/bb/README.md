@@ -11,6 +11,7 @@ name, outside the repository. None of it is committed or shipped: these are From
 | 1 | `BbModel list` | Every character archive in the dump's `chr` folder with its size, to choose from |
 | 2 | `BbModel export` | `model.json` (skeleton, materials, meshes, weights) and `textures/*.dds` |
 | 3 | `model_gltf.py` | `model.gltf` + `model.bin`, to open in Blender |
+| - | `template_facts.py` | What the Dark Cloud monster's pack and its export hold, as text (below) |
 
 ## What you need
 
@@ -55,9 +56,24 @@ The model as the file holds it, in the game's own space (nothing turned or mirro
 default; `z` or `none` to choose). No pictures are attached: load the `.dds` files in Blender by the names in the
 material.
 
+## The monster the model replaces
+
+```bash
+python tools/chr/chrtool.py export "C:/path/to/data/dun/monstor/e06a.chr" "C:/path/to/work/e06a"
+python tools/bb/template_facts.py "C:/path/to/data/dun/monstor/e06a.chr" "C:/path/to/work/e06a"
+```
+
+`template_facts.py` prints the pack's members, its `.cfg` text, the skeleton as a tree, and each mesh's size, material
+and whether it is skinned, then the textures' sizes and the motions' lengths: what a new body has to fit. It reads
+only. If the pack's cfg skins a mesh and the export has no skin weights, it says so: the toolkit build that wrote
+the export does not keep them ([docs/known-issues.md](../../docs/known-issues.md)).
+
 ## Checked, and not
 
-- `model_gltf.py` is tested on a model made up in the test (`tools/tests/test_bb_model.py`), with no game data.
+- `model_gltf.py` is tested on a model made up in the test (`tools/tests/test_bb_model.py`), with no game data,
+  and its output was imported with Blender 5.3: bones, vertex groups, and the skin following a posed bone.
+- `template_facts.py` is tested on a made-up pack (`tools/tests/test_bb_template_facts.py`) and was run on one real
+  export, Opar's `c07d.chr` from `mods/moonmod.opar`. It has not been run on a monster's pack.
 - `BbModel` has been written against the source of DSAnimStudio's SoulsFormats (v5-rc6.1) but **not built or run**:
   the machine it was written on has neither that library nor a dump. If your DSAnimStudio is older, the names it
   reads by either spelling (`Nodes`/`Bones`, `NodeIndex`/`DefaultBoneIndex`, `ParamName`/`Type`) should still fit.
