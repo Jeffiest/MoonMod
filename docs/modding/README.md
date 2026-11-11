@@ -24,6 +24,7 @@ When a page says "the Gauntlet does it this way", the code is there to read.
 | Look up an exact operation, field or event | [API reference](../API.md) and its [operation index](../api/OPERATIONS.md) |
 | Give a character a new animated move | [Animation guide](../ANIMATION_GUIDE.md) |
 | Replace a model or texture | [Model replacements](../MODEL_REPLACEMENTS.md) |
+| Make the game's textures larger and sharper | [Larger textures](../MODEL_REPLACEMENTS.md#larger-textures) |
 | Write native C code instead of Lua | [Native SDK](../NATIVE_SDK.md) |
 
 ## The framework in one page

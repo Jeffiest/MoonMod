@@ -20,6 +20,7 @@ Recipes are Chronicle unless they say otherwise. The snippets use the `try` and 
 - [Add a playable character](#add-a-playable-character)
 - [New moves and animations](#new-moves-and-animations)
 - [Change the game's text](#change-the-games-text)
+- [Larger textures](#larger-textures)
 - [Share the game with other mods](#share-the-game-with-other-mods)
 
 ---
@@ -723,6 +724,27 @@ Vigil's are `tools/anim/vigil_criticals.py` (Toan) and the `crumple` in `vigil_m
 of the house scene in Norune while he is waiting to join, and puts them back afterwards (`words()` in
 `mods/moonmod.opar/main.lua`). Keys and the glyph tokens (`{icon-jar}`, `{insert1}`, `{name2}`) are in the
 [API reference](../api/assets.md#game-text-text-chronicle).
+
+---
+
+## Larger textures
+
+No Lua is involved: a package's `textures/<texture name>.png` replaces that texture, and a PNG larger than the texture
+is drawn at its own size (up to 8 times the texture's, 4096 a side). `tools/textures/texture_pack.py` makes such a
+package from the game's own pictures:
+
+```
+python tools/textures/texture_pack.py dump    --game darkcloud.exe --out dumps
+python tools/textures/texture_pack.py upscale --dump dumps --package <save>/mods/me.hires --model model.onnx
+python tools/textures/texture_pack.py check   --package <save>/mods/me.hires --dump dumps
+```
+
+Traps: a texture is only dumped once the game has loaded it, so play through what you want covered (`dump --play`);
+upscaling models spoil fonts and small symbols, so look at those and `--skip` them; when a texture is animated by
+copying from another (water, a blinking face), enlarge both or the copy stays at the old sharpness; the pictures come
+from the game disc, so share your settings and not the package. The rules and limits are in
+[Model replacements](../MODEL_REPLACEMENTS.md#larger-textures), every option in the
+[tool's own page](../../tools/textures/README.md).
 
 ---
 

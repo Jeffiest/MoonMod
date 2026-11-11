@@ -162,7 +162,10 @@ game.text.set({key = "dun.message.old_data.dungeon.0", text = "{icon-jar}\"{inse
 Chronicle's renderer also supports package-owned 3D mesh replacements outside the Lua API. Put `models/<texture>.obj` or
 `models/<texture>.glb` in an enabled package; use `<texture>__<vertex-count>v.obj` for a source-vertex-specific
 replacement. An optional sibling JSON file accepts `scale`, `rotate_deg`, `offset`, and `flip_v`. Enabled packages can
-also supply `textures/<texture>.png` to replace the matching native texture. The renderer keeps the native material
+also supply `textures/<texture>.png` to replace the matching native texture; a PNG larger than the texture is kept at
+its own size, up to 8 times the texture's and 4096 a side (2 times and 2048 in the browser), and
+`DC_TEXTURE_DUMP=<folder>` writes the game's own textures out as PNG files to start from: see
+[Larger textures](../MODEL_REPLACEMENTS.md#larger-textures). The renderer keeps the native material
 strips and follows native character skinning. Later packages in MoonFactory's resolved load order override earlier
 package assets; a matching exact-vertex file takes precedence over a generic texture file.
 

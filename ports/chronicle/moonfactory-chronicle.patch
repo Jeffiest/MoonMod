@@ -27030,7 +27030,7 @@ index dab4bf3f..5561ed34 100644
  }
  
 diff --git a/port/src/game/texture.cpp b/port/src/game/texture.cpp
-index 282d41fa..c1222a13 100644
+index 282d41fa..29554cf7 100644
 --- a/port/src/game/texture.cpp
 +++ b/port/src/game/texture.cpp
 @@ -12,6 +12,7 @@
@@ -27063,7 +27063,55 @@ index 282d41fa..c1222a13 100644
  
  struct DummyTexture {
      std::string name;
-@@ -566,9 +569,13 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+@@ -295,7 +298,8 @@ uint32_t BlendColors(uint32_t first, uint32_t second, unsigned first_weight, uns
+ }
+ 
+ // DC_TEXTURE_DUMP=<dir>: every entered texture is written there as <name>.png, indexed textures
+-// through their palette.
++// through their palette. The game's own picture (in the chosen language), before any package replaces it: what
++// tools/textures in MoonMod upscales into a package.
+ void DumpTexture(const char *name, const PortDecodedTexture &texture) {
+     static const char *dir = std::getenv("DC_TEXTURE_DUMP");
+     if (dir == nullptr || texture.levels.empty()) {
+@@ -385,11 +389,14 @@ void MakeGroundPeriodic(std::string_view name, PortDecodedTexture &texture) {
+         return;
+     }
+ 
+-    const unsigned        horizontal_band = name == "d02b05" ? 32 : 8;
+-    const unsigned        vertical_band = name == "d02b06" ? 32 : 8;
+     std::vector<uint8_t> &pixels = texture.levels[0];
+     const unsigned        width = texture.width;
+     const unsigned        height = texture.height;
++    // MoonMod: a package's larger picture has the same share of itself blended.
++    const unsigned across = texture.logical_width != 0 ? std::max(1u, width / texture.logical_width) : 1;
++    const unsigned down = texture.logical_height != 0 ? std::max(1u, height / texture.logical_height) : 1;
++    const unsigned horizontal_band = std::min((name == "d02b05" ? 32u : 8u) * across, width / 2);
++    const unsigned vertical_band = std::min((name == "d02b06" ? 32u : 8u) * down, height / 2);
+     const auto            color_at = [&](unsigned pixel) {
+         if (texture.format == gfx::TextureFormat::Index8) {
+             return texture.palette[pixels[pixel]];
+@@ -431,6 +438,20 @@ void MakeGroundPeriodic(std::string_view name, PortDecodedTexture &texture) {
+             set_color(bottom, BlendColors(top_color, bottom_color, bottom_weight, 2 * vertical_band));
+         }
+     }
++    // MoonMod: a larger picture is mostly drawn from its smaller levels, each half the one before: made again from
++    // the blended first.
++    if ((texture.logical_width != 0 || texture.logical_height != 0) && texture.format == gfx::TextureFormat::Rgba8) {
++        for (size_t level = 1; level < texture.levels.size(); level++) {
++            const unsigned level_width = std::max(1u, width >> level);
++            const unsigned level_height = std::max(1u, height >> level);
++            if (texture.levels[level].size() != static_cast<size_t>(level_width) * level_height * 4) {
++                break;
++            }
++            PortHalveRgba(texture.levels[level - 1].data(), std::max(1u, width >> (level - 1)),
++                          std::max(1u, height >> (level - 1)), texture.levels[level].data(), level_width, level_height,
++                          0, 0, level_width, level_height);
++        }
++    }
+ }
+ 
+ // EnterTexture, EnterTextureEX and EnterFixTexture share everything but where pixels are staged and
+@@ -566,9 +587,13 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
                                           clut == nullptr ? 0 : static_cast<std::size_t>(clut_bytes), decoded,
                                           resolution_error, entry_index, bpp);
              canvas_backing = !baked && resolution_error == "canvas texture keeps its runtime backing";
@@ -27078,18 +27126,36 @@ index 282d41fa..c1222a13 100644
          } else {
              // Pixels outside any data source (a synthetic or runtime image) have no baked document
              // and decode from the bytes given.
-@@ -593,6 +600,10 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+@@ -593,9 +618,27 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
              }
          }
          LocalizeTexture(name, decoded);
++        DumpTexture(name, decoded);
 +        ModsTextureOverride(name, decoded);
 +        if (!decoded.levels.empty() && decoded.format == gfx::TextureFormat::Rgba8) {
-+            RememberMenuSheet(name, decoded.width, decoded.height, decoded.levels[0]);
++            if (decoded.logical_width != 0 || decoded.logical_height != 0) {
++                // MoonMod: a package's larger picture. The menus read the status sheet texel by texel, so they are
++                // given it at the texture's own size.
++                if (std::string_view(name) == "status") {
++                    const unsigned texels_across = decoded.logical_width != 0 ? decoded.logical_width : decoded.width;
++                    const unsigned texels_down = decoded.logical_height != 0 ? decoded.logical_height : decoded.height;
++                    RememberMenuSheet(name, texels_across, texels_down,
++                                      LocalizeResample(decoded.levels[0].data(), static_cast<int>(decoded.width),
++                                                       static_cast<int>(decoded.height),
++                                                       static_cast<int>(texels_across),
++                                                       static_cast<int>(texels_down)));
++                }
++            } else {
++                RememberMenuSheet(name, decoded.width, decoded.height, decoded.levels[0]);
++            }
 +        }
          caption::PreparePainted(name, decoded);
          MakeGroundPeriodic(name, decoded);
-         DumpTexture(name, decoded);
-@@ -618,7 +629,7 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+-        DumpTexture(name, decoded);
+         if (baked) {
+             tex->clut = nullptr;
+             cbp = 0;
+@@ -618,7 +661,7 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
              tex->tex1 = SCE_GS_SET_TEX1(0, 2, 1, 5, 1, lod.L, lod.K);
          }
      }
@@ -27098,7 +27164,7 @@ index 282d41fa..c1222a13 100644
  }
  
  } // namespace
-@@ -641,7 +652,9 @@ void CTextureManager::Initialize(int size) {
+@@ -641,7 +684,9 @@ void CTextureManager::Initialize(int size) {
      texture_max = 1;
      vram_work = 8960;
      vram_size = size;
@@ -27109,7 +27175,7 @@ index 282d41fa..c1222a13 100644
      vram_fix = size;
  
      // The frame-copy area water samples, a field of the frame on PS2: the water unit fills it.
-@@ -674,6 +687,8 @@ void CTextureManager::SetBuffer(u_long128 *buffer, int size) {
+@@ -674,6 +719,8 @@ void CTextureManager::SetBuffer(u_long128 *buffer, int size) {
      buffer_used = 0;
  }
  
@@ -27118,7 +27184,7 @@ index 282d41fa..c1222a13 100644
  int CTextureManager::SearchTextureName(char *name, int block) {
      for (int index = texture_max; index >= 0; index--) {
          const CTexture &texture = textures[index];
-@@ -912,7 +927,7 @@ int LoadImage(u_int *packet, int dbp, int dpsm, int dbw, u_long128 *source, int
+@@ -912,7 +959,7 @@ int LoadImage(u_int *packet, int dbp, int dpsm, int dbw, u_long128 *source, int
  // Every texture is resident on the renderer from the moment it is entered, so a block never needs
  // uploading; only its bookkeeping remains.
  void CTextureManager::ReloadTexture(sceVif1Packet *packet, int block) {
@@ -27127,7 +27193,7 @@ index 282d41fa..c1222a13 100644
          last_block = -1;
          return;
      }
-@@ -943,7 +958,7 @@ void CTextureManager::BeginEnterTextureBlock(int block) {
+@@ -943,7 +990,7 @@ void CTextureManager::BeginEnterTextureBlock(int block) {
  // Native textures occupy independent storage, so simulated VRAM overlap never overwrites either
  // image; only the staging bounds check and block finalization remain.
  void CTextureManager::EndEnterTextureBlock(int block) {
@@ -27136,7 +27202,7 @@ index 282d41fa..c1222a13 100644
          return;
      }
      if (buffer_used > buffer_size) {
-@@ -958,7 +973,7 @@ void CTextureManager::EndEnterTextureBlock(int block) {
+@@ -958,7 +1005,7 @@ void CTextureManager::EndEnterTextureBlock(int block) {
  }
  
  int CTextureManager::DeleteTextureBlock(int block) {
@@ -27145,7 +27211,7 @@ index 282d41fa..c1222a13 100644
          return 0;
      }
      if (block >= 0) {
-@@ -1132,4 +1147,33 @@ int CTextureManager::EnterTextureFile(LOADTEXTURE_INFO *table) {
+@@ -1132,4 +1179,33 @@ int CTextureManager::EnterTextureFile(LOADTEXTURE_INFO *table) {
  void CTextureManager::print_buff_info() {
  }
  
@@ -59004,25 +59070,29 @@ index 00000000..31a5fcaa
 +                    const float bone[4][4], const float inverse[4][4], float weight);
 diff --git a/port/src/moonmod/mod_texture.cpp b/port/src/moonmod/mod_texture.cpp
 new file mode 100644
-index 00000000..2f71f827
+index 00000000..53b716eb
 --- /dev/null
 +++ b/port/src/moonmod/mod_texture.cpp
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,259 @@
 +// Package-owned PNG overrides for Chronicle's decoded native textures.
 +// PNGs live at mods/<package>/textures/<native texture name>.png. Later packages
 +// in MoonFactory's resolved load order win, matching model replacement behavior.
++// A PNG larger than the native texture stays larger (mod_texture.hpp).
 +
 +#include "moonmod/mod_texture.hpp"
 +
 +#include <algorithm>
++#include <bit>
 +#include <cctype>
 +#include <cstdio>
 +#include <cstdint>
++#include <cstdlib>
 +#include <filesystem>
 +#include <fstream>
 +#include <map>
 +#include <string>
 +#include <system_error>
++#include <utility>
 +#include <vector>
 +
 +#include "localize/localize_texture.hpp"
@@ -59098,53 +59168,181 @@ index 00000000..2f71f827
 +    }
 +}
 +
++// The package's PNG as the texture that stands for a native one of this size and these levels. `quiet` for reading it
++// again (the registry, when the game copies into the texture): what went wrong was said the first time.
++bool ReadPicture(const fs::path &path, unsigned native_width, unsigned native_height, unsigned native_levels,
++                 PortDecodedTexture &texture, bool quiet) {
++    if (!PngWithinDecodeBudget(path)) {
++        if (!quiet) {
++            std::fprintf(stderr, "mods: rejected oversized or malformed PNG texture override %s\n", path.string().c_str());
++        }
++        return false;
++    }
++    int source_width = 0;
++    int source_height = 0;
++    std::vector<uint8_t> rgba;
++    if (!imagefile::LoadPng(path, source_width, source_height, rgba) || source_width <= 0 || source_height <= 0 ||
++        rgba.size() != static_cast<size_t>(source_width) * source_height * 4) {
++        if (!quiet) {
++            std::fprintf(stderr, "mods: cannot read texture override %s\n", path.string().c_str());
++        }
++        return false;
++    }
++    const ModsTextureSize size =
++        ModsTextureSizeFor(static_cast<unsigned>(source_width), static_cast<unsigned>(source_height), native_width,
++                           native_height, native_levels, ModsTextureMaxSide(), ModsTextureMaxScale());
++    texture.levels = ModsTextureLevels(std::move(rgba), static_cast<unsigned>(source_width),
++                                       static_cast<unsigned>(source_height), size, native_width, native_height);
++    const bool larger = size.width != native_width || size.height != native_height;
++    texture.width = size.width;
++    texture.height = size.height;
++    texture.logical_width = larger ? native_width : 0;
++    texture.logical_height = larger ? native_height : 0;
++    texture.format = gfx::TextureFormat::Rgba8;
++    texture.four_bit = false;
++    texture.has_alpha = false;
++    for (size_t i = 3; i < texture.levels.front().size(); i += 4) {
++        if (texture.levels.front()[i] != 255) {
++            texture.has_alpha = true;
++            break;
++        }
++    }
++    return true;
++}
++
 +} // namespace
++
++unsigned ModsTextureMaxSide() {
++#ifdef __EMSCRIPTEN__
++    return 2048; // what every WebGL2 browser takes
++#else
++    return 4096; // what every Vulkan device takes
++#endif
++}
++
++unsigned ModsTextureMaxScale() {
++    static const unsigned scale = [] {
++#ifdef __EMSCRIPTEN__
++        unsigned value = 2; // a phone's memory: four times the pixels, not sixteen or sixty-four
++#else
++        unsigned value = 8;
++#endif
++        if (const char *text = std::getenv("DC_TEXTURE_SCALE_MAX"); text != nullptr && *text != '\0') {
++            char      *end = nullptr;
++            const long asked = std::strtol(text, &end, 10);
++            if (end != text && asked >= 1) {
++                value = static_cast<unsigned>(std::min(asked, 64L));
++            }
++        }
++        return value;
++    }();
++    return scale;
++}
++
++ModsTextureSize ModsTextureSizeFor(unsigned source_width, unsigned source_height, unsigned native_width,
++                                   unsigned native_height, unsigned native_levels, unsigned max_side,
++                                   unsigned max_scale) {
++    const auto over = [&](unsigned side, unsigned native) {
++        return side > max_side || side > static_cast<uint64_t>(native) * std::max(1u, max_scale);
++    };
++    ModsTextureSize size;
++    size.width = source_width;
++    size.height = source_height;
++    // Both ways together, so the picture keeps its shape.
++    while ((size.width > native_width || size.height > native_height) &&
++           (over(size.width, native_width) || over(size.height, native_height))) {
++        size.width = (size.width + 1) / 2;
++        size.height = (size.height + 1) / 2;
++    }
++    size.width = std::max(size.width, native_width);
++    size.height = std::max(size.height, native_height);
++    unsigned extra = 0;
++    while (extra < 16 && (static_cast<uint64_t>(native_width) << (extra + 1)) <= size.width &&
++           (static_cast<uint64_t>(native_height) << (extra + 1)) <= size.height) {
++        extra++;
++    }
++    size.levels = std::min(std::max(1u, native_levels) + extra,
++                           static_cast<unsigned>(std::bit_width(std::max(size.width, size.height))));
++    return size;
++}
++
++std::vector<std::vector<uint8_t>> ModsTextureLevels(std::vector<uint8_t> rgba, unsigned source_width,
++                                                    unsigned source_height, const ModsTextureSize &size,
++                                                    unsigned native_width, unsigned native_height) {
++    std::vector<std::vector<uint8_t>> levels;
++    levels.reserve(size.levels);
++    if (size.width == native_width && size.height == native_height) {
++        // The native size: every level fitted from the PNG itself.
++        for (unsigned level = 0; level < size.levels; level++) {
++            levels.push_back(LocalizeResample(rgba.data(), static_cast<int>(source_width),
++                                              static_cast<int>(source_height),
++                                              static_cast<int>(std::max(1u, size.width >> level)),
++                                              static_cast<int>(std::max(1u, size.height >> level))));
++        }
++        return levels;
++    }
++    if (source_width == size.width && source_height == size.height) {
++        levels.push_back(std::move(rgba));
++    } else {
++        levels.push_back(LocalizeResample(rgba.data(), static_cast<int>(source_width), static_cast<int>(source_height),
++                                          static_cast<int>(size.width), static_cast<int>(size.height)));
++    }
++    for (unsigned level = 1; level < size.levels; level++) {
++        const unsigned above_width = std::max(1u, size.width >> (level - 1));
++        const unsigned above_height = std::max(1u, size.height >> (level - 1));
++        const unsigned width = std::max(1u, size.width >> level);
++        const unsigned height = std::max(1u, size.height >> level);
++        std::vector<uint8_t> smaller(static_cast<size_t>(width) * height * 4);
++        PortHalveRgba(levels.back().data(), above_width, above_height, smaller.data(), width, height, 0, 0, width,
++                      height);
++        levels.push_back(std::move(smaller));
++    }
++    return levels;
++}
 +
 +bool ModsTextureOverride(const char *name, PortDecodedTexture &texture) {
 +    if (name == nullptr || texture.width == 0 || texture.height == 0 || texture.levels.empty()) return false;
 +    Initialize();
 +    const auto found = State().by_name.find(Fold(name));
 +    if (found == State().by_name.end()) return false;
-+    if (!PngWithinDecodeBudget(found->second)) {
-+        std::fprintf(stderr, "mods: rejected oversized or malformed PNG texture override %s\n", found->second.string().c_str());
-+        return false;
-+    }
 +
-+    int source_width = 0;
-+    int source_height = 0;
-+    std::vector<uint8_t> rgba;
-+    if (!imagefile::LoadPng(found->second, source_width, source_height, rgba) || source_width <= 0 || source_height <= 0) {
-+        std::fprintf(stderr, "mods: cannot read texture override %s\n", found->second.string().c_str());
-+        return false;
-+    }
-+    std::vector<std::vector<uint8_t>> levels;
-+    levels.reserve(texture.levels.size());
-+    for (size_t level = 0; level < texture.levels.size(); ++level) {
-+        const int width = std::max(1, static_cast<int>(texture.width >> level));
-+        const int height = std::max(1, static_cast<int>(texture.height >> level));
-+        levels.push_back(LocalizeResample(rgba.data(), source_width, source_height, width, height));
-+    }
-+    bool translucent = false;
-+    for (size_t i = 3; i < levels.front().size(); i += 4) {
-+        if (levels.front()[i] != 255) {
-+            translucent = true;
-+            break;
-+        }
-+    }
-+    texture.levels = std::move(levels);
++    const fs::path path = found->second;
++    const unsigned native_width = texture.width;
++    const unsigned native_height = texture.height;
++    const unsigned native_levels = static_cast<unsigned>(texture.levels.size());
++    PortDecodedTexture picture;
++    if (!ReadPicture(path, native_width, native_height, native_levels, picture, false)) return false;
++
++    texture.levels = std::move(picture.levels);
++    texture.width = picture.width;
++    texture.height = picture.height;
++    texture.logical_width = picture.logical_width;
++    texture.logical_height = picture.logical_height;
 +    texture.format = gfx::TextureFormat::Rgba8;
-+    texture.has_alpha = translucent || texture.has_alpha;
++    texture.has_alpha = picture.has_alpha || texture.has_alpha;
 +    texture.four_bit = false;
-+    std::fprintf(stderr, "mods: replaced texture %s from %s\n", name, found->second.string().c_str());
++    texture.reread = nullptr;
++    if (texture.logical_width != 0) {
++        texture.reread = [path, native_width, native_height, native_levels](PortDecodedTexture &again) {
++            return ReadPicture(path, native_width, native_height, native_levels, again, true);
++        };
++        std::fprintf(stderr, "mods: replaced texture %s from %s (%ux%u for %ux%u)\n", name, path.string().c_str(),
++                     texture.width, texture.height, native_width, native_height);
++    } else {
++        std::fprintf(stderr, "mods: replaced texture %s from %s\n", name, path.string().c_str());
++    }
 +    return true;
 +}
 diff --git a/port/src/moonmod/mod_texture.hpp b/port/src/moonmod/mod_texture.hpp
 new file mode 100644
-index 00000000..c4c4411e
+index 00000000..46488e28
 --- /dev/null
 +++ b/port/src/moonmod/mod_texture.hpp
-@@ -0,0 +1,10 @@
+@@ -0,0 +1,45 @@
 +#pragma once
++
++#include <cstdint>
++#include <vector>
 +
 +namespace dc::render {
 +struct PortDecodedTexture;
@@ -59153,7 +59351,39 @@ index 00000000..c4c4411e
 +
 +/// Apply the winning enabled MoonFactory package PNG for a native texture name.
 +/// Returns true when a package image replaced the decoded native texture.
++///
++/// A PNG larger than the native texture is kept larger (up to the limits below), so redrawn or upscaled art shows
++/// its detail: the texture is then a picture with more pixels than its texels (PortDecodedTexture::logical_width),
++/// which the game still draws, scrolls and animates at the native size. A PNG the native size or smaller is fitted
++/// to the native size and levels, as before.
 +bool ModsTextureOverride(const char *name, PortDecodedTexture &texture);
++
++/// The pixels a replacement is kept at, and its levels.
++struct ModsTextureSize {
++    unsigned width = 0;
++    unsigned height = 0;
++    unsigned levels = 0;
++};
++
++/// The size a `source_width` x `source_height` PNG is kept at for a native texture: its own, halved (both ways
++/// together) while either side is over `max_side` pixels or over `max_scale` times the native side, and never under
++/// the native size either way.
++/// The levels are the native ones plus one for each whole doubling over the native size, so the smallest level is
++/// about what the native smallest was and the texture looks the same from far away.
++ModsTextureSize ModsTextureSizeFor(unsigned source_width, unsigned source_height, unsigned native_width,
++                                   unsigned native_height, unsigned native_levels, unsigned max_side,
++                                   unsigned max_scale);
++
++/// The levels of a replacement at `size` from the PNG's straight-alpha RGBA. At the native size each level is fitted
++/// from the PNG; larger, the first is the PNG (fitted if `size` is not its own) and each next one is half the last.
++std::vector<std::vector<uint8_t>> ModsTextureLevels(std::vector<uint8_t> rgba, unsigned source_width,
++                                                    unsigned source_height, const ModsTextureSize &size,
++                                                    unsigned native_width, unsigned native_height);
++
++/// The limits in force: the most pixels a side keeps, and the most times the native side. DC_TEXTURE_SCALE_MAX sets
++/// the second (1 keeps every replacement at the native size, as before larger ones were kept).
++unsigned ModsTextureMaxSide();
++unsigned ModsTextureMaxScale();
 diff --git a/port/src/moonmod/monstorunit_moonmod.cpp b/port/src/moonmod/monstorunit_moonmod.cpp
 new file mode 100644
 index 00000000..2ea0e010
@@ -65966,7 +66196,7 @@ index bee702b5..37e86f9f 100644
  
  Draw3DIdentityScope::~Draw3DIdentityScope() {
 diff --git a/port/src/render/texture_registry.cpp b/port/src/render/texture_registry.cpp
-index d74856d4..99ab7fdb 100644
+index d74856d4..a91f7736 100644
 --- a/port/src/render/texture_registry.cpp
 +++ b/port/src/render/texture_registry.cpp
 @@ -159,6 +159,7 @@ struct Entry {
@@ -65977,7 +66207,20 @@ index d74856d4..99ab7fdb 100644
      // A named render target is looked up by name on every use: gfx recreates it when asked for at
      // another size, and the handle this entry saw would die with the old one.
      std::string                                target;
-@@ -174,6 +175,7 @@ struct Entry {
+@@ -169,11 +170,20 @@ struct Entry {
+     unsigned                                   palette = 0;
+     bool                                       four_bit = false;
+     std::unique_ptr<std::array<uint32_t, 256>> shadow;
++    // MoonMod: a picture with more pixels than its texels (PortDecodedTexture::logical_width). width and height above
++    // stay the texels; these are the picture's own size and levels, how to read it again, and its pixels once the game
++    // has copied into or out of it.
++    unsigned                                           pixel_width = 0;
++    unsigned                                           pixel_height = 0;
++    unsigned                                           levels = 1;
++    std::function<bool(PortDecodedTexture &)>          reread;
++    std::unique_ptr<std::vector<std::vector<uint8_t>>> pixels;
+ };
+ 
  struct Registry {
      std::vector<Entry> entries = std::vector<Entry>(kKeyCount);
      unsigned           cursor = kFirstKey;
@@ -65985,7 +66228,7 @@ index d74856d4..99ab7fdb 100644
  };
  
  // Function-local: the manager's constructor runs Initialize during static initialisation, in an
-@@ -209,6 +211,7 @@ unsigned AllocateKey(EntryKind kind, PortTextureOwner owner) {
+@@ -209,6 +219,7 @@ unsigned AllocateKey(EntryKind kind, PortTextureOwner owner) {
              entry = Entry{};
              entry.kind = kind;
              entry.owner = owner;
@@ -65993,7 +66236,179 @@ index d74856d4..99ab7fdb 100644
              return key;
          }
      }
-@@ -734,12 +737,23 @@ void PortReleaseKey(unsigned key) {
+@@ -369,6 +380,7 @@ struct Side {
+     gfx::TextureHandle texture = gfx::kNullTexture;
+     gfx::TextureFormat format = gfx::TextureFormat::Rgba8;
+     Entry             *palette = nullptr;
++    Entry             *image = nullptr; // MoonMod: the registered image, none for the frame
+ };
+ 
+ bool ResolveSide(unsigned tbp, unsigned psm, Side &side) {
+@@ -395,9 +407,133 @@ bool ResolveSide(unsigned tbp, unsigned psm, Side &side) {
+     }
+     side.texture = EntryTexture(*entry);
+     side.format = entry->format;
++    side.image = entry;
+     return side.texture != gfx::kNullTexture;
+ }
+ 
++// MoonMod: the pixels of a picture with more pixels than its texels, read again the first time they are needed.
++bool KeepPixels(Entry &entry) {
++    if (entry.pixels != nullptr) {
++        return true;
++    }
++    if (!entry.reread) {
++        return false;
++    }
++    PortDecodedTexture again;
++    bool               usable = entry.reread(again) && again.format == gfx::TextureFormat::Rgba8 &&
++                                again.width == entry.pixel_width && again.height == entry.pixel_height &&
++                                again.levels.size() == entry.levels;
++    for (size_t level = 0; usable && level < again.levels.size(); level++) {
++        usable = again.levels[level].size() == static_cast<size_t>(std::max(1u, again.width >> level)) *
++                                                   std::max(1u, again.height >> level) * 4;
++    }
++    if (!usable) {
++        // The file went or changed: the renderer's own copy from here on, not a read every frame.
++        entry.reread = nullptr;
++        return false;
++    }
++    entry.pixels = std::make_unique<std::vector<std::vector<uint8_t>>>(std::move(again.levels));
++    return true;
++}
++
++// MoonMod: the game copying into a picture with more pixels than its texels. The renderer's copy reaches the largest
++// level only, and such a picture is mostly drawn from its smaller ones, so an animated face would stop blinking. The
++// copy is made on the kept pixels instead and every level it touches is sent again. The source's pixels are needed
++// too: it is a picture of the same kind (an animation's frames come from the same package), else false and the
++// renderer copies the largest level as it always did.
++bool MoveIntoPicture(const Side &src, int x, int y, int width, int height, Entry &to, gfx::TextureHandle texture,
++                     int dst_x, int dst_y) {
++    Entry *from = src.image;
++    if (from == nullptr || from->pixel_width == 0 || !KeepPixels(*from) || !KeepPixels(to)) {
++        return false;
++    }
++    // In texels first, clipped by whichever edge comes first, as the renderer's copy is.
++    if (x < 0) {
++        dst_x -= x;
++        width += x;
++        x = 0;
++    }
++    if (y < 0) {
++        dst_y -= y;
++        height += y;
++        y = 0;
++    }
++    if (dst_x < 0) {
++        x -= dst_x;
++        width += dst_x;
++        dst_x = 0;
++    }
++    if (dst_y < 0) {
++        y -= dst_y;
++        height += dst_y;
++        dst_y = 0;
++    }
++    width = std::min({width, static_cast<int>(from->width) - x, static_cast<int>(to.width) - dst_x});
++    height = std::min({height, static_cast<int>(from->height) - y, static_cast<int>(to.height) - dst_y});
++    if (width <= 0 || height <= 0) {
++        return true;
++    }
++    const auto pixel = [](int texel, unsigned pixels, unsigned texels) {
++        return static_cast<unsigned>((static_cast<uint64_t>(texel) * pixels + texels / 2) / texels);
++    };
++    const unsigned from_x0 = pixel(x, from->pixel_width, from->width);
++    const unsigned from_y0 = pixel(y, from->pixel_height, from->height);
++    const unsigned from_x1 = std::max(from_x0 + 1, pixel(x + width, from->pixel_width, from->width));
++    const unsigned from_y1 = std::max(from_y0 + 1, pixel(y + height, from->pixel_height, from->height));
++    const unsigned to_x0 = pixel(dst_x, to.pixel_width, to.width);
++    const unsigned to_y0 = pixel(dst_y, to.pixel_height, to.height);
++    const unsigned to_x1 = std::max(to_x0 + 1, pixel(dst_x + width, to.pixel_width, to.width));
++    const unsigned to_y1 = std::max(to_y0 + 1, pixel(dst_y + height, to.pixel_height, to.height));
++    if (from_x1 > from->pixel_width || from_y1 > from->pixel_height || to_x1 > to.pixel_width ||
++        to_y1 > to.pixel_height) {
++        return false;
++    }
++    const unsigned patch_width = to_x1 - to_x0;
++    const unsigned patch_height = to_y1 - to_y0;
++    // Through a patch, since the two may be one picture; nearest, as the renderer's copy between two scales is.
++    std::vector<uint8_t>        patch(static_cast<size_t>(patch_width) * patch_height * 4);
++    const std::vector<uint8_t> &source = (*from->pixels)[0];
++    for (unsigned row = 0; row < patch_height; row++) {
++        const unsigned source_row = from_y0 + static_cast<unsigned>(static_cast<uint64_t>(row) * (from_y1 - from_y0) / patch_height);
++        for (unsigned column = 0; column < patch_width; column++) {
++            const unsigned source_column =
++                from_x0 + static_cast<unsigned>(static_cast<uint64_t>(column) * (from_x1 - from_x0) / patch_width);
++            std::memcpy(&patch[(static_cast<size_t>(row) * patch_width + column) * 4],
++                        &source[(static_cast<size_t>(source_row) * from->pixel_width + source_column) * 4], 4);
++        }
++    }
++    std::vector<std::vector<uint8_t>> &levels = *to.pixels;
++    for (unsigned row = 0; row < patch_height; row++) {
++        std::memcpy(&levels[0][(static_cast<size_t>(to_y0 + row) * to.pixel_width + to_x0) * 4],
++                    &patch[static_cast<size_t>(row) * patch_width * 4], static_cast<size_t>(patch_width) * 4);
++    }
++    const bool upload = RendererUp() && texture != gfx::kNullTexture;
++    if (upload) {
++        gfx::UpdateTexture(texture, 0, to_x0, to_y0, patch_width, patch_height, patch.data());
++    }
++    unsigned x0 = to_x0;
++    unsigned y0 = to_y0;
++    unsigned x1 = to_x1;
++    unsigned y1 = to_y1;
++    for (unsigned level = 1; level < levels.size(); level++) {
++        const unsigned above_width = std::max(1u, to.pixel_width >> (level - 1));
++        const unsigned above_height = std::max(1u, to.pixel_height >> (level - 1));
++        const unsigned level_width = std::max(1u, to.pixel_width >> level);
++        const unsigned level_height = std::max(1u, to.pixel_height >> level);
++        x0 = std::min(x0 / 2, level_width - 1);
++        y0 = std::min(y0 / 2, level_height - 1);
++        x1 = std::clamp((x1 + 1) / 2, x0 + 1, level_width);
++        y1 = std::clamp((y1 + 1) / 2, y0 + 1, level_height);
++        PortHalveRgba(levels[level - 1].data(), above_width, above_height, levels[level].data(), level_width,
++                      level_height, x0, y0, x1, y1);
++        if (upload) {
++            gfx::UpdateTexture(texture, level, x0, y0, x1 - x0, y1 - y0,
++                               &levels[level][(static_cast<size_t>(y0) * level_width + x0) * 4], level_width);
++        }
++    }
++    return true;
++}
++
+ } // namespace
+ 
+ bool PortLegacyTexturePath() {
+@@ -648,14 +784,27 @@ unsigned PortCreateTexture(const PortDecodedTexture &decoded, PortTextureOwner o
+     }
+     unsigned key = AllocateKey(EntryKind::Image, owner);
+     Entry   &entry = Reg().entries[key];
+-    entry.width = decoded.width;
+-    entry.height = decoded.height;
++    // MoonMod: a picture with more pixels than its texels is registered, drawn and copied at the texels.
++    const bool larger = decoded.format == gfx::TextureFormat::Rgba8 &&
++                        (decoded.logical_width != 0 || decoded.logical_height != 0);
++    entry.width = larger && decoded.logical_width != 0 ? decoded.logical_width : decoded.width;
++    entry.height = larger && decoded.logical_height != 0 ? decoded.logical_height : decoded.height;
+     entry.format = decoded.format;
+     entry.has_alpha = decoded.has_alpha;
++    if (larger) {
++        entry.pixel_width = decoded.width;
++        entry.pixel_height = decoded.height;
++        entry.levels = static_cast<unsigned>(decoded.levels.size());
++        entry.reread = decoded.reread;
++    }
+     if (RendererUp()) {
+         gfx::TextureDesc desc;
+         desc.width = decoded.width;
+         desc.height = decoded.height;
++        if (larger) {
++            desc.logical_width = entry.width;
++            desc.logical_height = entry.height;
++        }
+         desc.format = decoded.format;
+         desc.mip_levels = static_cast<uint32_t>(decoded.levels.size());
+         desc.has_alpha = decoded.has_alpha;
+@@ -734,12 +883,23 @@ void PortReleaseKey(unsigned key) {
  
  void PortReleaseOwner(PortTextureOwner owner) {
      for (unsigned key = 0; key < kKeyCount; key++) {
@@ -66018,11 +66433,105 @@ index d74856d4..99ab7fdb 100644
  bool PortKeyLive(unsigned key) {
      return Live(key) != nullptr;
  }
+@@ -828,9 +988,56 @@ bool PortMoveImage(unsigned src_tbp, unsigned src_psm, int x, int y, int width,
+                    dst_tbp);
+         return false;
+     }
++    if (dst.image != nullptr && dst.image->levels > 1 && dst.image->pixel_width != 0 &&
++        MoveIntoPicture(src, x, y, width, height, *dst.image, dst.texture, dst_x, dst_y)) {
++        return true;
++    }
+     return gfx::CopyTexture(src.texture, gfx::Rect{.x = x, .y = y, .w = width, .h = height}, dst.texture, dst_x, dst_y);
+ }
+ 
++const std::vector<uint8_t> *PortKeptPixels(unsigned key, unsigned level) {
++    const Entry *entry = Live(key);
++    if (entry == nullptr || entry->pixels == nullptr || level >= entry->pixels->size()) {
++        return nullptr;
++    }
++    return &(*entry->pixels)[level];
++}
++
++void PortHalveRgba(const uint8_t *from, unsigned from_width, unsigned from_height, uint8_t *to, unsigned to_width,
++                   unsigned to_height, unsigned x0, unsigned y0, unsigned x1, unsigned y1) {
++    if (from_width == 0 || from_height == 0) {
++        return;
++    }
++    x1 = std::min(x1, to_width);
++    y1 = std::min(y1, to_height);
++    for (unsigned y = y0; y < y1; y++) {
++        const unsigned rows[2] = {std::min(2 * y, from_height - 1), std::min(2 * y + 1, from_height - 1)};
++        for (unsigned x = x0; x < x1; x++) {
++            const unsigned columns[2] = {std::min(2 * x, from_width - 1), std::min(2 * x + 1, from_width - 1)};
++            unsigned       colour[3] = {0, 0, 0};
++            unsigned       alpha = 0;
++            for (const unsigned row : rows) {
++                for (const unsigned column : columns) {
++                    const uint8_t *pixel = from + (static_cast<size_t>(row) * from_width + column) * 4;
++                    colour[0] += pixel[0] * pixel[3];
++                    colour[1] += pixel[1] * pixel[3];
++                    colour[2] += pixel[2] * pixel[3];
++                    alpha += pixel[3];
++                }
++            }
++            uint8_t *out = to + (static_cast<size_t>(y) * to_width + x) * 4;
++            if (alpha == 0) {
++                std::memset(out, 0, 4);
++                continue;
++            }
++            out[0] = static_cast<uint8_t>((colour[0] + alpha / 2) / alpha);
++            out[1] = static_cast<uint8_t>((colour[1] + alpha / 2) / alpha);
++            out[2] = static_cast<uint8_t>((colour[2] + alpha / 2) / alpha);
++            out[3] = static_cast<uint8_t>((alpha + 2) / 4);
++        }
++    }
++}
++
+ bool PortMoveImage(const sceGsTex0 &src, int x, int y, int width, int height, const sceGsTex0 &dst, int dst_x,
+                    int dst_y) {
+     return PortMoveImage(src.TBP0, src.PSM, x, y, width, height, dst.TBP0, dst.PSM, dst_x, dst_y);
 diff --git a/port/src/render/texture_registry.hpp b/port/src/render/texture_registry.hpp
-index 2e305974..496249d6 100644
+index 2e305974..bcc919c3 100644
 --- a/port/src/render/texture_registry.hpp
 +++ b/port/src/render/texture_registry.hpp
-@@ -160,6 +160,14 @@ void PortReleaseKey(unsigned key);
+@@ -5,6 +5,7 @@
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
++#include <functional>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+@@ -76,8 +77,28 @@ struct PortDecodedTexture {
+     std::vector<std::vector<uint8_t>> levels;
+     std::array<uint32_t, 256>         palette = {};
+     bool                              four_bit = false;
++    /**
++     * MoonMod: a colour picture with more pixels than the texture it stands for (a package's redrawn texture at several
++     * times the game's size). width and height are the picture's own; these are the size the game draws and copies it
++     * at, in texels. 0 for the picture's own width or height.
++     */
++    unsigned logical_width = 0;
++    unsigned logical_height = 0;
++    /**
++     * MoonMod: reads such a picture again, as it was first given. The registry keeps no copy of the pixels, and needs
++     * them back when the game copies into the texture (texture animation), to redo the smaller levels of what changed.
++     */
++    std::function<bool(PortDecodedTexture &)> reread;
+ };
+ 
++/**
++ * MoonMod: part of the next smaller level of straight-alpha RGBA. Columns [x0, x1) and rows [y0, y1) of `to` (half of
++ * `from` each way, rounded down, at least 1) each become the average of the pixels of `from` they cover, weighted by
++ * alpha so a transparent pixel's colour does not bleed in.
++ */
++void PortHalveRgba(const uint8_t *from, unsigned from_width, unsigned from_height, uint8_t *to, unsigned to_width,
++                   unsigned to_height, unsigned x0, unsigned y0, unsigned x1, unsigned y1);
++
+ /**
+  * True when the data has no baked texture documents at all (a fresh extraction), so every texture
+  * decodes from its raw source bytes instead. Decided once, from the data root, at the first load.
+@@ -160,6 +181,14 @@ void PortReleaseKey(unsigned key);
  void PortReleaseOwner(PortTextureOwner owner);
  bool PortKeyLive(unsigned key);
  
@@ -66037,6 +66546,19 @@ index 2e305974..496249d6 100644
  /**
   * The GS local-to-local transfer MGMoveImage describes, in texels of the two images: TBP0/PSM of
   * each side. Images copy on the renderer; palettes copy their CPU shadow in CLUT image positions
+@@ -170,6 +199,12 @@ bool PortMoveImage(unsigned src_tbp, unsigned src_psm, int x, int y, int width,
+ bool PortMoveImage(const sceGsTex0 &src, int x, int y, int width, int height, const sceGsTex0 &dst, int dst_x,
+                    int dst_y);
+ 
++/**
++ * MoonMod: a level of the pixels kept for a picture with more pixels than its texels, once the game has copied into
++ * or out of it (PortDecodedTexture::reread); nullptr if none are kept. For tests.
++ */
++const std::vector<uint8_t> *PortKeptPixels(unsigned key, unsigned level);
++
+ /**
+  * Uploads a 16x16 PSMCT32 CLUT image (GS alpha, CSM1 order) at cbp, as SetClut sends it.
+  * False when cbp names no live palette.
 diff --git a/port/src/save/save_slots.hpp b/port/src/save/save_slots.hpp
 index 4abe42d7..89b78831 100644
 --- a/port/src/save/save_slots.hpp
@@ -80399,6 +80921,267 @@ index 00000000..eeaa0e25
 +
 +
 +
+diff --git a/port/src/tests/moonmod_texture_test.cpp b/port/src/tests/moonmod_texture_test.cpp
+new file mode 100644
+index 00000000..76964311
+--- /dev/null
++++ b/port/src/tests/moonmod_texture_test.cpp
+@@ -0,0 +1,255 @@
++// MoonMod: a package's replacement texture kept larger than the texture it stands for (moonmod/mod_texture.hpp,
++// PortDecodedTexture::logical_width).
++#include <gtest/gtest.h>
++
++#include <array>
++#include <cstdint>
++#include <cstring>
++#include <vector>
++
++// The fixture first: the game's GS headers define short macros its own includes must not meet.
++#include "tex_fixture.hpp"
++
++#include "moonmod/mod_texture.hpp"
++#include "render/texture_registry.hpp"
++
++namespace dc::test {
++
++using namespace dc::render;
++using namespace texfix;
++
++namespace {
++
++constexpr std::array<uint8_t, 4> kWhite = {255, 255, 255, 0x80};
++
++using Colour = std::array<uint8_t, 4>;
++constexpr Colour kRed = {255, 0, 0, 0x80};
++constexpr Colour kGreen = {0, 255, 0, 0x80};
++constexpr Colour kBlue = {0, 0, 255, 0x80};
++
++std::vector<uint8_t> Filled(unsigned width, unsigned height, Colour colour) {
++    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
++    for (size_t pixel = 0; pixel < rgba.size(); pixel += 4) {
++        std::memcpy(&rgba[pixel], colour.data(), 4);
++    }
++    return rgba;
++}
++
++void Put(std::vector<uint8_t> &rgba, unsigned width, unsigned x, unsigned y, Colour colour) {
++    std::memcpy(&rgba[(static_cast<size_t>(y) * width + x) * 4], colour.data(), 4);
++}
++
++Colour At(const std::vector<uint8_t> &rgba, unsigned width, unsigned x, unsigned y) {
++    Colour colour;
++    std::memcpy(colour.data(), &rgba[(static_cast<size_t>(y) * width + x) * 4], 4);
++    return colour;
++}
++
++// An 8x8 picture for a 2x2 texture: three levels, the smallest the texture's own size.
++PortDecodedTexture LargerPicture(std::vector<uint8_t> first) {
++    PortDecodedTexture     picture;
++    const ModsTextureSize size = ModsTextureSizeFor(8, 8, 2, 2, 1, 4096, 8);
++    picture.width = size.width;
++    picture.height = size.height;
++    picture.logical_width = 2;
++    picture.logical_height = 2;
++    picture.levels = ModsTextureLevels(std::move(first), 8, 8, size, 2, 2);
++    const std::vector<std::vector<uint8_t>> levels = picture.levels;
++    picture.reread = [levels](PortDecodedTexture &again) {
++        again.width = 8;
++        again.height = 8;
++        again.levels = levels;
++        return true;
++    };
++    return picture;
++}
++
++PortTextureRef Ref(unsigned key) {
++    sceGsTex0 tex0 = {};
++    tex0.TBP0 = key;
++    tex0.PSM = SCE_GS_PSMCT32;
++    return PortTextureFromTex0(tex0);
++}
++
++} // namespace
++
++TEST(ModTexture, ALargerPngIsKeptLargerWithinTheLimits) {
++    // Four times a 64x64 texture: kept, with a level for each doubling.
++    ModsTextureSize size = ModsTextureSizeFor(256, 256, 64, 64, 1, 4096, 8);
++    EXPECT_EQ(size.width, 256u);
++    EXPECT_EQ(size.height, 256u);
++    EXPECT_EQ(size.levels, 3u);
++    // The texture's own levels stay under them.
++    EXPECT_EQ(ModsTextureSizeFor(256, 256, 64, 64, 3, 4096, 8).levels, 5u);
++    // Sixteen times is over eight: halved.
++    size = ModsTextureSizeFor(1024, 1024, 64, 64, 1, 4096, 8);
++    EXPECT_EQ(size.width, 512u);
++    EXPECT_EQ(size.levels, 4u);
++    // Over the longest side a device takes: halved, both ways together.
++    size = ModsTextureSizeFor(8192, 4096, 1024, 512, 1, 4096, 8);
++    EXPECT_EQ(size.width, 4096u);
++    EXPECT_EQ(size.height, 2048u);
++    EXPECT_EQ(size.levels, 3u);
++    // A scale of 1 is the texture's own size and levels, whatever the PNG.
++    size = ModsTextureSizeFor(256, 256, 64, 64, 3, 4096, 1);
++    EXPECT_EQ(size.width, 64u);
++    EXPECT_EQ(size.height, 64u);
++    EXPECT_EQ(size.levels, 3u);
++    // A smaller PNG is fitted up to the texture.
++    size = ModsTextureSizeFor(32, 16, 64, 64, 1, 4096, 8);
++    EXPECT_EQ(size.width, 64u);
++    EXPECT_EQ(size.height, 64u);
++    EXPECT_EQ(size.levels, 1u);
++    // Not a whole number of times: kept as it is, no level added until it is twice the texture.
++    size = ModsTextureSizeFor(96, 96, 64, 64, 1, 4096, 8);
++    EXPECT_EQ(size.width, 96u);
++    EXPECT_EQ(size.levels, 1u);
++}
++
++TEST(ModTexture, HalvingWeighsColourByAlpha) {
++    // One opaque red pixel beside three transparent ones of another colour.
++    std::vector<uint8_t> from = {255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 0, 255, 0, 0};
++    std::vector<uint8_t> to(4, 7);
++    PortHalveRgba(from.data(), 2, 2, to.data(), 1, 1, 0, 0, 1, 1);
++    EXPECT_EQ(to, (std::vector<uint8_t>{255, 0, 0, 64}));
++    // All transparent: nothing.
++    from.assign(16, 0);
++    from[0] = 200;
++    PortHalveRgba(from.data(), 2, 2, to.data(), 1, 1, 0, 0, 1, 1);
++    EXPECT_EQ(to, (std::vector<uint8_t>{0, 0, 0, 0}));
++    // Only the asked part is written.
++    std::vector<uint8_t> wide = Filled(4, 2, kRed);
++    std::vector<uint8_t> half = Filled(2, 1, kBlue);
++    PortHalveRgba(wide.data(), 4, 2, half.data(), 2, 1, 1, 0, 2, 1);
++    EXPECT_EQ(At(half, 2, 0, 0), kBlue);
++    EXPECT_EQ(At(half, 2, 1, 0), kRed);
++}
++
++TEST(ModTexture, LevelsOfALargerPictureHalveDownToTheTexture) {
++    std::vector<uint8_t> source = Filled(8, 8, kRed);
++    for (unsigned y = 0; y < 8; y++) {
++        for (unsigned x = 4; x < 8; x++) {
++            Put(source, 8, x, y, kBlue);
++        }
++    }
++    const ModsTextureSize                   size = ModsTextureSizeFor(8, 8, 2, 2, 1, 4096, 8);
++    const std::vector<std::vector<uint8_t>> levels = ModsTextureLevels(source, 8, 8, size, 2, 2);
++    ASSERT_EQ(levels.size(), 3u);
++    EXPECT_EQ(levels[0], source);
++    ASSERT_EQ(levels[1].size(), size_t{4} * 4 * 4);
++    ASSERT_EQ(levels[2].size(), size_t{2} * 2 * 4);
++    EXPECT_EQ(At(levels[1], 4, 1, 3), kRed);
++    EXPECT_EQ(At(levels[1], 4, 2, 0), kBlue);
++    EXPECT_EQ(At(levels[2], 2, 0, 1), kRed);
++    EXPECT_EQ(At(levels[2], 2, 1, 1), kBlue);
++
++    // At the texture's own size every level is fitted from the PNG, as it always was.
++    const ModsTextureSize                   native = ModsTextureSizeFor(8, 8, 2, 2, 2, 4096, 1);
++    const std::vector<std::vector<uint8_t>> fitted = ModsTextureLevels(source, 8, 8, native, 2, 2);
++    ASSERT_EQ(fitted.size(), 2u);
++    ASSERT_EQ(fitted[0].size(), size_t{2} * 2 * 4);
++    ASSERT_EQ(fitted[1].size(), size_t{4});
++    EXPECT_EQ(At(fitted[0], 2, 0, 0), kRed);
++    EXPECT_EQ(At(fitted[0], 2, 1, 1), kBlue);
++}
++
++// The picture's own pixels reach the screen: a texel of the texture shows the four by four pixels drawn for it.
++TEST(ModTexture, ALargerPictureIsDrawnAtTheTexturesSize) {
++    TexEnv               env;
++    std::vector<uint8_t> first = Filled(8, 8, kRed);
++    Put(first, 8, 1, 0, kGreen); // inside the first texel
++    unsigned key = PortCreateTexture(LargerPicture(first), PortTextureOwner::Manager, nullptr);
++    ASSERT_NE(key, 0u);
++    PortTextureRef ref = Ref(key);
++    ASSERT_TRUE(ref.valid);
++    EXPECT_EQ(ref.width, 2u);
++    EXPECT_EQ(ref.height, 2u);
++    auto info = gfx::GetTextureInfo(ref.binding.texture);
++    ASSERT_TRUE(info);
++    // 200 pixels for two texels: each of the picture's pixels is 25 across.
++    env.gfx.Frame(kWhite, [&] { env.Draw(ref, 0, 0, 200, 200, 0, 0, 2, 2); });
++    EXPECT_TRUE(env.gfx.PixelNear(12, 12, 255, 0, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(37, 12, 0, 255, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(62, 12, 255, 0, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(150, 150, 255, 0, 0));
++    PortReleaseKey(key);
++}
++
++// Texture animation: the game copies a frame over part of the texture, in texels. Every level takes it, since a
++// larger picture is mostly drawn from the smaller ones.
++TEST(ModTexture, ACopyIntoALargerPictureReachesEveryLevel) {
++    TexEnv               env;
++    std::vector<uint8_t> frames = Filled(8, 8, kBlue);
++    Put(frames, 8, 0, 0, kGreen);
++    unsigned src = PortCreateTexture(LargerPicture(frames), PortTextureOwner::Manager, nullptr);
++    unsigned dst = PortCreateTexture(LargerPicture(Filled(8, 8, kRed)), PortTextureOwner::Manager, nullptr);
++    ASSERT_NE(src, 0u);
++    ASSERT_NE(dst, 0u);
++    EXPECT_EQ(PortKeptPixels(dst, 0), nullptr);
++
++    // The texel at (0, 0) of the frames onto the texel at (1, 1).
++    ASSERT_TRUE(PortMoveImage(src, SCE_GS_PSMCT32, 0, 0, 1, 1, dst, SCE_GS_PSMCT32, 1, 1));
++    const std::vector<uint8_t> *first = PortKeptPixels(dst, 0);
++    const std::vector<uint8_t> *second = PortKeptPixels(dst, 1);
++    const std::vector<uint8_t> *third = PortKeptPixels(dst, 2);
++    ASSERT_TRUE(first != nullptr && second != nullptr && third != nullptr);
++    EXPECT_EQ(PortKeptPixels(dst, 3), nullptr);
++    EXPECT_EQ(At(*first, 8, 4, 4), kGreen);
++    EXPECT_EQ(At(*first, 8, 7, 7), kBlue);
++    EXPECT_EQ(At(*first, 8, 3, 4), kRed);
++    EXPECT_EQ(At(*first, 8, 4, 3), kRed);
++    EXPECT_EQ(At(*second, 4, 3, 3), kBlue);
++    EXPECT_EQ(At(*second, 4, 1, 2), kRed);
++    EXPECT_EQ(At(*third, 2, 0, 0), kRed);
++    EXPECT_EQ(At(*third, 2, 1, 0), kRed);
++    // Fifteen blue pixels and one green.
++    EXPECT_EQ(At(*third, 2, 1, 1), (Colour{0, 16, 239, 0x80}));
++
++    PortTextureRef ref = Ref(dst);
++    ASSERT_TRUE(ref.valid);
++    // Large, from the first level: the copied texel with its green corner.
++    env.gfx.Frame(kWhite, [&] { env.Draw(ref, 0, 0, 200, 200, 0, 0, 2, 2); });
++    EXPECT_TRUE(env.gfx.PixelNear(50, 50, 255, 0, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(112, 112, 0, 255, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(180, 180, 0, 0, 255));
++    // Small, from the last level: the copy is there too.
++    env.gfx.Frame(kWhite, [&] { env.Draw(ref, 0, 0, 2, 2, 0, 0, 2, 2); });
++    EXPECT_TRUE(env.gfx.PixelNear(0, 0, 255, 0, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(1, 1, 0, 16, 239, 3));
++
++    // Within one picture, as a face's frames are: the texel just written onto the first.
++    ASSERT_TRUE(PortMoveImage(dst, SCE_GS_PSMCT32, 1, 1, 1, 1, dst, SCE_GS_PSMCT32, 0, 0));
++    EXPECT_EQ(At(*PortKeptPixels(dst, 0), 8, 0, 0), kGreen);
++    EXPECT_EQ(At(*PortKeptPixels(dst, 0), 8, 3, 3), kBlue);
++    EXPECT_EQ(At(*PortKeptPixels(dst, 2), 2, 0, 0), (Colour{0, 16, 239, 0x80}));
++    EXPECT_EQ(At(*PortKeptPixels(dst, 2), 2, 1, 0), kRed);
++
++    // Releasing lets the kept pixels go.
++    PortReleaseKey(dst);
++    EXPECT_EQ(PortKeptPixels(dst, 0), nullptr);
++    PortReleaseKey(src);
++}
++
++// A picture that cannot be read again (its file went) falls back to the renderer's own copy.
++TEST(ModTexture, ACopyStillWorksWhenThePictureCannotBeReadAgain) {
++    TexEnv             env;
++    PortDecodedTexture picture = LargerPicture(Filled(8, 8, kRed));
++    picture.reread = [](PortDecodedTexture &) { return false; };
++    unsigned src = PortCreateTexture(LargerPicture(Filled(8, 8, kBlue)), PortTextureOwner::Manager, nullptr);
++    unsigned dst = PortCreateTexture(picture, PortTextureOwner::Manager, nullptr);
++    ASSERT_NE(src, 0u);
++    ASSERT_NE(dst, 0u);
++    bool moved = false;
++    env.gfx.Frame(kWhite, [&] {
++        moved = PortMoveImage(src, SCE_GS_PSMCT32, 0, 0, 1, 1, dst, SCE_GS_PSMCT32, 1, 1);
++        env.Draw(Ref(dst), 0, 0, 200, 200, 0, 0, 2, 2);
++    });
++    EXPECT_TRUE(moved);
++    EXPECT_EQ(PortKeptPixels(dst, 0), nullptr);
++    EXPECT_TRUE(env.gfx.PixelNear(50, 50, 255, 0, 0));
++    EXPECT_TRUE(env.gfx.PixelNear(150, 150, 0, 0, 255));
++    PortReleaseKey(dst);
++    PortReleaseKey(src);
++}
++
++} // namespace dc::test
 diff --git a/port/src/tests/moonmod_title_modes_test.cpp b/port/src/tests/moonmod_title_modes_test.cpp
 new file mode 100644
 index 00000000..41a716cb
