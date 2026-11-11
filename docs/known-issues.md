@@ -20,3 +20,17 @@
   another of its members.
 - 2026-11-11: `pip install bpy` works in the cloud container (Blender 5.3 as a Python module, Python 3.13), so
   Blender scripts can be checked there on made-up models.
+- 2026-11-11: The dc1tk in this workspace (Jeffiest/dc1tk at `37ca8b0`, `main` and the session branch) does not
+  export skin weights. Its source has no `ALLOC_DBUFF` handling and no `chained_weights`, the two toolkit fixes
+  `tools/chr/README.md` dates 2026-10-29 and places in the toolkit at `E:/dc1tk-blender`. Seen: `model-export` of
+  `mods/moonmod.opar/resources/opar/c07d.chr` (its cfg has `VERTEX_ANIME 1` and `ALLOC_DBUFF "skin"`) gives a glTF
+  with no `skins` and no `JOINTS_0`. Until that toolkit work is in the repository, a skinned pack's export and
+  build have to come from the build on the user's machine, and nothing built here on this dc1tk can keep a skin.
+- 2026-11-11: `dc2tk model-export` refuses a pack that is not inside a game data folder ("one holding dun/ and
+  chara/"). A folder with those two directories and the pack at its data path is enough for a pack that needs
+  nothing else.
+- 2026-11-11: dc1tk builds to `dc1tk/build/release/dc2tk` (its cargo config sets the target folder), not
+  `src/target`. Set `DC2TK` to it for `tools/chr/chrtool.py`.
+- 2026-11-11: Blender's glTF importer adds a mesh object of its own, `Icosphere` (the bones' shape). A check that
+  walks every mesh object meets it first: take the meshes whose parent is the armature. (A first check this
+  session stopped on it and was read, wrongly, as the model's mesh missing.)
