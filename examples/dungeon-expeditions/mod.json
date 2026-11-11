@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "id": "example.dungeon-expeditions",
+  "name": "Dungeon Expeditions",
+  "version": "0.1.0",
+  "author": "MoonFactory Example",
+  "description": "Maze and horde dungeon runs with contracts, persistent run stats, and bankable rewards.",
+  "framework_api": 1,
+  "games": ["chronicle"],
+  "entry": "main.lua",
+  "permissions": ["storage.read", "storage.write", "game.read", "game.write", "content.register"],
+  "settings": [
+    {
+      "id": "maze_rooms",
+      "name": "Maze room count",
+      "description": "Room count for future Maze Expedition floors.",
+      "type": "integer",
+      "default": 24,
+      "min": 2,
+      "max": 64
+    },
+    {
+      "id": "maze_area",
+      "name": "Maze area",
+      "description": "Placement area for future Maze Expedition floors.",
+      "type": "integer",
+      "default": 40,
+      "min": 8,
+      "max": 46
+    },
+    {
+      "id": "horde_active_limit",
+      "name": "Horde active enemies",
+      "description": "Maximum enemies kept awake during Horde Expeditions.",
+      "type": "integer",
+      "default": 16,
+      "min": 1,
+      "max": 16
+    },
+    {
+      "id": "base_reward",
+      "name": "Expedition base reward",
+      "description": "Gilda awarded when an expedition is banked.",
+      "type": "integer",
+      "default": 100,
+      "min": 1,
+      "max": 10000
+    },
+    {
+      "id": "per_floor_reward",
+      "name": "Reward per floor",
+      "description": "Additional Gilda for each distinct floor reached.",
+      "type": "integer",
+      "default": 75,
+      "min": 0,
+      "max": 1000
+    },
+    {
+      "id": "per_kill_reward",
+      "name": "Reward per enemy",
+      "description": "Additional Gilda for each enemy defeated during the run.",
+      "type": "integer",
+      "default": 2,
+      "min": 0,
+      "max": 100
+    },
+    {
+      "id": "contract_bonus",
+      "name": "Contract bonus",
+      "description": "Bonus Gilda for completing the mode-specific contract.",
+      "type": "integer",
+      "default": 500,
+      "min": 0,
+      "max": 10000
+    }
+  ]
+}
