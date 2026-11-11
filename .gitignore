@@ -21,3 +21,7 @@ Thumbs.db
 # Elden Ring reference exporter build output (tools/anim/reference)
 tools/anim/reference/bin/
 tools/anim/reference/obj/
+
+# Bloodborne model exporter build output (tools/bb)
+tools/bb/bin/
+tools/bb/obj/

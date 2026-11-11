@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Reads one Bloodborne character model from the player's own dump into a cache outside the repository, for the
+       monster replacement tools. It builds against DSAnimStudio's libraries where they are unpacked (pass
+       -p:DsasDir=... or set DSAS_DIR), as tools/anim/reference does; nothing of theirs or the game's is copied into
+       this folder. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>CA1416</NoWarn>
+    <DsasDir Condition="'$(DsasDir)' == ''">$(DSAS_DIR)</DsasDir>
+  </PropertyGroup>
+  <Target Name="NeedDsas" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(DsasDir)/SoulsFormats.dll')">
+    <Error Text="Point DsasDir (or the DSAS_DIR environment variable) at an unpacked DSAnimStudio folder (the one with SoulsFormats.dll)." />
+  </Target>
+  <ItemGroup>
+    <Reference Include="SoulsFormats"><HintPath>$(DsasDir)/SoulsFormats.dll</HintPath></Reference>
+    <!-- What SoulsFormats loads while it reads a PS4 texture or a compressed archive; copied beside the program. -->
+    <Reference Include="DrSwizzler" Condition="Exists('$(DsasDir)/DrSwizzler.dll')"><HintPath>$(DsasDir)/DrSwizzler.dll</HintPath></Reference>
+    <Reference Include="ZstdNet" Condition="Exists('$(DsasDir)/ZstdNet.dll')"><HintPath>$(DsasDir)/ZstdNet.dll</HintPath></Reference>
+    <Reference Include="BouncyCastle.Cryptography" Condition="Exists('$(DsasDir)/BouncyCastle.Cryptography.dll')"><HintPath>$(DsasDir)/BouncyCastle.Cryptography.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>
