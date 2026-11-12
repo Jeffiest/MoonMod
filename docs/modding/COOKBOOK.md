@@ -212,7 +212,8 @@ With `dungeons.set_quick_passage({enabled = true})` the engine does the rest:
 - **No loading card.** Any jump from a town, a field or a floor to another place (a door, the world map, a road, a
   scene's own jump, `world.enter_map`, a floor to a floor) holds the last picture on screen until the other side is
   ready (at most ten seconds), then cuts. A loaded save has no card either, if the mod holds the passage by
-  `game.scene.will_enter`; the title's own screens and a new game keep theirs.
+  `game.scene.will_enter`; the title's own screens and a new game keep theirs. A house's door, in or out, has no
+  fade: the party opens it in view and the picture cuts to the room, or back to the town.
 - **Connected worlds.** Each place keeps its own memory (town `100 + map`, dungeon its map), so walking back out of
   the dungeon resumes the town as it was left, villagers where they stood, and walking back in resumes floor 1.
 - **The door is a window.** Norune's cave door, once opened, stays open, and the cave is drawn live through it; inside,

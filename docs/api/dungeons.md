@@ -494,7 +494,9 @@ Smaller floor rules and things to stand on a floor, one entry each:
   hold the passage by the time the place starts: claim it from `game.scene.will_enter` or earlier (the card is decided
   right after that event). The title's own screens and a new game keep their card. Leaving a dungeon by a knockout,
   the escape item or the floor's exit keeps the game's own fade to black (about a quarter of a second) and then cuts
-  to the town. Between a town and its dungeon there is more: the town and the dungeon
+  to the town. A house's door has no fade either way: the party opens the door in view (the game's own motion, about
+  a second going in and three quarters of one coming out), the last picture is held for a few frames over the load,
+  and the room or the town is there. Between a town and its dungeon there is more: the town and the dungeon
   both stay loaded (each keeps its own memory and textures), and each is drawn live through the other's way through,
   from where the camera stands: the cave seen through the town's door, the town seen through a doorway in the cave wall
   behind where the party arrived.

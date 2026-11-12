@@ -87,7 +87,9 @@ Every trip that still loads keeps loading, but nothing stands between the player
    OW2 item 2.)
 4. **Houses.** The interior gets its own NPC buffer (it shares `EdNPCBuffer` with the villagers today, which is why
    the villagers are thrown away) and its own kept world, built with the town. The door opens and the party walks in:
-   the house is a doorway like the dungeon's, drawn live through its door.
+   the house is a doorway like the dungeon's, drawn live through its door. (First piece 2026-11-12: no fade either
+   way, the door opened in view, a picture held 7 or 8 frames over the load. The kept house and the live door are
+   still to do.)
 5. **Floors without Vigil.** For saves that go floor by floor: the next floor is built in its own world while the
    party plays the current one, and the stairs are a doorway. Back floors the same way.
 6. **Hitches.** Menu art, the other characters' models and the weapon models are kept loaded; the autosave writes on
@@ -243,3 +245,23 @@ what the roads feel like.
   dungeon's leave cleanup while the door still shows a deeper floor; it comes free once any place can be kept.
   Not checked: the escape item and the exit gate driven by hand or headless (read in code only), exits to a field
   map (the Shipwreck's goes to map 19 by the road path), Matataki, and the eye beyond eight screenshots.
+- 2026-11-12, OW1 item 4, houses, first piece (engine; patch round 54). Measured first, base game, Toan's house in
+  Norune (`--jump house:i01h01`, which now goes in through the house's own door where the town has one): from the
+  press at the door to the room at full brightness 171 frames (100 of fade to black, a few black, 64 of fade in); out
+  again 208 frames (100 of fade, 40 black, 64 of fade in). The load itself takes little. Built, with the passage
+  held: neither door fades. Going in, the party opens the door in view (the game's own motion, 64 frames, to just
+  past the door's sound), the picture is held over the load, and the room is there: 71 frames from the press, 7 of
+  them a held picture, none black. Coming out, 45 frames of the door, the picture held while the town's villagers
+  load again, then the town: 53 frames, 8 held, none black. `GotoInterior` and the interior's door skip `EdFadeOut`
+  and cut by the door's count; `ChronicleHouseJumped` begins the hold at the cut; the room lets it go two frames into
+  its loop, the town four frames into its walk (or into a scene the house's script starts). With Open World off both
+  doors fade as before (171 and 208 again). Trace under `DC_PERF_TRANSITIONS=1`: `perf house door enter|leave` and
+  `perf held begin house ...`. Checked on the check exe and again on the rebuilt play exe, every frame's screenshot
+  compared; a second Norune house (`i01h04`) going in. Engine tests 799 pass.
+  Not checked: a door that opens with a scene (`minimum_progress`: it goes in with no door, cut 10 frames in), a
+  scene's own way out of a house, houses outside Norune (the dev jump ran into Matataki's and Queens' arrival
+  scenes), the door's sound against the cut (headless runs are silent), and the eye: nobody has watched it move.
+  Left in item 4: the picture is still held (7 and 8 frames), and the town's villagers are still thrown away and
+  loaded again on the way out. Zero needs the item as written: the interior's own NPC buffer and kept world, and the
+  room drawn live through the open door. Seen on the way: the mod layer knows nothing of houses
+  (`game.player.get()` gives no position inside one, and no event says the party went in or came out).

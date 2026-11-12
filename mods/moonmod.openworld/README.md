@@ -17,6 +17,10 @@ you pick it. Starting a new game keeps the card.
 **Out of a dungeon with no card.** Knocked out, or leaving by the escape item or the floor's exit: the screen fades
 to black as the game always did, and the town is there a moment later, with the party in front of the dungeon.
 
+**Into a house and out with no fade.** Press at a door and the party opens it; the room is there about a second
+later, and the town as quickly on the way back out. The game faded to black and in again each way: close to three
+seconds going in, three and a half coming out.
+
 **A town and its dungeon are one place.** Norune and the Divine Beast Cave, Matataki and the Wise Owl Forest: walk
 through the door and you are there, and you can see the other place through the doorway before you step in.
 
@@ -43,7 +47,7 @@ of the plan.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| No loading card on the way from one place to another | on | The held picture on every trip, and the passage through a town's dungeon door |
+| No loading card on the way from one place to another | on | The held picture on every trip, the passage through a town's dungeon door, and house doors with no fade |
 | A town's gate is the road to the next town, not the world map | on | The road panel at the gate |
 | The road only leads where the story has opened the way | on | Off: every road is open from the start |
 
@@ -75,6 +79,8 @@ Tests: `lua tools/tests/openworld/test_openworld.lua`.
       from the pause menu's load.
 - [ ] In a dungeon, use the escape item, leave by the floor's exit, and get knocked out (pick Leave): each fades to
       black and cuts to the town with no card; the party stands in front of the dungeon.
+- [ ] Norune: go into a house and come out again. The party opens the door, then the room (or the town) is there,
+      with no fade to black; the door's sound plays as it did. Try a house in another town as well.
 - [ ] Norune before Matataki is on the world map: the gate still opens the world map.
 - [ ] Once Matataki is open: the gate shows **The road** with Matataki Village and Stay; the party stands still while
       the panel is up.
