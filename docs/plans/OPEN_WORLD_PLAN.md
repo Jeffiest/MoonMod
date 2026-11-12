@@ -82,7 +82,9 @@ Every trip that still loads keeps loading, but nothing stands between the player
 2. **Loads get short.** Measure each `ModeInit`; move file reads off the game's thread for what can be read ahead
    (the next town's ground and textures while the panel is open, the town while walking to the dungeon's way out).
 3. **Dungeon exits walk out.** Escape powder, the floor's exit and defeat arrive at the door the party would have
-   walked out of, with the cut, not at the town's default spot behind a card.
+   walked out of, with the cut, not at the town's default spot behind a card. (Measured 2026-11-12: no card already,
+   and the game's spot is in front of the cave. The rest, the kept town resumed and the party at the door, is under
+   OW2 item 2.)
 4. **Houses.** The interior gets its own NPC buffer (it shares `EdNPCBuffer` with the villagers today, which is why
    the villagers are thrown away) and its own kept world, built with the town. The door opens and the party walks in:
    the house is a doorway like the dungeon's, drawn live through its door.
@@ -101,7 +103,9 @@ The step that makes roads possible: the town the party left is still there when 
 1. **`TownState`.** The town's globals move into one structure that `SwitchWorld` swaps (the survey's list is the
    starting point). Same for the dungeon's `dun/gameloop.cpp` state, so a second dungeon, or floor, can be kept.
 2. **Any number of kept places.** The door code keys places by world number, not "the town" and "the dungeon"; each
-   doorway has its own live picture.
+   doorway has its own live picture. Every way out of a dungeon (the escape item, the floor's exit, a knockout, from
+   any floor) then goes back to the kept town with the party at the door, as walking out of the first floor does
+   today (from OW1 item 3).
 3. **Letting go.** Least recently visited places are released when memory or texture keys run short. The count is a
    setting (large on a desktop, two or three in the browser build). Arena blocks and texture managers learn to be
    freed.
@@ -172,7 +176,10 @@ what the roads feel like.
 - **D4. Queens to Muska Lacka**: a coast road, or a ship from the East Harbor.
 - **D5. Fast travel**: keep travel from the map to places already walked to, or walk everywhere.
 - **D6. Which first**: OW1 (the cards and fades that are left, felt everywhere at once) or OW2 then OW3 (the first
-  walked road, Norune to Matataki). OW3 can't start before OW2.
+  walked road, Norune to Matataki). OW3 can't start before OW2. Answered "whatever you think": OW1 first.
+- **D7. The card with Open World off.** OW1 item 1 says it should last only as long as the load (under a second)
+  instead of 6.6 s. That changes the base game's timing for everyone, mod or no mod, so it is not built until asked
+  for.
 
 ## 5. Rules that hold throughout
 
@@ -211,3 +218,28 @@ what the roads feel like.
   the title is not a place to hold a picture of); the card lasting only as long as the load when open world is off.
   Not checked: the world map's own jump (same `MapJump`, by hand only), a scene's `_MAP_JUMP` with an event, the
   dungeon's leave-through-the-menu path (item 3), and the eye: these are tick counts, nobody has watched the cut.
+- 2026-11-12, OW1 item 1, a loaded save (engine; patch round 52). The card was decided in `GameLoop` before
+  `game.scene.will_enter`, and a save loaded from the title has no story session before that event, so no mod could
+  hold the passage in time. Changed: the card is decided right after the event; a loaded save (`g_loaded_save`, set
+  by the title's load and the pause menu's) counts as a trip, and with the passage held `ChronicleLoadJumped` holds
+  the dark frame behind the menu until the town stands or the floor is built. Checked headless with the real card
+  timing, on the check exe and again on the rebuilt play exe: Norune save from the title, card 397 ticks before, 8
+  ticks held now; a save made on a Shipwreck floor, 47 ticks held and Toan standing on the floor; Open World off,
+  the card as before (ticks 691 to 1088); a new game keeps its card. Engine tests 799 pass.
+  Not checked: the pause menu's load (same flag, set by hand-read code only), a load that passes through the dungeon
+  loader mode, a Vigil World save, and the eye.
+  Left in item 1: D7 (the card's length with Open World off), which waits for an answer.
+- 2026-11-12, OW1 item 3 measured before building anything: dungeon exits already have no card. A probe loaded the
+  Norune save, entered the Divine Beast Cave's second floor (`dungeons.enter_floor`, 45 ticks held), took lethal
+  damage, pressed through the knockout and chose Leave. `game.dungeon.defeated` at tick 1639, the game's own 16-frame
+  fade to black, `MapJump` at 1656, the town up at 1665: 10 ticks held (on black), then a cut to Norune at full
+  brightness, HP restored, the party at (815, 0, -460), which is the game's own return spot in front of the cave
+  mouth, facing it. So the item's premise (a far default spot behind a card) was wrong on both counts. The escape
+  item and the floor's exit end in the same `GAME_TASK_EXIT_FADE_WAIT` and the same `MapJump`, so they get the same
+  cut; a mod's way out (`world.enter_map`, `world.transition`) was measured in round 51 (10 ticks, no fade). Nothing
+  was changed. What is left of the item is moved to OW2 item 2, where it belongs: the town is loaded afresh on these
+  exits (it is resumed as it was left only when the party walks out of the first floor's way out), and the party
+  stands at the game's spot, not with its back to the door. Doing that now would mean resuming a kept town after the
+  dungeon's leave cleanup while the door still shows a deeper floor; it comes free once any place can be kept.
+  Not checked: the escape item and the exit gate driven by hand or headless (read in code only), exits to a field
+  map (the Shipwreck's goes to map 19 by the road path), Matataki, and the eye beyond eight screenshots.

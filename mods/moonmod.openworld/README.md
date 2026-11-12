@@ -10,8 +10,12 @@ while you are a guest in a friend's world.
 
 **No loading card on the way from one place to another.** Town to town, town to dungeon, a floor to the next, a
 scene that takes you somewhere: the picture you left stays up for the moment the next place takes to load (about half
-a second), then you are there. The game's own card stayed up 6.6 seconds whatever the load took. Loading a save from
-the title still shows it.
+a second), then you are there. The game's own card stayed up 6.6 seconds whatever the load took. Loading a save,
+from the title or the pause menu, has no card either: you are in the save's town or on its floor a moment after
+you pick it. Starting a new game keeps the card.
+
+**Out of a dungeon with no card.** Knocked out, or leaving by the escape item or the floor's exit: the screen fades
+to black as the game always did, and the town is there a moment later, with the party in front of the dungeon.
 
 **A town and its dungeon are one place.** Norune and the Divine Beast Cave, Matataki and the Wise Owl Forest: walk
 through the door and you are there, and you can see the other place through the doorway before you step in.
@@ -67,6 +71,10 @@ Tests: `lua tools/tests/openworld/test_openworld.lua`.
 - [ ] Norune: walk into the Divine Beast Cave and back out with no loading card.
 - [ ] Any trip (the world map, a road, a story scene that moves you): no "Now Loading" card; the last picture holds
       for a moment, then the next place is there. An arrival scene plays from its start.
+- [ ] Load a save from the title: no "Now Loading" card; the town (or the floor) is there within a second. The same
+      from the pause menu's load.
+- [ ] In a dungeon, use the escape item, leave by the floor's exit, and get knocked out (pick Leave): each fades to
+      black and cuts to the town with no card; the party stands in front of the dungeon.
 - [ ] Norune before Matataki is on the world map: the gate still opens the world map.
 - [ ] Once Matataki is open: the gate shows **The road** with Matataki Village and Stay; the party stands still while
       the panel is up.

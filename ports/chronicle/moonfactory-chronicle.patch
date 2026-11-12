@@ -3862,10 +3862,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..294c208d
+index 00000000..fee21235
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,317 @@
 +#pragma once
 +
 +/**
@@ -4058,6 +4058,9 @@ index 00000000..294c208d
 +// (presentation drops the frames drawn meanwhile) until the place walked into is ready: a town once its init is done,
 +// a dungeon once its floor is built, then a few frames more. At most ten seconds.
 +void  ChronicleMapJumped(int map_no);
++// A save loaded from the title or the pause menu, quick passage on: the same hold, begun as the place's mode starts
++// (to_floor: a dungeon floor's, let go as a floor walked into is).
++void  ChronicleLoadJumped(bool to_floor);
 +// A jump from one town to another (the open world's road), or from a dungeon floor to another of the same dungeon (a
 +// story floor through its smoke), holds the picture as well (with quick passage on); the arriving mode's start reads
 +// the mark (true) and starts with the picture clear. The floor's hold lets go once the party plays on the new floor.
@@ -5813,7 +5816,7 @@ index a914df22..8435418d 100644
  }
 \ No newline at end of file
 diff --git a/port/src/app/gameloop.cpp b/port/src/app/gameloop.cpp
-index 3fb86052..7737e926 100644
+index 3fb86052..a8acfb93 100644
 --- a/port/src/app/gameloop.cpp
 +++ b/port/src/app/gameloop.cpp
 @@ -9,6 +9,7 @@
@@ -6067,7 +6070,11 @@ index 3fb86052..7737e926 100644
      if (!number.empty()) {
          auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), jump.map);
          if (error != std::errc{} || end != number.data() + number.size() || jump.map < 0) {
-@@ -724,6 +846,9 @@ int                                              g_resume_floor = -1;
+@@ -721,9 +843,13 @@ namespace {
+ 
+ int                                              g_autosaved_floor = -1;
+ int                                              g_resume_floor = -1;
++bool g_loaded_save = false; // a save was loaded (title or pause menu) and its place is the next to start
  std::array<s8, sizeof(CUserStatus::event_flags)> g_resume_event_flags;
  
  void WriteAutosave() {
@@ -6077,7 +6084,15 @@ index 3fb86052..7737e926 100644
      if (g_autosave && ConfigGet().autosave && !SaveSlotWriteAutosave()) {
          std::println(stderr, "autosave: could not write {}", PathsDisplay(SaveSlotPath(kSaveSlotAutosave)));
      }
-@@ -845,6 +970,7 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+@@ -743,6 +869,7 @@ void GameAutosaveFloor() {
+ 
+ void GameResumeLoaded() {
+     const CUserStatus *status = SaveData->GetDngStatus();
++    g_loaded_save = true;
+     g_resume_floor = -1;
+     if (IsDungeonMap(SaveData->GetMapNo()) && status->cur_floor >= 0) {
+         g_resume_floor = status->cur_floor;
+@@ -845,6 +972,7 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
      }
  
      int  title_ran = 0;
@@ -6085,26 +6100,18 @@ index 3fb86052..7737e926 100644
      int  exist_data = 0;
      bool data_loaded = false;
      bool skip_title = false;
-@@ -885,8 +1011,18 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+@@ -884,10 +1012,6 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+         }
          LoadDrawEnv();
  
-         if (mode != GAME_MODE_UNUSED_12 && StartEventNo < 0) {
-+            // MoonMod: between a town and a dungeon (through the dungeon loader or not), a mod's quick passage shows
-+            // no loading card and no fade (O2 C0)
-+            // and between two towns along the road, or two floors of one dungeon (ChronicleTakeRoadJump)
-+            const bool road = moonmod::ChronicleTakeRoadJump();
-+            const bool walk = ((mode == GAME_MODE_DUNGEON || mode == GAME_MODE_LOADER) && (previous_mode == GAME_MODE_EDIT || road)) ||
-+                              (mode == GAME_MODE_EDIT && (previous_mode == GAME_MODE_DUNGEON || road));
-+            const bool quick = walk && moonmod::ChronicleQuickPassage();
-+            if (quick) now_loading_off();
-+            moonmod::ChronicleMarkWalkArrival(quick);
-             init_now_loading(MapNo);
-         }
-+        if (mode != GAME_MODE_LOADER) previous_mode = mode;
-         GameLoadTraceCheckpoint("loading_card_started");
+-        if (mode != GAME_MODE_UNUSED_12 && StartEventNo < 0) {
+-            init_now_loading(MapNo);
+-        }
+-        GameLoadTraceCheckpoint("loading_card_started");
          GamePad.StopVibration();
          if (DebugMode) {
-@@ -904,7 +1040,28 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+             LoadSystemMessage();
+@@ -904,7 +1028,50 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
          } else {
              g_resume_floor = -1;
          }
@@ -6128,12 +6135,34 @@ index 3fb86052..7737e926 100644
 +        moonmod::SharedRuntime().Publish("game.scene.will_enter", {{"scene_id", scene_id},
 +                                                                   {"native_mode", mode},
 +                                                                   {"frame", moonmod::SharedRuntime().Frame()}});
++        // The card is decided after the event above, so a mod that takes the quick passage as a place loads (a save
++        // loaded from the title: there is no story session before this) has it in time.
++        if (mode != GAME_MODE_UNUSED_12 && StartEventNo < 0) {
++            // MoonMod: between a town and a dungeon (through the dungeon loader or not), a mod's quick passage shows
++            // no loading card and no fade (O2 C0)
++            // and between two towns along the road, or two floors of one dungeon (ChronicleTakeRoadJump)
++            const bool road = moonmod::ChronicleTakeRoadJump();
++            const bool walk = ((mode == GAME_MODE_DUNGEON || mode == GAME_MODE_LOADER) && (previous_mode == GAME_MODE_EDIT || road)) ||
++                              (mode == GAME_MODE_EDIT && (previous_mode == GAME_MODE_DUNGEON || road));
++            // and into the town or the floor of a save just loaded, from the title or the pause menu (OW1)
++            const bool loaded = g_loaded_save && (mode == GAME_MODE_EDIT || mode == GAME_MODE_DUNGEON || mode == GAME_MODE_LOADER);
++            const bool quick = (walk || loaded) && moonmod::ChronicleQuickPassage();
++            if (quick) now_loading_off();
++            if (quick && loaded) moonmod::ChronicleLoadJumped(mode != GAME_MODE_EDIT);
++            moonmod::ChronicleMarkWalkArrival(quick);
++            init_now_loading(MapNo);
++        }
++        if (mode != GAME_MODE_LOADER) {
++            previous_mode = mode;
++            g_loaded_save = false; // kept through the dungeon's loader, as the walk is
++        }
++        GameLoadTraceCheckpoint("loading_card_started");
          ModeInit(title_ran, exist_data, skip_title);
 +        moonmod::PreparePendingChronicleDungeonEntry();
          if (resume) {
              std::ranges::copy(g_resume_event_flags, std::begin(UserStatus->event_flags));
          }
-@@ -917,6 +1074,11 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+@@ -917,6 +1084,11 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
          }
          GameLoadTraceCheckpoint("loading_card_done");
  
@@ -6145,7 +6174,7 @@ index 3fb86052..7737e926 100644
          MGInitVSyncCallBack(PlayTimeCount);
          LoadDrawEnv();
          ClockSyncV();
-@@ -949,6 +1111,7 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+@@ -949,6 +1121,7 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
  
              result = ModeLoop(skip_title);
              GameApplyLoopResult(old_main_mode, result);
@@ -6153,7 +6182,7 @@ index 3fb86052..7737e926 100644
              if (result == 0 && LocalizeLanguagePending() && !MenuOptionOpen() &&
                  (mode == GAME_MODE_EDIT || mode == GAME_MODE_TITLE)) {
                  // The language was changed in this town or title and the Options screen has closed: load
-@@ -960,6 +1123,10 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+@@ -960,12 +1133,17 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
              }
  
              if (result == 0 && battlemenu::TakeBattleMenuLoadRequest()) {
@@ -6164,6 +6193,13 @@ index 3fb86052..7737e926 100644
                  const int loaded_map = SaveData->GetMapNo();
                  MapNo = (loaded_map >= 0 && loaded_map < DUNGEON_MAP_BASE) ? loaded_map : 0;
                  LocalMapNo = MapNo;
+                 OldMapNo = -1;
+                 NextMapNo = -1;
+                 StartEventNo = -1;
++                g_loaded_save = true;
+                 GameApplyLoopResult(GAME_MODE_TITLE, 2);
+                 break;
+             }
 diff --git a/port/src/app/gameloop.hpp b/port/src/app/gameloop.hpp
 index 88bbacba..0ce12bf7 100644
 --- a/port/src/app/gameloop.hpp
@@ -27061,7 +27097,7 @@ index dab4bf3f..5561ed34 100644
  }
  
 diff --git a/port/src/game/texture.cpp b/port/src/game/texture.cpp
-index 282d41fa..29554cf7 100644
+index 282d41fa..f7be4b5b 100644
 --- a/port/src/game/texture.cpp
 +++ b/port/src/game/texture.cpp
 @@ -12,6 +12,7 @@
@@ -27094,17 +27130,65 @@ index 282d41fa..29554cf7 100644
  
  struct DummyTexture {
      std::string name;
-@@ -295,7 +298,8 @@ uint32_t BlendColors(uint32_t first, uint32_t second, unsigned first_weight, uns
+@@ -295,22 +298,20 @@ uint32_t BlendColors(uint32_t first, uint32_t second, unsigned first_weight, uns
  }
  
  // DC_TEXTURE_DUMP=<dir>: every entered texture is written there as <name>.png, indexed textures
 -// through their palette.
 +// through their palette. The game's own picture (in the chosen language), before any package replaces it: what
 +// tools/textures in MoonMod upscales into a package.
++// A name can hold a different picture from place to place (each dungeon's "frame"). The first one dumped keeps
++// <name>.png; another is written as <name>.<its key>.png, the name a package gives a file for that picture alone.
  void DumpTexture(const char *name, const PortDecodedTexture &texture) {
      static const char *dir = std::getenv("DC_TEXTURE_DUMP");
      if (dir == nullptr || texture.levels.empty()) {
-@@ -385,11 +389,14 @@ void MakeGroundPeriodic(std::string_view name, PortDecodedTexture &texture) {
+         return;
+     }
+-    const unsigned       width = texture.width;
+-    const unsigned       height = texture.height;
+-    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
+-    for (size_t pixel = 0; pixel < static_cast<size_t>(width) * height; pixel++) {
+-        if (texture.format == gfx::TextureFormat::Index8) {
+-            const uint32_t color = texture.palette[texture.levels[0][pixel]];
+-            std::memcpy(&rgba[pixel * 4], &color, 4);
+-        } else {
+-            std::memcpy(&rgba[pixel * 4], &texture.levels[0][pixel * 4], 4);
+-        }
++    const unsigned             width = texture.width;
++    const unsigned             height = texture.height;
++    const std::vector<uint8_t> rgba = ModsTextureRgba(texture);
++    if (rgba.empty()) {
++        return;
+     }
+     // A PNG with stored (uncompressed) deflate blocks.
+     auto crc = [](std::span<const uint8_t> data) {
+@@ -369,6 +370,25 @@ void DumpTexture(const char *name, const PortDecodedTexture &texture) {
+     chunk("IEND", {});
+     std::filesystem::create_directories(dir);
+     std::string path = std::string(dir) + "/" + name + ".png";
++    const auto  holds = [&](const std::string &file_path) {
++        std::vector<uint8_t> there(out.size() + 1);
++        size_t               read = 0;
++        if (FILE *file = std::fopen(file_path.c_str(), "rb")) {
++            read = std::fread(there.data(), 1, there.size(), file);
++            std::fclose(file);
++        }
++        return read == out.size() && std::memcmp(there.data(), out.data(), read) == 0;
++    };
++    std::error_code exists_error;
++    if (std::filesystem::exists(path, exists_error)) {
++        if (holds(path)) {
++            return;
++        }
++        path = std::string(dir) + "/" + ModsTextureKeyedName(name, ModsTextureKey(rgba)) + ".png";
++        if (holds(path)) {
++            return;
++        }
++    }
+     if (FILE *file = std::fopen(path.c_str(), "wb")) {
+         std::fwrite(out.data(), 1, out.size(), file);
+         std::fclose(file);
+@@ -385,11 +405,14 @@ void MakeGroundPeriodic(std::string_view name, PortDecodedTexture &texture) {
          return;
      }
  
@@ -27121,7 +27205,7 @@ index 282d41fa..29554cf7 100644
      const auto            color_at = [&](unsigned pixel) {
          if (texture.format == gfx::TextureFormat::Index8) {
              return texture.palette[pixels[pixel]];
-@@ -431,6 +438,20 @@ void MakeGroundPeriodic(std::string_view name, PortDecodedTexture &texture) {
+@@ -431,6 +454,20 @@ void MakeGroundPeriodic(std::string_view name, PortDecodedTexture &texture) {
              set_color(bottom, BlendColors(top_color, bottom_color, bottom_weight, 2 * vertical_band));
          }
      }
@@ -27142,7 +27226,7 @@ index 282d41fa..29554cf7 100644
  }
  
  // EnterTexture, EnterTextureEX and EnterFixTexture share everything but where pixels are staged and
-@@ -566,9 +587,13 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+@@ -566,9 +603,13 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
                                           clut == nullptr ? 0 : static_cast<std::size_t>(clut_bytes), decoded,
                                           resolution_error, entry_index, bpp);
              canvas_backing = !baked && resolution_error == "canvas texture keeps its runtime backing";
@@ -27157,7 +27241,7 @@ index 282d41fa..29554cf7 100644
          } else {
              // Pixels outside any data source (a synthetic or runtime image) have no baked document
              // and decode from the bytes given.
-@@ -593,9 +618,27 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+@@ -593,9 +634,27 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
              }
          }
          LocalizeTexture(name, decoded);
@@ -27186,7 +27270,7 @@ index 282d41fa..29554cf7 100644
          if (baked) {
              tex->clut = nullptr;
              cbp = 0;
-@@ -618,7 +661,7 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
+@@ -618,7 +677,7 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
              tex->tex1 = SCE_GS_SET_TEX1(0, 2, 1, 5, 1, lod.L, lod.K);
          }
      }
@@ -27195,7 +27279,7 @@ index 282d41fa..29554cf7 100644
  }
  
  } // namespace
-@@ -641,7 +684,9 @@ void CTextureManager::Initialize(int size) {
+@@ -641,7 +700,9 @@ void CTextureManager::Initialize(int size) {
      texture_max = 1;
      vram_work = 8960;
      vram_size = size;
@@ -27206,7 +27290,7 @@ index 282d41fa..29554cf7 100644
      vram_fix = size;
  
      // The frame-copy area water samples, a field of the frame on PS2: the water unit fills it.
-@@ -674,6 +719,8 @@ void CTextureManager::SetBuffer(u_long128 *buffer, int size) {
+@@ -674,6 +735,8 @@ void CTextureManager::SetBuffer(u_long128 *buffer, int size) {
      buffer_used = 0;
  }
  
@@ -27215,7 +27299,7 @@ index 282d41fa..29554cf7 100644
  int CTextureManager::SearchTextureName(char *name, int block) {
      for (int index = texture_max; index >= 0; index--) {
          const CTexture &texture = textures[index];
-@@ -912,7 +959,7 @@ int LoadImage(u_int *packet, int dbp, int dpsm, int dbw, u_long128 *source, int
+@@ -912,7 +975,7 @@ int LoadImage(u_int *packet, int dbp, int dpsm, int dbw, u_long128 *source, int
  // Every texture is resident on the renderer from the moment it is entered, so a block never needs
  // uploading; only its bookkeeping remains.
  void CTextureManager::ReloadTexture(sceVif1Packet *packet, int block) {
@@ -27224,7 +27308,7 @@ index 282d41fa..29554cf7 100644
          last_block = -1;
          return;
      }
-@@ -943,7 +990,7 @@ void CTextureManager::BeginEnterTextureBlock(int block) {
+@@ -943,7 +1006,7 @@ void CTextureManager::BeginEnterTextureBlock(int block) {
  // Native textures occupy independent storage, so simulated VRAM overlap never overwrites either
  // image; only the staging bounds check and block finalization remain.
  void CTextureManager::EndEnterTextureBlock(int block) {
@@ -27233,7 +27317,7 @@ index 282d41fa..29554cf7 100644
          return;
      }
      if (buffer_used > buffer_size) {
-@@ -958,7 +1005,7 @@ void CTextureManager::EndEnterTextureBlock(int block) {
+@@ -958,7 +1021,7 @@ void CTextureManager::EndEnterTextureBlock(int block) {
  }
  
  int CTextureManager::DeleteTextureBlock(int block) {
@@ -27242,7 +27326,7 @@ index 282d41fa..29554cf7 100644
          return 0;
      }
      if (block >= 0) {
-@@ -1132,4 +1179,33 @@ int CTextureManager::EnterTextureFile(LOADTEXTURE_INFO *table) {
+@@ -1132,4 +1195,33 @@ int CTextureManager::EnterTextureFile(LOADTEXTURE_INFO *table) {
  void CTextureManager::print_buff_info() {
  }
  
@@ -30107,10 +30191,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..21cdc08c
+index 00000000..3055c452
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17791 @@
+@@ -0,0 +1,17803 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -46960,6 +47044,18 @@ index 00000000..21cdc08c
 +    }
 +    if (!by_road) dc::game::DoorwayJumped(MapNo, map_no);
 +}
++// A save loaded, from the title or the pause menu, with quick passage on: there is no card, and the dark frame
++// between the menu and the place is held until the town stands or the floor is built (or played on, a story floor).
++void ChronicleLoadJumped(bool to_floor) {
++    if (g_hold_frames >= 0) return; // through the dungeon's loader: held since the pass before
++    g_hold_frames = 0;
++    g_hold_release = -1;
++    g_road_jump = false;
++    g_floor_jump = to_floor;
++    if (HeldTrace()) {
++        std::fprintf(stderr, "perf held begin load to %d frame %llu\n", MapNo, static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++}
 +bool ChronicleTakeRoadJump() {
 +    // read by both the loader's and the dungeon's mode start; the jump's end (StepHeldPicture) clears it
 +    return g_road_jump;
@@ -59122,27 +59218,32 @@ index 00000000..31a5fcaa
 +                    const float bone[4][4], const float inverse[4][4], float weight);
 diff --git a/port/src/moonmod/mod_texture.cpp b/port/src/moonmod/mod_texture.cpp
 new file mode 100644
-index 00000000..53b716eb
+index 00000000..9ed90bf7
 --- /dev/null
 +++ b/port/src/moonmod/mod_texture.cpp
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,353 @@
 +// Package-owned PNG overrides for Chronicle's decoded native textures.
 +// PNGs live at mods/<package>/textures/<native texture name>.png. Later packages
 +// in MoonFactory's resolved load order win, matching model replacement behavior.
 +// A PNG larger than the native texture stays larger (mod_texture.hpp).
++// <native texture name>.<8 hex digits>.png is for the one picture of that name with that key.
 +
 +#include "moonmod/mod_texture.hpp"
 +
 +#include <algorithm>
++#include <array>
 +#include <bit>
 +#include <cctype>
 +#include <cstdio>
 +#include <cstdint>
 +#include <cstdlib>
++#include <cstring>
 +#include <filesystem>
 +#include <fstream>
 +#include <map>
++#include <set>
 +#include <string>
++#include <string_view>
 +#include <system_error>
 +#include <utility>
 +#include <vector>
@@ -59164,6 +59265,10 @@ index 00000000..53b716eb
 +struct TextureState {
 +    bool initialized = false;
 +    std::map<std::string, fs::path, std::less<>> by_name;
++    // <name>.<key>.png: by name, then by the key of the one picture the file is for.
++    std::map<std::string, std::map<uint32_t, fs::path>, std::less<>> by_key;
++    // Pictures of such a name that no keyed file is for: said once each.
++    std::set<std::pair<std::string, uint32_t>> without_file;
 +};
 +
 +TextureState &State() {
@@ -59202,21 +59307,7 @@ index 00000000..53b716eb
 +    for (const std::string &mod_id : moonmod::SharedRuntime().LoadedModOrder()) {
 +        const auto record = std::ranges::find(records, mod_id, &moonmod::ModRecord::id);
 +        if (record == records.end() || !record->enabled || record->state != moonmod::ModState::Loaded) continue;
-+        const fs::path textures = record->package_root / "textures";
-+        std::error_code error;
-+        if (!fs::is_directory(textures, error)) continue;
-+        for (fs::directory_iterator it(textures, fs::directory_options::skip_permission_denied, error), end;
-+             !error && it != end; it.increment(error)) {
-+            std::error_code entry_error;
-+            const fs::file_status status = it->symlink_status(entry_error);
-+            if (entry_error || !fs::is_regular_file(status) || Fold(it->path().extension().string()) != ".png") continue;
-+            const std::string name = Fold(it->path().stem().string());
-+            if (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) continue;
-+            entry_error.clear();
-+            const auto size = fs::file_size(it->path(), entry_error);
-+            if (entry_error || size == 0 || size > 64 * 1024 * 1024) continue;
-+            state.by_name[name] = it->path();
-+        }
++        ModsTextureAddFolder(record->package_root / "textures");
 +    }
 +}
 +
@@ -59263,6 +59354,89 @@ index 00000000..53b716eb
 +}
 +
 +} // namespace
++
++void ModsTextureAddFolder(const fs::path &textures) {
++    TextureState   &state = State();
++    std::error_code error;
++    if (!fs::is_directory(textures, error)) return;
++    for (fs::directory_iterator it(textures, fs::directory_options::skip_permission_denied, error), end;
++         !error && it != end; it.increment(error)) {
++        std::error_code entry_error;
++        const fs::file_status status = it->symlink_status(entry_error);
++        if (entry_error || !fs::is_regular_file(status) || Fold(it->path().extension().string()) != ".png") continue;
++        ModsTextureFile file;
++        if (!ModsTextureFileFor(it->path().stem().string(), file)) continue;
++        entry_error.clear();
++        const auto size = fs::file_size(it->path(), entry_error);
++        if (entry_error || size == 0 || size > 64 * 1024 * 1024) continue;
++        if (file.key) {
++            state.by_key[file.name][*file.key] = it->path();
++        } else {
++            state.by_name[file.name] = it->path();
++        }
++    }
++}
++
++bool ModsTextureFileFor(std::string_view stem, ModsTextureFile &file) {
++    std::string name = Fold(std::string(stem));
++    file.key.reset();
++    if (const size_t dot = name.find('.'); dot != std::string::npos) {
++        const std::string_view hex = std::string_view(name).substr(dot + 1);
++        if (hex.size() != 8 || hex.find_first_not_of("0123456789abcdef") != std::string_view::npos) return false;
++        uint32_t key = 0;
++        for (const char digit : hex) {
++            key = (key << 4) | static_cast<uint32_t>(digit <= '9' ? digit - '0' : digit - 'a' + 10);
++        }
++        file.key = key;
++        name.resize(dot);
++    }
++    if (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) {
++        return false;
++    }
++    file.name = std::move(name);
++    return true;
++}
++
++std::string ModsTextureKeyedName(std::string_view name, uint32_t key) {
++    char hex[16];
++    std::snprintf(hex, sizeof(hex), ".%08x", key);
++    return std::string(name) + hex;
++}
++
++std::vector<uint8_t> ModsTextureRgba(const PortDecodedTexture &texture) {
++    const size_t pixels = static_cast<size_t>(texture.width) * texture.height;
++    const bool   indexed = texture.format == gfx::TextureFormat::Index8;
++    if (pixels == 0 || texture.levels.empty() || texture.levels[0].size() < pixels * (indexed ? 1 : 4)) return {};
++    std::vector<uint8_t> rgba(pixels * 4);
++    if (indexed) {
++        for (size_t pixel = 0; pixel < pixels; pixel++) {
++            const uint32_t colour = texture.palette[texture.levels[0][pixel]];
++            std::memcpy(&rgba[pixel * 4], &colour, 4);
++        }
++    } else {
++        std::memcpy(rgba.data(), texture.levels[0].data(), rgba.size());
++    }
++    return rgba;
++}
++
++uint32_t ModsTextureKey(std::span<const uint8_t> rgba) {
++    static constexpr std::array<uint32_t, 256> table = [] {
++        std::array<uint32_t, 256> values{};
++        for (uint32_t index = 0; index < 256; index++) {
++            uint32_t value = index;
++            for (int bit = 0; bit < 8; bit++) {
++                value = (value >> 1) ^ (0xEDB88320u & (0u - (value & 1)));
++            }
++            values[index] = value;
++        }
++        return values;
++    }();
++    uint32_t value = ~0u;
++    for (const uint8_t byte : rgba) {
++        value = table[(value ^ byte) & 0xFF] ^ (value >> 8);
++    }
++    return ~value;
++}
 +
 +unsigned ModsTextureMaxSide() {
 +#ifdef __EMSCRIPTEN__
@@ -59355,10 +59529,26 @@ index 00000000..53b716eb
 +bool ModsTextureOverride(const char *name, PortDecodedTexture &texture) {
 +    if (name == nullptr || texture.width == 0 || texture.height == 0 || texture.levels.empty()) return false;
 +    Initialize();
-+    const auto found = State().by_name.find(Fold(name));
-+    if (found == State().by_name.end()) return false;
++    TextureState     &state = State();
++    const std::string folded = Fold(name);
++    const fs::path   *chosen = nullptr;
++    if (const auto keyed = state.by_key.find(folded); keyed != state.by_key.end()) {
++        // A name with a file for one picture of it: which picture is this? Only such names pay for the key.
++        const uint32_t key = ModsTextureKey(ModsTextureRgba(texture));
++        if (const auto exact = keyed->second.find(key); exact != keyed->second.end()) {
++            chosen = &exact->second;
++        } else if (state.without_file.emplace(folded, key).second) {
++            std::fprintf(stderr, "mods: texture %s is picture %08x here, which no %s.<key>.png is for\n", name, key,
++                         folded.c_str());
++        }
++    }
++    if (chosen == nullptr) {
++        const auto found = state.by_name.find(folded);
++        if (found == state.by_name.end()) return false;
++        chosen = &found->second;
++    }
 +
-+    const fs::path path = found->second;
++    const fs::path path = *chosen;
 +    const unsigned native_width = texture.width;
 +    const unsigned native_height = texture.height;
 +    const unsigned native_levels = static_cast<unsigned>(texture.levels.size());
@@ -59387,13 +59577,18 @@ index 00000000..53b716eb
 +}
 diff --git a/port/src/moonmod/mod_texture.hpp b/port/src/moonmod/mod_texture.hpp
 new file mode 100644
-index 00000000..46488e28
+index 00000000..8866580a
 --- /dev/null
 +++ b/port/src/moonmod/mod_texture.hpp
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,81 @@
 +#pragma once
 +
 +#include <cstdint>
++#include <filesystem>
++#include <optional>
++#include <span>
++#include <string>
++#include <string_view>
 +#include <vector>
 +
 +namespace dc::render {
@@ -59408,7 +59603,38 @@ index 00000000..46488e28
 +/// its detail: the texture is then a picture with more pixels than its texels (PortDecodedTexture::logical_width),
 +/// which the game still draws, scrolls and animates at the native size. A PNG the native size or smaller is fitted
 +/// to the native size and levels, as before.
++///
++/// Some names hold a different picture from place to place (each dungeon's "frame"). A package file named
++/// textures/<name>.<8 hex digits>.png is for the one picture of that name with that key (ModsTextureKey), and is
++/// taken before a plain textures/<name>.png, which goes on every picture of the name that has no file of its own.
 +bool ModsTextureOverride(const char *name, PortDecodedTexture &texture);
++
++/// The first level of a texture as straight RGBA rows, an indexed one through its palette: the picture
++/// DC_TEXTURE_DUMP writes. Empty when the texture has no such level.
++std::vector<uint8_t> ModsTextureRgba(const PortDecodedTexture &texture);
++
++/// A picture's key: the CRC-32 (the one zlib and PNG use) of those bytes. Tools get the same number from the dumped
++/// PNG's RGBA pixels.
++uint32_t ModsTextureKey(std::span<const uint8_t> rgba);
++
++/// What a package's texture file is for, from its name without ".png": "frame" is every picture named frame,
++/// "frame.1a2b3c4d" the one with that key. Upper case is folded.
++struct ModsTextureFile {
++    std::string             name;
++    std::optional<uint32_t> key;
++};
++
++/// False for a name the game takes no file under: one with other characters than a-z, 0-9, _ and -, or whose part
++/// after a dot is not eight hex digits.
++bool ModsTextureFileFor(std::string_view stem, ModsTextureFile &file);
++
++/// "<name>.<8 hex digits>": the name, without ".png", of the file for one picture of a texture name.
++std::string ModsTextureKeyedName(std::string_view name, uint32_t key);
++
++/// Adds a package's textures folder to the files replacements are taken from; a later folder's file wins over an
++/// earlier one's of the same name. The game adds each enabled package's, in load order, when the first texture is
++/// entered.
++void ModsTextureAddFolder(const std::filesystem::path &textures);
 +
 +/// The pixels a replacement is kept at, and its levels.
 +struct ModsTextureSize {
@@ -80975,17 +81201,21 @@ index 00000000..eeaa0e25
 +
 diff --git a/port/src/tests/moonmod_texture_test.cpp b/port/src/tests/moonmod_texture_test.cpp
 new file mode 100644
-index 00000000..76964311
+index 00000000..6123550c
 --- /dev/null
 +++ b/port/src/tests/moonmod_texture_test.cpp
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,346 @@
 +// MoonMod: a package's replacement texture kept larger than the texture it stands for (moonmod/mod_texture.hpp,
 +// PortDecodedTexture::logical_width).
 +#include <gtest/gtest.h>
 +
 +#include <array>
++#include <chrono>
 +#include <cstdint>
 +#include <cstring>
++#include <filesystem>
++#include <string>
++#include <string_view>
 +#include <vector>
 +
 +// The fixture first: the game's GS headers define short macros its own includes must not meet.
@@ -81231,6 +81461,93 @@ index 00000000..76964311
 +    EXPECT_TRUE(env.gfx.PixelNear(150, 150, 0, 0, 255));
 +    PortReleaseKey(dst);
 +    PortReleaseKey(src);
++}
++
++TEST(ModTexture, APicturesKeyIsTheCrcOfItsPixelsAsDumped) {
++    // The CRC-32 every zlib has: its check value.
++    const std::string_view digits = "123456789";
++    EXPECT_EQ(ModsTextureKey({reinterpret_cast<const uint8_t *>(digits.data()), digits.size()}), 0xCBF43926u);
++
++    // An indexed texture is keyed by the colours it shows, not by its indices.
++    PortDecodedTexture indexed;
++    indexed.width = 2;
++    indexed.height = 1;
++    indexed.format = gfx::TextureFormat::Index8;
++    indexed.levels = {{7, 3}};
++    std::memcpy(&indexed.palette[7], kRed.data(), 4);
++    std::memcpy(&indexed.palette[3], kBlue.data(), 4);
++    PortDecodedTexture colour;
++    colour.width = 2;
++    colour.height = 1;
++    colour.levels = {{255, 0, 0, 0x80, 0, 0, 255, 0x80}};
++    EXPECT_EQ(ModsTextureRgba(indexed), colour.levels[0]);
++    EXPECT_EQ(ModsTextureKey(ModsTextureRgba(indexed)), ModsTextureKey(colour.levels[0]));
++    // A texture with too few bytes for its size has no picture.
++    colour.height = 2;
++    EXPECT_TRUE(ModsTextureRgba(colour).empty());
++}
++
++TEST(ModTexture, AFileNameMayNameOnePictureOfATexture) {
++    ModsTextureFile file;
++    ASSERT_TRUE(ModsTextureFileFor("frame", file));
++    EXPECT_EQ(file.name, "frame");
++    EXPECT_FALSE(file.key.has_value());
++    ASSERT_TRUE(ModsTextureFileFor("Frame.1A2b3c4D", file));
++    EXPECT_EQ(file.name, "frame");
++    EXPECT_EQ(file.key, 0x1a2b3c4du);
++    EXPECT_EQ(ModsTextureKeyedName("frame", 0x1a2b3c4d), "frame.1a2b3c4d");
++    EXPECT_EQ(ModsTextureKeyedName("fx_foot", 0xabc), "fx_foot.00000abc");
++    for (const char *bad : {"", ".1a2b3c4d", "frame.1a2b3c4", "frame.1a2b3c4d5", "frame.1a2b3c4g", "frame.dungeon_0",
++                            "frame.", "a.b.1a2b3c4d", "bad name", "bad name.1a2b3c4d"}) {
++        EXPECT_FALSE(ModsTextureFileFor(bad, file)) << bad;
++    }
++}
++
++// Each dungeon has a "frame" of its own: a file with a picture's key in its name goes on that picture alone, the plain
++// file on the others.
++TEST(ModTexture, AKeyedFileGoesOnThePictureItIsFor) {
++    namespace fs = std::filesystem;
++    const fs::path folder = fs::temp_directory_path() / ("dc_texture_keys_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    fs::remove_all(folder);
++    fs::create_directories(folder);
++
++    const auto native = [](Colour colour) {
++        PortDecodedTexture texture;
++        texture.width = 2;
++        texture.height = 2;
++        texture.levels = {Filled(2, 2, colour)};
++        return texture;
++    };
++    const uint32_t green_key = ModsTextureKey(ModsTextureRgba(native(kGreen)));
++    ASSERT_NE(green_key, ModsTextureKey(ModsTextureRgba(native(kBlue))));
++
++    const std::vector<uint8_t> red = Filled(4, 4, {255, 0, 0, 255});
++    const std::vector<uint8_t> white = Filled(4, 4, {255, 255, 255, 255});
++    ASSERT_TRUE(gfx::WritePng(folder / "keytest_frame.png", red.data(), 4, 4));
++    ASSERT_TRUE(gfx::WritePng(folder / (ModsTextureKeyedName("keytest_frame", green_key) + ".png"), white.data(), 4, 4));
++    ASSERT_TRUE(gfx::WritePng(folder / (ModsTextureKeyedName("keytest_only", green_key) + ".png"), white.data(), 4, 4));
++    ASSERT_TRUE(gfx::WritePng(folder / "keytest_frame.dungeon_0.png", white.data(), 4, 4)); // not a key: never taken
++    ModsTextureAddFolder(folder);
++
++    // The green picture has a file of its own.
++    PortDecodedTexture texture = native(kGreen);
++    ASSERT_TRUE(ModsTextureOverride("KEYTEST_frame", texture));
++    EXPECT_EQ(texture.width, 4u);
++    EXPECT_EQ(texture.logical_width, 2u);
++    EXPECT_EQ(At(texture.levels[0], 4, 1, 1), (Colour{255, 255, 255, 255}));
++    // Any other picture of the name takes the plain file.
++    texture = native(kBlue);
++    ASSERT_TRUE(ModsTextureOverride("keytest_frame", texture));
++    EXPECT_EQ(At(texture.levels[0], 4, 1, 1), (Colour{255, 0, 0, 255}));
++    // With no plain file, the other pictures stay the game's own.
++    texture = native(kGreen);
++    EXPECT_TRUE(ModsTextureOverride("keytest_only", texture));
++    texture = native(kBlue);
++    EXPECT_FALSE(ModsTextureOverride("keytest_only", texture));
++    EXPECT_EQ(texture.width, 2u);
++    EXPECT_EQ(At(texture.levels[0], 2, 1, 1), kBlue);
++
++    fs::remove_all(folder);
 +}
 +
 +} // namespace dc::test
