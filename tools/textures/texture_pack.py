@@ -12,6 +12,10 @@ upscale  enlarges each dumped picture with an ESRGAN-style ONNX model (any scale
          <package>/textures/<texture name>.png, with a mod.json and main.lua if the package has none.
 check    lists a package's pictures: whether the name can match a texture, and the size the game keeps it at.
 
+A few texture names hold a different picture from place to place (every dungeon has its own "frame"). Those are
+dumped as <texture name>.<key>.png, the key being eight hex digits worked out from the picture, and a package file of
+that name goes on that picture alone.
+
 The pictures a package holds are made from the game's disc. Share the tool and your settings, not the pictures.
 Needs Python 3.10+, numpy and Pillow; upscale with a model also needs onnxruntime (onnxruntime-directml or
 onnxruntime-gpu to run it on the graphics card). See tools/textures/README.md.
@@ -20,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import hashlib
 import json
 import os
 import re
@@ -28,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +39,8 @@ from PIL import Image
 
 # What the engine takes as a texture file's name (port/src/moonmod/mod_texture.cpp).
 NAME = re.compile(r"^[a-z0-9_-]+$")
+# <texture name>.<key>: the file for one picture of a name that holds several (the engine's ModsTextureFileFor).
+KEYED = re.compile(r"^([a-z0-9_-]+)\.([0-9a-f]{8})$")
 # Pictures the game loads another way, which a package cannot replace.
 NOT_REPLACEABLE = ("stayframe",)
 # Where the headless dump goes when no --jump is given.
@@ -43,8 +49,6 @@ PLACES = ("e01", "e03", "e04", "dungeon:0", "dungeon:1", "dungeon:2", "dungeon:3
 PROVIDERS = {"dml": "DmlExecutionProvider", "cuda": "CUDAExecutionProvider", "cpu": "CPUExecutionProvider"}
 # The engine's limits (ModsTextureMaxSide, ModsTextureMaxScale): the desktop game, and the browser one.
 LIMITS = {"desktop": (4096, 8), "browser": (2048, 2)}
-# In a dump folder: the pictures of names that hold more than one, as <texture name>.<place>.png.
-SHARED = "shared-names"
 
 
 def kept_size(width: int, height: int, native_width: int, native_height: int, max_side: int, max_scale: int):
@@ -100,7 +104,8 @@ class OnnxModel:
                              "(Windows, any graphics card), onnxruntime-gpu (CUDA) or onnxruntime (processor)")
         available = onnxruntime.get_available_providers()
         wanted = [PROVIDERS[provider]] if PROVIDERS[provider] in available else []
-        self.session = onnxruntime.InferenceSession(str(path), providers=wanted + ["CPUExecutionProvider"])
+        providers = list(dict.fromkeys(wanted + ["CPUExecutionProvider"]))
+        self.session = onnxruntime.InferenceSession(str(path), providers=providers)
         source = self.session.get_inputs()[0]
         self.input = source.name
         self.output = self.session.get_outputs()[0].name
@@ -244,56 +249,96 @@ def matches(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name, pattern.lower()) for pattern in patterns)
 
 
+def picture_key(file: Path) -> str:
+    """The engine's key for a dumped picture (ModsTextureKey): the CRC-32 of its RGBA pixels, as eight hex digits."""
+    with Image.open(file) as image:
+        return f"{zlib.crc32(np.asarray(image.convert('RGBA')).tobytes()):08x}"
+
+
+def split_name(stem: str) -> tuple[str, str | None] | None:
+    """(texture name, key or None) from a file's name without .png: "frame" is every picture named frame,
+    "frame.1a2b3c4d" the one with that key. None when the game takes no file of that name."""
+    stem = stem.lower()
+    if NAME.match(stem):
+        return stem, None
+    keyed = KEYED.match(stem)
+    return (keyed[1], keyed[2]) if keyed else None
+
+
+def dumped_names(dump: Path) -> dict[str, dict[str | None, Path]]:
+    """{texture name: {key: file}} for a dump folder; the key is None for <name>.png."""
+    names: dict[str, dict[str | None, Path]] = {}
+    for file in sorted(dump.glob("*.png")):
+        parsed = split_name(file.stem)
+        if parsed is not None:
+            names.setdefault(parsed[0], {}).setdefault(parsed[1], file)
+    return names
+
+
+def by_key(kinds: dict[str | None, Path]) -> dict[str, Path]:
+    """A name's dumped pictures by key, <name>.png's worked out: the game writes the first picture of a name as
+    <name>.png and any other as <name>.<key>.png, and one picture can be there both ways after several dumps."""
+    pictures = {key: file for key, file in kinds.items() if key is not None}
+    if None in kinds:
+        pictures.setdefault(picture_key(kinds[None]), kinds[None])
+    return dict(sorted(pictures.items()))
+
+
 def dumped_pictures(dump: Path, only: list[str], skip: list[str]):
-    """(texture name, file) for each dumped picture to work on, and (file, why) for each left out."""
-    chosen: dict[str, Path] = {}
+    """(package file name without .png, dumped file) for each picture to work on, and (file, why) for each left out.
+    A name with one picture gives <name>; a name that holds several gives <name>.<key> for each of them."""
+    names: dict[str, dict[str | None, Path]] = {}
     left_out: list[tuple[Path, str]] = []
     for file in sorted(dump.glob("*.png")):
-        name = file.stem.lower()
-        if not NAME.match(name):
+        parsed = split_name(file.stem)
+        if parsed is None:
             left_out.append((file, "a package cannot name it (only a-z, 0-9, _ and - match a texture)"))
-        elif name in chosen:
-            left_out.append((file, f"same texture as {chosen[name].name}"))
+            continue
+        name, key = parsed
+        if key in names.get(name, {}):
+            left_out.append((file, f"same texture as {names[name][key].name}"))
         elif name in NOT_REPLACEABLE:
             left_out.append((file, "the game loads it another way; a package cannot replace it"))
         elif (only and not matches(name, only)) or matches(name, skip):
             continue
-        elif shared_pictures(dump, name):
-            left_out.append((file, f"the game has more than one picture of this name (see {SHARED})"))
         else:
-            chosen[name] = file
-    return list(chosen.items()), left_out
+            names.setdefault(name, {})[key] = file
+    chosen: list[tuple[str, Path]] = []
+    for name, kinds in sorted(names.items()):
+        if list(kinds) == [None]:
+            chosen.append((name, kinds[None]))
+        else:
+            chosen.extend((f"{name}.{key}", file) for key, file in by_key(kinds).items())
+    return chosen, left_out
 
 
-def merge_places(places: dict[str, Path], out: Path) -> dict[str, list[str]]:
-    """Each place's dumped pictures, copied into out. The game matches a package's picture by texture name alone, and
-    some names hold a different picture from place to place (every dungeon has a "frame" of its own): one picture
-    would land on all of them. Those go to out/shared-names/<name>.<place>.png and stay out of the package.
-    Returns {name: the first place of each of its pictures}."""
+def merge_places(places: dict[str, Path], out: Path) -> dict[str, dict[str, str]]:
+    """Each place's dumped pictures, copied into out. The game matches a package's picture by texture name, and some
+    names hold a different picture from place to place (every dungeon has a "frame" of its own). A name with one
+    picture is written as <name>.png; each picture of a name with several as <name>.<key>.png, the name of the
+    package file that goes on that picture alone. Pictures out already holds for a name count too.
+    Returns {name: {key: the first place it was seen}} for the names with several."""
     seen: dict[str, dict[str, tuple[str, Path]]] = {}
     for place, folder in places.items():
-        for file in sorted(folder.glob("*.png")):
-            digest = hashlib.sha1(file.read_bytes()).hexdigest()
-            seen.setdefault(file.name.lower(), {}).setdefault(digest, (place, file))
-    shared: dict[str, list[str]] = {}
+        for name, kinds in dumped_names(folder).items():
+            for key, file in by_key(kinds).items():
+                seen.setdefault(name, {}).setdefault(key, (place, file))
+    earlier = dumped_names(out)
+    shared: dict[str, dict[str, str]] = {}
     for name, kinds in sorted(seen.items()):
+        for key, file in by_key(earlier.get(name, {})).items():
+            kinds.setdefault(key, ("an earlier dump", file))
         if len(kinds) == 1:
-            (out / name).write_bytes(next(iter(kinds.values()))[1].read_bytes())
+            file = next(iter(kinds.values()))[1]
+            if file.parent != out:
+                (out / f"{name}.png").write_bytes(file.read_bytes())
             continue
-        folder = out / SHARED
-        folder.mkdir(exist_ok=True)
-        stem = name[:-len(".png")]
-        for place, file in kinds.values():
-            (folder / f"{stem}.{re.sub('[^a-z0-9]+', '_', place.lower())}.png").write_bytes(file.read_bytes())
-        if (out / name).exists():  # from an earlier dump, when the name looked like one picture
-            (out / name).replace(folder / f"{stem}.earlier.png")
-        shared[stem] = [place for place, _ in kinds.values()]
+        pictures = {key: file.read_bytes() for key, (_, file) in kinds.items()}
+        (out / f"{name}.png").unlink(missing_ok=True)
+        for key, content in pictures.items():
+            (out / f"{name}.{key}.png").write_bytes(content)
+        shared[name] = {key: place for key, (place, _) in sorted(kinds.items())}
     return shared
-
-
-def shared_pictures(dump: Path, name: str) -> list[Path]:
-    """The pictures a dump holds for a name that has more than one."""
-    return sorted((dump / SHARED).glob(f"{name}.*.png"))
 
 
 def write_package_files(package: Path, package_id: str, name: str, author: str, model: str) -> None:
@@ -333,6 +378,10 @@ def command_upscale(arguments) -> int:
     textures = package / "textures"
     textures.mkdir(parents=True, exist_ok=True)
     write_package_files(package, package_id, arguments.name or "Larger textures", arguments.author, upscaler.name)
+    for name in sorted({split_name(name)[0] for name, _ in pictures if "." in name}):
+        if (textures / f"{name}.png").exists():
+            print(f"note: {name} holds more than one picture and each gets a file of its own; {name}.png in the package "
+                  "still goes on any picture of that name without one. Delete it unless you mean that.")
     started, done, failed = time.time(), 0, 0
     for index, (name, file) in enumerate(pictures, 1):
         target = textures / f"{name}.png"
@@ -388,16 +437,12 @@ def command_dump(arguments) -> int:
                       flush=True)
             shared = merge_places(places, out)
             for name, where in shared.items():
-                print(f"{name}: {len(where)} different pictures ({', '.join(where)}); kept apart in {SHARED}")
-            if shared:
-                print(f"{len(shared)} names hold more than one picture. A package's picture goes on every texture of its "
-                      f"name, so these are left out of the dump; they are in {out / SHARED}")
+                print(f"{name}: {len(where)} different pictures, dumped as {name}.<key>.png "
+                      f"({', '.join(f'{key} {place}' for key, place in where.items())})")
     after = len(list(out.glob("*.png")))
     print(f"{after} pictures in {out} ({after - before} new)")
     if not arguments.play:
         print("the headless run sees only what those places load; run again with --play and walk through the rest")
-    else:
-        print("a name that holds more than one picture keeps the last one the game loaded: look before you upscale")
     return 0 if after else 1
 
 
@@ -407,17 +452,20 @@ def command_check(arguments) -> int:
     if not textures.is_dir():
         raise SystemExit(f"{package} has no textures folder")
     dump = Path(arguments.dump) if arguments.dump else None
+    dumped = dumped_names(dump) if dump else {}
+    files = [file for file in sorted(textures.iterdir()) if file.suffix.lower() == ".png"]
+    in_package = {split_name(file.stem) for file in files}
     problems = 0
-    for file in sorted(textures.iterdir()):
-        if file.suffix.lower() != ".png":
-            continue
-        name = file.stem.lower()
+    for file in files:
         with Image.open(file) as image:
             width, height = image.size
-        if not NAME.match(name):
-            print(f"{file.name}: never used, the name can only hold a-z, 0-9, _ and -")
+        parsed = split_name(file.stem)
+        if parsed is None:
+            print(f"{file.name}: never used, the name can only hold a-z, 0-9, _ and - "
+                  "(and .<8 hex digits> for one picture of a name)")
             problems += 1
             continue
+        name, key = parsed
         if name in NOT_REPLACEABLE:
             print(f"{file.name}: never used, the game loads this picture another way")
             problems += 1
@@ -426,20 +474,34 @@ def command_check(arguments) -> int:
             print(f"{file.name}: never used, {width}x{height} is over what the game reads (16 million pixels, 64 MiB)")
             problems += 1
             continue
-        native = dump / f"{name}.png" if dump else None
-        if native is None:
+        if dump is None:
             print(f"{file.name}: {width}x{height}")
             continue
-        others = shared_pictures(dump, name)
-        if others:
-            print(f"{file.name}: {width}x{height}, goes on {len(others)} different pictures of that name "
-                  f"({', '.join(other.name for other in others)})")
-            problems += 1
-            continue
-        if not native.is_file():
+        pictures = by_key(dumped.get(name, {}))
+        if not pictures:
             print(f"{file.name}: {width}x{height}, no dumped texture of that name")
             problems += 1
             continue
+        if key is not None:
+            native = pictures.get(key)
+            if native is None:
+                print(f"{file.name}: {width}x{height}, no dumped picture of that name has that key "
+                      f"({', '.join(pictures)})")
+                problems += 1
+                continue
+        else:
+            # A plain file goes on every picture of the name that has no file of its own.
+            others = [other for other in pictures if (name, other) not in in_package]
+            if not others:
+                print(f"{file.name}: {width}x{height}; every dumped picture of that name has a file of its own, "
+                      "so this goes on any that was not dumped")
+                continue
+            if len(others) > 1:
+                print(f"{file.name}: {width}x{height}, goes on {len(others)} different pictures of that name; "
+                      f"name a file for each ({', '.join(f'{name}.{other}.png' for other in others)})")
+                problems += 1
+                continue
+            native = pictures[others[0]]
         with Image.open(native) as image:
             native_width, native_height = image.size
         sizes = {where: kept_size(width, height, native_width, native_height, *limits)

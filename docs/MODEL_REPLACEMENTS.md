@@ -45,13 +45,18 @@ surfaces) keep working when the frames they are copied from are larger too.
 - A file over 64 MiB or over 16 million pixels is skipped.
 - `stayframe`, a menu sheet, is loaded another way and cannot be replaced.
 - A file goes on every texture of its name, and a few names hold a different picture from place to place (each
-  dungeon has its own `frame`): a picture made from one of them shows up on the others too. The tool below
-  finds such names in its windowless dump and leaves them out.
-- The log names each picture taken: `mods: replaced texture e01t03 from <file> (1024x1024 for 256x256)`.
+  dungeon has its own `frame`). `textures/<texture>.<key>.png` goes on one of those pictures alone: the key is eight
+  hex digits, the CRC-32 of the game's own picture as straight RGBA rows (what the dump writes). A file with a key is
+  taken before one without, whatever the load order; `textures/<texture>.png` goes on the pictures of the name that
+  have no file of their own. Text pictures differ by language, so a key for one is for the language it was dumped in.
+- The log names each picture taken: `mods: replaced texture e01t03 from <file> (1024x1024 for 256x256)`. Where a name
+  has files with keys and the picture met has none, it says so once, with the key:
+  `mods: texture frame is picture e014ed16 here, which no frame.<key>.png is for`.
 
 Start the game with `DC_TEXTURE_DUMP=<folder>` and it writes every texture it loads to `<folder>/<texture name>.png`,
-the game's own picture even where a package replaces it, with text in the game's chosen language. Those files give
-you the names and sizes, and something to paint over or upscale.
+the game's own picture even where a package replaces it, with text in the game's chosen language. A second, different
+picture of a name is written as `<texture name>.<key>.png`: the name a package file for that picture has. Those files
+give you the names and sizes, and something to paint over or upscale.
 
 [`tools/textures/texture_pack.py`](../tools/textures/README.md) does the whole job: `dump` runs the game for the
 pictures, `upscale` enlarges them with an upscaling model (ONNX; none is included) into a package's `textures` folder,

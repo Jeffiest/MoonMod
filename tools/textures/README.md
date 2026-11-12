@@ -37,11 +37,12 @@ what you want to cover, open the menus, then close the game. Run it as often as 
 `menu`, `title`, `edit:<map>`. `--data <folder>` names the game's data folder if the game does not find it by itself.
 Text pictures are dumped in the language the game is set to.
 
-The game matches a package's picture by texture name alone, and a few names hold a different picture from place to
-place: every dungeon has a `frame` of its own, and the towns and the dungeons each have their own `fx_foot`. One
-upscaled picture would land on all of them. The windowless run dumps each place apart, so it sees these: it puts
-them in `dumps/shared-names/<texture name>.<place>.png`, and `upscale` leaves those names out. A `--play` dump cannot
-tell: it keeps the last picture the game loaded under each name, so look at what you upscale from it.
+A few texture names hold a different picture from place to place: every dungeon has a `frame` of its own, and the
+towns and the dungeons each have their own `fx_foot`. Those are dumped as `dumps/<texture name>.<key>.png`, one file
+for each picture; the key is eight hex digits worked out from the picture itself. `upscale` writes a package file of
+the same name for each, and the game puts it on that picture alone. The windowless run prints these names and the
+place each picture was found in. In a `--play` dump the first picture the game meets under a name is written as
+`<texture name>.png` and any other with its key; the tool treats both the same.
 
 The game itself does the dumping: setting `DC_TEXTURE_DUMP=<folder>` before starting it is all `dump` does.
 
@@ -51,7 +52,8 @@ The game itself does the dumping: setting `DC_TEXTURE_DUMP=<folder>` before star
 python tools/textures/texture_pack.py upscale --dump dumps --package <save>\mods\me.hires --model model.onnx
 ```
 
-Each dumped picture is enlarged by the model and written to `<package>/textures/<texture name>.png`. A package with
+Each dumped picture is enlarged by the model and written to `<package>/textures/<texture name>.png`
+(`<texture name>.<key>.png` for a name that holds several pictures). A package with
 no `mod.json` gets one (id: the folder's name; `"coop": "local"`, so co-op friends need not have it) and a `main.lua`
 that does nothing. Turn the package on in the Mod Manager.
 
@@ -82,13 +84,18 @@ python tools/textures/texture_pack.py check --package <save>\mods\me.hires --dum
 ```
 
 One line per picture: its size, the texture's size, and the size the game keeps it at on the desktop and in the
-browser. It also names pictures the game will never use (a name that matches no texture, a picture the game loads
-another way). Any picture you paint or edit yourself can be checked the same way.
+browser. It also names pictures the game will never use (a name that matches no texture, a key no dumped picture
+has, a picture the game loads another way) and a `<texture name>.png` that would land on several different pictures.
+Any picture you paint or edit yourself can be checked the same way.
 
 ## The rules the game follows
 
 - `textures/<texture name>.png` in an enabled package replaces that texture. The name is the dumped file's, lower case,
   only `a-z`, `0-9`, `_` and `-`. Where two packages hold the same picture, the later one in the load order wins.
+- `textures/<texture name>.<key>.png` goes on one picture of a name that holds several. The key is eight hex digits:
+  the CRC-32 of the game's own picture as RGBA rows, which is what the dump writes. Such a file is taken before a
+  `<texture name>.png`, whatever the load order; the file without a key goes on the pictures of the name that have
+  none of their own. Text pictures differ by language, so their keys do too.
 - The picture keeps its own size, halved (both sides together) while a side is over 4096 or over 8 times the
   texture's. In the browser: 2048 and 2 times. A picture smaller than the texture is enlarged to it. A picture of
   another shape than the texture is stretched to fit.
@@ -97,4 +104,5 @@ another way). Any picture you paint or edit yourself can be checked the same way
 - A file over 64 MiB or over 16 million pixels is not read.
 - `stayframe` (a menu sheet) is dumped but cannot be replaced; the tool leaves it out.
 - The game writes `mods: replaced texture <name> from <file> (1024x1024 for 256x256)` to its log for each picture it
-  takes.
+  takes, and `mods: texture <name> is picture <key> here, which no <name>.<key>.png is for` once for a picture of a
+  name whose files have keys when none is for it.

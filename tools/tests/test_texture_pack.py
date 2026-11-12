@@ -183,38 +183,88 @@ class TexturePack(unittest.TestCase):
         self.assertIn("nothing.png: 8x8, no dumped texture of that name", text)
         self.assertIn("it will be stretched", text)
 
-    def test_a_name_with_more_than_one_picture_is_kept_apart(self):
-        """Every dungeon has its own "frame": one package picture would land on all of them."""
+    def test_the_key_of_a_picture(self):
+        """As the engine's ModsTextureKey: the CRC-32 of the picture's RGBA rows, whatever the file's own format."""
+        import zlib
+        values = np.random.default_rng(7).integers(0, 256, (4, 6, 3), dtype=np.uint8)
+        rgba = np.dstack([values, np.full((4, 6, 1), 255, np.uint8)])
+        Image.fromarray(values).save(self.dump / "rgb.png")
+        Image.fromarray(rgba).save(self.dump / "rgba.png")
+        key = f"{zlib.crc32(rgba.tobytes()):08x}"
+        self.assertEqual(self.tool.picture_key(self.dump / "rgb.png"), key)
+        self.assertEqual(self.tool.picture_key(self.dump / "rgba.png"), key)
+        self.assertEqual(self.tool.split_name("Frame"), ("frame", None))
+        self.assertEqual(self.tool.split_name("Frame.1A2b3c4D"), ("frame", "1a2b3c4d"))
+        for bad in ("", "bad name", "frame.dungeon_0", "frame.1a2b3c4", "a.b.1a2b3c4d", ".1a2b3c4d"):
+            self.assertIsNone(self.tool.split_name(bad), bad)
+
+    def test_a_name_with_more_than_one_picture_gets_a_file_for_each(self):
+        """Every dungeon has its own "frame": each is dumped, upscaled and checked as frame.<key>.png."""
+        def frame(folder, seed, name="frame.png"):
+            values = np.random.default_rng(seed).integers(0, 256, (8, 8, 3), dtype=np.uint8)
+            Image.fromarray(values).save(folder / name)
+            return self.tool.picture_key(folder / name)
+
         places = {}
         for index, place in enumerate(("dungeon:0", "dungeon:1", "title")):
             places[place] = self.root / f"place{index}"
             places[place].mkdir()
+        keys = {}
         for place, seed in (("dungeon:0", 1), ("dungeon:1", 2)):
-            values = np.random.default_rng(seed).integers(0, 256, (8, 8, 3), dtype=np.uint8)
-            Image.fromarray(values).save(places[place] / "frame.png")
+            keys[seed] = frame(places[place], seed)
             Image.new("RGB", (8, 8), (9, 9, 9)).save(places[place] / "gaiji.png")   # the same in both
+        # Two pictures of the name in one place: the game writes the second with its key.
+        keys[5] = frame(places["dungeon:1"], 5, "frame.placeholder.png")
+        (places["dungeon:1"] / "frame.placeholder.png").rename(places["dungeon:1"] / f"frame.{keys[5]}.png")
         Image.new("RGB", (8, 8), (9, 9, 9)).save(places["title"] / "gaiji.png")
         Image.new("RGB", (8, 8)).save(places["title"] / "logo.png")
-        self.picture("frame.png", 8, 8, seed=3)                                    # from an earlier dump
+        keys[3] = frame(self.dump, 3)                                              # from an earlier dump
+        self.assertEqual(len(set(keys.values())), 4)
 
         shared = self.tool.merge_places(places, self.dump)
-        self.assertEqual(shared, {"frame": ["dungeon:0", "dungeon:1"]})
-        self.assertEqual(sorted(file.name for file in self.dump.glob("*.png")), ["gaiji.png", "logo.png"])
-        self.assertEqual(sorted(file.name for file in (self.dump / "shared-names").iterdir()),
-                         ["frame.dungeon_0.png", "frame.dungeon_1.png", "frame.earlier.png"])
+        self.assertEqual(shared, {"frame": {keys[1]: "dungeon:0", keys[2]: "dungeon:1", keys[5]: "dungeon:1",
+                                            keys[3]: "an earlier dump"}})
+        self.assertEqual(sorted(file.name for file in self.dump.glob("*.png")),
+                         sorted([f"frame.{key}.png" for key in keys.values()] + ["gaiji.png", "logo.png"]))
+        # A second merge of the same places changes nothing.
+        self.tool.merge_places(places, self.dump)
+        self.assertEqual(len(list(self.dump.glob("*.png"))), 6)
 
-        # A dump made by playing puts the name back; it is still left out, and check names a package that has it.
-        self.picture("frame.png", 8, 8, seed=4)
+        # A dump made by playing writes the first picture it meets as frame.png: one more picture of the name.
+        keys[4] = frame(self.dump, 4)
         chosen, left_out = self.tool.dumped_pictures(self.dump, [], [])
-        self.assertEqual([name for name, _ in chosen], ["gaiji", "logo"])
-        self.assertEqual([file.name for file, _ in left_out], ["frame.png"])
+        self.assertEqual([name for name, _ in chosen], sorted(f"frame.{key}" for key in keys.values()) + ["gaiji", "logo"])
+        self.assertEqual(left_out, [])
         package = self.root / "mods" / "me.hires"
-        run(self.tool, "upscale", "--dump", str(self.dump), "--package", str(package))
-        self.assertFalse((package / "textures" / "frame.png").exists())
-        Image.new("RGB", (32, 32)).save(package / "textures" / "frame.png")
+        textures = package / "textures"
+        code, text = run(self.tool, "upscale", "--dump", str(self.dump), "--package", str(package))
+        self.assertEqual(code, 0, text)
+        self.assertFalse((textures / "frame.png").exists())
+        for key in keys.values():
+            with Image.open(textures / f"frame.{key}.png") as image:
+                self.assertEqual(image.size, (32, 32))
+        code, text = run(self.tool, "check", "--package", str(package), "--dump", str(self.dump))
+        self.assertEqual(code, 0, text)
+        self.assertIn(f"frame.{keys[4]}.png: 32x32 for 8x8", text)
+
+        # A plain file goes on the pictures without a file of their own: fine for none or one, not for several.
+        Image.new("RGB", (32, 32)).save(textures / "frame.png")
+        code, text = run(self.tool, "check", "--package", str(package), "--dump", str(self.dump))
+        self.assertEqual(code, 0, text)
+        self.assertIn("frame.png: 32x32; every dumped picture of that name has a file of its own", text)
+        (textures / f"frame.{keys[1]}.png").unlink()
+        code, text = run(self.tool, "check", "--package", str(package), "--dump", str(self.dump))
+        self.assertEqual(code, 0, text)
+        self.assertIn("frame.png: 32x32 for 8x8", text)
+        (textures / f"frame.{keys[2]}.png").unlink()
         code, text = run(self.tool, "check", "--package", str(package), "--dump", str(self.dump))
         self.assertEqual(code, 1)
-        self.assertIn("frame.png: 32x32, goes on 3 different pictures of that name", text)
+        self.assertIn("frame.png: 32x32, goes on 2 different pictures of that name", text)
+        (textures / "frame.png").unlink()
+        Image.new("RGB", (32, 32)).save(textures / "frame.0000abcd.png")
+        code, text = run(self.tool, "check", "--package", str(package), "--dump", str(self.dump))
+        self.assertEqual(code, 1)
+        self.assertIn("frame.0000abcd.png: 32x32, no dumped picture of that name has that key", text)
 
 
 if __name__ == "__main__":
