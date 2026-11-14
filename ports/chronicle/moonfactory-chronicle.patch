@@ -181,6 +181,23 @@ index 715c9417..4241026e 100644
    # Discord Rich Presence.
    - --filesystem=xdg-run/discord-ipc-0
    - --filesystem=xdg-run/app/com.discordapp.Discord:create
+diff --git a/port/include/game/actionseq.hpp b/port/include/game/actionseq.hpp
+index 73200a20..c0805452 100644
+--- a/port/include/game/actionseq.hpp
++++ b/port/include/game/actionseq.hpp
+@@ -225,6 +225,12 @@ public:
+      * Advances queued actions and updates the character transform.
+      */
+     void Play();
++
++    /**
++     * MoonMod: a motion the queue waits to see played to its end (started, its delay over) is taken as played out, so
++     * the next one queued starts. For a scene run at once, where no time passes for the character.
++     */
++    void EndMotion();
+ };
+ 
+ STATIC_ASSERT(sizeof(CActionSeq) == 0xD0);
 diff --git a/port/include/game/battlemenu.hpp b/port/include/game/battlemenu.hpp
 index 96fca7af..c566c971 100644
 --- a/port/include/game/battlemenu.hpp
@@ -250,10 +267,10 @@ index 0a1f0d12..2e761ab7 100644
 +
  } // namespace dc::game
 diff --git a/port/include/game/btsysscript.hpp b/port/include/game/btsysscript.hpp
-index 3b8033ce..6e3ed280 100644
+index 3b8033ce..c35a10ac 100644
 --- a/port/include/game/btsysscript.hpp
 +++ b/port/include/game/btsysscript.hpp
-@@ -67,6 +67,11 @@ void BtSystemScriptAfter();
+@@ -67,6 +67,17 @@ void BtSystemScriptAfter();
   */
  int BtSystemScriptRun(int event, CDataAlloc2<1> *arena);
  
@@ -261,6 +278,12 @@ index 3b8033ce..6e3ed280 100644
 + * MoonMod: whether the dungeon's loaded event script has program `no` (its program table, as the runner reads it).
 + */
 +bool BtSystemScriptHasProgram(int no);
++
++/**
++ * MoonMod: the event flag program `no` of the dungeon's loaded event script tests before anything else (its first op
++ * is CHECK_EVENT_FLG), or -1. A gate whose one program is its lock as well as its way out begins with that test.
++ */
++int BtSystemScriptFlagTest(int no);
 +
  /**
   * Selects the floor used by the next battle-map jump.
@@ -1053,6 +1076,25 @@ index 0727a3ba..c377be3f 100644
  /**
   * Reports whether any modal editor event currently blocks normal input.
   */
+diff --git a/port/include/game/editloop3.hpp b/port/include/game/editloop3.hpp
+index abcd9613..fa789be4 100644
+--- a/port/include/game/editloop3.hpp
++++ b/port/include/game/editloop3.hpp
+@@ -353,6 +353,14 @@ int EdInitEventParamSimple();
+  * ambient colour the map is drawn with, loads the event script and runs it.
+  */
+ int EdEventInit(int event_number, CDataAlloc2<1> *arena, char *program);
++/** MoonMod: how many script functions deep the event script is (0 in a program's own body). */
++int EdEventCallDepth();
++/**
++ * MoonMod: the event script is being run at once, unseen (a walk in that is skipped, an exit gate's scene under a held
++ * picture): many steps in one frame. What a scene waits on that only real frames bring is taken as over: a character's
++ * motion played to its end (ASQ_CHECK).
++ */
++extern bool EdEventAtOnce;
+ 
+ /**
+  * Resets the event workspace from the arena's free space and runs one program of a script.
 diff --git a/port/include/game/editpartsinfo.hpp b/port/include/game/editpartsinfo.hpp
 index ba99c2cc..96fcc720 100644
 --- a/port/include/game/editpartsinfo.hpp
@@ -2630,10 +2672,10 @@ index 00000000..55226749
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_adapter.hpp b/port/include/moonmod/chronicle_adapter.hpp
 new file mode 100644
-index 00000000..79686014
+index 00000000..890113e0
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_adapter.hpp
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,221 @@
 +#pragma once
 +
 +#include <array>
@@ -2847,6 +2889,8 @@ index 00000000..79686014
 +void StepExitRoom();
 +bool ExitRoomPending();
 +void TeleportPlayer(float x, float z);
++/** The same, at a height of its own: a spot whose floor is a part's own (the Temple's gate stands below its cell's floor). */
++void TeleportPlayer(float x, float y, float z);
 +bool TeleportPinned();
 +void ResetExitRoomForTests();
 +
@@ -3862,10 +3906,10 @@ index 00000000..1803202f
 +void ChronicleModGeoramaTableLoaded(CEditPartsInfo *table, int georama_no);
 diff --git a/port/include/moonmod/game_hooks.hpp b/port/include/moonmod/game_hooks.hpp
 new file mode 100644
-index 00000000..e7efe7b5
+index 00000000..6172fb0b
 --- /dev/null
 +++ b/port/include/moonmod/game_hooks.hpp
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,350 @@
 +#pragma once
 +
 +/**
@@ -4066,6 +4110,34 @@ index 00000000..e7efe7b5
 +// town's walk.
 +void  ChronicleHouseDoor(bool entering);
 +void  ChronicleHouseJumped(bool entering);
++// A floor's exit gate with quick passage on (OW1 item 5): the gate's script (the game's program 160: the walk out,
++// the "next floor or leave" window, then the next floor's opening script or the jump to the town) shows no black.
++// GateScript: that script is running. GateFade: a script's fade in or out was asked; true = the gate's own, to be cut
++// (a fade out also marks what follows as run at once: GateSkip, until a fade in, a request or the script's end).
++// GateChained: the gate's script hands over to the floor's opening script: the last picture is held over the build,
++// until that script (or a scene it starts) fades in over some frames; a fade in of no length (frames < 0) is the
++// scripts' "black from here" and lets nothing go. Until that fade in nothing the script does can be seen, so it runs
++// at once as well (GateSkip: its waits in the dark take no time) and a fade out it asks for is cut.
++// With the passage's walks off (dungeons.set_quick_passage walks = false) nothing of the stairs is seen. GateQuiet:
++// the script asked for is such a gate's (the game's own fade to black before it is not started). GateAsk, each frame
++// of the game's wait for that fade: 1 = open the "next floor or leave" window now, over the floor; 2 = wait a frame;
++// 0 = go on (the picture is held from here and the script runs at once); 3 = stepped back from the gate (Circle in
++// the window): nothing runs. GateAnswered: the window's answer (3: stepped back). GateOverFloor: that window is up, so
++// it is drawn with no picture of its own under it (the floor, the party and the HUD stay) and Circle closes it.
++// GateAnswer: that answer, once, for the script's own window op (0: none, open the window).
++// GateUnseen: the gate's script runs unseen, the question answered before it: a question of its own in a message
++// window (the Shipwreck and the Moon Sea ask "go on?" before anything else) is answered as it stands, with OK.
++bool  ChronicleFloorGateScript();
++bool  ChronicleFloorGateOverFloor();
++bool  ChronicleFloorGateUnseen();
++bool  ChronicleFloorGateQuiet(int script);
++int   ChronicleFloorGateAsk(int script);
++void  ChronicleFloorGateAnswered(int answer);
++int   ChronicleFloorGateAnswer();
++bool  ChronicleFloorGateFade(bool in, int frames);
++bool  ChronicleFloorGateSkip();
++void  ChronicleFloorGateSkipEnd();
++void  ChronicleFloorGateChained(int from_script, int to_script);
 +// A jump from one town to another (the open world's road), or from a dungeon floor to another of the same dungeon (a
 +// story floor through its smoke), holds the picture as well (with quick passage on); the arriving mode's start reads
 +// the mark (true) and starts with the picture clear. The floor's hold lets go once the party plays on the new floor.
@@ -6867,6 +6939,27 @@ index 384cc5b3..ab2b312f 100644
  /**
   * Clears pack bounds for buffers invalidated when the game resets its data arenas.
   */
+diff --git a/port/src/game/actionseq.cpp b/port/src/game/actionseq.cpp
+index 7387fc67..1c85afcf 100644
+--- a/port/src/game/actionseq.cpp
++++ b/port/src/game/actionseq.cpp
+@@ -317,6 +317,16 @@ ACT_SEQ *DeleteSeq(ACT_SEQ *sequence) {
+ 
+ } // namespace
+ 
++void CActionSeq::EndMotion() {
++    if (motion_head == nullptr || motion_head->arguments.animation.mode != 7 || motion_trigger == 0 || motion_delay > 0) {
++        return;
++    }
++    motion_head = DeleteSeq(motion_head);
++    if (motion_head == nullptr) {
++        motion_tail = nullptr;
++    }
++}
++
+ void CActionSeq::Play() {
+     if (move_head == nullptr && motion_head == nullptr && anime_head == nullptr) {
+         return;
 diff --git a/port/src/game/battle_globals.cpp b/port/src/game/battle_globals.cpp
 index 4488d8fb..f649fa44 100644
 --- a/port/src/game/battle_globals.cpp
@@ -10202,7 +10295,7 @@ index 19ea6bca..3ff9654d 100644
      const std::string      number = FormatWeaponIndex(weapon_index);
  
 diff --git a/port/src/game/btsysscript.cpp b/port/src/game/btsysscript.cpp
-index 08ba60f0..c2f1a19f 100644
+index 08ba60f0..18eda0f0 100644
 --- a/port/src/game/btsysscript.cpp
 +++ b/port/src/game/btsysscript.cpp
 @@ -22,6 +22,7 @@
@@ -10222,7 +10315,7 @@ index 08ba60f0..c2f1a19f 100644
  #include "nowload.hpp"
  #include "npcharacter.hpp"
  #include "runscript.hpp"
-@@ -252,6 +255,26 @@ int BtSystemScriptRun(int event, CDataAlloc2<1> *arena) {
+@@ -252,6 +255,53 @@ int BtSystemScriptRun(int event, CDataAlloc2<1> *arena) {
      return EdEventInit(event, arena, g_event_data);
  }
  
@@ -10246,10 +10339,37 @@ index 08ba60f0..c2f1a19f 100644
 +    return false;
 +}
 +
++int BtSystemScriptFlagTest(int no) {
++    if (g_event_data == nullptr) {
++        return -1;
++    }
++    // header {unk, main, code, prog, prog_num}; a program's record {addr, name, local, arg}; instructions {op, arg1, arg2}
++    s32 header[5];
++    std::memcpy(header, g_event_data, sizeof(header));
++    if (header[2] <= 0 || header[3] <= 0 || header[4] <= 0 || header[4] > 4096) {
++        return -1;
++    }
++    for (int i = 0; i < header[4]; i++) {
++        s32 entry[2];
++        std::memcpy(entry, g_event_data + header[3] + 8 * i, sizeof(entry));
++        if (entry[0] != no) {
++            continue;
++        }
++        s32 record[4];
++        std::memcpy(record, g_event_data + entry[1], sizeof(record));
++        s32 ops[6];
++        std::memcpy(ops, g_event_data + header[2] + record[0], sizeof(ops));
++        // an external call pushes its operation number, then its arguments: CHECK_EVENT_FLG (1023), the flag
++        const bool pushes = ops[0] == RS_OP_PUSH_CONST && ops[1] == 1 && ops[3] == RS_OP_PUSH_CONST && ops[4] == 1;
++        return pushes && ops[2] == 1023 ? ops[5] : -1;
++    }
++    return -1;
++}
++
  void BtSetMapJumpFloor(int floor) {
      BtMapJumpFloor = floor;
  }
-@@ -298,7 +321,9 @@ int _GET_FLOOR_LEVEL(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -298,7 +348,9 @@ int _GET_FLOOR_LEVEL(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _SET_FLOOR_LEVEL(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10260,7 +10380,7 @@ index 08ba60f0..c2f1a19f 100644
      return 1;
  }
  
-@@ -389,6 +414,7 @@ int _GET_OBJHDL(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -389,6 +441,7 @@ int _GET_OBJHDL(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _SET_OBJHDL_POS(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10268,7 +10388,7 @@ index 08ba60f0..c2f1a19f 100644
      int            index = GetStackInt(stack++);
      float          x = GetStackFloat(stack++);
      float          y = GetStackFloat(stack++);
-@@ -407,6 +433,7 @@ int _SET_OBJHDL_POS(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -407,6 +460,7 @@ int _SET_OBJHDL_POS(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _SET_OBJHDL_ROT(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10276,7 +10396,7 @@ index 08ba60f0..c2f1a19f 100644
      int            index = GetStackInt(stack++);
      float          x = GetStackFloat(stack++);
      float          y = GetStackFloat(stack++);
-@@ -533,6 +560,7 @@ int _GET_OBJHDL_ROT(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -533,6 +587,7 @@ int _GET_OBJHDL_ROT(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _SET_URA_DUNGEON(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
@@ -10284,7 +10404,7 @@ index 08ba60f0..c2f1a19f 100644
      BtEventInfo.request = BT_REQUEST_URA_DUNGEON;
      return 1;
  }
-@@ -552,6 +580,7 @@ int _GET_EVENT_ROT(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -552,6 +607,7 @@ int _GET_EVENT_ROT(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _OPEN_ENTRANCE_WINDOW(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10292,7 +10412,7 @@ index 08ba60f0..c2f1a19f 100644
      if (stack->type != RS_PTR) {
          return 0;
      }
-@@ -562,6 +591,7 @@ int _OPEN_ENTRANCE_WINDOW(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -562,6 +618,7 @@ int _OPEN_ENTRANCE_WINDOW(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _OPEN_ESCAPE_WINDOW(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10300,7 +10420,7 @@ index 08ba60f0..c2f1a19f 100644
      if (stack->type != RS_PTR) {
          return 0;
      }
-@@ -573,11 +603,13 @@ int _OPEN_ESCAPE_WINDOW(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -573,11 +630,13 @@ int _OPEN_ESCAPE_WINDOW(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _GO_DUNGEON(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
@@ -10314,7 +10434,7 @@ index 08ba60f0..c2f1a19f 100644
      const std::string_view map_file = GetStackString(stack++);
      BtLoadMapType = GetStackInt(stack);
      *std::ranges::copy(map_file, BtLoadMapFileName.begin()).out = '\0';
-@@ -586,6 +618,7 @@ int _SET_DUNGEON_MAP(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -586,6 +645,7 @@ int _SET_DUNGEON_MAP(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _LOAD_DUNGEON_MAP2(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
@@ -10322,7 +10442,7 @@ index 08ba60f0..c2f1a19f 100644
      CUserStatus *status = UserStatus;
      status->res_limit_zone_current = RES_LIMIT_ZONE_NONE;
      BtMapJumpLoad(BtLoadMapFileName.data());
-@@ -599,6 +632,7 @@ int _LOAD_MONSTOR(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
+@@ -599,6 +659,7 @@ int _LOAD_MONSTOR(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
  }
  
  int _SET_RANDOM_MAP(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
@@ -10330,7 +10450,7 @@ index 08ba60f0..c2f1a19f 100644
      if (NowDngMap->map_type == 1) {
          BtCleatRandomMap();
      } else {
-@@ -609,6 +643,7 @@ int _SET_RANDOM_MAP(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
+@@ -609,6 +670,7 @@ int _SET_RANDOM_MAP(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
  }
  
  int _SET_EVENT_SW(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10338,7 +10458,7 @@ index 08ba60f0..c2f1a19f 100644
      int script_no = GetStackInt(stack++);
      NowEventMan->SearchDataSwitch(script_no, GetStackInt(stack));
      return 1;
-@@ -800,6 +835,7 @@ int _USER_WEAPON_DRAW(RS_STACKDATA *stack, int argument_count) {
+@@ -800,6 +862,7 @@ int _USER_WEAPON_DRAW(RS_STACKDATA *stack, int argument_count) {
  }
  
  int _SET_MAIN_CHR2(RS_STACKDATA *stack, int argument_count) {
@@ -10346,7 +10466,7 @@ index 08ba60f0..c2f1a19f 100644
      int chara = GetStackInt(stack++);
      int reload = 0;
  
-@@ -810,6 +846,12 @@ int _SET_MAIN_CHR2(RS_STACKDATA *stack, int argument_count) {
+@@ -810,6 +873,12 @@ int _SET_MAIN_CHR2(RS_STACKDATA *stack, int argument_count) {
      if (chara < 0 || chara > 5) {
          return 1;
      }
@@ -10359,7 +10479,7 @@ index 08ba60f0..c2f1a19f 100644
  
      selectChrUnit(chara, reload);
      BtEventInfo.script_main_chr = chara;
-@@ -817,6 +859,7 @@ int _SET_MAIN_CHR2(RS_STACKDATA *stack, int argument_count) {
+@@ -817,6 +886,7 @@ int _SET_MAIN_CHR2(RS_STACKDATA *stack, int argument_count) {
  }
  
  int _RESET_MAIN_CHR(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
@@ -10367,7 +10487,7 @@ index 08ba60f0..c2f1a19f 100644
      if (BtEventInfo.script_main_chr == -1) {
          return 1;
      }
-@@ -892,6 +935,7 @@ int _END_BEE(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
+@@ -892,6 +962,7 @@ int _END_BEE(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
  }
  
  int _EASTKING_COMPLETE(RS_STACKDATA *stack, int /*argument_count*/) {
@@ -10375,7 +10495,7 @@ index 08ba60f0..c2f1a19f 100644
      SetStack(stack, EastKingCheckComplete());
      return 1;
  }
-@@ -1027,6 +1071,7 @@ int _SET_IBOX_ANGLE(RS_STACKDATA *stack, int /*argument_count*/) {
+@@ -1027,6 +1098,7 @@ int _SET_IBOX_ANGLE(RS_STACKDATA *stack, int /*argument_count*/) {
  }
  
  int _SET_IBOX_FINISH(RS_STACKDATA * /*stack*/, int /*argument_count*/) {
@@ -12772,7 +12892,7 @@ index 00000000..d56b5827
 +
 +} // namespace dc::game
 diff --git a/port/src/game/dun/gameloop.cpp b/port/src/game/dun/gameloop.cpp
-index 0e33bf79..5e3ff291 100644
+index 0e33bf79..e98b08a9 100644
 --- a/port/src/game/dun/gameloop.cpp
 +++ b/port/src/game/dun/gameloop.cpp
 @@ -1,3 +1,5 @@
@@ -13153,7 +13273,27 @@ index 0e33bf79..5e3ff291 100644
              break;
          case BT_GAME_MODE_BATTLE_MENU:
              if (BattleMenuCursor() == 0) {
-@@ -1927,7 +2085,7 @@ int GameLoop() {
+@@ -1877,6 +2035,11 @@ int GameLoop() {
+             break;
+         }
+         case BT_GAME_MODE_ESCAPE_MSG: {
++            // MoonMod (OW1 item 5): with a mod's quick passage the gate's scene stays up under the window coming in
++            if (moonmod::ChronicleFloorGateScript()) {
++                DunMainDraw();
++            }
++
+             int answer = DngEscapeMsgLoop();
+ 
+             if (answer > 0) {
+@@ -1886,6 +2049,7 @@ int GameLoop() {
+ 
+                 BtEventInfo.escape_result = nullptr;
+                 BtGameModeFlag = BT_GAME_MODE_PLAY;
++                moonmod::ChronicleFloorGateAnswered(answer); // asked before the gate's script (walks off)
+             }
+ 
+             break;
+@@ -1927,7 +2091,7 @@ int GameLoop() {
          if (BtEventInfo.no_status_recover == 0) {
              CUserStatus *status = UserStatus;
  
@@ -13162,7 +13302,7 @@ index 0e33bf79..5e3ff291 100644
                  status->hp[i] = status->max_hp[i];
                  status->ailments[i] = 0;
                  status->ailment_frames[i] = 0;
-@@ -1993,6 +2151,10 @@ void Draw_MainUnitShadow() {
+@@ -1993,6 +2157,10 @@ void Draw_MainUnitShadow() {
          CharaMain.DrawShadow();
      }
  
@@ -13173,7 +13313,7 @@ index 0e33bf79..5e3ff291 100644
      if (CMonUnitHyde == 0 && BtEventMode == 0) {
          NowMonstorUnit->DrawShadowMonstor();
      }
-@@ -2112,11 +2274,17 @@ void Draw_MainUnit() {
+@@ -2112,11 +2280,17 @@ void Draw_MainUnit() {
      CharaMain.TextureAnime(0x11);
      CharaMain.Draw();
  
@@ -13192,7 +13332,7 @@ index 0e33bf79..5e3ff291 100644
      MGSetAmbient(saved_ambient);
      sceVu0CopyMatrix(light, saved_light);
      sceVu0CopyMatrix(colour, saved_colour);
-@@ -2131,12 +2299,54 @@ namespace {
+@@ -2131,12 +2305,54 @@ namespace {
  // Draws the floor's monsters. CMonstorUnit::DrawMonstor draws the ones taking part; a dormant one
  // within video.detail_distance of the player is passed off as taking part for the length of the
  // call, so that its model draws and animates without the monster waking.
@@ -13249,7 +13389,7 @@ index 0e33bf79..5e3ff291 100644
          MONSTOR *monster = &unit->monster[i];
          dormant[i] = monster->state == 1 && monster->revealed != 0 && monster->player_distance < detail;
  
-@@ -2147,7 +2357,7 @@ void DrawMonstorDetail() {
+@@ -2147,7 +2363,7 @@ void DrawMonstorDetail() {
  
      unit->DrawMonstor();
  
@@ -13258,7 +13398,7 @@ index 0e33bf79..5e3ff291 100644
          if (dormant[i]) {
              unit->monster[i].state = 1;
          }
-@@ -2168,6 +2378,125 @@ CTexture *NamedTexture(const char *name) {
+@@ -2168,6 +2384,125 @@ CTexture *NamedTexture(const char *name) {
  
  } // namespace
  
@@ -13384,7 +13524,7 @@ index 0e33bf79..5e3ff291 100644
  void DunMainDraw() {
      sceVu0FMATRIX camera;
      sceVu0FVECTOR eye;
-@@ -2182,6 +2511,8 @@ void DunMainDraw() {
+@@ -2182,6 +2517,8 @@ void DunMainDraw() {
      sceVu0UnitMatrix(unit);
      sceVu0MulMatrix(view, unit, camera);
      MGSetViewMatrix(view, eye);
@@ -13393,7 +13533,7 @@ index 0e33bf79..5e3ff291 100644
      SndSetCamera(NowCamera__3);
  
      if (BtAllDrawFlag == 0) {
-@@ -2197,6 +2528,7 @@ void DunMainDraw() {
+@@ -2197,6 +2534,7 @@ void DunMainDraw() {
      }
  
      if (lightingMode == 0) {
@@ -13401,7 +13541,7 @@ index 0e33bf79..5e3ff291 100644
          MGSetPLight(main_light, main_lightcolor);
          MGSetAmbient(main_ambientlight);
          MGSetBGColor(main_bgColor[0], main_bgColor[1], main_bgColor[2], 128.0f);
-@@ -2228,6 +2560,13 @@ void DunMainDraw() {
+@@ -2228,6 +2566,13 @@ void DunMainDraw() {
  
      // Deliberately non-virtual: the map field's own draw, not an override.
      NowDranMapField->CDranMapField::Draw();
@@ -13415,7 +13555,7 @@ index 0e33bf79..5e3ff291 100644
  
      if (itemOpenSmallFlag == 0 && itemOpenBigFlag == 0) {
          sceVu0FVECTOR box_pos;
-@@ -2258,6 +2597,7 @@ void DunMainDraw() {
+@@ -2258,6 +2603,7 @@ void DunMainDraw() {
          NowDngMap->DrawAtraBoll(atra_pos);
      }
  
@@ -13423,7 +13563,7 @@ index 0e33bf79..5e3ff291 100644
      Draw_MainUnitShadow();
  
      if (BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0) {
-@@ -2267,15 +2607,16 @@ void DunMainDraw() {
+@@ -2267,15 +2613,16 @@ void DunMainDraw() {
      if (CMonUnitHyde == 0 && BtEventMode == 0) {
          DrawMonstorDetail();
      }
@@ -13442,7 +13582,7 @@ index 0e33bf79..5e3ff291 100644
              TexManager.ReloadTexture(Vif1Packet, 0x1D);
              NowWeapon->Draw();
          }
-@@ -2334,7 +2675,7 @@ void DunMainDraw() {
+@@ -2334,7 +2681,7 @@ void DunMainDraw() {
  
          CSHOT_EFFECT *shot = NowShotEffect->effect;
  
@@ -13451,7 +13591,7 @@ index 0e33bf79..5e3ff291 100644
              shot[i].Draw();
          }
  
-@@ -2535,6 +2876,7 @@ void DunMainDraw() {
+@@ -2535,6 +2882,7 @@ void DunMainDraw() {
  
              if (CEffectHyde == 0 && BtEventMode == 0) {
                  NowShotData->draw();
@@ -13459,7 +13599,7 @@ index 0e33bf79..5e3ff291 100644
                  OzumondShotEffect.Draw();
                  OzumondFire.Draw();
              }
-@@ -2542,14 +2884,26 @@ void DunMainDraw() {
+@@ -2542,14 +2890,26 @@ void DunMainDraw() {
              CWeaponFx.Draw();
              CRunFx__2.Step();
              CRunFx__2.Draw();
@@ -13487,7 +13627,7 @@ index 0e33bf79..5e3ff291 100644
          }
  
          TexManager.ReloadTexture(Vif1Packet, 2);
-@@ -2579,17 +2933,23 @@ void DunMainDraw() {
+@@ -2579,17 +2939,23 @@ void DunMainDraw() {
              sceVu0FVECTOR map_pos;
              sceVu0FVECTOR map_rot;
  
@@ -13516,7 +13656,7 @@ index 0e33bf79..5e3ff291 100644
          BtStatusErrDraw(rogoY3);
          gfx::SetUiAnchor({});
  
-@@ -2601,6 +2961,12 @@ void DunMainDraw() {
+@@ -2601,6 +2967,12 @@ void DunMainDraw() {
              TexManager.ReloadTexture(Vif1Packet, 7);
              set2DSprite(Vif1Packet, NamedTexture("pause"), CRect_i_(0x100, 0xCC, 0x80, 0x28), 0, 0);
          }
@@ -13529,7 +13669,7 @@ index 0e33bf79..5e3ff291 100644
  
          setbilinear(1);
      }
-@@ -2686,6 +3052,10 @@ void DunMainDraw() {
+@@ -2686,6 +3058,10 @@ void DunMainDraw() {
          }
      }
  
@@ -13540,7 +13680,7 @@ index 0e33bf79..5e3ff291 100644
      if (BtEventMode != 0) {
          if (DebugStatus[4] != 0) {
              TexManager.ReloadTexture(Vif1Packet, 0xC);
-@@ -2714,17 +3084,79 @@ float oldCameraAngle;
+@@ -2714,17 +3090,79 @@ float oldCameraAngle;
  float inputH1;
  
  void motionDrive() {
@@ -13621,7 +13761,7 @@ index 0e33bf79..5e3ff291 100644
      }
  
      if (BtActStatus.player_visible != 0 && EdEventInfo.player_draw != 0) {
-@@ -2750,7 +3182,7 @@ void motionDrive() {
+@@ -2750,7 +3188,7 @@ void motionDrive() {
              if (chara == CHARA_XIAO) {
                  CCharacter *weapon = NowWeapon;
  
@@ -13630,7 +13770,7 @@ index 0e33bf79..5e3ff291 100644
                  weapon->motion_flags = 1;
                  weapon->motion_speed = -1.0f;
              }
-@@ -2764,7 +3196,7 @@ void motionDrive() {
+@@ -2764,7 +3202,7 @@ void motionDrive() {
              if (chara == CHARA_XIAO) {
                  CCharacter *weapon = NowWeapon;
  
@@ -13639,7 +13779,7 @@ index 0e33bf79..5e3ff291 100644
                  weapon->motion_flags = blend;
                  weapon->motion_speed = -1.0f;
              }
-@@ -2773,7 +3205,7 @@ void motionDrive() {
+@@ -2773,7 +3211,7 @@ void motionDrive() {
          }
  
          // Osmond's tail keeps turning on its own.
@@ -13648,7 +13788,7 @@ index 0e33bf79..5e3ff291 100644
              CFrame *tail = CharaMain.frame->SearchFrame("tukene1");
              CFrame *tail_shadow = CharaMain.shadow_frame->SearchFrame("obj46");
  
-@@ -2796,7 +3228,7 @@ void motionDrive() {
+@@ -2796,7 +3234,7 @@ void motionDrive() {
              }
          }
  
@@ -13657,7 +13797,7 @@ index 0e33bf79..5e3ff291 100644
              CharaMain.motion_type.state.look_frame = static_cast<CFrameVu1 *>(CharaFrame->SearchFrame("jnt2_1"));
              sceVu0CopyVector(CharaMain.motion_type.state.look_position, BtActStatus.target_position);
              CharaMain.motion_type.state.look_at = true;
-@@ -2805,18 +3237,26 @@ void motionDrive() {
+@@ -2805,18 +3243,26 @@ void motionDrive() {
              CharaMain.motion_type.state.look_at = false;
          }
  
@@ -13685,7 +13825,7 @@ index 0e33bf79..5e3ff291 100644
          sceVu0CopyVector(hand, CharaFrame->position);
  
          float height = CharaHeight(UserStatus);
-@@ -2832,28 +3272,28 @@ void motionDrive() {
+@@ -2832,28 +3278,28 @@ void motionDrive() {
          }
  
          if (driveStepHold != 0 || BtActStatus.movement_locked != 0) {
@@ -13718,7 +13858,7 @@ index 0e33bf79..5e3ff291 100644
                  weapon->motion_flags = blend;
                  weapon->motion_speed = -1.0f;
              }
-@@ -2891,7 +3331,7 @@ void motionDrive() {
+@@ -2891,7 +3337,7 @@ void motionDrive() {
          s8           owner = status->cur_chara;
          WEAPON_HAVE *weapon = &status->chara_weapons[owner][status->equipped_weapon_slot[owner]];
  
@@ -13727,7 +13867,7 @@ index 0e33bf79..5e3ff291 100644
              static int warning_cnt = 0;
              auto       wait = static_cast<int>(weapon->durability_f) * 10;
  
-@@ -3003,51 +3443,37 @@ void motionDrive() {
+@@ -3003,51 +3449,37 @@ void motionDrive() {
          BtActStatus.special_cooldown--;
      }
  
@@ -13741,6 +13881,18 @@ index 0e33bf79..5e3ff291 100644
          }
  
 -        auto gain = static_cast<float>(NowWeaponHave->speed) / 30.0f;
+-
+-        if (StatusErrCheck(AILMENT_GOO) != 0) {
+-            gain /= 2.0f;
+-        }
+-
+-        if (StatusErrCheck(AILMENT_STAMINA) != 0) {
+-            gain *= 2.0f;
+-        }
+-
+-        gain = std::max(gain, 1.0f);
+-
+-        s8 who = UserStatus->cur_chara;
 +        // The weapon's Speed / 30 a tick and the character's factor (gauge_rules.hpp), or a mod's stamina and
 +        // lightness (player.tuning_set).
 +        const int who = CombatChara(UserStatus->cur_chara);
@@ -13755,18 +13907,6 @@ index 0e33bf79..5e3ff291 100644
 +                                          .exhausted = BtActStatus.gauge_exhausted != 0,
 +                                          .gear_stamina = static_cast<float>(GearWornEffects(UserStatus->cur_chara).stamina)});
  
--        if (StatusErrCheck(AILMENT_GOO) != 0) {
--            gain /= 2.0f;
--        }
--
--        if (StatusErrCheck(AILMENT_STAMINA) != 0) {
--            gain *= 2.0f;
--        }
--
--        gain = std::max(gain, 1.0f);
--
--        s8 who = UserStatus->cur_chara;
--
 -        // Toan and Ungaga recharge slowly, and not at all on a frame they swing.
          if (who == CHARA_TOAN || who == CHARA_UNGAGA) {
 -            if (BtActStatus.swinging == 0) {
@@ -13798,7 +13938,7 @@ index 0e33bf79..5e3ff291 100644
          }
  
          BtActStatus.action_gauge += gain;
-@@ -3061,6 +3487,8 @@ void motionDrive() {
+@@ -3061,6 +3493,8 @@ void motionDrive() {
          BtActStatus.gauge_flash--;
      }
  
@@ -13807,7 +13947,7 @@ index 0e33bf79..5e3ff291 100644
      if (BtActStatus.hud_shake_frames > 0) {
          BtActStatus.hud_shake_y = static_cast<int>(16.0f * static_cast<float>(rand()) / 2147483648.0f) - 8;
          BtActStatus.hud_shake_frames--;
-@@ -3191,7 +3619,7 @@ void motionDrive() {
+@@ -3191,7 +3625,7 @@ void motionDrive() {
  
      CSHOT_EFFECT *effects = NowShotEffect->effect;
  
@@ -13816,7 +13956,7 @@ index 0e33bf79..5e3ff291 100644
          effects[i].Step();
      }
  
-@@ -3273,7 +3701,7 @@ void BtLoadMonstor(int ura) {
+@@ -3273,7 +3707,7 @@ void BtLoadMonstor(int ura) {
      unit->model_count = 0;
      unit->current_monster = 0;
  
@@ -13825,7 +13965,7 @@ index 0e33bf79..5e3ff291 100644
          unit->script[slot] = &MonstorScriptBuffer[slot];
      }
  
-@@ -3296,7 +3724,7 @@ void BtLoadMonstor(int ura) {
+@@ -3296,7 +3730,7 @@ void BtLoadMonstor(int ura) {
  
      CSHOT_EFFECT *effects = NowShotEffect->effect;
  
@@ -13834,7 +13974,7 @@ index 0e33bf79..5e3ff291 100644
          effects[i].Initialize();
      }
  
-@@ -3304,6 +3732,12 @@ void BtLoadMonstor(int ura) {
+@@ -3304,6 +3738,12 @@ void BtLoadMonstor(int ura) {
      const BT_ENEMY_FLOOR &layout = floors[UserStatus->cur_floor];
      int                   count = 0;
  
@@ -13847,7 +13987,7 @@ index 0e33bf79..5e3ff291 100644
      for (const auto &entry : layout.monster) {
          if (entry.monster_no == -1) {
              break;
-@@ -3326,7 +3760,7 @@ void EquipReAttach(CCharacter *equipment, int held_out) {
+@@ -3326,7 +3766,7 @@ void EquipReAttach(CCharacter *equipment, int held_out) {
  void EquipWeaponFrame(CCharacter *weapon, int chara, int held_out) {
      NowWeapon = weapon;
  
@@ -13856,7 +13996,7 @@ index 0e33bf79..5e3ff291 100644
  
      if (hand == nullptr) {
          std::println("no weapon frame !!");
-@@ -3373,15 +3807,16 @@ void LoadWeapon2(unsigned int *crash_data, unsigned int *default_data, unsigned
+@@ -3373,15 +3813,16 @@ void LoadWeapon2(unsigned int *crash_data, unsigned int *default_data, unsigned
      // The weapon's item number, counted from its character's first weapon.
      int model_no = status->chara_weapons[owner][status->equipped_weapon_slot[owner]].item_no;
  
@@ -13877,7 +14017,7 @@ index 0e33bf79..5e3ff291 100644
      WEffectModelBuffer.used = 0;
  
      MenuWeaponSpSet(NowWeapon, &status->chara_weapons[owner][status->equipped_weapon_slot[owner]]);
-@@ -3429,7 +3864,7 @@ void SwordDmgCheck1(float amount, int kind) {
+@@ -3429,7 +3870,7 @@ void SwordDmgCheck1(float amount, int kind) {
      // 1 leaves the broken weapon in hand, 2 the character's default one.
      if (broke == 1 || broke == 2) {
          EquipWeaponFrame(broke == 1 ? &CrashWeapon : &DefaultWeapon, UserStatus->cur_chara, CharaMainHandViewFlag);
@@ -13886,7 +14026,7 @@ index 0e33bf79..5e3ff291 100644
  
          if (owner == CHARA_OSMOND || owner == CHARA_RUBY) {
              NowMainEffect = &CharaMainEffectCrash;
-@@ -3453,6 +3888,24 @@ u8 wep_rgb[5][3] = {
+@@ -3453,6 +3894,24 @@ u8 wep_rgb[5][3] = {
  void SetWeaponColor() {
      s8 element = NowWeaponHave->best_elem;
  
@@ -13911,7 +14051,7 @@ index 0e33bf79..5e3ff291 100644
      if (element == WEAPON_ELEMENT_NONE) {
          SetWeaponTrailDefaultColour();
      } else if (element >= 0 && element < 6) {
-@@ -3470,7 +3923,7 @@ void SetWeaponColor() {
+@@ -3470,7 +3929,7 @@ void SetWeaponColor() {
  }
  
  BT_SHOT_EFFECT *Get_Main_EffectPtr(int chara, int form) {
@@ -13920,7 +14060,7 @@ index 0e33bf79..5e3ff291 100644
          case CHARA_TOAN:
              return MyEffectEntry_Tbl[0];
          case CHARA_XIAO:
-@@ -3564,17 +4017,56 @@ void MainChara_Effect(BT_SHOT_EFFECT *effect, unsigned int *data, int reload) {
+@@ -3564,17 +4023,56 @@ void MainChara_Effect(BT_SHOT_EFFECT *effect, unsigned int *data, int reload) {
          std::println("set eff sucsess !");
      }
  
@@ -13979,7 +14119,7 @@ index 0e33bf79..5e3ff291 100644
  void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned int *crash_data, unsigned int *default_data, unsigned int *main_data) {
      CFrameAttr    frame_attr;
      sceVu0FVECTOR pos;
-@@ -3605,15 +4097,24 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3605,15 +4103,24 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
  
      CharaMain.InitializeTexAnime(CharaMainTexAnim, 64);
      CharaMain.LoadPackData2(chara_data, "base.cfg", &CharaModelBuffer, 0x11, &CharaModelBuffer, 0);
@@ -14006,7 +14146,7 @@ index 0e33bf79..5e3ff291 100644
          CharaHand.frame->SetAttr(hand_attr, 1, 0);
      }
  
-@@ -3628,7 +4129,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3628,7 +4135,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
  
      CharaFrame = static_cast<CFrameVu1 *>(CharaMain.frame);
  
@@ -14015,7 +14155,7 @@ index 0e33bf79..5e3ff291 100644
          std::array<LOADTEXTURE_INFO2, 2> info = {
              {
               {.name = nullptr, .block_no = 0x46, .mipmap = 0},
-@@ -3637,7 +4138,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3637,7 +4144,7 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
          };
          int size = 0;
  
@@ -14024,7 +14164,7 @@ index 0e33bf79..5e3ff291 100644
          u_char *at = ArenaFree(CharaModelBuffer);
  
          memcpy(at, hand_texture, size);
-@@ -3646,25 +4147,21 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
+@@ -3646,25 +4153,21 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
          TexManager.DeleteTextureBlock(0x46);
          TexManager.LoadTextureBlockEX(0x46, info.data());
  
@@ -14057,7 +14197,7 @@ index 0e33bf79..5e3ff291 100644
      WeaponModelBuffer.used = 0;
      LoadWeapon2(crash_data, default_data, main_data, chara, 0);
      MemoryMapDump();
-@@ -3690,6 +4187,7 @@ void LoadData() {
+@@ -3690,6 +4193,7 @@ void LoadData() {
      frame_attr.program_option = 0;
  
      UserStatus->cur_chara = 0;
@@ -14065,7 +14205,7 @@ index 0e33bf79..5e3ff291 100644
      BtGetWeaponNamePath3(weapon_name.data(), weapon_effect_name.data(), UserStatus->chara_weapons[0][UserStatus->equipped_weapon_slot[0]].item_no);
      std::println("[{}] {}", UserStatus->chara_weapons[0][UserStatus->equipped_weapon_slot[0]].item_no, weapon_name.data());
  
-@@ -3782,6 +4280,44 @@ void SpendQuickItem(int slot, int item_id) {
+@@ -3782,6 +4286,44 @@ void SpendQuickItem(int slot, int item_id) {
      }
  }
  
@@ -14110,7 +14250,7 @@ index 0e33bf79..5e3ff291 100644
  } // namespace
  
  void HitBlowVelocity(int hit_no, float *velocity) {
-@@ -3808,7 +4344,20 @@ void HitBlowVelocity(int hit_no, float *velocity) {
+@@ -3808,7 +4350,20 @@ void HitBlowVelocity(int hit_no, float *velocity) {
      velocity[2] = away_z / length;
  }
  
@@ -14131,7 +14271,7 @@ index 0e33bf79..5e3ff291 100644
      sceVu0FVECTOR pos;
      sceVu0FVECTOR from;
      sceVu0FVECTOR blow;
-@@ -3854,18 +4403,21 @@ int BtCheckDamageProc() {
+@@ -3854,18 +4409,21 @@ int BtCheckDamageProc() {
  
              BtActStatus.move_power = 0.0f;
              BtActStatus.gauge_exhausted = 0;
@@ -14156,7 +14296,7 @@ index 0e33bf79..5e3ff291 100644
  
              if (StatusErrCheck(AILMENT_STAMINA) != 0) {
                  guard *= 2;
-@@ -3916,51 +4468,35 @@ int BtCheckDamageProc() {
+@@ -3916,51 +4474,35 @@ int BtCheckDamageProc() {
              }
  
              if ((hit->flags & 0x100) && roll < 0x41) {
@@ -14212,7 +14352,7 @@ index 0e33bf79..5e3ff291 100644
                  }
              }
  
-@@ -3969,11 +4505,29 @@ int BtCheckDamageProc() {
+@@ -3969,11 +4511,29 @@ int BtCheckDamageProc() {
                  damage = UserStatus->max_hp[static_cast<int>(UserStatus->cur_chara)] >> 1;
              }
  
@@ -14243,7 +14383,7 @@ index 0e33bf79..5e3ff291 100644
                      HitBlowVelocity(hit_no, blowVelo);
                      velo__2[0] = blowVelo[0] / 10.0f;
                      velo__2[2] = blowVelo[2] / 10.0f;
-@@ -3990,6 +4544,7 @@ int BtCheckDamageProc() {
+@@ -3990,6 +4550,7 @@ int BtCheckDamageProc() {
                      SndSePlay(SE_CHARA_HURT, -1, 0);
                      SndSePlay(SE_PLAYER_HIT, -1, 0);
                      BtActStatus.hud_shake_frames = 15;
@@ -14251,7 +14391,7 @@ index 0e33bf79..5e3ff291 100644
                      setUnitAmbientAnime(160.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                      UserStatus->AddNowLife(UserStatus->cur_chara, -damage, 10.0f);
  
-@@ -3998,14 +4553,20 @@ int BtCheckDamageProc() {
+@@ -3998,14 +4559,20 @@ int BtCheckDamageProc() {
                      number_pos[1] = CharaHeight(UserStatus);
                      HitValueEntry(NowHitValue, number_pos, damage, HIT_VALUE_PLAYER, CharaMain.frame);
  
@@ -14275,7 +14415,7 @@ index 0e33bf79..5e3ff291 100644
                          BtActStatus.action_on = 5;
                          BtActStatus.motion_no = 6;
                          CharaMain.motion_type.state.time = static_cast<float>(CharaMain.motion_type.motion_info[6].start);
-@@ -4015,9 +4576,12 @@ int BtCheckDamageProc() {
+@@ -4015,9 +4582,12 @@ int BtCheckDamageProc() {
                          CharaMain.motion_type.state.time = static_cast<float>(CharaMain.motion_type.motion_info[4].start);
                      }
  
@@ -14291,7 +14431,7 @@ index 0e33bf79..5e3ff291 100644
                  }
              }
  
-@@ -4028,7 +4592,8 @@ int BtCheckDamageProc() {
+@@ -4028,7 +4598,8 @@ int BtCheckDamageProc() {
                  sceVu0CopyVector(at, hit->pos);
                  GamePad.SetVibration(1, 0xDC, 0xC);
  
@@ -14301,7 +14441,7 @@ index 0e33bf79..5e3ff291 100644
                      sceVu0CopyVector(away, CharaMain.pos);
  
                      if (monster != -1) {
-@@ -4060,6 +4625,7 @@ int BtCheckDamageProc() {
+@@ -4060,6 +4631,7 @@ int BtCheckDamageProc() {
                      SndSePlay(SE_CHARA_HURT_HEAVY, -1, 0);
                      SndSePlay(SE_PLAYER_HIT, -1, 0);
                      BtActStatus.hud_shake_frames = 25;
@@ -14309,7 +14449,7 @@ index 0e33bf79..5e3ff291 100644
                      setUnitAmbientAnime(80.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                      UserStatus->AddNowLife(UserStatus->cur_chara, -damage, 10.0f);
  
-@@ -4086,7 +4652,9 @@ int BtCheckDamageProc() {
+@@ -4086,7 +4658,9 @@ int BtCheckDamageProc() {
                          cnt++;
                      }
  
@@ -14320,7 +14460,7 @@ index 0e33bf79..5e3ff291 100644
                          BtActStatus.action_on = 0;
                          BtActStatus.motion_no = 0x1D;
                      } else {
-@@ -4095,14 +4663,18 @@ int BtCheckDamageProc() {
+@@ -4095,14 +4669,18 @@ int BtCheckDamageProc() {
                          CharaMain.motion_type.state.time = static_cast<float>(CharaMain.motion_type.motion_info[4].start);
                      }
  
@@ -14346,7 +14486,7 @@ index 0e33bf79..5e3ff291 100644
                      }
                  }
              }
-@@ -4192,7 +4764,7 @@ void BattleActionThlow() {
+@@ -4192,7 +4770,7 @@ void BattleActionThlow() {
      if (BombInfo.throw_step == 1) {
          constexpr std::array<float, 6> throw_frame = {548.0f, 452.0f, 267.0f, 347.0f, 188.0f, 321.0f};
          auto                           end = static_cast<float>(CharaMain.motion_type.motion_info[27].end);
@@ -14355,7 +14495,7 @@ index 0e33bf79..5e3ff291 100644
  
          if (CharaMain.motion_type.state.time >= start && CharaMain.motion_type.state.time <= end) {
              SndSePlay(SE_THROW, -1, 0);
-@@ -4280,7 +4852,7 @@ void BattleActionDrink() {
+@@ -4280,7 +4858,7 @@ void BattleActionDrink() {
  
      BtActStatus.motion_no = 0x1C;
  
@@ -14364,7 +14504,7 @@ index 0e33bf79..5e3ff291 100644
      float now = CharaMain.motion_type.state.time;
  
      if (now >= frame && now < frame + 0.3f) {
-@@ -4342,7 +4914,22 @@ void EndAction(bool face_target = true) {
+@@ -4342,7 +4920,22 @@ void EndAction(bool face_target = true) {
  /**
   * Puts a shot from the player's character in the first free slot, if there is one.
   */
@@ -14387,7 +14527,7 @@ index 0e33bf79..5e3ff291 100644
      CSHOT *shots = NowShotData;
  
      for (int i = 0; i < 12; i++) {
-@@ -4355,6 +4942,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+@@ -4355,6 +4948,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
              shots->halted[i] = 0;
              shots->start_flag[i] = 0;
              shots->used[i] = 1;
@@ -14395,7 +14535,7 @@ index 0e33bf79..5e3ff291 100644
              break;
          }
      }
-@@ -4362,6 +4950,77 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+@@ -4362,6 +4956,77 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
  
  } // namespace
  
@@ -14473,7 +14613,7 @@ index 0e33bf79..5e3ff291 100644
  void BattleActionOn_Jinn() {
      if (BtActStatus.action_on == 0 && static_cast<s32>(BtActStatus.action_gauge) == 100) {
          BtActStatus.action_step = 0;
-@@ -4508,6 +5167,8 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
+@@ -4508,6 +5173,8 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
          damage *= 2;
      }
  
@@ -14482,7 +14622,7 @@ index 0e33bf79..5e3ff291 100644
      // A repeat shot reuses the start and the way the first one took.
      if (repeat != 0) {
          if (NowMainEffect->Set(ruby_effect_pos, ruby_effect_vec, 3, element, 0, nullptr, 1) != -1) {
-@@ -4556,6 +5217,19 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
+@@ -4556,6 +5223,19 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
          NowMainEffect->SetVsMonster(NowWeaponHave->vs_monster);
          NowMainEffect->SetDmg(damage);
      }
@@ -14502,7 +14642,7 @@ index 0e33bf79..5e3ff291 100644
  }
  
  void BattleActionPlay_Ruby(CCharacter *chara, int aimed) {
-@@ -4788,6 +5462,7 @@ void BattleActionPlay_Ozumond(int aimed) {
+@@ -4788,6 +5468,7 @@ void BattleActionPlay_Ozumond(int aimed) {
          sceVu0Normalize(shot, shot);
          sceVu0ScaleVectorXYZ(shot, shot, 10.0f);
          OzumondShot.Set(pos, shot, damage, 0);
@@ -14510,7 +14650,7 @@ index 0e33bf79..5e3ff291 100644
          BtActStatus.frames_since_attack = 0;
          SwordDmgCheck1(0.5f, 0);
      }
-@@ -4853,6 +5528,7 @@ void BattleActionPlay_Ozumond_H(int aimed) {
+@@ -4853,6 +5534,7 @@ void BattleActionPlay_Ozumond_H(int aimed) {
              NowMainEffect->SetAttribute(GetWeaponElementAttr(NowWeaponHave->best_elem));
              NowMainEffect->SetDmg(damage);
          }
@@ -14518,7 +14658,7 @@ index 0e33bf79..5e3ff291 100644
  
          BtActStatus.action_step = 1;
          BtActStatus.frames_since_attack = 0;
-@@ -4900,6 +5576,7 @@ void BattleActionPlay_Ozumond_F(int aimed) {
+@@ -4900,6 +5582,7 @@ void BattleActionPlay_Ozumond_F(int aimed) {
              }
  
              OzumondFire.Init(start, start_dir, 0, 0);
@@ -14526,7 +14666,7 @@ index 0e33bf79..5e3ff291 100644
          }
  
          if (GamePad.On(PadInput_OK) == 0) {
-@@ -5028,6 +5705,10 @@ void autoCamTrial() {
+@@ -5028,6 +5711,10 @@ void autoCamTrial() {
          return;
      }
  
@@ -14537,7 +14677,7 @@ index 0e33bf79..5e3ff291 100644
      NowCamera__3->GetPos(eye);
      NowCamera__3->GetRef(look);
  
-@@ -5080,12 +5761,13 @@ void autoCamTrial() {
+@@ -5080,12 +5767,13 @@ void autoCamTrial() {
              }
          }
      } else {
@@ -14555,7 +14695,7 @@ index 0e33bf79..5e3ff291 100644
  
                  if (frame == nullptr) {
                      continue;
-@@ -5097,7 +5779,7 @@ void autoCamTrial() {
+@@ -5097,7 +5785,7 @@ void autoCamTrial() {
  
                  int turn = cell->direction;
  
@@ -14564,7 +14704,7 @@ index 0e33bf79..5e3ff291 100644
  
                  if (turn > 3) {
                      turn -= 3;
-@@ -5109,7 +5791,10 @@ void autoCamTrial() {
+@@ -5109,7 +5797,10 @@ void autoCamTrial() {
  
                  frame->SetRotation(0.0f, PI * (-90.0f * turn) / 180.0f, 0.0f);
                  frame->SetPosition(160.0f * i, 0.0f, 160.0f * j);
@@ -14576,7 +14716,7 @@ index 0e33bf79..5e3ff291 100644
              }
          }
      }
-@@ -5120,14 +5805,14 @@ void autoCamTrial() {
+@@ -5120,14 +5811,14 @@ void autoCamTrial() {
      sceVu0SubVector(reach, pos, forward);
      sceVu0SubVector(reach, pos, ref);
      sceVu0Normalize(reach, reach);
@@ -14593,7 +14733,7 @@ index 0e33bf79..5e3ff291 100644
  
      if (hits > 0) {
          camera_far_dist_limmit = DistVector(ref, hit_point[0]);
-@@ -5160,7 +5845,7 @@ void autoCamTrial() {
+@@ -5160,7 +5851,7 @@ void autoCamTrial() {
                      } else {
                          CameraAutoMove(NowCamera__3, hit_point[last], 1000000.0f, 1000000.0f);
                      }
@@ -14602,7 +14742,7 @@ index 0e33bf79..5e3ff291 100644
                      NowCamera__3->SetPos(hit_point[0]);
                  } else {
                      CameraAutoMove(NowCamera__3, hit_point[last], 1000000.0f, 1000000.0f);
-@@ -5213,8 +5898,8 @@ void autoCamTrial() {
+@@ -5213,8 +5904,8 @@ void autoCamTrial() {
          }
      }
  
@@ -14613,7 +14753,7 @@ index 0e33bf79..5e3ff291 100644
      }
  
      if (NowCamera__3->GetDistance() < camera_near_dist__2) {
-@@ -5254,11 +5939,24 @@ void autoCamTrial() {
+@@ -5254,11 +5945,24 @@ void autoCamTrial() {
      // A locked-on monster pulls the camera round behind the player.
      if (lockOnTargetFlag != 0) {
          sceVu0CopyVector(near_chara, CharaMain.pos);
@@ -14640,7 +14780,7 @@ index 0e33bf79..5e3ff291 100644
              CharaMain.frame->GetLWMatrix(world);
  
              auto want = static_cast<float>(atan2f(world[2][0], world[2][2]) - PI_D);
-@@ -5331,7 +6029,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
+@@ -5331,7 +6035,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
      s16          item_no = weapon->item_no;
  
      // The first two weapons of each character turn every trap into the stamina trap.
@@ -14649,7 +14789,7 @@ index 0e33bf79..5e3ff291 100644
          kind = TRAP_CIRCLE_STAMINA;
      }
  
-@@ -5403,6 +6101,112 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
+@@ -5403,6 +6107,112 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
      return kind;
  }
  
@@ -14762,7 +14902,7 @@ index 0e33bf79..5e3ff291 100644
  void LockOffTargte() {
      lockOnTargetDraw = 0;
      lockOnTargetNo = -1;
-@@ -5430,6 +6234,11 @@ void DrawTargetLife() {
+@@ -5430,6 +6240,11 @@ void DrawTargetLife() {
          return;
      }
  
@@ -14774,7 +14914,7 @@ index 0e33bf79..5e3ff291 100644
      s32 x = EnemyLifeGage.x - 32;
  
      EnemyLifeGage.y = (EnemyLifeGage.y >> 1) << 1;
-@@ -5506,9 +6315,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5506,9 +6321,9 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      CUserStatus  *status = UserStatus;
      sceVu0FVECTOR at;
      sceVu0FVECTOR towards;
@@ -14787,7 +14927,7 @@ index 0e33bf79..5e3ff291 100644
      float         rate = CharaRangeRate(status);
  
      CharaFrame->GetRotation(at);
-@@ -5516,7 +6325,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5516,7 +6331,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
      sceVu0FVECTOR forward = {0.0f, 0.0f, 1.0f, 1.0f};
      sceVu0FMATRIX unit;
      sceVu0FMATRIX turn;
@@ -14796,7 +14936,7 @@ index 0e33bf79..5e3ff291 100644
      int           screen[4];
  
      sceVu0UnitMatrix(unit);
-@@ -5532,7 +6341,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
+@@ -5532,7 +6347,7 @@ int SetNearLockOnTarget(int from, int nearest_only) {
          monster = -1;
      }
  
@@ -14805,7 +14945,7 @@ index 0e33bf79..5e3ff291 100644
          MonstorPicupInner[i] = 0.0f;
  
          CMonstorUnit *monsters = NowMonstorUnit;
-@@ -5687,6 +6496,27 @@ void setTargetCursor(int on) {
+@@ -5687,6 +6502,27 @@ void setTargetCursor(int on) {
  
      float rate = CharaRangeRate(status);
  
@@ -14834,7 +14974,7 @@ index 0e33bf79..5e3ff291 100644
          int keep = 1;
  
 diff --git a/port/src/game/dun/movechara.cpp b/port/src/game/dun/movechara.cpp
-index f0d0e889..f43a83a3 100644
+index f0d0e889..4432f65c 100644
 --- a/port/src/game/dun/movechara.cpp
 +++ b/port/src/game/dun/movechara.cpp
 @@ -1,5 +1,6 @@
@@ -15072,7 +15212,13 @@ index f0d0e889..f43a83a3 100644
                                      BtActStatus.action_on = 0;
                                      BtActStatus.action_no = 0x12;
                                  }
-@@ -538,10 +607,12 @@ void DunMoveChara() {
+@@ -534,14 +603,17 @@ void DunMoveChara() {
+                                 ResetStatusInfo();
+                                 driveStepHold = 1;
+                                 EdFadeInit();
+-                                EdFadeOut(0x78, 0.0f, 0.0f, 0.0f);
++                                // MoonMod (set_quick_passage walks = false): the exit gate has no fade to black
++                                if (!moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no)) EdFadeOut(0x78, 0.0f, 0.0f, 0.0f);
                                  BtEventInfo.fade_on_start = false;
                                  gameTask = GAME_TASK_FLOOR_FADE_RESET;
                              } else if (UserStatus->CheckLife() != 0 && BtActStatus.action_on == 0 && (script = NowMonstorUnit->CheckEventFlag2()) != -1) {
@@ -15085,7 +15231,7 @@ index f0d0e889..f43a83a3 100644
                                  BtEventInfo.script_no = script;
                                  BtEventInfo.ext_memory = BtEventInfo.clear_script_ext_memory;
                                  BtEventInfo.clear_script_no = -1;
-@@ -587,7 +658,11 @@ void DunMoveChara() {
+@@ -587,7 +659,11 @@ void DunMoveChara() {
                                                  case ITEM_CLOCK_HANDS:
                                                  case ITEM_POINTY_CHESTNUT:
                                                  case ITEM_BLACK_KNIGHT_CREST:
@@ -15098,7 +15244,7 @@ index f0d0e889..f43a83a3 100644
                                                      BtGetGateKey_Init(event);
                                                      gameTask = GAME_TASK_GATE_KEY_LOOP;
                                                      break;
-@@ -646,7 +721,13 @@ void DunMoveChara() {
+@@ -646,7 +722,13 @@ void DunMoveChara() {
                                              sceVu0CopyVector(BtEventInfo.direction, slot_dir);
                                          }
  
@@ -15113,7 +15259,22 @@ index f0d0e889..f43a83a3 100644
                                              if (state->event->chara_no != -1 && GamePad.Down(PadInput_OK) != 0) {
                                                  if (UserStatus->cur_chara == state->event->chara_no) {
                                                      state->chara_done = UserStatus->cur_chara;
-@@ -689,7 +770,8 @@ void DunMoveChara() {
+@@ -664,11 +746,12 @@ void DunMoveChara() {
+                                                 gameTask = GAME_TASK_SCRIPT_RESTART;
+                                                 run_action = false;
+                                             } else if (state->hold != 0 && GamePad.Down(PAD_SQUARE) != 0) {
+-                                                gameTask = GAME_TASK_SCRIPT_START;
++                                                // MoonMod (set_quick_passage walks = false): the exit gate asks first, over the floor
++                                                gameTask = moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no) ? GAME_TASK_FLOOR_FADE_RESET : GAME_TASK_SCRIPT_START;
+                                                 BtEventInfo.action_mode = 2;
+                                                 run_action = false;
+                                             } else if (GamePad.Down(PadInput_OK) != 0) {
+-                                                gameTask = GAME_TASK_SCRIPT_START;
++                                                gameTask = moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no) ? GAME_TASK_FLOOR_FADE_RESET : GAME_TASK_SCRIPT_START; // MoonMod: as above
+                                                 BtEventInfo.action_mode = 1;
+                                                 run_action = false;
+                                             }
+@@ -689,7 +772,8 @@ void DunMoveChara() {
                                          }
  
                                          if (GamePad.Down(PadInput_OK | 0x80) != 0 && BtActStatus.movement_locked == 0 && BtActStatus.in_water != 0) {
@@ -15123,7 +15284,7 @@ index f0d0e889..f43a83a3 100644
                                              DngMessMan.hide_timer = 0x5A;
                                              autoCamTrial();
                                              BtActStatus.action_on = 0;
-@@ -700,7 +782,7 @@ void DunMoveChara() {
+@@ -700,7 +784,7 @@ void DunMoveChara() {
                                              BtActStatus.action_gauge = 100.0f;
                                              BtActStatus.gauge_exhausted = 0;
                                              ResetMovePower();
@@ -15132,7 +15293,7 @@ index f0d0e889..f43a83a3 100644
                                              SetSystemMes(0x50, 0x5A, MES_POS_BOTTOM, 0, nullptr, nullptr);
                                              DngMessMan.hide_timer = 0x5A;
                                              autoCamTrial();
-@@ -776,7 +858,7 @@ void DunMoveChara() {
+@@ -776,7 +860,7 @@ void DunMoveChara() {
                                                              if (NowDngMap->atra[entry_no].used != 0) {
                                                                  s8 chara = UserStatus->cur_chara;
  
@@ -15141,7 +15302,7 @@ index f0d0e889..f43a83a3 100644
                                                                      gameTask = GAME_TASK_ATRA_GET_INIT;
                                                                      done = 1;
                                                                      SndSePlay(MENU_SOUND_CONFIRM, -1, 0);
-@@ -809,7 +891,14 @@ void DunMoveChara() {
+@@ -809,7 +893,14 @@ void DunMoveChara() {
  
                                                      run_play = true;
                                                  } else {
@@ -15157,7 +15318,7 @@ index f0d0e889..f43a83a3 100644
                                                          case CHARA_TOAN:
                                                              ToanKey_On();
                                                              break;
-@@ -843,13 +932,17 @@ void DunMoveChara() {
+@@ -843,13 +934,17 @@ void DunMoveChara() {
                                                              break;
                                                      }
  
@@ -15177,7 +15338,7 @@ index f0d0e889..f43a83a3 100644
                                                          case CHARA_TOAN:
                                                              ToanKey_Play();
                                                              break;
-@@ -885,7 +978,8 @@ void DunMoveChara() {
+@@ -885,7 +980,8 @@ void DunMoveChara() {
                                                  }
                                                  BtBySpeedFlag = 0;
  
@@ -15187,7 +15348,7 @@ index f0d0e889..f43a83a3 100644
                                                      if (DebugStatus[5] == 0) {
                                                          BtBySpeedFlag = 1;
                                                      }
-@@ -893,7 +987,9 @@ void DunMoveChara() {
+@@ -893,7 +989,9 @@ void DunMoveChara() {
                                                      if (BtActStatus.action_on == 0 && gameTask != GAME_TASK_UNK_F0 && BtActStatus.can_act != 0) {
                                                          s16 *slots = UserStatus->active_item;
  
@@ -15198,7 +15359,7 @@ index f0d0e889..f43a83a3 100644
                                                              // A boosting running item is spent each frame the button is held.
                                                              BtBySpeedFlag = 1;
                                                              int slot = itemNowSel - 1;
-@@ -912,7 +1008,10 @@ void DunMoveChara() {
+@@ -912,7 +1010,10 @@ void DunMoveChara() {
                                                      }
                                                  }
  
@@ -15210,7 +15371,16 @@ index f0d0e889..f43a83a3 100644
                                                      s16 *slots = UserStatus->active_item;
                                                      int  used = checkItemUsed(itemNowSel - 1);
  
-@@ -1026,11 +1125,11 @@ void DunMoveChara() {
+@@ -1004,7 +1105,7 @@ void DunMoveChara() {
+                                                         }
+ 
+                                                         if (BtEventInfo.script_no != -1) {
+-                                                            gameTask = GAME_TASK_SCRIPT_START;
++                                                            gameTask = moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no) ? GAME_TASK_FLOOR_FADE_RESET : GAME_TASK_SCRIPT_START; // MoonMod: the exit gate asks first
+                                                             BtEventInfo.action_mode = 1;
+                                                             BtEventInfo.chara_help = false;
+                                                             run_step = false;
+@@ -1026,11 +1127,11 @@ void DunMoveChara() {
                                                          if (BtActStatus.action_on == 1) {
                                                              int slow = 0;
  
@@ -15224,7 +15394,7 @@ index f0d0e889..f43a83a3 100644
                                                                  slow = 1;
                                                              }
  
-@@ -1061,7 +1160,7 @@ void DunMoveChara() {
+@@ -1061,7 +1162,7 @@ void DunMoveChara() {
                                                              BtActStatus.slow_walking = 1;
                                                          }
  
@@ -15233,7 +15403,7 @@ index f0d0e889..f43a83a3 100644
                                                              ok = 1;
                                                          }
  
-@@ -1202,7 +1301,7 @@ void DunMoveChara() {
+@@ -1202,7 +1303,7 @@ void DunMoveChara() {
                                                                          }
                                                                      }
  
@@ -15242,7 +15412,7 @@ index f0d0e889..f43a83a3 100644
                                                                          if (NowDngMap->boxes[entry_no].used != 0) {
                                                                              collision = NowDngMap->box_collision_model;
  
-@@ -1216,7 +1315,7 @@ void DunMoveChara() {
+@@ -1216,7 +1317,7 @@ void DunMoveChara() {
                                                                      NowMonstorUnit->MoveCheck(pos, velo__2, lockOnTargetFlag);
                                                                      int mode = 1;
  
@@ -15251,7 +15421,7 @@ index f0d0e889..f43a83a3 100644
                                                                          mode = 8;
                                                                      }
  
-@@ -1263,22 +1362,23 @@ void DunMoveChara() {
+@@ -1263,22 +1364,23 @@ void DunMoveChara() {
                                                                      bound.min[2] = pos[2] - 20.0f;
                                                                      colPolyNum = 0;
  
@@ -15282,7 +15452,7 @@ index f0d0e889..f43a83a3 100644
  
                                                                                  int turn = dir;
                                                                                  turn += base;
-@@ -1295,8 +1395,10 @@ void DunMoveChara() {
+@@ -1295,8 +1397,10 @@ void DunMoveChara() {
  
                                                                                  collision->SetRotation(0.0f, rot, 0.0f);
                                                                                  collision->SetPosition(160.0f * x, 0.0f, 160.0f * z);
@@ -15295,7 +15465,7 @@ index f0d0e889..f43a83a3 100644
                                                                              }
                                                                          }
                                                                      }
-@@ -1314,7 +1416,7 @@ void DunMoveChara() {
+@@ -1314,7 +1418,7 @@ void DunMoveChara() {
                                                                      NowMonstorUnit->MoveCheck(pos, velo__2, lockOnTargetFlag);
                                                                      int mode = 1;
  
@@ -15304,7 +15474,7 @@ index f0d0e889..f43a83a3 100644
                                                                          mode = 8;
                                                                      }
  
-@@ -1351,7 +1453,7 @@ void DunMoveChara() {
+@@ -1351,7 +1455,7 @@ void DunMoveChara() {
                                                                  pos[2] += velo__2[2];
                                                              }
  
@@ -15313,7 +15483,7 @@ index f0d0e889..f43a83a3 100644
                                                                  CharaMain.FootSoundEnable(1);
                                                                  CharaMain.EventEnable(1);
                                                                  CharaMain.SetFootSoundID(BtActStatus.foot_sound);
-@@ -1372,7 +1474,8 @@ void DunMoveChara() {
+@@ -1372,7 +1476,8 @@ void DunMoveChara() {
                                                                  }
                                                              }
  
@@ -15323,7 +15493,7 @@ index f0d0e889..f43a83a3 100644
                                                                  UserStatus->AddNowLife(UserStatus->cur_chara, -0x28, 10.0f);
                                                                  setUnitAmbientAnime(120.0f, 1.0f, 255.0f, 0.0f, 0.0f);
                                                                  ResetStatusInfo();
-@@ -1428,7 +1531,7 @@ void DunMoveChara() {
+@@ -1428,7 +1533,7 @@ void DunMoveChara() {
  
                                                                          sceVu0CopyVector(step_pos, CharaFrame->position);
  
@@ -15332,7 +15502,7 @@ index f0d0e889..f43a83a3 100644
                                                                              CRunFx__2.Set(step_pos);
                                                                          }
                                                                      }
-@@ -1446,7 +1549,8 @@ void DunMoveChara() {
+@@ -1446,7 +1551,8 @@ void DunMoveChara() {
                                                                  NowCamera__3->AddAngle(0.04f * -turn);
  
                                                                  if (lockOnTargetFlag == 0) {
@@ -15342,7 +15512,7 @@ index f0d0e889..f43a83a3 100644
                                                                          NowCamera__3->AddAngle(-0.034906585f);
                                                                      }
  
-@@ -1455,14 +1559,18 @@ void DunMoveChara() {
+@@ -1455,14 +1561,18 @@ void DunMoveChara() {
                                                                      }
                                                                  }
  
@@ -15363,7 +15533,7 @@ index f0d0e889..f43a83a3 100644
                                                                      oldCameraAngle = NowCamera__3->GetAngle();
                                                                      oldCameraHeight = NowCamera__3->GetHeight();
                                                                      NowCamera__3->FollowOff();
-@@ -1470,7 +1578,7 @@ void DunMoveChara() {
+@@ -1470,7 +1580,7 @@ void DunMoveChara() {
                                                                      viewMode__2 = 1;
                                                                      InitEyeCamera();
  
@@ -15372,7 +15542,7 @@ index f0d0e889..f43a83a3 100644
                                                                          EquipReAttach(NowWeapon, 1);
                                                                      }
  
-@@ -1481,7 +1589,7 @@ void DunMoveChara() {
+@@ -1481,7 +1591,7 @@ void DunMoveChara() {
                                                                      LockOffTargte();
                                                                      ResetMovePower();
  
@@ -15381,7 +15551,7 @@ index f0d0e889..f43a83a3 100644
                                                                          NowMainEffect->OffEffect(ruby_effect_id);
                                                                          ruby_effect_id = -1;
                                                                      }
-@@ -1490,7 +1598,7 @@ void DunMoveChara() {
+@@ -1490,7 +1600,7 @@ void DunMoveChara() {
                                                                  } else {
                                                                      sceVu0FVECTOR follow;
  
@@ -15390,7 +15560,7 @@ index f0d0e889..f43a83a3 100644
                                                                          pos[1] += 200.0f;
                                                                      }
  
-@@ -1502,12 +1610,10 @@ void DunMoveChara() {
+@@ -1502,12 +1612,10 @@ void DunMoveChara() {
                                                                      NowCamera__3->SetFollow(follow[0], follow[1], follow[2]);
  
                                                                      if (lockOnTargetFlag != 0) {
@@ -15404,8 +15574,33 @@ index f0d0e889..f43a83a3 100644
                                                                          float dist = DistVector(target, pos);
                                                                          to_target[0] = target[0] - pos[0];
                                                                          to_target[1] = target[1] - pos[1];
-@@ -1553,7 +1659,7 @@ void DunMoveChara() {
-             if (EdFadeOutCheck() != 0) {
+@@ -1550,10 +1658,31 @@ void DunMoveChara() {
+             gameTask = GAME_TASK_SCRIPT_START;
+             break;
+         case GAME_TASK_FLOOR_FADE_RESET:
+-            if (EdFadeOutCheck() != 0) {
++            // MoonMod (set_quick_passage walks = false): the exit gate asks "next floor or leave" here, over the floor
++            // as it stands; with the answer the picture is held and the gate's script runs unseen
++            if (const int ask = moonmod::ChronicleFloorGateAsk(BtEventInfo.script_no); ask != 0) {
++                if (ask == 1) {
++                    DngMessMan.enabled = false;
++                    DngMessMan.message = -1;
++                    DngMessMan.timer = 0;
++                    DngMes1.mes_made = -1;
++                    DngMes2.mes_made = -1;
++                    DngEscapeMsgInit(&DngMes2, &DngMes1, 0);
++                    BtGameModeFlag = BT_GAME_MODE_ESCAPE_MSG;
++                } else if (ask == 3) { // stepped back from the gate: nothing of it runs
++                    NowMonstorUnit->requested_event = -1;
++                    BtEventInfo.script_no = -1;
++                    DngMes1.mes_made = -1;
++                    DngMes2.mes_made = -1;
++                    driveStepHold = 0;
++                    gameTask = GAME_TASK_PLAY;
++                }
++                break;
++            }
++            if (EdFadeOutCheck() != 0 || moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no)) {
                  CSHOT_EFFECT *effects = NowShotEffect->effect;
  
 -                for (int i = 0; i < 5; i++) {
@@ -15413,7 +15608,7 @@ index f0d0e889..f43a83a3 100644
                      effects[i].Initialize();
                  }
  
-@@ -1602,7 +1708,7 @@ void DunMoveChara() {
+@@ -1602,7 +1731,7 @@ void DunMoveChara() {
                  TexManager.CleanUpTextureList();
                  CSHOT_EFFECT *effects = NowShotEffect->effect;
  
@@ -15422,7 +15617,7 @@ index f0d0e889..f43a83a3 100644
                      effects[i].Initialize();
                  }
  
-@@ -1625,9 +1731,23 @@ void DunMoveChara() {
+@@ -1625,9 +1754,37 @@ void DunMoveChara() {
              }
  
              break;
@@ -15435,9 +15630,23 @@ index f0d0e889..f43a83a3 100644
 +            bool ended = false;
 +            if (BtEventInfo.running_script_no == 100 &&
 +                (moonmod::ChronicleArrivalTeleport() || moonmod::ChronicleDungeonWalkInSkip())) {
++                EdEventAtOnce = true;
 +                for (int step = 0; step < 6000 && !ended && BtEventInfo.request == BT_REQUEST_NONE; ++step) {
 +                    ended = EdEventMode(NowCamera__3, 0) > 0;
 +                }
++                EdEventAtOnce = false;
++            } else if (moonmod::ChronicleFloorGateSkip()) {
++                // MoonMod (OW1 item 5): the exit gate's script with quick passage: it asked for a fade to black, which
++                // is not shown; what it does under the black (setting a scene up, waiting the fade out) runs at once,
++                // up to its fade in, its window or its end. The same for the next floor's opening script, from the
++                // gate to its first fade in, under the held picture.
++                EdEventAtOnce = true;
++                for (int step = 0; step < 6000 && !ended && BtEventInfo.request == BT_REQUEST_NONE; ++step) {
++                    ended = EdEventMode(NowCamera__3, 0) > 0;
++                    if (!moonmod::ChronicleFloorGateSkip()) break; // it faded in
++                }
++                EdEventAtOnce = false;
++                moonmod::ChronicleFloorGateSkipEnd();
 +            } else {
 +                ended = EdEventMode(NowCamera__3, 0) > 0;
 +            }
@@ -15448,7 +15657,7 @@ index f0d0e889..f43a83a3 100644
                  read_buffer = old_read_buffer;
                  DngMes1.mes_made = -1;
                  DngMes2.mes_made = -1;
-@@ -1647,12 +1767,21 @@ void DunMoveChara() {
+@@ -1647,12 +1804,21 @@ void DunMoveChara() {
                      existFlag = 1;
                  }
              }
@@ -15470,7 +15679,7 @@ index f0d0e889..f43a83a3 100644
                      BtMiniItemSelect();
                      gameTask = GAME_TASK_SCRIPT_ITEM_SELECT;
                      break;
-@@ -1662,11 +1791,24 @@ void DunMoveChara() {
+@@ -1662,11 +1828,32 @@ void DunMoveChara() {
                      break;
                  case BT_REQUEST_ENTRANCE_WINDOW:
                      BtEventInfo.request = BT_REQUEST_NONE;
@@ -15493,10 +15702,18 @@ index f0d0e889..f43a83a3 100644
 +                        BtEventInfo.escape_result = nullptr;
 +                        break;
 +                    }
++                    // MoonMod (set_quick_passage walks = false): the question was asked before the script
++                    if (BtEventInfo.escape_result != nullptr) {
++                        if (const int given = moonmod::ChronicleFloorGateAnswer(); given > 0) {
++                            BtEventInfo.escape_result->i = given;
++                            BtEventInfo.escape_result = nullptr;
++                            break;
++                        }
++                    }
                      DngEscapeMsgInit(&DngMes2, &DngMes1, 0);
                      BtGameModeFlag = BT_GAME_MODE_ESCAPE_MSG;
                      break;
-@@ -1706,7 +1848,7 @@ void DunMoveChara() {
+@@ -1706,10 +1893,12 @@ void DunMoveChara() {
                      startCnt2 = 0;
                      gameTask = GAME_TASK_PLAY;
                      printf("go dungeon\n");
@@ -15505,7 +15722,12 @@ index f0d0e889..f43a83a3 100644
                      break;
                  case BT_REQUEST_RUN_SCRIPT:
                      BtEventInfo.request = BT_REQUEST_NONE;
-@@ -1735,7 +1877,7 @@ void DunMoveChara() {
++                    // MoonMod (OW1 item 5): from the exit gate to the next floor: the picture is held over its build
++                    moonmod::ChronicleFloorGateChained(BtEventInfo.running_script_no, BtEventInfo.chained_script_no);
+                     BtSystemScriptAfter();
+                     BtEventInfo.script_no = BtEventInfo.chained_script_no;
+                     gameTask = GAME_TASK_SCRIPT_START;
+@@ -1735,7 +1924,7 @@ void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -15514,7 +15736,7 @@ index f0d0e889..f43a83a3 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1757,7 +1899,7 @@ void DunMoveChara() {
+@@ -1757,7 +1946,7 @@ void DunMoveChara() {
                  unit_now->model_count = 0;
                  unit_now->current_monster = 0;
  
@@ -15523,7 +15745,7 @@ index f0d0e889..f43a83a3 100644
                      unit_now->script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -1782,7 +1924,7 @@ void DunMoveChara() {
+@@ -1782,7 +1971,7 @@ void DunMoveChara() {
                  MainMonstorUnit.model_count = 0;
                  MainMonstorUnit.current_monster = 0;
  
@@ -15532,7 +15754,7 @@ index f0d0e889..f43a83a3 100644
                      MainMonstorUnit.script[i] = &MonstorScriptBuffer[i];
                  }
  
-@@ -1850,7 +1992,7 @@ void DunMoveChara() {
+@@ -1850,7 +2039,7 @@ void DunMoveChara() {
                      for (const ATRA_BOLL &ball : NowDngMap->atra) {
                          int atra_no = ball.atra_no;
  
@@ -15541,7 +15763,7 @@ index f0d0e889..f43a83a3 100644
                              int atra = UserStatus->atra_registry[selectMapNo][atra_no].id;
  
                              getAtraToSaveData(atra, atra_no, SaveData, selectMapNo, UserStatus->cur_floor);
-@@ -1920,7 +2062,7 @@ void DunMoveChara() {
+@@ -1920,7 +2109,7 @@ void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -15550,7 +15772,7 @@ index f0d0e889..f43a83a3 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1940,7 +2082,7 @@ void DunMoveChara() {
+@@ -1940,7 +2129,7 @@ void DunMoveChara() {
              unit->model_count = 0;
              unit->current_monster = 0;
  
@@ -15559,7 +15781,7 @@ index f0d0e889..f43a83a3 100644
                  unit->script[i] = &MonstorScriptBuffer[i];
              }
  
-@@ -1953,6 +2095,18 @@ void DunMoveChara() {
+@@ -1953,6 +2142,18 @@ void DunMoveChara() {
              gameTask = GAME_TASK_PLAY;
              break;
          }
@@ -15578,7 +15800,7 @@ index f0d0e889..f43a83a3 100644
          case GAME_TASK_PAUSE:
              if (GamePad.Down(PAD_START) != 0) {
                  driveStepHold = 0;
-@@ -2097,7 +2251,7 @@ void DunMoveChara() {
+@@ -2097,7 +2298,7 @@ void DunMoveChara() {
                  sceVu0FVECTOR before;
                  sceVu0CopyVector(before, pos);
                  auto *fields = NowDngMap->map_type != 1 && selectMapNo == DUNGEON_DIVINE_BEAST_CAVE ? reinterpret_cast<DRAN_MAP_FIELD_SET *>(NowDranMapField) : nullptr;
@@ -15587,7 +15809,7 @@ index f0d0e889..f43a83a3 100644
                      sceVu0SubVector(ref_off, pos, before);
                      veloOld[1] = velo__2[1];
                      velo__2[1] = info.landed ? 0.0f : std::max(-10.0f, velo__2[1] - 0.1f);
-@@ -2118,7 +2272,7 @@ void DunMoveChara() {
+@@ -2118,7 +2319,7 @@ void DunMoveChara() {
                      NowCamera__3->SetPos(eye);
                      NowCamera__3->SetRef(look);
                      static float walked = 0.0f;
@@ -15596,7 +15818,7 @@ index f0d0e889..f43a83a3 100644
                          walked += hypotf(ref_off[0], ref_off[2]);
                          if (walked >= 10.0f) {
                              static int foot = 0;
-@@ -2140,15 +2294,15 @@ void DunMoveChara() {
+@@ -2140,15 +2341,15 @@ void DunMoveChara() {
                      hand_ok = 0;
                  }
  
@@ -15615,7 +15837,7 @@ index f0d0e889..f43a83a3 100644
                      float head = viewAngleH__2;
  
                      if (head - PI <= -PI) {
-@@ -2158,7 +2312,7 @@ void DunMoveChara() {
+@@ -2158,7 +2359,7 @@ void DunMoveChara() {
                      CharaHand.SetRotation(viewAngleV__2, head, 0.0f);
                      CharaMainHandViewFlag = 1;
  
@@ -15624,7 +15846,7 @@ index f0d0e889..f43a83a3 100644
                          case CHARA_XIAO:
                              if (GamePad.Down(PadInput_OK) != 0) {
                                  BattleActionOn_Jinn();
-@@ -2192,7 +2346,7 @@ void DunMoveChara() {
+@@ -2192,7 +2393,7 @@ void DunMoveChara() {
                      }
  
                      if (BtActStatus.action_on == 1) {
@@ -15633,7 +15855,7 @@ index f0d0e889..f43a83a3 100644
                              case CHARA_XIAO:
                                  BattleActionPlay_Jinn(&CharaHand, 1);
                                  break;
-@@ -2222,7 +2376,12 @@ void DunMoveChara() {
+@@ -2222,7 +2423,12 @@ void DunMoveChara() {
                  SetBattleStyle(selectMapNo, 0);
  
                  bool check_eye_event = true;
@@ -15647,7 +15869,26 @@ index f0d0e889..f43a83a3 100644
                      int ok = 1;
  
                      if (BtActStatus.action_on != 0) {
-@@ -2301,6 +2460,7 @@ void DunMoveChara() {
+@@ -2272,7 +2478,7 @@ void DunMoveChara() {
+                             leaving = 1;
+                             BtEventInfo.action_mode = 1;
+                             BtEventInfo.chara_help = false;
+-                            next_task = GAME_TASK_SCRIPT_START;
++                            next_task = moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no) ? GAME_TASK_FLOOR_FADE_RESET : GAME_TASK_SCRIPT_START; // MoonMod: the exit gate asks first
+                         }
+                     }
+ 
+@@ -2282,7 +2488,8 @@ void DunMoveChara() {
+                         ResetStatusInfo();
+                         driveStepHold = 1;
+                         EdFadeInit();
+-                        EdFadeOut(0x78, 0.0f, 0.0f, 0.0f);
++                        // MoonMod (set_quick_passage walks = false): the exit gate has no fade to black
++                        if (!moonmod::ChronicleFloorGateQuiet(BtEventInfo.script_no)) EdFadeOut(0x78, 0.0f, 0.0f, 0.0f);
+                         BtEventInfo.fade_on_start = false;
+                         next_task = GAME_TASK_FLOOR_FADE_RESET;
+                         leaving = 1;
+@@ -2301,6 +2508,7 @@ void DunMoveChara() {
                      }
  
                      if (UserStatus->CheckLife() != 0 && NowMonstorUnit->GetMonstorNum() <= 0 && BtEventInfo.clear_script_no != -1) {
@@ -15655,7 +15896,7 @@ index f0d0e889..f43a83a3 100644
                          BtEventInfo.script_no = BtEventInfo.clear_script_no;
                          BtEventInfo.ext_memory = BtEventInfo.clear_script_ext_memory;
                          BtEventInfo.clear_script_no = -1;
-@@ -2336,7 +2496,9 @@ void DunMoveChara() {
+@@ -2336,7 +2544,9 @@ void DunMoveChara() {
                          leaving = 1;
                      }
  
@@ -15666,7 +15907,7 @@ index f0d0e889..f43a83a3 100644
                          sceVu0FVECTOR chara_rot;
  
                          CharaMainHandViewFlag = 0;
-@@ -2352,11 +2514,11 @@ void DunMoveChara() {
+@@ -2352,11 +2562,11 @@ void DunMoveChara() {
                          viewMode__2 = 0;
                          cameraAuto = cameraAutoOld;
  
@@ -15680,7 +15921,7 @@ index f0d0e889..f43a83a3 100644
                              NowMainEffect->OffEffect(ruby_effect_id);
                              ruby_effect_id = -1;
                          }
-@@ -2471,7 +2633,7 @@ void DunMoveChara() {
+@@ -2471,7 +2681,7 @@ void DunMoveChara() {
                          viewMode__2 = 0;
                          cameraAuto = cameraAutoOld;
  
@@ -15689,7 +15930,7 @@ index f0d0e889..f43a83a3 100644
                              EquipReAttach(NowWeapon, 0);
                          }
                      }
-@@ -2535,6 +2697,7 @@ void DunMoveChara() {
+@@ -2535,6 +2745,7 @@ void DunMoveChara() {
                  if (BtMiniChrSelectNo == 2) {
                      ClearSystemMes();
                      driveStepHold = 1;
@@ -15697,7 +15938,7 @@ index f0d0e889..f43a83a3 100644
                      gameTask = GAME_TASK_EXIT_FADE_START;
                      static_cast<CDngStatusData *>(UserStatus)->SetDead();
                  } else {
-@@ -2628,7 +2791,7 @@ void DunMoveChara() {
+@@ -2628,7 +2839,7 @@ void DunMoveChara() {
              BtActStatus.camera_hold = 1;
              DngMessMan.enabled = false;
  
@@ -15706,7 +15947,7 @@ index f0d0e889..f43a83a3 100644
                  NowMainEffect->OffEffect(ruby_effect_id);
                  ruby_effect_id = -1;
              }
-@@ -2687,8 +2850,12 @@ void DunMoveChara() {
+@@ -2687,8 +2898,12 @@ void DunMoveChara() {
                          activeItem.model[8] = -1;
                      }
  
@@ -15720,7 +15961,7 @@ index f0d0e889..f43a83a3 100644
                      } else {
                          gameTask++;
                      }
-@@ -2706,7 +2873,7 @@ void DunMoveChara() {
+@@ -2706,7 +2921,7 @@ void DunMoveChara() {
                  DeadKeyStartWait--;
  
                  if (DeadKeyStartWait == 0) {
@@ -15729,7 +15970,7 @@ index f0d0e889..f43a83a3 100644
                          DeadMes(UserStatus->cur_chara, 0x168);
                      } else {
                          AllDeadMes(0x168);
-@@ -2731,10 +2898,12 @@ void DunMoveChara() {
+@@ -2731,10 +2946,12 @@ void DunMoveChara() {
                      CMonUnitHold = 0;
                      CEffectHold = 0;
                  } else {
@@ -15742,7 +15983,7 @@ index f0d0e889..f43a83a3 100644
                  gameTask = GAME_TASK_EXIT_FADE_START;
                  static_cast<CDngStatusData *>(UserStatus)->SetDead();
  #endif
-@@ -2742,6 +2911,46 @@ void DunMoveChara() {
+@@ -2742,6 +2959,46 @@ void DunMoveChara() {
  
              autoCamTrial();
              break;
@@ -21159,7 +21400,7 @@ index 12cad0dd..1418f691 100644
      pEditGround->river_parts = RiverParts;
      pEditGround->road_parts = RoadParts;
 diff --git a/port/src/game/editloop3.cpp b/port/src/game/editloop3.cpp
-index f0d923fc..3c3f73cf 100644
+index f0d923fc..d35e6526 100644
 --- a/port/src/game/editloop3.cpp
 +++ b/port/src/game/editloop3.cpp
 @@ -68,6 +68,7 @@
@@ -21227,7 +21468,68 @@ index f0d923fc..3c3f73cf 100644
      if (fade_in_out == 0 || frames < 0) {
          fade_col[3] = 0.0f;
      }
-@@ -9241,9 +9264,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+@@ -2892,6 +2915,10 @@ CCamera DmmyCamera(4.0f);
+ 
+ /** Bytecode interpreter used by editor events. */
+ CRunScript EdEventScript;
++int        EdEventCallDepth() {
++    return EdEventScript.call != nullptr ? static_cast<int>(EdEventScript.call_sp - EdEventScript.call) : 0;
++}
++bool EdEventAtOnce = false;
+ 
+ CRunScript SystemEventScript;
+ 
+@@ -3549,7 +3576,8 @@ int _GET_PADDOWN(RS_STACKDATA *stack, int argument_count) {
+         return 0;
+     }
+ 
+-    SetStack(stack, exch_ok_cancel(GamePad.GetPadDown()));
++    // MoonMod (set_quick_passage walks = false): the exit gate's script run unseen: a window of its own takes OK
++    SetStack(stack, exch_ok_cancel(GamePad.GetPadDown()) | (moonmod::ChronicleFloorGateUnseen() ? 0x20 : 0));
+     return 1;
+ }
+ 
+@@ -6540,6 +6568,13 @@ int _FADE_IN(RS_STACKDATA *stack, int argument_count) {
+         blue = GetStackInt(stack);
+     }
+ 
++    // MoonMod (OW1 item 5): the exit gate's script, with a mod's quick passage, has no fades: a cut
++    if (moonmod::ChronicleFloorGateFade(true, frames)) {
++        EdFadeInit();
++        fade_end = 1;
++        return 1;
++    }
++
+     EdFadeIn(frames, static_cast<float>(red), static_cast<float>(green), static_cast<float>(blue));
+     return 1;
+ }
+@@ -6557,6 +6592,13 @@ int _FADE_OUT(RS_STACKDATA *stack, int argument_count) {
+         blue = GetStackInt(stack);
+     }
+ 
++    // MoonMod (OW1 item 5): no black at the exit gate either; what the script does under it is run at once
++    if (moonmod::ChronicleFloorGateFade(false, frames)) {
++        EdFadeInit();
++        fade_end = 1;
++        return 1;
++    }
++
+     EdFadeOut(frames, static_cast<float>(red), static_cast<float>(green), static_cast<float>(blue));
+     return 1;
+ }
+@@ -7284,6 +7326,11 @@ int _ASQ_CHECK(RS_STACKDATA *stack, int argument_count) {
+         return 0;
+     }
+ 
++    // MoonMod: run at once, no time passes for the character: the motion waited on is taken as played out
++    if (EdEventAtOnce) {
++        sequence->EndMotion();
++    }
++
+     int end = sequence->CheckEnd();
+     SetStack(stack++, ((end != 0) ^ 1) & 0xFF);
+     return 1;
+@@ -9241,9 +9288,17 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
      character->GetRotation(character_rotation);
  
      for (i = 0; i < count; i++) {
@@ -21245,7 +21547,7 @@ index f0d923fc..3c3f73cf 100644
  
          int available = npcs[i].initialized != 0 && npcs[i].draw_enabled != 0;
  
-@@ -9279,7 +9310,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
+@@ -9279,7 +9334,11 @@ int EdSearchNearNPC(CCharacter *character, CNPCharacter *npcs, int count) {
          npcs[i].GetDir(*character, direction);
          float npc_angle = atan2f(direction[0], direction[2]);
          npcs[i].GetRotation(npc_rotation);
@@ -23801,7 +24103,7 @@ index d2017022..3399e138 100644
  }
  
 diff --git a/port/src/game/menu_misc.cpp b/port/src/game/menu_misc.cpp
-index 6f58f09f..1521522f 100644
+index 6f58f09f..9798f89e 100644
 --- a/port/src/game/menu_misc.cpp
 +++ b/port/src/game/menu_misc.cpp
 @@ -2,6 +2,7 @@
@@ -24196,7 +24498,65 @@ index 6f58f09f..1521522f 100644
          printf("*** voice read err \n");
      }
  }
-@@ -1449,7 +1567,8 @@ int CheckItemThrow(int *items, int *values) {
+@@ -1356,14 +1474,22 @@ void DngEscapeMsgInit(ClsMes *title, ClsMes *choice, int dungeon) {
+ }
+ 
+ void DngEscapeMsgDraw() {
+-    AllFadeForMenu(0x80);
++    // MoonMod (OW1 item 5): at a floor's exit gate with a mod's quick passage the window has no black under it or
++    // over it: its picture comes in over the scene, quicker, and the answer is taken as it is given
++    const bool quick = moonmod::ChronicleFloorGateScript();
++    if (!quick) {
++        AllFadeForMenu(0x80);
++    }
+ 
+     if (CharaNameMes == nullptr || DngMenuMes == nullptr) {
+         return;
+     }
+ 
+     MenuTextureReload(DngEscapeBlock);
+-    DrawFullSizePicture(DngEscapeTex, 0, 0, 0x80);
++    // (asked before the gate's script, set_quick_passage walks = false: no picture either, the floor stays under it)
++    if (!moonmod::ChronicleFloorGateOverFloor()) {
++        DrawFullSizePicture(DngEscapeTex, 0, 0, quick ? 0x80 - DngEscapeAlpha : 0x80);
++    }
+     MenuTextureReload(CharaNameMes->tex_block);
+     setbilinear(0);
+     CharaNameMes->stay_frame = true;
+@@ -1372,6 +1498,13 @@ void DngEscapeMsgDraw() {
+     CharaNameMes->DrawMesWin();
+     DngMenuMes->DrawMesWin();
+ 
++    if (quick) {
++        if (DngEscapeEndFlag == 0) {
++            DngEscapeAlpha = static_cast<s16>(DngEscapeAlpha > 8 ? DngEscapeAlpha - 8 : 0);
++        }
++        return;
++    }
++
+     if (DngEscapeEndFlag != 0) {
+         DngEscapeAlpha += 3;
+ 
+@@ -1413,9 +1546,16 @@ int DngEscapeMsgLoop() {
+         }
+ 
+         if (GamePad.Down(PAD_CIRCLE) != 0) {
+-            ComMenuSePlay(MENU_SOUND_REFUSE);
++            if (moonmod::ChronicleFloorGateOverFloor() && DngEscapeEndFlag == 0) {
++                // MoonMod: asked over the floor, before anything of the gate has run: Circle steps back from it
++                DngEscapeEndFlag = 1;
++                DngEscapeSelect = 3;
++                ComMenuSePlay(MENU_SOUND_CURSOR);
++            } else {
++                ComMenuSePlay(MENU_SOUND_REFUSE);
++            }
+         }
+-    } else if (DngEscapeAlpha >= 0x80) {
++    } else if (DngEscapeAlpha >= 0x80 || moonmod::ChronicleFloorGateScript()) {
+         result = DngEscapeSelect;
+         GamePad.AutoRepeatOff();
+         GamePad.MenuModeOff();
+@@ -1449,7 +1589,8 @@ int CheckItemThrow(int *items, int *values) {
          }
      }
  
@@ -24206,7 +24566,7 @@ index 6f58f09f..1521522f 100644
          int item_no = weapons[10].item_no;
  
          if (item_no >= ITEM_WEAPON_START) {
-@@ -1764,7 +1883,7 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
+@@ -1764,7 +1905,7 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
                      int chara = UserStatus->cur_chara;
                      EquipWeaponFrame(&DefaultWeapon, chara, CharaMainHandViewFlag);
  
@@ -28789,7 +29149,7 @@ index 43dfe76a..99565a6e 100644
      InputShutdown();
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..acf933ec
+index 00000000..a087c2d7
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,688 @@
@@ -28958,7 +29318,7 @@ index 00000000..acf933ec
 +    {"entities.tint", "entities", "tint", "simulation", "game.write", "Draw a live Chronicle enemy in a colour for a number of frames."},
 +    {"entities.knockback", "entities", "knockback", "simulation", "game.write", "Shove a live Chronicle enemy along a direction at a speed that slows to a stop."},
 +    {"dungeons.set_character_blocks", "dungeons", "set_character_blocks", "simulation", "game.write", "Put only the named characters' own doors and parts (Xiao's jumps, Goro's and Ruby's doors, Ungaga's and Osmond's parts) on new Chronicle floors."},
-+    {"dungeons.set_zones", "dungeons", "set_zones", "simulation", "game.write", "Lay Chronicle floors built from now on out as 2-24 zones joined by locked gates; a monster in each zone carries the next gate's key; open lists gates built open; shrines = true puts a spring in each zone's shrine room; a zone's source_floor gives it that floor's monsters, atla and chest items; a zone's source_dungeon builds it from that dungeon's rooms, corridors and pillars and gives it that dungeon's monsters (its main floor pack loads beside the floor's own); exit_floor is where the floor's exit gate leads; smoke lists gates no key opens (game.dungeon.smoke_touched); shrine_heal = false keeps the springs from healing HP; sanctuary = true keeps monsters out of a shrine's circle; {} turns zones off."},
++    {"dungeons.set_zones", "dungeons", "set_zones", "simulation", "game.write", "Lay Chronicle floors built from now on out as 2-24 zones joined by locked gates; a monster in each zone carries the next gate's key; open lists gates built open; shrines = true puts a spring in each zone's shrine room; a zone's source_floor gives it that floor's monsters, atla and chest items; a zone's source_dungeon builds it from that dungeon's rooms, corridors and pillars and gives it that dungeon's monsters (its main floor pack loads beside the floor's own); exit_floor is where the floor's exit gate leads; smoke lists gates no key opens (game.dungeon.smoke_touched); shrine_heal = false keeps the springs from healing HP; sanctuary = true keeps monsters out of a shrine's circle; yield = true makes the request one that gives way: refused while another mod's stands, replaced by any mod's request made without it ({yield = true} alone lets it go); {} turns zones off."},
 +    {"dungeons.set_exits", "dungeons", "set_exits", "simulation", "game.write", "Keep the party from leaving a Chronicle dungeon for town by the Escape menu or the exit gate (town = \"shrines\"; the gate leads on), or give the exits back (town = \"any\")."},
 +    {"dungeons.warp", "dungeons", "warp", "simulation", "game.write", "Move the player at once to a cell (x, y) of the dungeon floor they are on."},
 +    {"dungeons.drop_token", "dungeons", "drop_token", "simulation", "game.write", "Put a bag on the dungeon floor the player is on, at a world position (x, y, z), drawn as the game's own dropped item; walking onto it sends game.dungeon.token_taken {tag} to this mod instead of filling the bag."},
@@ -28978,7 +29338,7 @@ index 00000000..acf933ec
 +    {"dungeons.set_npc_models", "dungeons", "set_npc_models", "simulation", "game.write", "Chronicle: {models = {{dungeon_id, npc = 1-3, pack = \"dun/.../<stem>.chr\" or \"gedit/...\", cfg (default <stem>.cfg; base.cfg for dun/mainchara), motion}}} loads characters into a dungeon's free NPC slots when its map loads, for set_npc_marks to stand; {} stops."},
 +    {"dungeons.play_event", "dungeons", "play_event", "simulation", "game.write", "Chronicle: {program = n} plays program n of the dungeon's event script (a scene) on the floor the player is on, as a monster's script asks for one; game.dungeon.event_ended follows when it is over."},
 +    {"world.set_roads", "world", "set_roads", "simulation", "game.write", "Chronicle: {enabled = true} makes walking into a town's gate game.town.road, the mod's to take (world.transition), not the world map."},
-+    {"dungeons.set_quick_passage", "dungeons", "set_quick_passage", "simulation", "game.write", "Chronicle: {enabled = true} goes from one place to another (town, field, dungeon, floor) with no loading card: the last picture stays up while the next place loads; {enabled = false} gives the card back."},
++    {"dungeons.set_quick_passage", "dungeons", "set_quick_passage", "simulation", "game.write", "Chronicle: {enabled = true} goes from one place to another (town, field, dungeon, floor) with no loading card: the last picture stays up while the next place loads; with walks = false a floor's exit gate also asks next floor or leave over the floor and cuts to the next floor, with no walk out and no walk in; {enabled = false} gives the card back."},
 +    {"dungeons.set_floor_select", "dungeons", "set_floor_select", "simulation", "game.write", "Chronicle: {enabled = false} turns the dungeon entrance's floor menu off, so it takes the player straight to the first floor; {enabled = true} gives it back."},
 +    {"dungeons.set_story_exits", "dungeons", "set_story_exits", "simulation", "game.write", "Chronicle floors of the game's own design: the gate that asks for the floor's key asks the mod's question (leave this floor?) instead; the gate stays shut and the mod takes the player on (game.dungeon.story_exit)."},
 +    {"dungeons.set_backrooms", "dungeons", "set_backrooms", "simulation", "game.write", "Free Chronicle back floors: the stairs ask whether to go down (enter at your own risk) instead of asking for the gate key."},
@@ -30343,10 +30703,10 @@ index 00000000..e6cd3631
 +} // namespace dc::game
 diff --git a/port/src/moonmod/chronicle_adapter.cpp b/port/src/moonmod/chronicle_adapter.cpp
 new file mode 100644
-index 00000000..400dbe50
+index 00000000..61ddecd4
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_adapter.cpp
-@@ -0,0 +1,17823 @@
+@@ -0,0 +1,18118 @@
 +#include "doorway_view.hpp"
 +#include "moonmod/messages_moonmod.hpp"
 +#include "moonmod/chronicle_adapter.hpp"
@@ -40120,21 +40480,29 @@ index 00000000..400dbe50
 +
 +// dungeons.set_quick_passage: with it on, going from one place to another (town, field, dungeon, floor) shows no
 +// loading card (the area's title held for seconds): the last picture is held while the next place loads.
++// walks = false (with enabled = true): a floor's exit gate has no walk out and the next floor no walk in.
 +std::string g_quick_passage_owner;
++bool        g_passage_walks = true;
 +ApiCallResult SetQuickPassage(std::string_view owner, const Json &args) {
-+    const std::string usage = "expected {enabled = true or false}";
-+    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 || !args[0].contains("enabled") ||
-+        !args[0]["enabled"].is_boolean()) {
++    const std::string usage = "expected {enabled = true or false} (with enabled = true, walks = false: a floor's exit gate asks next "
++                              "floor or leave over the floor and cuts to the next floor, with no walk out and no walk in)";
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("enabled") || !args[0]["enabled"].is_boolean()) {
 +        return Invalid(usage);
 +    }
++    for (auto field = args[0].begin(); field != args[0].end(); ++field) {
++        if (field.key() != "enabled" && field.key() != "walks") return Invalid(usage);
++    }
++    if (args[0].contains("walks") && !args[0]["walks"].is_boolean()) return Invalid(usage);
 +    if (!g_quick_passage_owner.empty() && g_quick_passage_owner != owner) return Failed("another mod already set the passage");
 +    if (args[0]["enabled"].get<bool>()) {
 +        g_quick_passage_owner = std::string(owner);
++        g_passage_walks = args[0].value("walks", true);
 +    } else {
 +        g_quick_passage_owner.clear();
++        g_passage_walks = true;
 +        dc::game::DoorwayReset();
 +    }
-+    return {ApiCallStatus::Ok, {{"enabled", !g_quick_passage_owner.empty()}}, {}};
++    return {ApiCallStatus::Ok, {{"enabled", !g_quick_passage_owner.empty()}, {"walks", g_passage_walks}}, {}};
 +}
 +
 +// world.set_roads: with it on, walking into a town's gate is game.town.road for the mod to take (the next town, say,
@@ -41530,6 +41898,8 @@ index 00000000..400dbe50
 +// dungeons.set_zones (Vigil World): floors built from now on are a chain of zones joined by locked gates
 +// (moonmod/dungeonmap_layout.hpp). One mod at a time; {} or unloading it turns zones off.
 +std::string g_zones_owner;
++bool        g_zones_yield = false; // the request standing gives way to any mod's request made without yield
++void        DropArrivalOf(const std::string &owner);
 +Json ZonesRequestJson() {
 +    Json rooms = Json::array(), open = Json::array(), sources = Json::array(), dungeons = Json::array();
 +    for (int z = 0; z < DngZoneCount; ++z) {
@@ -41558,12 +41928,20 @@ index 00000000..400dbe50
 +                              "a spring in each zone's shrine room; shrine_heal = false: those springs refill water only; sanctuary = true: "
 +                              "no monster steps near a shrine; smoke: gates that are smoke, opened by no key; descent: units each zone lies below "
 +                              "the one before, a ramp down outside each gate; per zone, quiet = true: none of the floor's monsters, "
-+                              "heal = true: its spring heals, arena = true: 6x6 rooms; vaults = false: no way down to the back side), or {}";
++                              "heal = true: its spring heals, arena = true: 6x6 rooms; vaults = false: no way down to the back side; yield = true: "
++                              "the request gives way to any mod's made without it), or {}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(usage);
-+    if (!g_zones_owner.empty() && g_zones_owner != owner) return Failed("another mod already lays floors out in zones");
 +    const Json &request = args[0];
-+    if (request.empty()) {
++    if (request.contains("yield") && !request["yield"].is_boolean()) return Invalid("yield is true or false");
++    // yield = true: a request that gives way. It is refused while another mod's stands, and any mod's request made
++    // without it takes its place. {yield = true} alone lets go of the caller's own such request, and of nothing else.
++    const bool yields = request.value("yield", false);
++    const bool others = !g_zones_owner.empty() && g_zones_owner != owner;
++    if (request.empty() || (yields && request.size() == 1)) {
++        if (others && !g_zones_yield && !yields) return Failed("another mod already lays floors out in zones");
++        if (others || (yields && !g_zones_yield)) return {ApiCallStatus::Ok, ZonesRequestJson(), {}};
 +        g_zones_owner.clear();
++        g_zones_yield = false;
 +        DngZoneCount = 0;
 +        DngZoneOpenMask = 0;
 +        DngZoneShrines = 0;
@@ -41578,10 +41956,11 @@ index 00000000..400dbe50
 +        std::fill(std::begin(DngZoneSourceDungeon), std::end(DngZoneSourceDungeon), -1);
 +        return {ApiCallStatus::Ok, ZonesRequestJson(), {}};
 +    }
++    if (others && (yields || !g_zones_yield)) return Failed("another mod already lays floors out in zones");
 +    for (auto field = request.begin(); field != request.end(); ++field) {
 +        if (field.key() != "zones" && field.key() != "open" && field.key() != "shrines" && field.key() != "exit_floor" &&
 +            field.key() != "smoke" && field.key() != "shrine_heal" && field.key() != "sanctuary" && field.key() != "descent" &&
-+            field.key() != "vaults") {
++            field.key() != "vaults" && field.key() != "yield") {
 +            return Invalid("dungeons.set_zones received an unsupported field: " + field.key());
 +        }
 +    }
@@ -41649,7 +42028,9 @@ index 00000000..400dbe50
 +            smoke |= 1 << gate.get<int>();
 +        }
 +    }
++    if (others) DropArrivalOf(g_zones_owner); // the request that gave way: the arrival its mod asked for goes with it
 +    g_zones_owner = std::string(owner);
++    g_zones_yield = yields;
 +    DngZoneCount = count;
 +    for (int z = 0; z < DNG_ZONE_MAX; ++z) {
 +        DngZoneRooms[z] = z < count ? rooms[z] : 0;
@@ -41802,6 +42183,10 @@ index 00000000..400dbe50
 +    bool teleport = false; // no stairs walk-in: the player appears in the escape light
 +};
 +std::optional<FloorArrival> g_arrival;
++std::string                 g_arrival_owner; // the mod that asked for it (dungeons.set_arrival), or none
++void DropArrivalOf(const std::string &owner) {
++    if (g_arrival.has_value() && !owner.empty() && g_arrival_owner == owner) g_arrival.reset();
++}
 +// The shrine the player was put on: no game.dungeon.shrine_reached for it until they walk away.
 +bool g_shrine_quiet = false;
 +
@@ -41931,6 +42316,7 @@ index 00000000..400dbe50
 +    g_pending_dungeon_floor_entry = PendingDungeonFloorEntry{dungeon, floor};
 +    MapJump(dungeon + 200, -1);
 +    g_arrival.reset();
++    g_arrival_owner.clear();
 +    if (x >= 0) {
 +        g_arrival = FloorArrival{dungeon, floor, x, y};
 +        g_arrival->teleport = teleport;
@@ -41940,7 +42326,7 @@ index 00000000..400dbe50
 +
 +// dungeons.set_arrival: the next main floor built starts the player at cell x, y, or in front of zone `zone`'s shrine
 +// (just inside its gate on a floor without shrines). Called from game.dungeon.generating; {} takes it back.
-+ApiCallResult SetArrival(const Json &args) {
++ApiCallResult SetArrival(std::string_view owner, const Json &args) {
 +    const std::string usage = "expected {zone = 0-" + std::to_string(DNG_ZONE_MAX - 1) +
 +                              "} or {x = column, y = row} (each with teleport = true or not), or {}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(usage);
@@ -41962,6 +42348,7 @@ index 00000000..400dbe50
 +        return Invalid(usage);
 +    }
 +    g_arrival = arrival;
++    g_arrival_owner = std::string(owner);
 +    return {ApiCallStatus::Ok, {{"arrival", true}}, {}};
 +}
 +
@@ -44087,7 +44474,7 @@ index 00000000..400dbe50
 +    if (operation.path == "dungeons.drop_gilda") return DropGilda(args);
 +    if (operation.path == "dungeons.drop_token") return DropToken(mod_id, args);
 +    if (operation.path == "dungeons.enter_floor") return EnterFloor(args);
-+    if (operation.path == "dungeons.set_arrival") return SetArrival(args);
++    if (operation.path == "dungeons.set_arrival") return SetArrival(mod_id, args);
 +    if (operation.path == "dungeons.set_character_blocks") return SetCharacterBlocks(mod_id, args);
 +    if (operation.path == "weapons.style_set") return SetWeaponStyle(mod_id, args);
 +    if (operation.path == "weapons.style_clear") return ClearWeaponStyle(mod_id, args);
@@ -45041,7 +45428,35 @@ index 00000000..400dbe50
 +                    CDngStatusData *status = CurrentStatus();
 +                    if (status != nullptr && NowDngMap->gate_key_no > 0) status->GetItem(NowDngMap->gate_key_no, 1);
 +                    if (CharaFrame == nullptr) break;
-+                    TeleportPlayer(160.0f * col, 160.0f * (row - 1));
++                    float x = 160.0f * col, z = 160.0f * (row - 1);
++                    const CDungeonEventData *trigger = nullptr;
++                    // DC_EXIT_ROOM_TEST=gate: on the gate's own small trigger (the one switched on: the lock's, and once
++                    // the key has opened it, the way on), so Cross answers there with no walking.
++                    if (const std::string_view where = std::getenv("DC_EXIT_ROOM_TEST"); where == "gate" && NowEventMan != nullptr) {
++                        for (int slot = 0; slot < std::ssize(NowEventMan->event); ++slot) {
++                            CDungeonEventData &event = NowEventMan->event[slot];
++                            if (event.event == nullptr || event.CheckSwitch() == 0 || event.event->parts_id != MAP_PARTS_STAIR_UP) continue;
++                            x = event.pos[0];
++                            z = event.pos[2];
++                            trigger = &event;
++                            std::printf("exit room test: gate trigger %d script %d hold %d radius %.0f at %.0f,%.0f,%.0f\n", slot,
++                                        event.event->script_no, event.hold, event.event->radius, event.pos[0], event.pos[1], event.pos[2]);
++                        }
++                        // where the key sits in the gate's item window (Right that many times from its first item)
++                        int place = 0;
++                        for (int slot = 0; status != nullptr && slot < status->item_pack.num; ++slot) {
++                            const int item = status->item_pack.item[slot];
++                            if (item == NowDngMap->gate_key_no) break;
++                            if (item >= ITEM_DUNGEON_START) ++place;
++                        }
++                        std::printf("exit room test: the key is item %d of the gate's window\n", place);
++                    }
++                    // at the trigger's own height: it answers within 40 of it, and the Temple's stands below its cell's floor
++                    if (trigger != nullptr) {
++                        TeleportPlayer(x, trigger->pos[1], z);
++                    } else {
++                        TeleportPlayer(x, z);
++                    }
 +                    if (NowMonstorUnit != nullptr) {
 +                        // Test only: no monsters, so Cross uses the gate instead of attacking.
 +                        for (int slot = 0; slot < MONSTOR_SLOT_MAX; ++slot) NowMonstorUnit->monster[slot].state = -1;
@@ -45705,8 +46120,10 @@ index 00000000..400dbe50
 +                                                  {"large", map->boxes[slot].kind == TREASURE_BOX_LARGE}});
 +}
 +void ChronicleDungeonWalkInBuilt();
++void ChronicleFloorGateBuilt();
 +void ChronicleFloorGenerated(bool back_floor, int seed, int rooms) {
 +    if (!back_floor) ChronicleDungeonWalkInBuilt();
++    if (!back_floor) ChronicleFloorGateBuilt();
 +    if (!back_floor && !ChronicleDungeonPrebuilding() && g_arrival.has_value() && UserStatus != nullptr &&
 +        (g_arrival->dungeon < 0 || (selectMapNo == g_arrival->dungeon && UserStatus->cur_floor == g_arrival->floor))) {
 +        g_arrival->built = true;
@@ -46784,13 +47201,19 @@ index 00000000..400dbe50
 +        return;
 +    }
 +    // Test hook: DC_ZONE_VISIT=frames puts the player in the corridor outside the first gate that many frames into the
-+    // floor (600 when it names none).
++    // floor (600 when it names none); with DC_ZONE_VISIT_OPEN set as well, that gate stands open.
 +    static int visit_clock = 0, visit_seed = -1;
 +    if (const char *visit = std::getenv("DC_ZONE_VISIT"); visit != nullptr && *visit != '\0' && DngZoneGateCount > 0 &&
 +                                                          visit_seed != NowDngMap->map_seed &&
 +                                                          ++visit_clock > (std::atoi(visit) > 1 ? std::atoi(visit) : 600)) {
 +        visit_seed = NowDngMap->map_seed;
 +        visit_clock = 0;
++        if (DNG_ZONE_GATE &first = DngZoneGateTable[0]; std::getenv("DC_ZONE_VISIT_OPEN") != nullptr && first.locked) {
++            first.locked = 0;
++            MAP_CELL &cell = NowDngMap->cells[first.x + first.y * DNG_GRID];
++            cell.parts_no = first.open_part;
++            cell.direction = first.open_direction;
++        }
 +        const DNG_ZONE_GATE &gate = DngZoneGateTable[0];
 +        const int dx = gate.gate_part == MAP_PARTS_ROOM_GATE_EAST ? 1 : (gate.gate_part == MAP_PARTS_ROOM_GATE_WEST ? -1 : 0);
 +        const int dy = gate.gate_part == MAP_PARTS_ROOM_GATE_SOUTH ? 1 : (gate.gate_part == MAP_PARTS_ROOM_GATE_NORTH ? -1 : 0);
@@ -47160,6 +47583,10 @@ index 00000000..400dbe50
 +int g_hold_release = -1; // frames left once the place walked into is ready, or -1
 +bool g_road_jump = false; // the jump under way is a town's road to another town, or a floor to another of its dungeon
 +bool g_floor_jump = false; // the latter: let go once the floor is played on (a story floor's fixed map says no more)
++// The exit gate with the passage's walks off (ChronicleFloorGateAsk): 0 nothing, 1 its question is up over the floor,
++// 2 answered, 3 a frame of the floor shown without the window, 4 the picture is held and its script runs unseen.
++int g_gate_ask = 0;
++int g_gate_answer = 0; // the answer given, for the script's window op
 +// DC_PERF_TRANSITIONS=1 (the load trace's switch): each held picture's start and end, for counting the frames a trip
 +// shows something that is not the world.
 +bool HeldTrace() {
@@ -47228,6 +47655,204 @@ index 00000000..400dbe50
 +                     static_cast<unsigned long long>(SharedRuntime().Frame()));
 +    }
 +}
++// A floor's exit gate with quick passage on (OW1 item 5). The gate's script is the game's program 160 in every
++// dungeon: a walk out by the stairs (some with a cut to the scene under a short black), a fade to black, the "next
++// floor or leave" window, then the floor's opening script (program 100: the next floor is built, the party walks in)
++// or the jump to the town. Here it shows no black: its fades are cut, what it does under a fade to black runs at
++// once, the window comes in over the scene, and from the answer the last picture is held over the next floor's build
++// until the opening script fades in. What the opening script does before that fade in was under the gate's black
++// (the build, a pause of two seconds in the Moon Sea, a scene set up): it runs at once too, under the held picture.
++//
++// With the passage's walks off (set_quick_passage walks = false) nothing of the stairs is seen at either end. The
++// question is asked before the gate's script, over the floor as it stands (GateAsk, from the game's wait for its own
++// fade, which is not started); with the answer the picture is held and the script runs at once from its first step,
++// its window op taking the answer given (GateAnswer). On the next floor the walk in is the function of the opening
++// script that holds its first real fade in once the floor is built: from that fade in to the function's return it
++// runs at once too, every fade of it cut, and the picture goes as it returns. A fade in before the build, or in the
++// script's own body (a story floor's fixed map, a scene that opens a floor), is shown as before.
++//
++// Not every gate's program is only its way out. In the Gallery of Time and the Demon Shaft the one program is the
++// lock as well: it begins by testing the event flag its key sets, and until then it is the lock (a message, the item
++// window), so nothing is asked and it runs as written (GateLocked). And a gate that was asked first and then neither
++// led on nor left had something to say that went unseen (the Gallery's last floor, its story not yet whole): used
++// again on that floor, it runs as written (g_gate_as_written).
++namespace {
++constexpr int kFloorGateScript = 160;
++constexpr int kFloorOpeningScript = 100;
++constexpr int kFloorGateRelease = 3; // frames from the opening script's fade in to the picture let go
++bool          g_gate_skip = false;   // the gate's script faded out: run on to its fade in, its window or its end
++bool          g_gate_held = false;   // the picture is held for the opening script the gate chained
++bool          g_gate_cut = false;    // that script faded in: the picture goes in a few frames, the eye is put in place
++bool          g_gate_built = false;  // the floor that script builds stands
++int           g_walkin_depth = -1;   // the call depth of the walk in being run unseen, or -1
++u64           g_gate_ended_at = 0;   // frame + 1 the gate's script ended on (its last step may chain the opening script)
++bool          g_gate_as_written = false; // asked first, the gate led nowhere: used again on this floor it runs as written
++bool GateLocked() {
++    const int flag = BtSystemScriptFlagTest(kFloorGateScript);
++    return flag >= 0 && UserStatus != nullptr && UserStatus->ChkEventFlag(flag) == 0;
++}
++bool GateScriptRunning() {
++    return ChronicleQuickPassage() && mode == GAME_MODE_DUNGEON && BtEventInfo.running_script_no == kFloorGateScript;
++}
++// The walk in run unseen has returned to the script that called it: the floor is shown.
++bool WalkInOver() {
++    if (g_walkin_depth < 0 || EdEventCallDepth() >= g_walkin_depth) return false;
++    g_walkin_depth = -1;
++    g_gate_held = false;
++    g_gate_cut = true;
++    if (g_hold_frames >= 0 && g_hold_release < 0) g_hold_release = kFloorGateRelease;
++    if (HeldTrace()) {
++        std::fprintf(stderr, "perf floor gate walk in over dungeon %d frame %llu\n", selectMapNo,
++                     static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++    return true;
++}
++} // namespace
++bool ChronicleFloorGateScript() {
++    return GateScriptRunning() || (g_gate_ask == 1 && ChronicleQuickPassage() && mode == GAME_MODE_DUNGEON);
++}
++bool ChronicleFloorGateUnseen() { return g_gate_ask >= 3 && g_gate_ask <= 4 && GateScriptRunning(); }
++bool ChronicleFloorGateOverFloor() {
++    return g_gate_ask == 1 && ChronicleQuickPassage() && !g_passage_walks && mode == GAME_MODE_DUNGEON;
++}
++bool ChronicleFloorGateQuiet(int script) {
++    return ChronicleQuickPassage() && !g_passage_walks && mode == GAME_MODE_DUNGEON && script == kFloorGateScript &&
++           !g_gate_as_written && !GateLocked();
++}
++// 0: go on; 1: open the window; 2: wait a frame; 3: stepped back, nothing runs.
++int ChronicleFloorGateAsk(int script) {
++    if (!ChronicleFloorGateQuiet(script)) {
++        g_gate_ask = 0;
++        g_gate_answer = 0;
++        return 0;
++    }
++    if (g_gate_ask == 5) {
++        g_gate_ask = 0;
++        g_gate_answer = 0;
++        if (HeldTrace()) {
++            std::fprintf(stderr, "perf floor gate stepped back dungeon %d frame %llu\n", selectMapNo,
++                         static_cast<unsigned long long>(SharedRuntime().Frame()));
++        }
++        return 3;
++    }
++    if (g_gate_ask == 0 && g_exits_owner.empty()) {
++        g_gate_ask = 1;
++        g_gate_answer = 0;
++        if (HeldTrace()) {
++            std::fprintf(stderr, "perf floor gate asks over the floor dungeon %d frame %llu\n", selectMapNo,
++                         static_cast<unsigned long long>(SharedRuntime().Frame()));
++        }
++        return 1;
++    }
++    if (g_gate_ask == 1) return 2; // the window is up
++    if (g_gate_ask == 2) {
++        g_gate_ask = 3; // a frame of the floor without the window: the picture that is held
++        return 2;
++    }
++    if (g_gate_ask == 4) return 0;
++    // (0 with dungeons.set_exits: no town from the gate, so nothing to ask; the window op is answered there)
++    g_gate_ask = 4;
++    if (g_hold_frames < 0) {
++        g_hold_frames = 0;
++        g_road_jump = g_floor_jump = false;
++    }
++    g_hold_release = -1;
++    if (HeldTrace()) {
++        std::fprintf(stderr, "perf held begin floor gate unseen dungeon %d answer %d frame %llu\n", selectMapNo, g_gate_answer,
++                     static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++    return 0;
++}
++void ChronicleFloorGateAnswered(int answer) {
++    if (g_gate_ask != 1) return;
++    if (answer == 3) { // Circle: stepped back from the gate
++        g_gate_answer = 0;
++        g_gate_ask = 5;
++        return;
++    }
++    g_gate_answer = answer;
++    g_gate_ask = 2;
++}
++int ChronicleFloorGateAnswer() {
++    if (g_gate_ask < 3 || !GateScriptRunning()) return 0;
++    const int answer = g_gate_answer;
++    g_gate_answer = 0;
++    return answer;
++}
++void ChronicleFloorGateBuilt() {
++    g_gate_as_written = false;
++    if (g_gate_held) g_gate_built = true;
++}
++bool ChronicleFloorGateFade(bool in, int frames) {
++    if (HeldTrace() && mode == GAME_MODE_DUNGEON) {
++        std::fprintf(stderr, "perf script fade %s frames %d script %d held %d depth %d frame %llu\n", in ? "in" : "out", frames,
++                     BtEventInfo.running_script_no, g_hold_frames, EdEventCallDepth(),
++                     static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++    if (!GateScriptRunning()) {
++        WalkInOver();
++        if (g_walkin_depth >= 0) return true; // a fade of the walk in run unseen
++        if (!g_gate_held || g_hold_frames < 0) return false;
++        // a fade in of no length is the scripts' "black from here" (most opening scripts begin with one, before the
++        // floor is built): the picture stays; a scene the opening script starts may be the one that fades in
++        if (in && frames < 0) return false;
++        if (in && !g_passage_walks && g_gate_built && EdEventCallDepth() > 0) {
++            // walks off: the built floor's walk in. It runs unseen to its return (ChronicleFloorGateSkip).
++            g_walkin_depth = EdEventCallDepth();
++            if (HeldTrace()) {
++                std::fprintf(stderr, "perf floor gate walk in unseen dungeon %d depth %d frame %llu\n", selectMapNo, g_walkin_depth,
++                             static_cast<unsigned long long>(SharedRuntime().Frame()));
++            }
++            return true;
++        }
++        if (in) {
++            g_gate_held = false; // the new floor has something to show
++            g_gate_cut = true;
++            if (g_hold_release < 0) g_hold_release = kFloorGateRelease;
++            return false;
++        }
++        // a fade out under the held picture (before a scene is set up): nothing of it would show, so no wait for it
++        if (HeldTrace()) {
++            std::fprintf(stderr, "perf floor gate fade out cut under the held picture dungeon %d frame %llu\n", selectMapNo,
++                         static_cast<unsigned long long>(SharedRuntime().Frame()));
++        }
++        return true;
++    }
++    g_gate_skip = !in;
++    if (HeldTrace()) {
++        std::fprintf(stderr, "perf floor gate fade %s cut dungeon %d frame %llu\n", in ? "in" : "out", selectMapNo,
++                     static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++    return true;
++}
++bool ChronicleFloorGateSkip() {
++    // (walks off: the whole of the gate's script, the question having been answered before it)
++    if ((g_gate_skip || g_gate_ask >= 3) && GateScriptRunning()) return true;
++    if (WalkInOver()) return false;
++    // the opening script, up to its fade in: all of it unseen, under the held picture
++    return g_gate_held && g_hold_frames >= 0 && g_hold_release < 0 && mode == GAME_MODE_DUNGEON;
++}
++void ChronicleFloorGateSkipEnd() { g_gate_skip = false; }
++void ChronicleFloorGateChained(int from_script, int to_script) {
++    g_gate_skip = false;
++    g_gate_ask = 0;
++    g_gate_answer = 0;
++    g_gate_built = false;
++    g_walkin_depth = -1;
++    const bool from_gate = from_script == kFloorGateScript || (from_script < 0 && g_gate_ended_at == SharedRuntime().Frame() + 1);
++    if (!ChronicleQuickPassage() || mode != GAME_MODE_DUNGEON || !from_gate || to_script != kFloorOpeningScript) return;
++    if (g_hold_frames < 0) {
++        g_hold_frames = 0;
++        g_road_jump = false;
++    }
++    g_floor_jump = true; // should the opening script never fade in: let go once the floor is played on
++    g_hold_release = -1;
++    g_gate_held = true;
++    if (HeldTrace()) {
++        std::fprintf(stderr, "perf held begin floor gate dungeon %d floor %d frame %llu\n", selectMapNo,
++                     UserStatus != nullptr ? UserStatus->cur_floor : -1, static_cast<unsigned long long>(SharedRuntime().Frame()));
++    }
++}
 +bool ChronicleTakeRoadJump() {
 +    // read by both the loader's and the dungeon's mode start; the jump's end (StepHeldPicture) clears it
 +    return g_road_jump;
@@ -47244,7 +47869,8 @@ index 00000000..400dbe50
 +    SharedRuntime().Publish("game.town.road", {{"town_id", town_map}, {"location_id", location}, {"frame", SharedRuntime().Frame()}});
 +}
 +void ChronicleWalkPlaceReady() {
-+    if (g_hold_frames >= 0 && g_hold_release < 0) g_hold_release = 4;
++    // (a floor built from the exit gate is not ready to be seen: its opening script is still to fade in)
++    if (g_hold_frames >= 0 && g_hold_release < 0 && !g_gate_held) g_hold_release = 4;
 +}
 +bool ChronicleHoldingPicture() { return g_hold_frames >= 0; }
 +int  ChronicleHeldReleaseIn() { return g_hold_frames >= 0 ? g_hold_release : -1; }
@@ -47256,9 +47882,14 @@ index 00000000..400dbe50
 +void StepHeldPicture() {
 +    if (g_hold_frames < 0) return;
 +    // a floor of the same dungeon is ready once the party plays on it (a fixed story map sends no generated)
-+    if (g_floor_jump && g_hold_release < 0 && mode == GAME_MODE_DUNGEON && gameTask == GAME_TASK_PLAY && NowDngMap != nullptr) {
++    // (not while the gate's opening script is still to fade in: the game goes through "play" between its steps)
++    if (g_floor_jump && !g_gate_held && g_hold_release < 0 && mode == GAME_MODE_DUNGEON && gameTask == GAME_TASK_PLAY &&
++        NowDngMap != nullptr) {
 +        g_hold_release = 4;
 +    }
++    // the gate's opening script faded in: the game's eye would glide from where the gate left it to where the new
++    // floor's scene wants it, under the dark start of that fade in. There is no dark now, so it is put there.
++    if (g_gate_cut && mode == GAME_MODE_DUNGEON && NowCamera__3 != nullptr) NowCamera__3->Step(-1);
 +    if (++g_hold_frames > 600 || (g_hold_release >= 0 && --g_hold_release <= 0)) {
 +        if (HeldTrace()) {
 +            std::fprintf(stderr, "perf held end map %d ticks %d reason %s frame %llu\n", MapNo, g_hold_frames,
@@ -47267,6 +47898,9 @@ index 00000000..400dbe50
 +        g_hold_frames = -1;
 +        g_hold_release = -1;
 +        g_road_jump = g_floor_jump = false;
++        g_gate_held = g_gate_cut = g_gate_built = false;
++        g_walkin_depth = -1;
++        g_gate_ask = g_gate_answer = 0;
 +    }
 +}
 +
@@ -47278,6 +47912,25 @@ index 00000000..400dbe50
 +}
 +
 +void ChronicleEventEnded(int program) {
++    g_gate_ended_at = program == kFloorGateScript ? SharedRuntime().Frame() + 1 : 0;
++    // the gate's opening script is over and never faded in (and hands over to no other): let go once the floor is played on
++    if (g_gate_held && program != kFloorGateScript && BtEventInfo.request != BT_REQUEST_RUN_SCRIPT) {
++        g_gate_held = false;
++        if (g_walkin_depth >= 0) g_gate_cut = true; // it ended inside its walk in, run unseen: the eye is put in place
++    }
++    if (program != kFloorGateScript) g_walkin_depth = -1;
++    if (program == kFloorGateScript) {
++        // a gate that asked first and then neither led on nor left: the picture goes once the floor is played on,
++        // and used again it runs as written
++        const bool nowhere = BtEventInfo.request != BT_REQUEST_RUN_SCRIPT && NextMapNo < 0;
++        if (g_gate_ask >= 4 && g_hold_frames >= 0 && nowhere) g_floor_jump = true;
++        g_gate_as_written = g_gate_ask >= 4 && nowhere;
++        if (g_gate_as_written && HeldTrace()) {
++            std::fprintf(stderr, "perf floor gate led nowhere dungeon %d frame %llu\n", selectMapNo,
++                         static_cast<unsigned long long>(SharedRuntime().Frame()));
++        }
++        g_gate_ask = g_gate_answer = 0;
++    }
 +    if (g_play_event_program == -1 || program != g_play_event_program) return;
 +    const std::string owner = g_play_event_owner;
 +    g_play_event_owner.clear();
@@ -47934,6 +48587,7 @@ index 00000000..400dbe50
 +        if (g_floor_select_owner == mod_id) g_floor_select_owner.clear();
 +        if (g_quick_passage_owner == mod_id) {
 +            g_quick_passage_owner.clear();
++            g_passage_walks = true;
 +            dc::game::DoorwayReset();
 +        }
 +        if (g_roads_owner == mod_id) g_roads_owner.clear();
@@ -47974,6 +48628,7 @@ index 00000000..400dbe50
 +        if (g_exits_owner == mod_id) g_exits_owner.clear();
 +        if (g_zones_owner == mod_id) {
 +            g_zones_owner.clear();
++            g_zones_yield = false;
 +            DngZoneCount = 0;
 +            DngZoneOpenMask = 0;
 +            DngZoneShrines = 0;
@@ -51165,10 +51820,10 @@ index 00000000..2bc093f2
 +} // namespace dc::game
 diff --git a/port/src/moonmod/exit_room.cpp b/port/src/moonmod/exit_room.cpp
 new file mode 100644
-index 00000000..2500d52a
+index 00000000..aedb0f9d
 --- /dev/null
 +++ b/port/src/moonmod/exit_room.cpp
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,187 @@
 +// The walk-through exit room and the seamless floor change (moonmod/chronicle_adapter.hpp). Both are off
 +// (DngExitRoomEnabled, IsSeamlessDungeonEnabled): they are unfinished, and the normal continue/leave window is
 +// used.
@@ -51278,7 +51933,11 @@ index 00000000..2500d52a
 +// collision is only gathered near the camera, which eases over after a jump.
 +void TeleportPlayer(float x, float z) {
 +    if (CharaFrame == nullptr) return;
-+    const float y = DngFloorHeight(NowDngMap, x, z);
++    TeleportPlayer(x, DngFloorHeight(NowDngMap, x, z), z);
++}
++
++void TeleportPlayer(float x, float y, float z) {
++    if (CharaFrame == nullptr) return;
 +    CharaMain.SetPosition(x, y, z);
 +    CharaFrame->SetPosition(x, y, z);
 +    if (NowCamera__3 != nullptr) NowCamera__3->SetFollow(x, y + 14.0f, z);

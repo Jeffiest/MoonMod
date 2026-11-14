@@ -178,11 +178,22 @@ hooks that put the player there in a test run, inert unless the variable is set:
 | --- | --- |
 | `DC_REST_TEST=spring\|stairs\|gate` | Stands the player at the rest floor's spring, stairs trigger or exit trigger, once per floor |
 | `DC_WARDEN_VISIT`, `DC_WARDEN_CHASE` | Walks into the Warden room, or makes the Warden chase |
-| `DC_EXIT_ROOM_TEST`, `DC_BACKROOM_TEST`, `DC_SHORTCUT_VISIT` | The exit room, back-floor stairs, shortcut doors |
+| `DC_EXIT_ROOM_TEST`, `DC_BACKROOM_TEST`, `DC_SHORTCUT_VISIT` | The exit room, back-floor stairs, shortcut doors. `DC_EXIT_ROOM_TEST=gate` works on the game's own floors too: it gives the gate key, stands the player on the exit gate's trigger (at the trigger's own height) and clears the floor's monsters |
+| `DC_ZONE_VISIT=frames`, `DC_ZONE_VISIT_OPEN` | Puts the player outside a zoned floor's first gate that many frames in; with the second set, that gate stands open |
+| `DC_PERF_TRANSITIONS=1` | Prints a `perf ...` line to stderr for every held picture, script fade and floor gate step (`perf floor gate asks over the floor`, `perf held begin floor gate unseen`, `perf floor gate walk in over`, `perf held end ... ticks N`): count frames from these, not from screenshots |
 | `DC_REACH_SEEDS`, `DC_REACH_DUMP` | How many floors `DungeonReach.*` walks; print one floor's grid |
 
 Stand the player on the event's own trigger position, not the centre of the cell. Dark Cloud's triggers are small and
-sit off-centre (see [Dark Cloud engine notes](DARK_CLOUD_NOTES.md#map-events-and-triggers)).
+sit off-centre (see [Dark Cloud engine notes](DARK_CLOUD_NOTES.md#map-events-and-triggers)). Use the trigger's
+height as well (`TeleportPlayer(x, y, z)`): a trigger answers only within 40 units of its own height, and a part
+can put it below its cell's floor (the Sun & Moon Temple's exit gate, 48 down).
+
+Two helpers for a rule that runs a dungeon script where the player does not see it. `EdEventAtOnce` (set around the
+loop that steps the script many times in one frame) makes the script take a character's motion it waits on as
+played out (`CActionSeq::EndMotion`), since no time passes for the character; without it a walk in that waits on a
+motion never ends. `BtSystemScriptFlagTest(program)` gives the event flag a program tests before anything else, or
+-1: a gate whose one program is its lock as well as its way out begins with that test, and a rule that replaces the
+way out must leave the lock alone until the flag is set.
 
 ### 8. Test it
 

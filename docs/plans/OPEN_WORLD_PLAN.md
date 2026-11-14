@@ -91,7 +91,12 @@ Every trip that still loads keeps loading, but nothing stands between the player
    way, the door opened in view, a picture held 7 or 8 frames over the load. The kept house and the live door are
    still to do.)
 5. **Floors without Vigil.** For saves that go floor by floor: the next floor is built in its own world while the
-   party plays the current one, and the stairs are a doorway. Back floors the same way.
+   party plays the current one, and the stairs are a doorway. Back floors the same way. (First piece 2026-11-14: no
+   black from the exit gate to the next floor or to the town, a picture held 5 frames over the build. Second piece
+   the same day: the floors of a region are one map joined by locked gates, walked through with no load; at a
+   region's last gate there is no walk out and no walk in, the question comes up over the floor and the next floor
+   is there 8 frames after the answer. The floor built ahead in its own world, so that a region's end is a doorway
+   too, and back floors are still to do.)
 6. **Hitches.** Menu art, the other characters' models and the weapon models are kept loaded; the autosave writes on
    another thread.
 
@@ -265,3 +270,72 @@ what the roads feel like.
   loaded again on the way out. Zero needs the item as written: the interior's own NPC buffer and kept world, and the
   room drawn live through the open door. Seen on the way: the mod layer knows nothing of houses
   (`game.player.get()` gives no position inside one, and no event says the party went in or came out).
+- 2026-11-14, OW1 item 5, floors, first piece (engine; patch round 55). Read first: the exit gate is the dungeon's
+  script program 160 in every dungeon (a walk out, a fade to black, the "next floor or leave" window, then the
+  floor's opening script, program 100, or the jump to the town); program 100 blacks the screen (a fade in of no
+  length), builds the floor, fades in and plays a walk in. Measured, base game, every frame's screenshot: Divine
+  Beast Cave, gate to floor 2, 58 black frames (1 at the cut to the walk out, 44 around the window, 13 over the
+  build), 636 frames from the press to control; Moon Sea 145 black frames (its opening script waits two seconds in
+  the dark before its cannon scene).
+  Built, with quick passage on: the gate script's fades are cut and what it did under them runs in the same frame;
+  the window comes in over the scene with no black under it and takes the answer at once; from the answer the last
+  picture is held while the opening script runs, at once, up to its first real fade in (its blackout, the build, a
+  wait in the dark, a fade out before a scene: none of it shown), and is let go 3 frames after that. The camera is
+  put where the new floor's scene wants it for those frames (the game glides it there under the dark start of its
+  fade in; without the dark the Shipwreck showed 28 frames of flight through the hull). Leave from the window: the
+  road path's held picture, no black.
+  Checked on the check exe and again (dungeons 0 and 4) on the rebuilt play exe: Divine Beast Cave, Wise Owl Forest,
+  Shipwreck, Moon Sea, Gallery of Time and Demon Shaft, gate to floor 2: 0 black frames at the gate, 5 frames held
+  each, the party on floor 2; contact sheets of the cut looked at for each. Sun & Moon Temple the same, driven with
+  `dungeons.play_event{program = 160}` (the test hook does not reach its gate). Leave: 0 black, 10 frames held, the
+  party in Norune in front of the cave (measured on an earlier build of this piece). With Open World off the Divine
+  Beast Cave is as it was (44 and 13 black frames). Engine tests 799 pass. Trace under `DC_PERF_TRANSITIONS=1`:
+  `perf script fade in|out` (every script fade), `perf floor gate fade in|out cut`, `perf floor gate fade out cut
+  under the held picture`, `perf held begin floor gate`. Headless driver: `DC_EXIT_ROOM_TEST=gate` gives the gate
+  key, stands the party at the gate and clears the floor.
+  Left as the game has it: the walk out (about 80 frames) and the walk in (about 270), and fades a floor's scene
+  does after its first fade in (the Shipwreck's crane scene has a pair: 2 black frames).
+  Not checked: floors that open with a story scene (the hold ends on its own after ten seconds, or when the script
+  ends without a fade in), a Vigil save's own exits (`set_exits`), back floors, the frames from the press to control
+  on the final build (447 on an earlier one), sound, and the eye: nobody has watched it move.
+  Left in item 5: the item as written (the next floor built in its own world ahead of time, the stairs a doorway)
+  and back floors.
+- 2026-11-14, OW1 item 5, floors, second piece (engine and mod; patch round 56). Asked for after the first piece: no
+  animation, walk from one floor to the next, the stairs gone at both ends.
+  Built, mod (setting `floors`, on by default): the floors of a **region** are one map, a zone to a floor, joined
+  by locked gates whose key a monster on the near side carries (`dungeons.set_zones` with `source_floor` per zone
+  and `exit_floor`, the way Vigil World does it, 5 rooms to a floor, 24 floors at most). A region ends where the
+  game needs a map of its own: a story floor's fixed map, a boss, a floor that gives the party to one character or
+  puts a limit on it, a floor whose opening scene is not seen yet (it joins once its story flag is set), and where
+  the walls change (the game loads another set). Come in at a later floor from the entrance's list and the gates
+  behind it stand open and the party starts in that floor's zone. Walking into a floor's zone says "Floor n". The
+  zones are asked for with `yield = true`: another mod's zones (Vigil World) stand over them.
+  Built, engine: `dungeons.set_quick_passage({enabled = true, walks = false})`. The exit gate (program 160) asks
+  "next floor or leave" over the floor before its script starts; Circle steps back with nothing played; from the
+  answer the picture is held while the gate's script (its own question answered at once) and the next floor's
+  opening script, walk in and all, run in the same frames, unseen. A scene run at once takes a character's motion
+  it waits on as played out (`EdEventAtOnce`, `CActionSeq::EndMotion`; the Wise Owl walk in waited on one and never
+  ended). A gate whose one program is its lock as well (it begins with CHECK_EVENT_FLG: the Gallery of Time, the
+  Demon Shaft) runs as written until its key has been used; a gate that was asked first and then led nowhere (the
+  Gallery's last floor before the story is whole) runs as written the next time it is used on that floor.
+  `dungeons.set_zones({yield = true, ...})` is new with it.
+  Checked on the check exe, the Norune save, `DC_EXIT_ROOM_TEST=gate`, every dungeon: the question over the floor,
+  8 frames held from the answer, the walk in begun and over in one frame, the party in control on the next floor.
+  Regions seen: Divine Beast Cave 1-3 (and from its floor 4 on to 5-6), Wise Owl Forest 2-3,
+  Shipwreck 1-4, Sun & Moon Temple 1-3, Moon Sea 1-3, Gallery of Time 1-4, Demon Shaft 1-20 (then 21-40: twenty
+  zones on one map, built in the same 8 frames). The Temple's gate again on the rebuilt play exe: 8 frames.
+  Open World off: the game's own scenes and fades, no held picture. `floors` off: the first piece as it was (walk
+  out and walk in play, 5 frames held). Another mod's zones asked without `yield`: they stand (5 zones, not Open
+  World's 3). The Temple's floor 7 with its scene unseen: alone, and the scene plays; seen: joined
+  with floor 8. Arrival on a first floor through quick passage is as before in all seven (45 to 49 frames held).
+  Engine tests 799 pass, mod tests 81 (Open World), 574 (Vigil), 55 (pack).
+  Test hook fixes on the way: `DC_EXIT_ROOM_TEST=gate` now stands the party at the trigger's own height (the
+  Temple's gate trigger is 48 below its cell's floor and answers only within 40), so the Temple is driven like the
+  rest. Trace under `DC_PERF_TRANSITIONS=1`: `perf floor gate asks over the floor`, `stepped back`, `perf held
+  begin floor gate unseen`, `perf floor gate walk in unseen` / `walk in over`, `led nowhere`.
+  Left as the game has it: a region's end is still a cut (8 frames of held picture), the scene a lock plays when
+  it opens (the Wise Owl's owl), and every fixed-map, boss and story floor.
+  Not checked: a zone gate opened with a key a monster dropped (the gates are Vigil World's, played there; here
+  only walked up to), a real Vigil World save beside this mod (the rule is checked with a stand-in mod and the mod
+  tests), sound, back floors, and the eye: nobody has played it.
+  Left in item 5: the next floor built ahead in its own world so a region's end is a doorway, and back floors.

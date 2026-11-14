@@ -311,7 +311,7 @@ fill again.
 
 ## Zones joined by locked gates (`dungeons.set_zones`, `dungeons.zones_get`, Chronicle)
 
-A floor built while zones are on is a chain of 2-4 **zones** on one map, joined by **zone gates**: you walk from one
+A floor built while zones are on is a chain of two or more **zones** on one map, joined by **zone gates**: you walk from one
 zone into the next with no load. Each zone is built in its own square of the grid (a snake: east, south, then west), its
 rooms joined only to each other; one corridor joins it to the zone before, and that corridor's doorway into the zone is
 a locked gate. The stair down stands in the first zone and the stair up in the last. A monster standing in the zone
@@ -379,6 +379,11 @@ game.dungeons.set_zones({}) -- floors as the game builds them
   `game.dungeon.smoke_touched`; what lies beyond is the mod's to offer (Vigil puts a story floor of the game's own there
   and enters it with `dungeons.enter_floor`). A smoke gate listed in `open` is built open, like any other; don't list
   one in both.
+- `yield = true`: the request **gives way**. It is refused while another mod's request stands, and any mod's
+  request made without `yield` takes its place with no refusal (the yielding mod's next request then fails with
+  "another mod already lays floors out in zones": its cue to leave the floor to the other mod). `{yield = true}`
+  alone lets go of the caller's own request and of no other mod's. For a mod that joins floors on every save
+  (Open World) beside a mod with a layout of its own (Vigil World).
 - The request stays until changed or `{}`; one mod at a time owns it, and unloading that mod clears it. It applies to
   the main floor only, never the back floor, and never to a rest floor.
 - A layout that can't be split cleanly (a room that lands outside its zone, a corridor that gets round a gate) is built
@@ -484,7 +489,7 @@ Smaller floor rules and things to stand on a floor, one entry each:
   the road itself, with `world.transition` to another town or `dungeons.enter_floor({dungeon_id, floor_id = 0})`; with
   quick passage on, a jump between two towns holds the picture as one between a town and a dungeon does. One mod at a
   time; unloading the mod gives the world map back. Returns `{enabled}`. Vigil turns it on for a Vigil World save.
-- `dungeons.set_quick_passage({enabled})`: `{enabled = true}` goes from one place to another with no loading card, no
+- `dungeons.set_quick_passage({enabled, walks})`: `{enabled = true}` goes from one place to another with no loading card, no
   title the game holds for several seconds and no fade: the last picture stays on screen while the other side builds
   (at most ten seconds) and the first picture of the other side replaces it. That is every jump made while walking a
   town, a field or a floor to another town, field or dungeon: a town's door, the world map, a road, a scene's own
@@ -492,9 +497,20 @@ Smaller floor rules and things to stand on a floor, one entry each:
   arrival) shows the scene from its first frames. A save loaded from the title or the pause menu has no card either:
   the dark frame behind the menu is held until the save's town stands or its floor is built. For that the mod must
   hold the passage by the time the place starts: claim it from `game.scene.will_enter` or earlier (the card is decided
-  right after that event). The title's own screens and a new game keep their card. Leaving a dungeon by a knockout,
-  the escape item or the floor's exit keeps the game's own fade to black (about a quarter of a second) and then cuts
-  to the town. A house's door has no fade either way: the party opens the door in view (the game's own motion, about
+  right after that event). The title's own screens and a new game keep their card. Leaving a dungeon by a knockout
+  or the escape item keeps the game's own fade to black (about a quarter of a second) and then cuts to the town. A
+  floor's exit gate shows no black at all: the party walks out as the game has it, the "next floor or leave" window
+  comes in over the scene, and from the answer the last picture is held for a few frames while the next floor is
+  built (or the town is brought back), then the new floor's walk in plays. What the floor's opening script did in
+  the dark before its first fade in (a blackout, a wait, a scene set up) runs at once under the held picture; fades
+  its scene does later are the game's own. With `walks = false` (beside `enabled = true`) the gate has no walk out
+  and the next floor no walk in: at the gate the window asks over the floor, before the gate's script starts;
+  Circle steps back with nothing played; from the answer the picture is held (8 frames) while the gate's script
+  and the next floor's opening script, its walk in included, run at once and unseen, and the party stands on the
+  next floor in control. A motion such a scene waits on is taken as played out. A gate whose program is its lock
+  as well (the Gallery of Time, the Demon Shaft: it begins by testing its key's event flag) runs as written until
+  the key has been used, and a gate that was asked and then led nowhere runs as written the next time. A floor
+  that opens with a story scene shows the scene. The op returns `{enabled, walks}`. A house's door has no fade either way: the party opens the door in view (the game's own motion, about
   a second going in and three quarters of one coming out), the last picture is held for a few frames over the load,
   and the room or the town is there. Between a town and its dungeon there is more: the town and the dungeon
   both stay loaded (each keeps its own memory and textures), and each is drawn live through the other's way through,

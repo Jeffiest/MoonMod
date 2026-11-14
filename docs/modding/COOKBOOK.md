@@ -143,7 +143,7 @@ end)
 | `dungeons.set_exits({town = "shrines"})` | No town from the Escape menu or the exit gate (the gate leads on); your mod's own way out is the only one |
 | `game.dungeon.defeated` then `dungeons.enter_floor({dungeon_id, floor_id, x, y})` from town | Wake the party somewhere after a knockout (Vigil: at the last shrine) |
 | `weapons.abs_add({id, character, slot, amount = -n})` | Take a weapon's unspent ABS (a death drop, a toll); it never goes below 0 |
-| `dungeons.set_zones({zones = {{rooms = 5, source_floor = 0}, {rooms = 5, source_floor = 1}}, exit_floor = 2})` | A **region**: two of the game's floors on one map, each zone with its own floor's monsters, atla and chest items, the exit gate leading past both; `dungeons.set_arrival({zone = 1})` starts the player at the second floor's shrine |
+| `dungeons.set_zones({zones = {{rooms = 5, source_floor = 0}, {rooms = 5, source_floor = 1}}, exit_floor = 2})` | A **region**: two of the game's floors on one map, each zone with its own floor's monsters, atla and chest items, the exit gate leading past both; `dungeons.set_arrival({zone = 1})` starts the player at the second floor's shrine; `yield = true` gives way to another mod's zones |
 | `dungeons.warp({x, y})` / `dungeons.enter_floor({floor_id, x, y})` | Move the player on this floor at once / build a floor again from the start (monsters back) and arrive at a cell; from a town add `dungeon_id` (fast travel) |
 | `dungeons.map_snapshot()` / `dungeons.set_seen({seed, cells})` / `dungeons.set_waypoint({x, y})` | Keep what the player has seen of a floor, give it back on the next visit, and flag a cell on the mini map |
 | `dungeons.set_opened_chests({chests, back_chests})` | With `set_seed`, open the chests the player already opened (numbers from `game.chest.opened`) as the floor is built again; `dungeons.chests_get()` lists a floor's chests |
@@ -154,6 +154,7 @@ end)
 | `dungeons.set_character_blocks({characters})` | Character-only doors and jumps appear only for these |
 | `dungeons.set_backrooms({free, title, text, stay, lines})` | Back-floor stairs ask with a panel instead of taking the key |
 | `dungeons.set_quick_passage({enabled = true})` | No loading card on any trip from one place to another; a town and its dungeon both stay loaded |
+| `dungeons.set_quick_passage({enabled = true, walks = false})` | The same, and a floor's exit gate asks over the floor and cuts to the next floor: no walk out, no walk in |
 | `world.set_roads({enabled = true})` + `game.town.road` | A town's gate asks the mod instead of opening the world map: answer with a `ui.choice_open({..., town = true})` panel of places, then `world.transition` or `dungeons.enter_floor` |
 | `dungeons.set_floor_select({enabled = false})` | The dungeon entrance skips its floor menu and goes straight to floor 1 |
 | `dungeons.set_npc_models` + `dungeons.set_npc_marks` | Stand a character (a scene's pack) at cells of a dungeon floor |
@@ -213,7 +214,13 @@ With `dungeons.set_quick_passage({enabled = true})` the engine does the rest:
   scene's own jump, `world.enter_map`, a floor to a floor) holds the last picture on screen until the other side is
   ready (at most ten seconds), then cuts. A loaded save has no card either, if the mod holds the passage by
   `game.scene.will_enter`; the title's own screens and a new game keep theirs. A house's door, in or out, has no
-  fade: the party opens it in view and the picture cuts to the room, or back to the town.
+  fade: the party opens it in view and the picture cuts to the room, or back to the town. A floor's exit gate has
+  none either: the window comes in over the scene, and the picture cuts to the next floor's walk in, or to the town.
+- **Floors walked.** Add `walks = false` and the gate has no walk out and the next floor no walk in: the question
+  comes up over the floor and the party stands on the next floor 8 frames after the answer. Pair it with regions
+  (`set_zones` with `source_floor` per zone, asked in `game.dungeon.generating`) and most stairs are gone
+  altogether: the floors between two of the game's fixed maps are one map joined by locked gates. Ask for those
+  zones with `yield = true` if a mod with its own layout should win. `mods/moonmod.openworld/main.lua` does both.
 - **Connected worlds.** Each place keeps its own memory (town `100 + map`, dungeon its map), so walking back out of
   the dungeon resumes the town as it was left, villagers where they stood, and walking back in resumes floor 1.
 - **The door is a window.** Norune's cave door, once opened, stays open, and the cave is drawn live through it; inside,
