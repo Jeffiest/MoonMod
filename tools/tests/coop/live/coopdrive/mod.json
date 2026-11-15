@@ -6,8 +6,8 @@
   "author": "MoonMod tests",
   "description": "Plays one game of a live co-op test from a script (tools/tests/coop/live): waits, walks into places, strikes monsters, leaves, and logs what it sees. Only the live harness installs it.",
   "framework_api": 1,
-  "games": ["chronicle"],
+  "games": ["chronicle", "chronicle-two"],
   "entry": "main.lua",
   "coop": "local",
-  "permissions": ["game.read", "game.write", "storage.read", "storage.write"]
+  "permissions": ["game.read", "game.write", "content.register", "storage.read", "storage.write"]
 }

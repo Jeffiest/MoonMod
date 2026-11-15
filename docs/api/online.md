@@ -176,6 +176,122 @@ game.mods.settings_overlay_clear({})                                            
 Online Co-op uses these to make every game in a room play the same mods with the host's settings: see
 `docs/plans/COOP_PLAN.md`, "The room's mods".
 
+## Chronicle Two's co-op (what differs from Chronicle)
+
+The same operations and events with Dark Chronicle's records, in the ChronicleTwo engine (`port/docs/COOP.md`
+there). It runs on the real game since 2026-11-14 (`tools/coop/live.py` in ChronicleTwo: two games on the disc's
+data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
+
+- The relay `game` id is `chronicle-two`; a room is one game at one protocol number.
+- `save.world_export` is `DCW2...`: the story flags and counters, each map's flags, the time and day, where the host
+  is, the Georama parts held, each town's record and its layout, dungeon progress, quests, the monster book and the
+  fishing tournament. `save.player_export` is `DCP2...`: Max, Monica and the ridepod, the bag and bait, the
+  aquarium, badges, the townsfolk in the party, inventions and photos, Gilda, medals, fishing records and costumes.
+  `georama.town_export` is `DCT2<town>:...`. The bytes are packed before they become text (what repeats is written once; `!` after the tag): a
+  save's records are mostly empty, and unpacked a world is several hundred kilobytes, over the 64 KiB an operation
+  answers. Imports read packed and plain text alike. Accounts live in `<save root>/moonmod/coop_accounts.json`.
+- `session.start {visit = {world, player?, map_no}}` starts in a map by its own number (the host's
+  `world.get().map_no`); `map`, a Georama town's area (0-4), still works for a town that has a Georama map. Palm
+  Brinks has none, so `map_no` is the only way to join a host there.
+- `world.get` adds, in a town: `town_map` (the area), `scene_map` (the map the town runs: a district of Palm Brinks
+  is a map of its own while `map_no` stays the town's), `house` (the sub map the hero is inside, if any),
+  `map_title` (the place's name as the game shows it), `editing` and `walking`; on a floor: `floor_seed`,
+  `floor_layout` and `walking`; always: `map_no`, `progress` (how far the story is) and `chapter`.
+- `dungeons.set_seed` decides the whole floor: its layout (a preset floor's pick too), then its chests, then its
+  monsters each start from a number made of the seed, whatever the game drew in between. `floor_layout` is a number
+  for the floor as built (cells, chests and what they hold, monsters and where), equal in two games that built the
+  same floor.
+- `dungeons.enter_floor {dungeon_id, floor_id}` lands on the floor itself (the dungeon's floor load event), not on
+  its floor list. `x`, `y` and `teleport` are accepted and not used: the way in is the floor's own.
+- `player.get` adds `heading`, `motion`, the melee `weapon`, `outfit` (`{head, clothes, feet, sub}`, the item
+  numbers of what the hero wears and of the second weapon) and, in a town, `town_character` and the position.
+- `world.avatar_set` shows `"max"` or `"monica"`, tinted through the ambient light, in the `outfit` given (`{head,
+  clothes, feet, sub}`, each left out at will: then as this game's own hero has it) with the hat or hair piece and
+  the weapons on the body; no name over the head yet. It takes `"ridepod"` and `"monster"` too (what `player.get`
+  says of a player in the ridepod or a monster's form), drawn as Max or Monica standing in for them.
+- `monsters.mirror_get`'s `hits` are the blows the host's monsters landed on other players' heroes:
+  `{avatar, monster, damage, kind, flags}`, `damage` the blow's strength and `kind` 2 (a flinch) or 3 (a knock-down).
+  `combat.strike_player`'s `damage` is that strength: the struck hero's own defence comes off it.
+- `ui.choice_open` does not pause the game; while the panel is open the pad's buttons are the panel's (the press
+  that picks an option does not also act in the game) and the sticks stay the game's.
+- A player's own saves: `save.slots_list()` gives this game's numbered saves and how far each one's story is,
+  `{slots = {{slot, ready, progress, chapter, play_time}}}`. `save.slot_player_export({slot})` reads a player's
+  things (`save.player_export` text) out of one without loading it: `{slot, data, progress, chapter}`.
+  `save.slot_player_import({slot, data})`, during this mod's visit only, writes the player's things back into that
+  save and nothing else of it: its story, towns and dungeon records stay as they are. Before the first write to a
+  save in a run of the game the file is copied to `<save root>/moonmod/coop-own-saves/`.
+- The operations that carry a save's text (`save.world_export/import`, `save.player_export/import`,
+  `save.slot_player_export/import`, `save.account_get/set`, `session.start`, `georama.town_export/import`) take
+  and answer up to 2 MiB; every other operation keeps the 64 KiB limit.
+- One hero each: `party.room_hero_set({hero = "max" | "monica"})` makes this game play that hero whatever the
+  story's party says, until `party.room_hero_clear()` (or the mod that set it unloads). Monica can be played before
+  the story has her; the other hero cannot be changed to; the hero's own second shape (the ridepod, a monster form)
+  is open when the story has opened it; sealed floors carry no seal. Nothing is written into the save: the rule is a
+  filter where the game reads its party, and the story's own scripts still hear the story's party. A visit begun
+  after it starts as that hero; set while playing, the game changes hero as soon as the player is free (walking a
+  town or a floor). `world.get().room_hero` says which. The story's party fields (who is in the party, who can be
+  changed to) travel with the world, not with a player's things.
+- The world as it changes: `world.watch_set({enabled})` has this mod told, as `game.world.changed {kind, id,
+  value}`, of each change this game makes to the parts of the save two games share: `flag` (a story flag, true or
+  false), `counter` (a story counter), `progress` (id 0), `party` (id 0 the members, 1 who can be changed to, 2 the
+  mask), `recruit` (a townsperson who can join, `{chara_no, status}`), `floor` (a dungeon floor's record, nine
+  numbers), `stock` (how many of a Georama part are built and waiting to be placed, id the part's number),
+  `gift` (an item one of the story's scripts gave this player, id the item's number, value how many; a chest's
+  content and a floor's prize are not told: `world.change_apply` adds a gift to the other player's own bag) and
+  `town` (id 0-4: that town's Georama changed; the value is only a number for the town as it stands, the town
+  itself is `georama.town_export`'s). A town or a floor beginning is where the games start from and tells nothing.
+  `world.change_apply({kind, id, value})` writes another game's change into the save without telling it back (every
+  kind but `town`, which goes through `georama.town_import`); a floor's record is merged (flags together, higher
+  counts, the better time). Each map's own flags are not shared.
+- A Georama town is a number 0-4 (Sindain, Balance Valley, Veniccio, Heim Rada, Moon Flower Palace): its map's
+  number, which is what `georama.town_export/import`'s `town_id` means. It is not `world.get().town_map`, which
+  is the area; `world.get().georama_town` gives the number when the town on screen is one of the five (Palm
+  Brinks has no Georama).
+- A town as it is built: while the world is watched, a town in its editor is written into its record as its
+  player builds, so `town` is told at each part placed, moved or taken away, not only on leaving the editor.
+  `georama.town_import` into a town this game's player stands in answers `reloaded = false, rebuilding = true`:
+  nobody is walked back to the entrance; the town on screen is built again from its record where the player
+  stands, as soon as they walk free (after a scene or a menu, or on coming out of a house). It is still refused
+  as `busy` while this game's player is in that town's editor.
+- Who runs a floor: in Chronicle Two the co-op mod has a floor's monsters run by whoever was on it first, host or
+  joiner (`monsters.mirror_get` there, `monsters.puppet_set` in the other game), and by the other when the first
+  leaves. The engine's operations do not care which game is the host.
+- Down, not out: `player.down_rule_set({enabled})`. While it holds, a hero whose life runs out on a floor plays
+  their death and stays lying (`player.get().down == true`): the game's own death (change hero, or Game Over) does
+  not run, nothing strikes them, and this game's monsters go for the other players first.
+  `player.revive({hp, x?, y?, z?})` stands them up with that much life, where they lie or at the place given;
+  `player.give_up()` lets the game's own death run after all. The rule goes when the mod that set it unloads (a
+  hero who is down then gets the game's death). `world.avatar_set`'s `down = true` marks another player's hero as
+  down: this game's monsters neither go for it nor strike it.
+- `world.get()` on a floor adds `exit_map`, the map the dungeon's own way out leads to (for
+  `world.enter_map`), and the floor's clear as the game decides it: `monsters_counted` (the monsters still counted
+  against the clear), `mimic_chests` and `floor_cleared`; in a Georama town, `georama_live_parts`, how many parts
+  stand in the town as it is on screen.
+- A panel from `ui.choice_open` stays until the player picks or backs out, or the game leaves a town or a floor (a
+  load), which closes it as backed out (`ui.choice_made` with `cancelled`). `ui.choice_close {}` closes the calling
+  mod's own panel quietly, with no `ui.choice_made`, and answers `{closed}`; another mod's panel stays open.
+- On a follower's floor a monster the leader gains after the floor was built (a late spawn) is made in the same
+  slot here, from the floor's loaded kinds, a mod enemy or the game's own refer; a kind this game cannot make is
+  refused for that slot only and logged once. A monster the leader no longer lists is gone here too, so it stops
+  counting against the clear.
+- A Georama part that lands where this game's player stands moves the player to the nearest walkable spot.
+- Down, not out in the co-op mod: Revive is the left stick (L3) or V, not Chronicle's right stick or R. In a
+  Dark Chronicle dungeon R3 changes to the ridepod or a monster form and R (the keyboard's R2) is the first-person
+  view; L3 changes hero, which a room's one hero each turns off. The powder a reviver may use is the Resurrection
+  Powder.
+- The co-op mod in a room of two, either way round: the floor's check ("K", "SYNC": the doors opened there) goes
+  both ways, so a host following a joiner's floor is offered to walk in again beside the joiner when that floor's
+  monsters can't be copied; two floors built apart leave the host's standing. Where two games change one story flag
+  or counter within three seconds of each other, the host's value stands: the host does not take the joiner's and
+  tells its own again. After every swap of heroes the host says how the room stands ("SW is0" / "SW is1"), so two
+  swaps that cross end on two heroes. A joiner's game holds the host's changes of the world ("X") and its towns
+  that arrive between the host sending its world and the visit beginning, and takes them as it begins.
+- A joiner who brings a save of their own writes into it only things that came out of it: a host that answers
+  with things of its own keeping (an older host, or one that did not take the save) leaves the save as it is, and
+  the joiner is told so. A room closing (the host closing it, the host's game gone) writes the joiner's things
+  into their save before the visit ends.
+- A headless game runs unpaced; `DC2_HEADLESS_BOUNDED=1` keeps it at the real tick rate (the live tests).
+
 ## Messages players leave for each other (`messages.*`, Chronicle)
 
 The `messages.*` operations need `storage.read` / `storage.write`. There is no server: each

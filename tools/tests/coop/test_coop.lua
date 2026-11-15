@@ -15,15 +15,25 @@ local function queue(game_state, event) game_state.net_events[#game_state.net_ev
 
 local function make_game(name, opts)
   opts = opts or {}
+  -- opts.game: "chronicle" (Dark Cloud, the default) or "chronicle-two" (Dark Cloud 2), as game.info.get names it.
+  local dc2 = opts.game == "chronicle-two"
   local S = {name = name, handlers = {}, storage = {}, settings = {name = name}, toasts = {}, layers = {},
              net_events = {}, net = nil, session = {kind = "story"}, accounts = {}, frame = 0, keys = {},
-             world = "DCW1" .. string.rep("w", 30000) .. name, things = "DCP1" .. string.rep("p", 20000) .. name,
-             map = {context = "georama", map_id = 2}, title = nil, started = nil, imported = {},
+             world = (dc2 and "DCW2" or "DCW1") .. string.rep("w", 30000) .. name,
+             things = (dc2 and "DCP2" or "DCP1") .. string.rep("p", 20000) .. name,
+             map = dc2 and {context = "georama", map_id = 23, town_map = 2, scene_map = 23, map_no = 23, map_title = "Balance Valley"} or {context = "georama", map_id = 2},
+             title = nil, started = nil, imported = {},
              avatars = {}, seeds = {}, player = {character = "toan"},
              monsters = {}, avatar_hits = {}, puppets = nil, mirror_hits = {}, strikes = {},
              doors_out = {}, doors_run = {}, door_busy = false,
              panel = nil, entered = {}, gilda = 1000, bag = {}, follows = {},
              towns = {[0] = "DCT10:start", "DCT11:start", "DCT12:start", "DCT13:start", "DCT14:start"}}
+  if dc2 then
+    S.towns = {[0] = "DCT20:start", "DCT21:start", "DCT22:start", "DCT23:start", "DCT24:start"}
+  end
+  S.slot_writes = {}
+  S.applied = {}
+  S.hero_log = {}
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
     on = function(event, fn) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], fn) end,
@@ -42,16 +52,18 @@ local function make_game(name, opts)
   end
   S.mods_list, S.mod_settings, S.overlay = opts.mods, opts.mod_settings or {}, {}
   env.game = {
+    info = {get = function() return {id = opts.game or "chronicle", name = dc2 and "Chronicle Two" or "Chronicle", api_major = 1} end},
     mods = opts.mods and {
       list = function() return {mods = S.mods_list} end,
       settings_get = function(a) return {id = a.id, values = S.mod_settings[a.id] or {}} end,
       settings_overlay = function(a) S.overlay[a.id] = a.values; return {id = a.id, applied = true} end,
       settings_overlay_clear = function() S.overlay = {}; S.overlay_cleared = (S.overlay_cleared or 0) + 1; return {cleared = true} end,
     } or nil,
-    ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end, register = function() return true end,
+    ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end,
+          register = function(a) S.actions = S.actions or {}; S.actions[a.id] = a; return true end,
           choice_open = function(a) if S.panel then return nil, {message = "a panel is open"} end; S.panel = a; return {} end},
     render = {layer_register = function(l) S.layers[l.id] = l.text end, layer_remove = function(l) S.layers[l.id] = nil end},
-    input = {bind = function() return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end,
+    input = {bind = function(a) S.binds = S.binds or {}; S.binds[a.id] = a.keys; return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end,
              state = function(a) return {down = S.keys[a.id] == true} end},
     title = {mode_register = function(d) S.title = d; return true end, mode_set = function(d) S.title = d; return true end},
     world = {
@@ -66,6 +78,13 @@ local function make_game(name, opts)
       set_time = function(a) S.clock = a.fraction; S.clock_sets = (S.clock_sets or 0) + 1; return {time = {fraction = a.fraction}} end,
       avatar_set = function(a) S.avatars[a.slot] = a; return {slot = a.slot, shown = true} end,
       avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
+      -- Chronicle Two's shared world (opts.shared): what the game is asked to watch, and the changes it is given
+      watch_set = opts.shared and function(a) S.watching = a.enabled; return {enabled = a.enabled} end or nil,
+      change_apply = opts.shared and function(a)
+        if a.kind == "flag" and type(a.value) ~= "boolean" then return nil, {message = "a flag is true or false"} end
+        S.applied[#S.applied + 1] = a
+        return {applied = true}
+      end or nil,
     },
     player = {
       get = function() return S.player end,
@@ -90,7 +109,7 @@ local function make_game(name, opts)
         S.puppets = a.monsters
         local hits = S.puppet_hits or {}
         S.puppet_hits = {}
-        return {followed = {}, refused = {}, hits = hits}
+        return {followed = {}, refused = S.refused or {}, hits = hits}
       end,
       puppet_clear = function() S.puppets = nil; return {cleared = true} end,
       mirror_hit = function(a) S.mirror_hits[#S.mirror_hits + 1] = a; return {slot = a.slot, damage = a.damage} end,
@@ -155,6 +174,15 @@ local function make_game(name, opts)
       end,
       finish = function() S.session = {kind = "title"}; S.pending_event = {"game.session.ended", {kind = "visit"}}; return {} end,
     },
+    party = opts.heroes and {
+      room_hero_set = function(a)
+        if a.hero ~= "max" and a.hero ~= "monica" then return nil, {message = "hero must be 'max' or 'monica'"} end
+        S.room_hero = a.hero
+        S.hero_log[#S.hero_log + 1] = a.hero .. (S.session.kind == "visit" and " in the visit" or "")
+        return {hero = a.hero}
+      end,
+      room_hero_clear = function() local had = S.room_hero ~= nil; S.room_hero = nil; return {cleared = had} end,
+    } or nil,
     save = {
       world_export = function() return {data = S.world} end,
       player_export = function() return {data = S.things} end,
@@ -166,6 +194,18 @@ local function make_game(name, opts)
         return {accounts = out}
       end,
       account_remove = function(a) local had = S.accounts[a.id] ~= nil; S.accounts[a.id] = nil; return {removed = had} end,
+      slots_list = opts.slots and function() return {slots = opts.slots} end or nil,
+      slot_player_export = opts.slots and function(a)
+        for _, slot in ipairs(opts.slots) do
+          if slot.slot == a.slot and slot.ready then return {slot = a.slot, data = "DCP2 own " .. a.slot, progress = slot.progress} end
+        end
+        return nil, {message = "no save has the number " .. tostring(a.slot)}
+      end or nil,
+      slot_player_import = opts.slots and function(a)
+        if S.session.kind ~= "visit" then return nil, {message = "only this mod's co-op visit writes a player's things into a save"} end
+        S.slot_writes[#S.slot_writes + 1] = {slot = a.slot, data = a.data}
+        return {slot = a.slot, written = true}
+      end or nil,
     },
     net = {
       host = function(a)
@@ -1254,6 +1294,786 @@ do
     h3.emit("runtime.unloaded", {})
     check(h3.net == nil and h3.down_rule == false and h3.gave_up == true, "switched off in a room: the room closes and no one is left lying down")
   end
+end
+
+print("Chronicle Two: the same mod in Dark Cloud 2")
+do
+  relay.rooms = {}
+  local h = make_game("Max", {game = "chronicle-two"})
+  local g = make_game("Monica", {game = "chronicle-two"})
+  check(h.mod.game == "chronicle-two" and h.mod.town_tag == "DCT2", "the mod knows which game it is in", h.mod.game)
+  check(h.mod.dungeons[0] == "Underground Channel" and h.mod.towns[4] == "Moon Flower Palace" and h.mod.towns[0] == "Sindain",
+        "and names Dark Cloud 2's dungeons and its Georama towns")
+  check(g.title.subtitle == "Visit a friend's Dark Cloud 2", "the title page says whose world", g.title.subtitle)
+  h.keys.host_key = true
+  both(h, g, 2)
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 6)
+  check(g.started and g.started.world == h.world and g.started.world:sub(1, 4) == "DCW2", "the guest's visit takes the host's Dark Cloud 2 world",
+        g.started and g.started.world:sub(1, 4))
+  check(g.started and g.started.map == 2, "and arrives in the host's town by its area (world.get().town_map), not its map number",
+        g.started and g.started.map)
+  check(g.started and g.started.map_no == 23, "and at the host's own map (world.get().map_no): Palm Brinks has no other name",
+        g.started and g.started.map_no)
+  check(h.layers.coop_who == "Monica" and g.layers.coop_who == "Max", "the HUDs name each other")
+  -- a place is the map the town runs; inside a house, the map and the house in one number
+  g.map = h.map
+  both(h, g, 40)
+  check(h.mod.state.places["T23"] == "Balance Valley" and g.mod.state.places["T23"] == "Balance Valley",
+        "each game says what its place is called", tostring(g.mod.state.places["T23"]))
+  -- the guest's things are Dark Cloud 2's, and the host keeps them
+  g.things = "DCP2" .. string.rep("q", 30000) .. "after a fight"
+  both(h, g, 60 * 60 + 2)
+  local kept = h.accounts[g.storage.me.id]
+  check(kept and kept.data == g.things, "after a minute the host keeps the guest's Dark Cloud 2 things", kept and #kept.data)
+  -- the host in a dungeon: the guest arrives in the town that dungeon is reached from
+  local k = make_game("Donny", {game = "chronicle-two"})
+  h.mod.state.ROOM_FOR = 4 -- (a third game, to see what the host passes on: by itself a Dark Cloud 2 room is for two)
+  h.map = {context = "dungeon", dungeon_id = 5, floor_id = 2, floor_seed = 77, map_no = 40}
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if k.title.entries[i].label:sub(-1) == ("ABCDE"):sub(i, i) then break end
+      k.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  k.emit("game.title.selected", {entry = "join"})
+  both(h, k, 6)
+  check(k.started and k.started.map == 4, "Moon Flower Palace is reached from Heim Rada (area 4)", k.started and k.started.map)
+  -- a Dark Cloud 2 town goes across with its own tag
+  -- (the town's Georama goes by its own number, 1, which is neither its area nor the map the test stands on)
+  g.map = {context = "georama", map_id = 23, town_map = 2, georama_town = 1, scene_map = 23, map_no = 23, map_title = "Balance Valley", editing = true}
+  both(h, g, 31)
+  g.towns[1] = "DCT21:" .. "a windmill"
+  g.map = {context = "georama", map_id = 23, town_map = 2, georama_town = 1, scene_map = 23, map_no = 23, map_title = "Balance Valley", editing = false}
+  both(h, g, 31)
+  check(h.towns[1] == "DCT21:a windmill" and h.last_base == "DCT21:start", "the guest's edit of Balance Valley reaches the host, merged over the town as it was",
+        tostring(h.towns[1]))
+  check(find_toast(h, "changed Balance Valley"), "and the host is told by the town's name")
+  -- the follow offer names Dark Cloud 2's places (the offer for the host's earlier move is answered first)
+  g.settings.follow_offers = true
+  if g.panel then g.choose(nil) end
+  h.map = {context = "dungeon", dungeon_id = 6, floor_id = 9, floor_seed = 1, map_no = 40}
+  h.player = {character = "max", weapon = {item_no = 300}, position = {x = 10, y = 0, z = 20}, heading = 0.5, motion = 1}
+  both(h, g, 48) -- a new place is offered once it has settled (the floor's number and seed held for a moment)
+  check(g.panel and g.panel.title:find("Zelmite Mine, floor 9", 1, true) ~= nil, "a follow offer names the Zelmite Mine floor by the game's own number", g.panel and g.panel.title)
+  -- the host walks into a house in another town: no question is asked (Dark Cloud 2 asks only at a dungeon floor),
+  -- but the Mod Manager's "Join a player" names the house as the host's game does, and the way there is the town's map
+  if g.panel then g.choose(nil) end
+  h.map = {context = "georama", map_id = 12, town_map = 1, scene_map = 12, house = 34, map_no = 10, map_title = "Max's House", walking = true}
+  both(h, g, 48)
+  check(g.panel == nil, "a friend walking about the towns is not asked after at every door", g.panel and g.panel.title)
+  g.emit("ui.action", {id = "follow"})
+  both(h, g, 2)
+  check(g.panel and g.panel.options[1] and tostring(g.panel.options[1].subtitle):find("Max's House", 1, true) ~= nil,
+        "the Mod Manager's Join a player names a house by the name its game gave", g.panel and g.panel.options[1] and g.panel.options[1].subtitle)
+  g.entered = {}
+  if g.panel then g.choose(1) end
+  both(h, g, 4)
+  check(g.entered[1] == "map 12", "and joining walks into the town map the house stands in", g.entered[1])
+end
+
+print("Chronicle Two: a joiner's own save, and the gate")
+do
+  relay.rooms = {}
+  local function entry(g, id) for _, e in ipairs(g.title.entries) do if e.id == id then return e end end end
+  local function has_line(g, text) for _, l in ipairs(g.title.lines) do if l:find(text, 1, true) then return true end end return false end
+  local function type_code(g, room)
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if g.title.entries[i].label:sub(-1) == room:sub(i, i) then break end
+        g.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+  end
+  -- the host's own story has to be past the talk with Donny
+  local h = make_game("Max", {game = "chronicle-two", slots = {}})
+  h.map.progress = 1
+  h.keys.host_key = true
+  h.tick(3)
+  check(h.mod.state.role == nil and find_toast(h, "talked to Donny"), "a host whose story has not reached Donny opens no room")
+  h.map.progress = 2
+  h.keys.host_key = true
+  h.tick(3)
+  check(h.mod.state.role == "host", "at the gate the room opens")
+  local room = h.mod.state.code
+  -- a joiner whose only save is before the gate
+  local early = make_game("Early", {game = "chronicle-two", slots = {{slot = 0, ready = true, progress = 1, chapter = 0}}})
+  early.emit("game.title.opened", {})
+  check(has_line(early, "talked to Donny") and entry(early, "join").enabled == false and entry(early, "save").label == "Your save: none yet",
+        "a joiner with no save past the gate is told so, and Join is closed")
+  type_code(early, room)
+  early.emit("game.title.selected", {entry = "join"})
+  both(h, early, 6)
+  check(early.mod.state.role == nil and early.started == nil, "and joining does nothing")
+  -- a joiner with saves: the ones past the gate can be picked, and the pick's things come along
+  local g = make_game("Monica", {game = "chronicle-two", slots = {
+    {slot = 0, ready = true, progress = 1, chapter = 0}, {slot = 2, ready = true, progress = 2, chapter = 1},
+    {slot = 5, ready = true, progress = 7, chapter = 5}, {slot = 6, ready = false, progress = 0, chapter = 0}}})
+  g.emit("game.title.opened", {})
+  check(entry(g, "save").label == "Your save: File 3 (chapter 1)" and entry(g, "save").enabled == true and #g.title.entries == 8,
+        "the page names the first save past the gate", entry(g, "save").label)
+  g.emit("game.title.selected", {entry = "save"})
+  check(entry(g, "save").label == "Your save: File 6 (chapter 5)", "and steps to the next one", entry(g, "save").label)
+  g.emit("game.title.selected", {entry = "save"})
+  g.emit("game.title.selected", {entry = "save"})
+  check(entry(g, "save").label == "Your save: File 6 (chapter 5)" and g.storage.own_slot == 5, "round the saves and back; the pick is remembered",
+        entry(g, "save").label)
+  type_code(g, room)
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 6)
+  check(g.started and g.started.player == "DCP2 own 5" and g.started.world == h.world, "the visit starts with the things of the save picked",
+        g.started and g.started.player)
+  check(find_toast(h, "joins with their own save") and next(h.accounts) == nil, "and the host keeps nothing for that player")
+  g.things = "DCP2" .. string.rep("q", 500) .. "after a fight"
+  both(h, g, 60 * 60 + 2)
+  local wrote = g.slot_writes[#g.slot_writes]
+  check(wrote and wrote.slot == 5 and wrote.data == g.things, "after a minute the things are written into that save", wrote and wrote.slot)
+  check(next(h.accounts) == nil, "not sent to the host")
+  -- the host closing its room does not wait on a joiner who keeps their own things
+  h.keys.leave_key = true
+  both(h, g, 6)
+  check(h.mod.state.role == nil and g.started ~= nil and find_toast(g, "host"), "the host closes at once: there is nothing of that player's to keep")
+  -- a game that says its save is past the gate when it is not: the host turns it away
+  relay.rooms = {}
+  local h2 = make_game("Max", {game = "chronicle-two", slots = {}})
+  h2.map.progress = 4
+  h2.keys.host_key = true
+  h2.tick(3)
+  local liar = make_game("Liar", {game = "chronicle-two", slots = {{slot = 1, ready = true, progress = 1, chapter = 0}}})
+  liar.mod.own.GATE = 0
+  liar.emit("game.title.opened", {})
+  type_code(liar, h2.mod.state.code)
+  liar.emit("game.title.selected", {entry = "join"})
+  both(h2, liar, 8)
+  check(liar.started == nil and next(h2.mod.state.players) == nil or not (h2.mod.state.players[1] and h2.mod.state.players[1].in_visit),
+        "a save before the gate is refused by the host, whatever its game says")
+  check(liar.started == nil, "and no visit starts")
+end
+
+print("Chronicle Two: one hero each, and the swap")
+do
+  relay.rooms = {}
+  local function type_code(g, room)
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if g.title.entries[i].label:sub(-1) == room:sub(i, i) then break end
+        g.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+  end
+  -- alone in a room there is nobody to swap with
+  local alone = make_game("Solo", {game = "chronicle-two", heroes = true})
+  alone.keys.host_key = true
+  alone.tick(3)
+  alone.emit("ui.action", {id = "swap"})
+  check(find_toast(alone, "exactly two players"), "a host alone is told a swap takes two")
+  relay.rooms = {} -- the fake relay gives every host the same code: one room at a time
+  local h = make_game("Jeffie", {game = "chronicle-two", heroes = true})
+  local g = make_game("April", {game = "chronicle-two", heroes = true})
+  h.keys.host_key = true
+  both(h, g, 3)
+  check(h.room_hero == "max", "the host's game plays Max once its room is open", tostring(h.room_hero))
+  g.emit("game.title.opened", {})
+  type_code(g, h.mod.state.code)
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  check(g.started ~= nil and g.room_hero == "monica" and g.hero_log[1] == "monica",
+        "the joiner's game is given Monica before its visit starts, so it starts as her", table.concat(g.hero_log, ", "))
+  -- each game draws the other's hero in what that player's own hero wears
+  h.player = {character = "max", town_character = "max", outfit = {head = 301, clothes = 302, feet = 303, sub = 304},
+              position = {x = 10, y = 0, z = 20}, heading = 0, motion = 0}
+  g.player = {character = "monica", town_character = "monica", outfit = {head = 0, clothes = 402, feet = 403, sub = 404},
+              position = {x = 14, y = 0, z = 20}, heading = 0, motion = 0}
+  g.map = h.map
+  both(h, g, 48)
+  local sees_host, sees_guest = g.avatars[1], h.avatars[1]
+  check(sees_host and sees_host.character == "max" and sees_host.outfit and sees_host.outfit.head == 301 and sees_host.outfit.sub == 304,
+        "the joiner's game is told what the host's Max wears", sees_host and sees_host.outfit and sees_host.outfit.head)
+  check(sees_guest and sees_guest.character == "monica" and sees_guest.outfit and sees_guest.outfit.clothes == 402 and sees_guest.outfit.head == nil,
+        "and the host's what the joiner's Monica wears (nothing on her head)", sees_guest and sees_guest.outfit and sees_guest.outfit.clothes)
+  h.player.outfit.head = 311
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].outfit.head == 311, "a change of hat reaches the other game", g.avatars[1] and g.avatars[1].outfit.head)
+  -- riding the ridepod, the other game is told its four parts and draws it; in a monster form, that monster
+  -- (on a floor, where the game gives no town_character)
+  h.player.town_character = nil
+  h.player.character, h.player.ridepod = "ridepod", {leg = 155, arm = 145, body = 135, pack = 165}
+  both(h, g, 12)
+  local rp = g.avatars[1] and g.avatars[1].ridepod
+  check(rp and rp.leg == 155 and rp.arm == 145 and rp.body == 135 and rp.pack == 165 and g.avatars[1].form == nil,
+        "the host's ridepod is drawn with its own four parts in the joiner's game", rp and rp.leg)
+  h.player.character, h.player.ridepod, h.player.form = "monster", nil, 0
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].form == 0 and g.avatars[1].ridepod == nil,
+        "a monster form (even form 0) is drawn as that monster", g.avatars[1] and g.avatars[1].form)
+  h.player.character, h.player.form = "max", nil
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].form == nil and g.avatars[1].ridepod == nil and g.avatars[1].outfit.head == 311,
+        "back on foot, Max is drawn in his own clothes again", g.avatars[1] and g.avatars[1].form)
+  -- the joiner asks; the host is asked on a panel and says no
+  g.emit("ui.action", {id = "swap"})
+  both(h, g, 4)
+  check(h.panel and h.panel.title == "April wants to swap heroes" and h.panel.subtitle == "You would play Monica.",
+        "the other player is asked on a panel", h.panel and h.panel.title)
+  h.choose(2)
+  both(h, g, 4)
+  check(h.room_hero == "max" and g.room_hero == "monica" and find_toast(g, "would rather not swap"), "a no changes nothing, and the asker is told")
+  -- asked again (after the wait between two panels), the host says yes: both change
+  both(h, g, 300)
+  g.emit("ui.action", {id = "swap"})
+  both(h, g, 4)
+  check(h.panel ~= nil, "asked again, the panel comes again")
+  h.choose(1)
+  both(h, g, 4)
+  check(h.room_hero == "monica" and g.room_hero == "max", "on yes the two games trade heroes", tostring(h.room_hero) .. "/" .. tostring(g.room_hero))
+  check(find_toast(h, "you play Monica now") and find_toast(g, "you play Max now"), "and each is told who they play")
+  -- and back, asked by the host
+  both(h, g, 300)
+  h.emit("ui.action", {id = "swap"})
+  both(h, g, 4)
+  check(g.panel and g.panel.title == "Jeffie wants to swap heroes" and g.panel.subtitle == "You would play Monica.", "either player can ask",
+        g.panel and g.panel.title)
+  g.choose(1)
+  both(h, g, 4)
+  check(h.room_hero == "max" and g.room_hero == "monica", "and a second swap puts them back")
+  -- a yes nobody asked for is not a swap
+  h.mod.heroes.hear(1, "yes")
+  check(h.room_hero == "max", "an answer to no question changes nothing")
+  -- a joiner into a swapped room starts as the hero the room gives it
+  both(h, g, 300)
+  g.emit("ui.action", {id = "swap"})
+  both(h, g, 4)
+  h.choose(1)
+  both(h, g, 4)
+  g.keys.leave_key = true
+  both(h, g, 8)
+  check(g.room_hero == nil, "leaving the room gives the party back to the story", tostring(g.room_hero))
+  local late = make_game("Late", {game = "chronicle-two", heroes = true})
+  late.emit("game.title.opened", {})
+  type_code(late, h.mod.state.code)
+  late.emit("game.title.selected", {entry = "join"})
+  both(h, late, 8)
+  check(late.started ~= nil and late.hero_log[1] == "max", "a joiner into a swapped room starts as Max", table.concat(late.hero_log, ", "))
+  -- the room's end is the rule's end
+  h.keys.leave_key = true
+  both(h, late, 12)
+  h.keys.leave_key = true
+  both(h, late, 12)
+  check(h.room_hero == nil and late.room_hero == nil, "when the room closes both parties are the story's again",
+        tostring(h.room_hero) .. "/" .. tostring(late.room_hero))
+end
+
+print("Chronicle Two: the world as it changes")
+do
+  relay.rooms = {}
+  local function type_code(g, room)
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if g.title.entries[i].label:sub(-1) == room:sub(i, i) then break end
+        g.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+  end
+  local function join(g, h)
+    g.emit("game.title.opened", {})
+    type_code(g, h.mod.state.code)
+    g.emit("game.title.selected", {entry = "join"})
+    both(h, g, 8)
+  end
+  local function last(g) return g.applied[#g.applied] end
+  local h = make_game("Max", {game = "chronicle-two", shared = true})
+  local g = make_game("Monica", {game = "chronicle-two", shared = true})
+  local k = make_game("Donny", {game = "chronicle-two", shared = true})
+  h.mod.state.ROOM_FOR = 4 -- (a third game, to see what the host passes on: by itself a Dark Cloud 2 room is for two)
+  h.keys.host_key = true
+  h.tick(3)
+  check(h.watching == true, "the host's game watches its world once the room is open")
+  check(g.watching == nil, "a game at the title watches nothing")
+  join(g, h)
+  check(g.started ~= nil and g.watching == true, "a joiner's game watches from the start of its visit")
+  join(k, h)
+  for _ = 1, 4 do h.tick(); g.tick(); k.tick() end
+  -- the joiner sees a scene alone: its flag reaches the host's world, and the other joiner's
+  g.emit("game.world.changed", {kind = "flag", id = 100, value = true})
+  for _ = 1, 4 do h.tick(); g.tick(); k.tick() end
+  check(last(h) and last(h).kind == "flag" and last(h).id == 100 and last(h).value == true, "a flag a joiner sets reaches the host's world",
+        last(h) and last(h).id)
+  check(last(k) and last(k).id == 100 and last(k).value == true, "and the host passes it to the other joiner")
+  check(#g.applied == 0, "and it is not told back to the game that set it", #g.applied)
+  -- the host moves the story on: every joiner hears
+  h.emit("game.world.changed", {kind = "progress", id = 0, value = 4})
+  h.emit("game.world.changed", {kind = "counter", id = 12, value = -3})
+  for _ = 1, 4 do h.tick(); g.tick(); k.tick() end
+  check(#g.applied == 2 and g.applied[1].kind == "progress" and g.applied[1].value == 4 and g.applied[2].kind == "counter" and g.applied[2].value == -3,
+        "the host's story progress and a counter reach a joiner", #g.applied)
+  check(#k.applied == 3, "and the other", #k.applied)
+  -- a flag cleared, a townsperson won over, a floor's record
+  g.emit("game.world.changed", {kind = "flag", id = 4, value = false})
+  g.emit("game.world.changed", {kind = "recruit", id = 2, value = {14, 1}})
+  g.emit("game.world.changed", {kind = "floor", id = 40, value = {0, 3000, 0, 0, 0, 1, 3, 9, 2}})
+  for _ = 1, 4 do h.tick(); g.tick(); k.tick() end
+  local n = #h.applied
+  check(n == 4 and h.applied[2].kind == "flag" and h.applied[2].value == false, "a flag cleared is told as cleared", n)
+  check(h.applied[3].kind == "recruit" and h.applied[3].value[1] == 14 and h.applied[3].value[2] == 1, "a townsperson who can join now")
+  check(h.applied[4].kind == "floor" and #h.applied[4].value == 9 and h.applied[4].value[2] == 3000 and h.applied[4].value[7] == 3,
+        "and a floor's record, all nine numbers")
+  -- what a scene gives one player goes into the others' bags too
+  h.toasts, k.toasts = {}, {}
+  g.emit("game.world.changed", {kind = "gift", id = 231, value = 1})
+  for _ = 1, 4 do h.tick(); g.tick(); k.tick() end
+  n = #h.applied
+  check(h.applied[n].kind == "gift" and h.applied[n].id == 231 and h.applied[n].value == 1, "an item a scene gave the joiner goes into the host's bag too",
+        h.applied[n].kind)
+  check(last(k) and last(k).kind == "gift" and last(k).id == 231, "and the other joiner's")
+  check(find_toast(h, "was given something in a scene") and find_toast(k, "was given something in a scene"), "and each is told")
+  -- nothing another game sends is taken on trust
+  h.mod.shared.hear(1, "gilda 0 999999")
+  h.mod.shared.hear(1, "flag 5 1,2")
+  h.mod.shared.hear(1, "floor 3 1,2,3")
+  h.mod.shared.hear(1, "flag 5 " .. string.rep("1", 200))
+  check(#h.applied == n, "what is not a change of the world is dropped", #h.applied)
+  local before = #g.applied
+  g.mod.shared.hear(2, "flag 7 1")
+  check(#g.applied == before, "a joiner takes the world's changes from the host alone")
+  -- a town's Georama: the game says only that it changed, and the town goes across as towns do
+  local function town_tick() for _ = 1, 8 do h.tick(); g.tick(); k.tick() end end
+  h.toasts, k.toasts = {}, {}
+  g.towns[2] = "DCT22:a bridge over the canal"
+  g.emit("game.world.changed", {kind = "town", id = 2, value = 77})
+  town_tick()
+  check(h.towns[2] == "DCT22:a bridge over the canal" and h.last_base == "DCT22:start",
+        "a town a joiner's game says changed reaches the host, with the town it was changed from", tostring(h.towns[2]))
+  check(k.towns[2] == g.towns[2], "and the other joiner")
+  check(find_toast(h, "is building in Veniccio"), "named as the Georama town it is (2 is Veniccio)")
+  g.emit("game.world.changed", {kind = "town", id = 2, value = 77})
+  h.last_base = nil
+  town_tick()
+  check(h.last_base == nil, "a town that is as the games agreed is not sent again")
+  -- a second change is measured from the first, not from the visit's start
+  g.towns[2] = "DCT22:a bridge and a pier"
+  g.emit("game.world.changed", {kind = "town", id = 2, value = 78})
+  town_tick()
+  check(h.towns[2] == "DCT22:a bridge and a pier" and h.last_base == "DCT22:a bridge over the canal", "the next change is measured from the last",
+        tostring(h.last_base))
+  -- the host's own change is the whole town, to every joiner; what a joiner then changes is measured from that
+  h.towns[0] = "DCT20:the host's new road"
+  h.emit("game.world.changed", {kind = "town", id = 0, value = 5})
+  town_tick()
+  check(g.towns[0] == h.towns[0] and k.towns[0] == h.towns[0], "the host's change of a town reaches every joiner")
+  k.towns[0] = "DCT20:the host's new road, and a tree"
+  k.emit("game.world.changed", {kind = "town", id = 0, value = 6})
+  town_tick()
+  check(h.towns[0] == k.towns[0] and h.last_base == "DCT20:the host's new road", "and a joiner's change after it is measured from the host's town",
+        tostring(h.last_base))
+  check(g.towns[0] == k.towns[0], "and reaches the other joiner")
+  -- in the editor a town goes part by part (the engine writes the town being built into its record)
+  g.map = {context = "georama", map_id = 3, town_map = 5, georama_town = 3, scene_map = 3, map_no = 3, map_title = "Heim Rada", editing = true}
+  for _ = 1, 4 do town_tick() end -- (the editor is looked for every half second)
+  h.toasts = {}
+  g.towns[3] = "DCT23:one house"
+  g.emit("game.world.changed", {kind = "town", id = 3, value = 1})
+  town_tick()
+  check(h.towns[3] == "DCT23:one house" and h.last_base == "DCT23:start", "a town being built goes at the first part", tostring(h.towns[3]))
+  check(k.towns[3] == "DCT23:one house", "to the other joiner too")
+  g.towns[3] = "DCT23:two houses"
+  g.emit("game.world.changed", {kind = "town", id = 3, value = 2})
+  town_tick()
+  check(h.towns[3] == "DCT23:two houses" and h.last_base == "DCT23:one house", "and at the next, measured from the part before", tostring(h.last_base))
+  local told = 0
+  for _, t in ipairs(h.toasts) do if t:find("is building in Heim Rada") then told = told + 1 end end
+  check(told == 1, "the host is told once who builds there, not at every part", told)
+  h.last_base = nil
+  g.map = {context = "georama", map_id = 3, town_map = 5, georama_town = 3, scene_map = 3, map_no = 3, map_title = "Heim Rada", editing = false}
+  for _ = 1, 4 do town_tick() end
+  check(h.last_base == nil, "leaving the editor sends nothing more when nothing more changed")
+  -- the host busy in a town's editor: a joiner's parts wait, and what is taken at last is measured from the first
+  h.busy_town = 4
+  k.towns[4] = "DCT24:a windmill"
+  k.emit("game.world.changed", {kind = "town", id = 4, value = 1})
+  town_tick()
+  k.towns[4] = "DCT24:a windmill and a well"
+  k.emit("game.world.changed", {kind = "town", id = 4, value = 2})
+  town_tick()
+  check(h.towns[4] == "DCT24:start", "a town the host is building in is not changed under them", tostring(h.towns[4]))
+  h.busy_town = nil
+  for _ = 1, 8 do town_tick() end
+  check(h.towns[4] == "DCT24:a windmill and a well" and h.last_base == "DCT24:start",
+        "once free the host takes the newest town, measured from the town before the first part that waited", tostring(h.last_base))
+  check(g.towns[4] == "DCT24:a windmill and a well", "and sends it on")
+  -- a part built is in the world's stock for either player to place
+  h.emit("game.world.changed", {kind = "stock", id = 12, value = 2})
+  town_tick()
+  check(last(g) and last(g).kind == "stock" and last(g).id == 12 and last(g).value == 2, "a Georama part built goes into both games' stock")
+  -- a town number that is none of the five is nothing
+  h.last_base = nil
+  g.emit("game.world.changed", {kind = "town", id = 9, value = 1})
+  g.emit("game.world.changed", {kind = "town", id = -1, value = 1})
+  town_tick()
+  check(h.last_base == nil, "a town number that is not a Georama town is dropped")
+
+  -- the room's end is the watching's end
+  h.keys.leave_key = true
+  for _ = 1, 12 do h.tick(); g.tick(); k.tick() end
+  h.keys.leave_key = true
+  for _ = 1, 12 do h.tick(); g.tick(); k.tick() end
+  check(h.watching == false and g.watching == false, "when the room closes nobody watches", tostring(h.watching) .. "/" .. tostring(g.watching))
+end
+
+print("Chronicle Two: a floor is run by whoever was there first")
+do
+  relay.rooms = {}
+  local h = make_game("Max", {game = "chronicle-two"})
+  local g = make_game("Monica", {game = "chronicle-two"})
+  h.keys.host_key = true
+  both(h, g, 2)
+  g.emit("game.title.opened", {})
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == h.mod.state.code:sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  check(g.started ~= nil, "(the joiner is in the host's world)")
+  local FLOOR = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 91, map_no = 0, walking = true}
+  local function rat(hp) return {slot = 0, kind = 3, state = 2, hp = hp, max_hp = 60, x = 10, y = 0, z = 0, heading = 0, motion = 0} end
+  h.player = {character = "max", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "monica", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
+  -- the joiner goes into the dungeon alone: the floor's monsters are its own
+  g.map = FLOOR
+  g.monsters = {rat(25)} -- one of two already struck down, the other hurt
+  both(h, g, 60)
+  check(g.puppets == nil and h.puppets == nil, "a joiner alone on a floor runs its monsters itself")
+  -- the host follows: the floor is still the joiner's to run, and the host's monsters copy the joiner's
+  h.map = FLOOR
+  h.monsters = {rat(60), {slot = 1, kind = 3, state = 2, hp = 60, max_hp = 60, x = 0, y = 0, z = 0, heading = 0, motion = 0}}
+  both(h, g, 60)
+  check(h.puppets and #h.puppets == 1 and h.puppets[1].hp == 25, "the host, coming second, copies the joiner's monsters as they stand",
+        h.puppets and #h.puppets)
+  check(g.puppets == nil, "and the joiner's stay its own")
+  -- the host's blow on a copy lands on the joiner's monster; the joiner's monster strikes the host
+  h.puppet_hits = {{slot = 0, damage = 11}}
+  both(h, g, 8)
+  check(g.mirror_hits[1] and g.mirror_hits[1].slot == 0 and g.mirror_hits[1].damage == 11, "the host's blow lands on the joiner's monster",
+        #g.mirror_hits)
+  check(#h.mirror_hits == 0, "not on its own")
+  g.avatar_hits = {{avatar = 1, slot = 0, damage = 9, kind = 3, flags = 0}}
+  both(h, g, 8)
+  check(h.strikes[1] and h.strikes[1].damage == 9, "the joiner's monster strikes the host's hero", #h.strikes)
+  -- the joiner leaves the floor: the host runs it from where the monsters stand
+  g.map = {context = "town", scene_map = 10, map_no = 10, town_map = 1, walking = true}
+  both(h, g, 60)
+  check(h.puppets == nil, "when the first leaves, the floor is the second's to run")
+  -- and the joiner, coming back, is the one who copies
+  h.monsters = {rat(7)}
+  g.map = FLOOR
+  both(h, g, 60)
+  check(g.puppets and #g.puppets == 1 and g.puppets[1].hp == 7, "the joiner, back on the floor, copies the host's", g.puppets and #g.puppets)
+  check(h.puppets == nil, "and the host's stay its own")
+  g.puppet_hits = {{slot = 0, damage = 4}}
+  both(h, g, 8)
+  check(h.mirror_hits[1] and h.mirror_hits[1].damage == 4, "its blows go to the host's monsters now", #h.mirror_hits)
+  -- both take a floor in the same moment: the host's stands
+  local NEXT = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 92, map_no = 0, walking = true}
+  h.map, g.map = NEXT, NEXT
+  h.monsters, g.monsters = {rat(33)}, {rat(60)}
+  both(h, g, 80)
+  check(h.puppets == nil and g.puppets and g.puppets[1] and g.puppets[1].hp == 33, "two taking one floor at once: the host's monsters stand",
+        tostring(h.puppets ~= nil) .. "/" .. tostring(g.puppets ~= nil))
+  -- a Dark Cloud 2 room is for two: a third is told so, and no visit starts
+  do
+    local third = make_game("Donny", {game = "chronicle-two"})
+    third.emit("game.title.opened", {})
+    for i = 1, 5 do
+      for _ = 1, 40 do
+        if third.title.entries[i].label:sub(-1) == h.mod.state.code:sub(i, i) then break end
+        third.emit("game.title.selected", {entry = "c" .. i})
+      end
+    end
+    third.emit("game.title.selected", {entry = "join"})
+    for _ = 1, 10 do h.tick(); g.tick(); third.tick() end
+    check(third.started == nil, "a third player is not let into a Dark Cloud 2 room")
+    check(tostring(third.mod.state.status):find("two players", 1, true), "and is told the room is for two", third.mod.state.status)
+  end
+  -- a third thing a joiner must not do: strike a host that leads with a blow of its own making
+  local before = #h.strikes
+  g.avatar_hits = {{avatar = 1, slot = 0, damage = 500, kind = 3, flags = 0}}
+  both(h, g, 8)
+  check(#h.strikes == before, "a game that does not run the floor lands no monster's blows on the other")
+  h.keys.leave_key = true
+  both(h, g, 2)
+end
+
+-- Two Dark Cloud 2 games in one room: the host, then the joiner in its visit. opts go to both games; g_opts to the
+-- joiner's alone (its saves, say).
+local function dc2_room(opts, g_opts)
+  relay.rooms = {}
+  local function with(extra)
+    local o = {game = "chronicle-two"}
+    for k, v in pairs(opts or {}) do o[k] = v end
+    for k, v in pairs(extra or {}) do o[k] = v end
+    return o
+  end
+  local h = make_game("Max", with())
+  local g = make_game("Monica", with(g_opts))
+  h.keys.host_key = true
+  both(h, g, 3)
+  g.emit("game.title.opened", {})
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == h.mod.state.code:sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  return h, g
+end
+local function count_toasts(g, text)
+  local n = 0
+  for _, t in ipairs(g.toasts) do if t:find(text, 1, true) then n = n + 1 end end
+  return n
+end
+
+print("Chronicle Two: what a player reads")
+do
+  local h, g = dc2_room({slots = {{slot = 5, ready = true, progress = 7, chapter = 5}}})
+  check(g.started ~= nil, "(the joiner is in the host's world)")
+  check(h.layers.coop == "CO-OP ABCDE  2 of 2", "the HUD counts a Dark Cloud 2 room's players out of two", h.layers.coop)
+  -- Revive is L3 (V): R3 is the ridepod's in a Dark Cloud 2 dungeon, and R (R2) its first-person view
+  check(h.binds.revive and h.binds.revive[1] == "V" and h.binds.revive[2] == "Gamepad:leftstick", "Revive is V or the left stick in Dark Cloud 2",
+        h.binds.revive and table.concat(h.binds.revive, ","))
+  do
+    local one = make_game("Toan")
+    check(one.binds.revive[1] == "R" and one.binds.revive[2] == "Gamepad:rightstick", "and R or the right stick in Dark Cloud, as before")
+  end
+  -- the Mod Manager: no buttons about a host's kept guests where joiners keep their own saves
+  check(h.actions.guests == nil and h.actions.forget == nil, "with saves of their own there are no kept-guests buttons")
+  check(h.actions.leave.description:find("own save", 1, true) ~= nil, "Leave says a joiner's things go into their own save", h.actions.leave.description)
+  check(h.actions.resync.label == "Resync the floor", "and resync is with the other player, not only the host", h.actions.resync.label)
+  do
+    local older = make_game("Old", {game = "chronicle-two"})
+    check(older.actions.guests ~= nil and older.actions.forget ~= nil, "an engine without saves of their own keeps the kept-guests buttons")
+  end
+  -- down: the toast names Dark Cloud 2's keys; the powder is the Resurrection Powder
+  local FLOOR = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 91, map_no = 0, walking = true}
+  g.settings.follow_offers, h.settings.follow_offers = false, false
+  h.map, g.map = FLOOR, FLOOR
+  h.player = {character = "max", hp = 40, max_hp = 60, position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "monica", hp = 30, max_hp = 45, position = {x = 30, y = 0, z = 0}, heading = 0, motion = 0}
+  both(h, g, 60)
+  g.player.down, g.player.hp = true, 0
+  both(h, g, 30)
+  check(count_toasts(h, "Monica is down! Stand beside them and hold Revive (V / left stick)") == 1, "the down toast names V and the left stick",
+        h.last_toast())
+  h.bag = {{id = "chronicle-two:item:resurrection-powder", name = "Resurrection Powder", count = 1}}
+  h.keys.revive = true
+  both(h, g, 4)
+  check(g.player.down == false and find_toast(h, "you used a Resurrection Powder on Monica"), "and the powder used is called Resurrection Powder",
+        h.last_toast())
+  -- two building in one town: in Dark Cloud 2 the last change to a spot stands, not the last to leave
+  h.map = {context = "georama", georama_town = 1, scene_map = 23, map_no = 23, editing = true}
+  both(h, g, 31)
+  g.map = {context = "georama", georama_town = 1, scene_map = 23, map_no = 23, editing = true}
+  both(h, g, 31)
+  check(find_toast(g, "the last change wins") and not find_toast(g, "last to leave"), "two builders are told the last change wins", g.last_toast())
+  -- the host's town as the joiner hears it: by the host's name
+  g.map = {context = "georama", georama_town = 1, scene_map = 23, map_no = 23, editing = false}
+  h.map = {context = "georama", georama_town = 1, scene_map = 23, map_no = 23, editing = false}
+  h.towns[1] = "DCT21:the host's mill"
+  both(h, g, 31)
+  check(g.towns[1] == "DCT21:the host's mill" and find_toast(g, "Max changed Balance Valley"), "a town the host built is told by the host's name",
+        g.last_toast())
+  -- a friend walking into a house on this player's street is no offer to walk anywhere
+  g.settings.follow_offers = true
+  g.map = {context = "georama", map_id = 23, town_map = 2, scene_map = 23, map_no = 23, map_title = "Balance Valley", walking = true}
+  h.map = {context = "georama", map_id = 23, town_map = 2, scene_map = 23, house = 4, map_no = 23, map_title = "Gaffer's Shop", walking = true}
+  both(h, g, 48)
+  check(g.panel == nil, "no offer when the other walks into a house on this player's street", g.panel and g.panel.title)
+  h.map = {context = "georama", map_id = 12, town_map = 1, scene_map = 12, house = 34, map_no = 10, map_title = "Max's House", walking = true}
+  both(h, g, 48)
+  check(g.panel == nil, "nor when they walk into a house in another town: only a dungeon floor is asked about", g.panel and g.panel.title)
+  h.map = {context = "dungeon", dungeon_id = 1, floor_id = 3, floor_seed = 5, map_no = 23, walking = true}
+  both(h, g, 48)
+  check(g.panel and g.panel.title:find("went to", 1, true) ~= nil, "going onto a dungeon floor is asked about", g.panel and g.panel.title)
+end
+
+print("Chronicle Two: closing a room under a joiner with their own save")
+do
+  local SLOTS = {{slot = 5, ready = true, progress = 7, chapter = 5}}
+  local h, g = dc2_room({}, {slots = SLOTS})
+  check(g.started and g.started.player == "DCP2 own 5", "(the joiner brings File 6)")
+  g.things = "DCP2 the very last things"
+  local writes = #g.slot_writes
+  h.keys.leave_key = true
+  both(h, g, 6)
+  check(#g.slot_writes > writes and g.slot_writes[#g.slot_writes].data == "DCP2 the very last things",
+        "the host closing at once still tells the joiner, whose things go into their save first")
+  check(find_toast(g, "the host closed the room; your things are in your save"), "and the joiner is told so", g.last_toast())
+  check(not find_toast(h, "save your game"), "the host is not told to save for guests it keeps nothing of")
+  -- the host's game gone without a word: the joiner's things still go into their save as the visit ends
+  local h2, g2 = dc2_room({}, {slots = SLOTS})
+  g2.things = "DCP2 after the host vanished"
+  h2.net = nil -- (the host's game is simply gone: the relay says so)
+  relay.rooms[g2.net.code] = nil
+  g2.net_events[#g2.net_events + 1] = {kind = "closed", reason = "the host left"}
+  both(h2, g2, 3)
+  check(g2.slot_writes[#g2.slot_writes] and g2.slot_writes[#g2.slot_writes].data == "DCP2 after the host vanished",
+        "a host that vanishes: the joiner's things go into their save before the visit ends")
+  check(find_toast(g2, "the host's game left the room; your things are in your save"), "and the joiner is told they are there", g2.last_toast())
+  -- the room closing under the host itself: nothing to save for joiners who keep their own things
+  local h3, g3 = dc2_room({}, {slots = SLOTS})
+  h3.net_events[#h3.net_events + 1] = {kind = "closed", reason = "the relay restarted"}
+  both(h3, g3, 2)
+  check(count_toasts(h3, "the room closed (the relay restarted)") == 1 and not find_toast(h3, "save your game"),
+        "a host whose room closes is not told to save for joiners with their own saves", h3.last_toast())
+end
+
+print("Chronicle Two: a joiner's save is written only with its own things (M1)")
+do
+  relay.rooms = {}
+  local h = make_game("Max", {game = "chronicle-two"})
+  local g = make_game("Monica", {game = "chronicle-two", slots = {{slot = 5, ready = true, progress = 7, chapter = 5}}})
+  h.keys.host_key = true
+  both(h, g, 3)
+  -- a host that drops the joiner's "OWN" (an older copy, or a stale greeting): it answers as for a new player
+  setmetatable(h.mod.state.guest_own, {__newindex = function() end})
+  g.emit("game.title.opened", {})
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == h.mod.state.code:sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  both(h, g, 8)
+  check(g.started ~= nil and g.started.player == nil, "(the host answered NEW: the visit starts with a new player's things)")
+  check(g.mod.own.slot == nil, "then the joiner's own save is not the visit's to write")
+  check(find_toast(g, "didn't take your save, so File 6 stays as it is"), "and the joiner is told why", g.last_toast())
+  g.things = "DCP2" .. string.rep("q", 200) .. "a new player's things"
+  both(h, g, 60 * 60 + 2)
+  check(#g.slot_writes == 0, "a minute on, nothing has been written into File 6", #g.slot_writes)
+  check(h.accounts[g.storage.me.id] and h.accounts[g.storage.me.id].data == g.things, "the things went to the host to keep, as in Dark Cloud")
+end
+
+print("Chronicle Two: the world's changes while a joiner's visit begins (M4)")
+do
+  relay.rooms = {}
+  local h = make_game("Max", {game = "chronicle-two", shared = true})
+  local g = make_game("Monica", {game = "chronicle-two", shared = true})
+  h.keys.host_key = true
+  both(h, g, 3)
+  g.emit("game.title.opened", {})
+  for i = 1, 5 do
+    for _ = 1, 40 do
+      if g.title.entries[i].label:sub(-1) == h.mod.state.code:sub(i, i) then break end
+      g.emit("game.title.selected", {entry = "c" .. i})
+    end
+  end
+  g.emit("game.title.selected", {entry = "join"})
+  g.tick() -- the joiner says hello
+  h.tick() -- the host sends its world, and counts the joiner in
+  -- the host changes the world before the joiner's visit has begun
+  h.emit("game.world.changed", {kind = "flag", id = 300, value = true})
+  h.emit("game.world.changed", {kind = "counter", id = 7, value = 12})
+  h.towns[2] = "DCT22:built while you loaded"
+  h.emit("game.world.changed", {kind = "town", id = 2, value = 3})
+  check(g.started == nil and #g.applied == 0, "(the joiner's visit has not begun yet)")
+  both(h, g, 4)
+  check(g.started ~= nil, "(now it has)")
+  check(#g.applied == 2 and g.applied[1].kind == "flag" and g.applied[1].id == 300 and g.applied[2].kind == "counter" and g.applied[2].value == 12,
+        "changes the host made while the visit began are kept and taken, in order", #g.applied)
+  check(g.towns[2] == "DCT22:built while you loaded", "and so is a town the host built then", tostring(g.towns[2]))
+end
+
+print("Chronicle Two: one value changed by both at once (M6)")
+do
+  local h, g = dc2_room({shared = true})
+  local function last_of(game, kind, id)
+    for i = #game.applied, 1, -1 do local a = game.applied[i]; if a.kind == kind and a.id == id then return a end end
+  end
+  h.emit("game.world.changed", {kind = "flag", id = 50, value = true})
+  g.emit("game.world.changed", {kind = "flag", id = 50, value = false})
+  h.emit("game.world.changed", {kind = "counter", id = 9, value = 4})
+  g.emit("game.world.changed", {kind = "counter", id = 9, value = 6})
+  both(h, g, 6)
+  check(last_of(h, "flag", 50) == nil and last_of(h, "counter", 9) == nil, "the host does not take a joiner's change that crossed its own")
+  check(last_of(g, "flag", 50) and last_of(g, "flag", 50).value == true and last_of(g, "counter", 9).value == 4,
+        "and the joiner ends with the host's values", tostring(last_of(g, "flag", 50) and last_of(g, "flag", 50).value))
+  -- a moment later the joiner's change is the world's again
+  both(h, g, 200)
+  g.emit("game.world.changed", {kind = "flag", id = 50, value = false})
+  both(h, g, 4)
+  check(last_of(h, "flag", 50) and last_of(h, "flag", 50).value == false, "a joiner's change long after the host's is taken")
+end
+
+print("Chronicle Two: the swap, crossed")
+do
+  local h, g = dc2_room({heroes = true})
+  -- backed out of: the asker hears no, rather than waiting on nothing
+  g.emit("ui.action", {id = "swap"})
+  both(h, g, 4)
+  check(h.panel ~= nil, "(the host is asked)")
+  h.choose(nil)
+  both(h, g, 4)
+  check(find_toast(g, "would rather not swap") and g.mod.heroes.asked == nil, "a panel backed out of answers no")
+  -- both ask at once: one swap, never both playing one hero
+  both(h, g, 700)
+  h.emit("ui.action", {id = "swap"})
+  g.emit("ui.action", {id = "swap"})
+  both(h, g, 6)
+  if h.panel then h.choose(1) end
+  if g.panel then g.choose(1) end
+  both(h, g, 6)
+  check(h.room_hero ~= g.room_hero and h.room_hero == "monica", "two asking at once swap once, and play two heroes",
+        tostring(h.room_hero) .. "/" .. tostring(g.room_hero))
+  -- an answer to a question given up on: the room ends as the host has it
+  both(h, g, 700)
+  h.emit("ui.action", {id = "swap"})
+  both(h, g, 4)
+  check(g.panel ~= nil, "(the joiner is asked)")
+  h.mod.heroes.asked = nil -- the host's question is long over
+  g.choose(1)
+  both(h, g, 6)
+  check(h.room_hero ~= g.room_hero, "a late yes leaves the two games on two heroes", tostring(h.room_hero) .. "/" .. tostring(g.room_hero))
+  check(find_toast(g, "as the room has it"), "and the joiner is told which hero it plays", g.last_toast())
+end
+
+print("Chronicle Two: out of step, either way round")
+do
+  local h, g = dc2_room({})
+  h.settings.follow_offers, g.settings.follow_offers = false, false
+  local FLOOR = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 91, map_no = 0, walking = true}
+  local function rat(slot) return {slot = slot, kind = 3, state = 2, hp = 50, max_hp = 60, x = 10, y = 0, z = 0, heading = 0, motion = 0} end
+  h.player = {character = "max", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "monica", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
+  -- the joiner runs the floor; the host, coming second, can't make two of its monsters
+  g.map = FLOOR
+  g.monsters = {rat(0), rat(1)}
+  g.doors_out = {{script = 7, mode = 0, ext = 0, pos = {1, 2, 3}, dir = {0, 0, 1}}}
+  both(h, g, 60)
+  h.map = FLOOR
+  h.refused = {0, 1}
+  both(h, g, 400)
+  check(h.panel and h.panel.title == "Out of step with Monica", "the host following the joiner's floor is offered to walk in again beside her",
+        h.panel and h.panel.title)
+  check(h.panel and h.panel.subtitle:find("of Monica's monsters", 1, true), "and told whose monsters are missing", h.panel and h.panel.subtitle)
+  h.choose(2)
+  h.refused = nil
+  -- the host resyncs with the joiner: the floor's doors come again
+  local runs = #h.doors_run
+  h.mod.door.log, h.mod.door.done = {}, {}
+  h.emit("ui.action", {id = "resync"})
+  both(h, g, 12)
+  check(find_toast(h, "asked Monica for this floor's open doors again"), "the host can resync with its joiner", h.last_toast())
+  check(#h.doors_run > runs, "and the joiner sends the floor's doors", #h.doors_run - runs)
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

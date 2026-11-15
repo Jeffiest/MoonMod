@@ -1,6 +1,6 @@
 # Online Co-op: plan
 
-Up to four play Dark Cloud together online, web and PC alike, through the co-op relay (DC_Web's `coop/relay`: the
+Up to four play Dark Cloud, or Dark Cloud 2 (Chronicle Two), together online, web and PC alike, through the co-op relay (DC_Web's `coop/relay`: the
 public Cloudflare Worker, or anyone's private server). The engine's side is `net.*` (online play), `save.*`'s split and
 accounts, and visits (`docs/API.md`); the game's side is the Online Co-op mod, `mods/moonmod.coop`. It ports the co-op
 of Jeffiest/Chronicle's `windows` branch (`win/docs/MULTIPLAYER.md`): ghosts, shared floors, mirrored monsters, the
@@ -69,6 +69,21 @@ Gauntlet run or a Vigil World (co-op hosts only from a story save; a visit carri
 run's).
 
 Tests: `tools/tests/coop/test_coop.lua` ("The room's mods") and the engine's `moonmod_mods_api_test.cpp`.
+
+## Chronicle Two (Dark Cloud 2) (0.12.0, protocol still 9)
+
+One mod for both games. It lists both (`"games": ["chronicle", "chronicle-two"]`) and asks `game.info.get` which it
+is in. The messages are the same; the dungeon and town names and the save texts' tags differ (`DCW2`/`DCP2`/`DCT2`).
+A guest arrives in a town by its area (`world.get().town_map`, 0-4), since Chronicle Two numbers its maps across the
+whole game. The engine side is ChronicleTwo's `port/src/moonmod/coop_*_moonmod.cpp` (`port/docs/COOP.md` there
+lists what is copied, what each side owns and what is not finished).
+
+What Dark Chronicle does not have yet: the down-and-revive rule (its engine has no `player.down_rule_set`, so the
+game's own knockout applies), blows from the host's monsters on a guest, weapons on avatars, and a panel that keeps
+its presses from the game. None of it has run on the real game. The plan for Dark Chronicle's own co-op (the gate,
+Max and Monica, the shared floor, Georama for both) is `docs/plans/DC2_COOP_PLAN.md`; this merge is its stage K0.
+
+Tests: `tools/tests/coop/test_coop.lua` ("Chronicle Two: the same mod in Dark Cloud 2").
 
 ## Next
 

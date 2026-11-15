@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..2506a4af
+index 00000000..b1d2ffa3
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,334 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -855,8 +855,18 @@ index 00000000..2506a4af
 +The other players are drawn as avatars (`world.avatar_set`, slots 1-3): Max's or Monica's dungeon model (town
 +model in a town), this game's hero's clothes and shoes, eased to the last report, tinted through the ambient light
 +(a guest in blue). They take the scene's last three event slots on a floor and the last three talk slots in a town,
-+stepped and drawn by the scene itself. A weapon is not shown yet; names appear in the HUD layer the mod keeps
-+(`coop_who`), not over heads.
++stepped and drawn by the scene itself.
++
++Each avatar carries its player's name (`world.avatar_set {name}`) over its head, in towns and on floors
++(`coop_avatar_names_moonmod.cpp`, `DrawAvatarNames`). The place is measured while the scene draws the body, with the
++scene's own camera (`AvatarBody::MeasureLabel`): the highest joint of the drawn pose (a hero's body; a ridepod or a
++monster with all its parts) is raised a little, a fifth for a hero and a tenth for the other shapes, and goes through
++the camera's world-to-screen matrix with the feet. The 2D pass reads that measure once (`AvatarNameOnScreen`, which
++also forgets it, so a body the scene stops drawing loses its name) and centres the name over the head in the game's
++own font, outlined. It is not drawn behind the camera, when the hero is drawn
++shorter than 14 lines of the screen's 448 (too far to read, fading in up to 30), while the scene hides the avatar,
++nor during an event scene, a photo, the floor's menus or the Georama editor. The choice panel's `Draw2D` calls it
++first, so a panel lies over the names.
 +
 +## The relay
 +
@@ -875,7 +885,7 @@ index 00000000..2506a4af
 +- `port/src/moonmod/coop_api_moonmod.cpp`: the operations (dispatched before the adapter's own in
 +  `chronicle_two_adapter.cpp`'s `Call`), `player.get`/`world.get`'s extra fields.
 +- `coop_world_moonmod.cpp`: avatars, puppets, nearest-player targeting, shared events, the floor seed.
-+- `coop_ui_moonmod.cpp`: the choice panel (`ui.choice_open` / `ui.choice_made`), title modes (`title.mode_*`,
++- `coop_ui_moonmod.cpp`: the choice panel (`ui.choice_open` / `ui.choice_close` / `ui.choice_made`), title modes (`title.mode_*`,
 +  `game.title.opened/selected`), visits (`session.*`, `game.session.started/ended/failed`).
 +- `coop_save_moonmod.cpp`: `DCW2`/`DCP2`/`DCT2` records and the accounts.
 +- Hooks in game units, one line each: `main.cpp` (`FrameStep`), `automap.cpp` (`FloorSeed`), `dng_event.cpp`
@@ -918,7 +928,13 @@ index 00000000..2506a4af
 +- `save.slot_player_import {slot, data}`: during the mod's visit, the player's things back into that save and
 +  nothing else of it. The save is read, the things replaced, and the file written by `SaveSlotWriteOwnThings`
 +  (`save_slots.cpp`: `SaveSlotWrite` without its rule that a visit writes no save). Before the first write to a
-+  save in a run the file is copied to `<save root>/moonmod/coop-own-saves/`.
++  save in a run the file is copied to `<save root>/moonmod/coop-own-saves/<name>.YYYYMMDD-HHMMSS-NN<ext>`: a new
++  copy each run, never written over an older one, and the newest five copies of each save kept (2026-11-15).
++- Since 2026-11-15 the save keeps its own townsfolk (`party_chara`: who has been recruited, who lives where) as it
++  keeps its own hero; only the player's things are the visit's. Only a JSON save is read or written: an old
++  memory-card save is refused ("open it once outside a visit to convert it"), and the game does not convert one
++  while a visit runs (`ImportLegacy` in `save_slots.cpp` waits), because a visit writes no save and the old one
++  would be archived with nothing in its place.
 +
 +The accounts (`save.account_*`) stay for a mod that keeps a guest's things with the host, as Dark Cloud 1's does.
 +
@@ -944,6 +960,15 @@ index 00000000..2506a4af
 +
 +Each map's own flags (a town's opened chests) are not shared: chests are each player's own.
 +
++Since 2026-11-15:
++
++- **Progress only goes forward.** A `progress` change from another game is taken only when it is higher: this
++  game's progress becomes the higher of the two, and the agreed value is theirs (so a game ahead tells its own
++  again, and both end at the higher).
++- **Who walks with whom is each game's own.** A `recruit`'s status is shared without its in-party bit
++  (`PARTY_CHARA_STATUS_IN_PARTY`): recruited and housed are the world's, and whether the townsperson walks with
++  this game's player stays this game's. A player taking a townsperson into the party tells nothing.
++
 +**What the story gives.** Each player has a bag of their own, and the story's scripts give items to whoever stood
 +in the scene (`_ADD_ITEM`). In a room that would leave the host's world without a thing its story needs whenever
 +the joiner saw the scene alone. So an item an event script gives is told as `gift` (id the item's number, value
@@ -951,6 +976,14 @@ index 00000000..2506a4af
 +is only one of is not given twice; what does not fit goes where the game puts it). A dungeon's system scripts are
 +left out (`SystemScriptBegan`, from `EventScriptSetup`): a chest's content, a floor's prize and a Spheda win are
 +the player's own. One line each in `event_func.cpp` and `dng_main.cpp`.
++
++Since 2026-11-15 a gift is told only when the story moved beside it: a story flag, a counter or the progress
++changed within 300 frames of it, before or after. A gift with no such change after 300 frames is dropped (it stays
++in this player's bag only). In the decompiled town scripts every story gift found sets a story flag in the same
++script around its `add_item` (Sindain's Lafrescia seed, Badge Box and Jurak's gun set `FLAG_SINDAIN_EVENT_272` and
++`_285_SEEN`; the gold paint sets `FLAG_GOLD_PAINT_RECEIVED`), while a dungeon chest sets only its box's state under
++a system script (already left out). No town-map chest script was found giving through `add_item`, so the rule's
++first use is the case of a script that gives without moving the story (a shop, a trade), which now stays here.
 +
 +## A town as it is built (2026-11-14)
 +
@@ -978,12 +1011,31 @@ index 00000000..2506a4af
 +- **One builder's town is taken whole.** `MergeTown` (a joiner's town with the one it was changed from) takes
 +  the edited town as it is when this game's town still equals the one it was changed from, which is every time
 +  while one player builds part by part: the parts keep their order and the placement log that indexes them.
-+  Only when both changed the town is it merged by parts, and then the log is theirs or dropped.
++  Only when both changed the town is it merged by parts. Since 2026-11-15 the placement log is kept then too,
++  renumbered: this game's entries and theirs for the parts they added, each with its parts' places in the merged
++  list, and an entry whose part was taken away goes with it. (`CEditMap::LoadData` loads a part saved as placed as
++  unplaced, and places it only through a log entry that rests it on a placed part: a merged town with no log loaded
++  with its parts standing unplaced. `GeoramaParts.AMergedTownLoadsEveryPartBothGamesPlaced` loads one.) The
++  town's `save_count`, which the game bumps at every house entered and map changed, is left out of
++  `TownFingerprint` and of the "nobody here changed it" comparison.
 +- **Built parts are the world's.** `build_parts_num` is shared as `stock`, so a part one player builds can be
 +  placed by the other.
 +
-+Not done: a player standing where a part lands is not moved aside; two players in the same town's editor at once
-+do not see each other's parts until one leaves it (the mod then merges both), nor each other's cursor.
++Since 2026-11-15:
++
++- **The editor writes no stale map.** The town is brought up to its record (`TownBeforeSave`) where `editloop.cpp`
++  enters Georama mode too (from the menu and from walking), and `TownLiveSync` never writes a live map over its
++  record while a rebuild from the record is pending for that town (`TownRecordWritable`).
++- **A player is not left inside a part.** After a rebuild, a player standing where a part just landed is set down
++  on the nearest spot the game would let them walk out of Georama mode onto (`CheckEditWalkSpot`, retail's
++  `CheckEditToWalk` for any spot: walkable town ground, no river, nothing over it), searched in rings of 40 to 800
++  units, 16 spots each. A spot that was not walkable before the rebuild is left alone. The log says
++  `co-op: a part landed where the player stood (...): moved to ...`. Live scenario `shove`.
++- `LayoutFromBytes` refuses a river grid whose cells are not `num_x` by `num_z` or whose counts are below zero,
++  and an import refuses a text that gives one field twice.
++
++Not done: two players in the same town's editor at once do not see each other's parts until one leaves it (the mod
++then merges both), nor each other's cursor.
 +
 +## Down, not out (2026-11-14)
 +
@@ -997,16 +1049,24 @@ index 00000000..2506a4af
 +  for while the life is at nothing (`HeroIsDown` in `IsRunDeadEvent` and `CheckStatusError`), and each frame the
 +  hero's grace is kept up (`DownStep`), so nothing strikes them. `player.get().down` says so.
 +- `player.revive {hp, x, y, z}`: life back, the normal program again, two seconds of grace. `player.give_up`:
-+  the death event is raised after all.
++  the death event is raised after all. Turning the rule off while the hero is down gives up too (2026-11-15).
 +- The others: `world.avatar_set`'s `down` marks another player's hero as down; a monster's turn does not go for
 +  it and its blows are not tested against it. A game whose own hero is down has its monsters go for any other
 +  player on the floor first.
 +- `world.get().exit_map` on a floor: the map the dungeon's own way out leads to (the table the game's menu uses),
 +  for the mod to walk a fallen party out with `world.enter_map`.
 +
-+A player in the ridepod or a monster's form is shown as their hero standing in for it (`world.avatar_set` takes
-+`"ridepod"` and `"monster"`): seen where they are, in the hero's first motion. Drawing the ridepod and the forms
-+themselves is not done.
++A player in the ridepod or a monster's form is drawn as it (`world.avatar_set` takes `"ridepod"` with
++`ridepod = {leg, arm, body, pack}`, the parts' item numbers, and `"monster"` with `form = monster_id`; their game's
++`player.get()` gives `ridepod` and `form` while it plays them). The ridepod is built as `SetupMainUnit` and
++`SetupRobo` build the player's (`charasetup.cpp`): the leg's model is the body, the arm hangs on its `body<n>` frame
++(n the arm's number), the body on `spine`, Max seated (`mints<type><outfit>`, from the body's type and the outfit the
++other player sent) on `joint2`, the energy pack on `joint1` and Max's hat on `hat`, each found down the chain of
++parts already hung as `CActionChara::SearchObject` finds it; the arm's `ude` frame takes the matrix of the body's
++`arm<n>` frame. The motion numbers the other game sends are its leg's, and every part plays the same number, as the
++game's own `CActionChara::SetMotion` has the chain do. A form is the monster's model read with its own profile
++(`GetMonsterModelFile`). When the parts or the form are not said, or a model or a frame is missing, the hero stands
++in, running while the reports move. A change of shape, hero or outfit loads the new body in the avatar's own slot.
 +
 +Three lines in game units: `actionchara.cpp` (two) and `dng_main.cpp` (two guards). Not done: the hero's own
 +Resurrection Powder is not looked at before they go down; the ridepod and monster forms go down like a hero but
@@ -1035,6 +1095,40 @@ index 00000000..2506a4af
 +split (`DCW2` fields 14-16), no longer a player's; a joiner's own save keeps the character it plays as when its
 +things are written back.
 +
++## A floor cleared for both (2026-11-15)
++
++The game clears a floor when its own count is at nothing (`IsEventRun`: `GetMonsterNum(-1)`, every active slot whose
++`chara_kind` is a script's, and `MimicCount`), and then runs system script 1500 (`play_floor_clear`). Two things
++kept that count above nothing in a room:
++
++- **A monster struck down out of sight never died.** `ThinkHost` skips a monster `CheckView` puts out of view unless
++  its state is already dead, so a `damage_req` of dead set on one far away was never taken up, and its slot kept
++  counting. Retail only kills monsters in sight; a co-op host also takes blows from another player's game, far
++  from its own hero. A dying monster (death asked, or life at nothing) now passes the view test.
++- **A guest's copies kept their slots.** A monster gone on the leader set the copy's state to none but left its
++  `chara_kind`, so the guest's count never fell. `monsters.puppet_set` lists the leader's whole floor: a slot it
++  does not name is freed (state, `chara_kind`, life, the scene's active bit).
++
++`world.get()` on a floor gives `monsters_counted` (the game's own count), `mimic_chests` and `floor_cleared`. Live
++scenario `clear`: both games count nothing, run system script 1500 and stay in the visit. (The clear's own scene
++ends in two messages that wait for a button; a headless game stays in it.)
++
++## Monsters the leader gains (2026-11-15)
++
++A monster the leader gains after the floor is built (a mod's foe, a monster the floor sends in) is made in the
++follower's game in the same slot: `CMonsterMan::SetActiveMonster` takes the slot to use (`wanted_slot`, refused
++unless free), and `ChronicleTwoMonsterReferFor` finds or loads the kind (a refer loaded already, a mod's enemy as
++`characters.spawn` loads it, or one of the game's own kinds through its loader). A kind this game cannot make is
++refused for that slot only, once in the log (`co-op: the leader's monster in slot N (kind K) can't be made here`);
++the others still follow. A leader's monster already dead is not made. Live scenarios `hurt` and `down` check that
++the follower's count matches the leader's and that it is never out of step.
++
++## A mod closes its own panel (2026-11-15)
++
++`ui.choice_close {}` closes the calling mod's own open choice panel without a `ui.choice_made` (the mod closed it,
++so it knows) and answers `{closed = true}`; with no panel of its own open it answers `{closed = false}`, and a
++panel another mod opened stays open.
++
 +## What is not finished (reported, never silently passed)
 +
 +- **Blows on avatars** are measured since 2026-11-14: each frame the attack primitives aimed at the player's side
@@ -1045,9 +1139,9 @@ index 00000000..2506a4af
 +  blow that reaches the avatar's body lands.
 +- **Puppets** pause every monster script on a guest's floor (`DNG_PAUSE_MONSTER_AI`) and step the copies themselves.
 +- **Avatars** wear and carry what the other player's own hero does (`world.avatar_set {outfit}`, from
-+  `player.get().outfit`): the hat or hair piece and the weapons hang on the body's frames as the hero's own do. They
-+  are Max or Monica only (not the ridepod or a monster form) and have no name label over the head; a slot the game
-+  is using (an event character in one of the last three event slots) refuses the avatar for that scene.
++  `player.get().outfit`): the hat or hair piece and the weapons hang on the body's frames as the hero's own do. A
++  slot the game is using (an event character in one of the last three event slots) refuses the avatar for that scene.
++  The names over heads are not hidden by walls between (no depth test against the map).
 +- **Shared events** cover map events (doors, gates, switches) started with the action or item button; a remote run
 +  re-finds the event point at the sent position, so it needs the same floor layout (the shared seed). The exit gate's
 +  event is shared too, which also moves the other player's floor; the mod's floor following handles the rest.
@@ -1065,7 +1159,7 @@ index 00000000..2506a4af
 +  `MoonModNet.AHostAndAGuestMeetThroughTheRelay` dials the relay; without it the case is skipped.
 +- Two games: `python3 tools/coop/two_games.py --build port/build/pc` starts the relay, runs two headless games on
 +  synthetic data with a fixture mod that hosts and joins, and checks the `COOP_E2E` markers on both sides.
-+- Two games on the disc: `python3 -I tools/coop/live.py --scenario meet|floor --keep --out DIR` runs a host and a
++- Two games on the disc: `python3 -I tools/coop/live.py --scenario meet|floor|clear|hurt|down|build|shove --keep --out DIR` runs a host and a
 +  guest on extracted retail data (`--data`, `DC2_DATA` or the gauntlet's cache) with MoonMod's co-op mod and its
 +  test driver (`--moonmod`), and checks what both logged: the visit, each game showing the other in town and on a
 +  floor, the same seed and `floor_layout`, the guest's monsters copying the host's, a kill ending on both. With no
@@ -1696,6 +1790,21 @@ index c534e41c..3d5527d0 100644
  
  /**
   *
+diff --git a/port/include/editmode.hpp b/port/include/editmode.hpp
+index 3b6f404d..77428a79 100644
+--- a/port/include/editmode.hpp
++++ b/port/include/editmode.hpp
+@@ -387,3 +387,10 @@ int CheckWalkToEdit(CScene *scene, float *pos);
+  * @size 0x270
+  */
+ int CheckEditToWalk(CScene *scene, float *position);
++
++/**
++ * CheckEditToWalk's test at any spot instead of the cursor: 1 when a player may stand there (walkable town ground,
++ * no river, nothing standing over it), with the ground point in position. A town without a "geo_check" part
++ * answers 1, as retail does.
++ */
++int CheckEditWalkSpot(CScene *scene, const float *spot, float *position);
 diff --git a/port/include/gamedata.hpp b/port/include/gamedata.hpp
 index 3da0892f..7e3da8b7 100644
 --- a/port/include/gamedata.hpp
@@ -1852,7 +1961,7 @@ index b872377e..c4fd5824 100644
  /**
   *
 diff --git a/port/include/monster.hpp b/port/include/monster.hpp
-index 14b4be61..51f9cc57 100644
+index 14b4be61..a419370f 100644
 --- a/port/include/monster.hpp
 +++ b/port/include/monster.hpp
 @@ -5,10 +5,12 @@
@@ -1910,10 +2019,19 @@ index 14b4be61..51f9cc57 100644
      s16 monster_id[MONSTER_LOCATE_MAX]; /**< Monster kind of each entry; -1 for none. */
      s16 param[MONSTER_LOCATE_MAX];      /**< Value given to the monster of each entry; -1 for none. */
  
-@@ -591,6 +595,15 @@ public:
+@@ -585,11 +589,22 @@ public:
+      *
+      * Places a monster of a loaded kind on the floor and runs its initialising program.
+      *
++     * @param wanted_slot The slot to place it in (it must be free), or -1 for the first free one as retail does;
++     *        co-op places a copy of another game's monster in the slot that monster has there.
+      * @mangled SetActiveMonster__11CMonsterManFiPfPfi
+      * @address 0x1DD050
+      * @size 0xA98
       */
-     CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
- 
+-    CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param);
++    CActiveMonster *SetActiveMonster(int refer_no, float *pos, float *rot, int param, int wanted_slot = -1);
++
 +    /**
 +     * Removes a live mod-spawned monster without running the native kill, reward, or gate-drop path.
 +     *
@@ -1922,11 +2040,10 @@ index 14b4be61..51f9cc57 100644
 +     * @return true when the matching live monster was safely removed.
 +     */
 +    bool DespawnMoonModMonster(int slot, unsigned int generation);
-+
+ 
      /**
       *
-      * Draws the monsters on the mini-map.
-@@ -760,6 +773,21 @@ extern BASE_MONSTER_TBL base_monster_define[344];
+@@ -760,6 +775,21 @@ extern BASE_MONSTER_TBL base_monster_define[344];
   */
  BASE_MONSTER_TBL *GetMonsterTable(int id);
  
@@ -2060,10 +2177,10 @@ index 00000000..2c0ab1b9
 +} // namespace moonmod
 diff --git a/port/include/moonmod/chronicle_two_adapter.hpp b/port/include/moonmod/chronicle_two_adapter.hpp
 new file mode 100644
-index 00000000..5837fa41
+index 00000000..f52996ad
 --- /dev/null
 +++ b/port/include/moonmod/chronicle_two_adapter.hpp
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,40 @@
 +#pragma once
 +
 +#include <string>
@@ -2089,6 +2206,11 @@ index 00000000..5837fa41
 +void ChronicleTwoTrackModSpawnedEnemy(std::string_view owner, std::string_view character_id, int slot,
 +                                      unsigned int generation, int native_monster_id);
 +void ChronicleTwoEnemyDefeated(::CActiveMonster *monster, const char *source);
++// The floor's loaded monster reference (CMonsterMan::refer) for a monster kind, loaded now when the floor lacks it:
++// a mod's enemy as characters.spawn loads it, one of the game's own through its monster loader. -1 with why in
++// `error` when the kind is unknown to this game or cannot be loaded. Co-op makes a copy of another game's monster
++// with it.
++int ChronicleTwoMonsterReferFor(int native_monster_id, std::string &error);
 +float ApplyChronicleTwoCombatDamageFormula(float damage);
 +void ResetChronicleTwoCombatFormulasForTests();
 +void ResetChronicleTwoContentForTests();
@@ -2781,10 +2903,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..f09df774
+index 00000000..37927324
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,298 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -2828,6 +2950,8 @@ index 00000000..f09df774
 +void FrameStep();
 +// Everything co-op holds goes back to the start (tests).
 +void ResetForTests();
++// Tests: a visit runs, owned by this mod, as TitleBeginVisit leaves one (ResetForTests ends it).
++void VisitStartForTests(std::string_view owner);
 +// player.get and world.get carry co-op's extra fields: heading, motion, the weapon and the town hero's place;
 +// map_no, town_map, editing and the floor's seed (the adapter calls these as it builds its answers).
 +void ExtendPlayer(Json &player);
@@ -2874,10 +2998,15 @@ index 00000000..f09df774
 +    float       tint[3] = {-1.0f, -1.0f, -1.0f}; // ambient 0-128 each, or negative for none
 +    std::string name;
 +    bool        down = false; // that player is down: this game's monsters neither go for the hero nor strike it
-+    // That player rides the ridepod or wears a monster's form, which this game cannot draw yet: their hero's own body
-+    // stands in for it, where they are and facing as they face, in its first motion (their motion numbers are the
-+    // ridepod's or the monster's, not the hero's).
++    // That player rides the ridepod (character is then USER_CHARA_MAX) or wears a monster's form (USER_CHARA_MONICA).
++    // The avatar is drawn as the ridepod or the monster when the parts or the form below are known and load; else
++    // their hero's own body stands in for it, where they are and facing as they face, running while they move (their
++    // motion numbers are the ridepod's or the monster's, not the hero's).
 +    bool        stand_in = false;
++    // The ridepod's parts by item_no, in the order leg, arm, body, energy pack (0: not said), and the monster whose
++    // form Monica wears, by its monster_id (-1: not said).
++    int         ridepod[4] = {0, 0, 0, 0};
++    int         form = -1;
 +};
 +bool AvatarSet(int slot, const AvatarState &state);
 +void AvatarClear(int slot); // -1: every slot
@@ -2885,6 +3014,15 @@ index 00000000..f09df774
 +bool AvatarAt(int slot, float out[3]);
 +// The avatar bodies on the floor or in the town: made in free scene slots, stepped and drawn by the scene.
 +void AvatarsStep();
++// Where an avatar's name goes on the screen (from its top left, in the screen's units): the point just over its head
++// and the point it stands on, as measured when the scene last drew the body with its camera, and the name the mod gave
++// (UTF-8). Each drawing is given once. False for an avatar the scene has not drawn since (none, hidden, elsewhere,
++// behind the camera) or one with no name.
++bool AvatarNameOnScreen(int slot, float head[2], float feet[2], std::string &name);
++// The other players' names over their heroes' heads (coop_avatar_names_moonmod.cpp), drawn with the game's own
++// font in the 2D pass after the scene, with its camera: the choice panel's Draw2D calls it first, so a panel lies
++// over them.
++void DrawAvatarNames();
 +
 +// ---- Monsters: the host's (coop_world_moonmod.cpp) -----------------------------------------------------------------
 +
@@ -2947,12 +3085,14 @@ index 00000000..f09df774
 +
 +// world.watch_set: the mod is told (game.world.changed {kind, id, value}) of each change this game makes to the parts
 +// of the save two games share while they play: a story flag ("flag", value true or false), a story counter
-+// ("counter"), the story's progress ("progress", id 0), who the story has in the party ("party", id 0 the members, 1
-+// who can be changed to, 2 the mask), a townsperson who can join ("recruit", value {chara_no, status}), a dungeon
++// ("counter"), the story's progress ("progress", id 0; taken as the higher of the two games'), who the story has in
++// the party ("party", id 0 the members, 1 who can be changed to, 2 the mask), a townsperson who can join ("recruit",
++// value {chara_no, status}, the status without its in-party bit, which is each player's own pick), a dungeon
 +// floor's record ("floor", id its place in the save's records, value its nine numbers), how many of a Georama part
 +// are built and waiting to be placed ("stock", id the part's number), an item one of the story's scripts gave the
-+// player ("gift", id the item's number, value how many; not a chest's or a floor's prize, which are the player's
-+// own; world.change_apply adds it to this game's bag) and a town's Georama ("town", id 0-4: only that
++// player ("gift", id the item's number, value how many; told only when a story flag, counter or progress changed within
++// 300 frames of it, so not a chest's, a shop's or a floor's prize, which are the player's own; world.change_apply adds
++// it to this game's bag) and a town's Georama ("town", id 0-4: only that
 +// it changed; the mod sends the town with georama.town_export). A town or a floor beginning (a save loaded, a visit
 +// begun) is where the two games start from, not a change.
 +void RegisterWatch(std::string_view owner, bool enabled);
@@ -2966,6 +3106,8 @@ index 00000000..f09df774
 +bool RegisterApply(std::string_view kind, int id, const Json &value, std::string &error);
 +// georama.town_import: the town as it stands after another game's is what the games share (no "town" change told).
 +void RegisterTownAgreed(int town);
++// How many gifts the register has told since it was reset (a gift is told only when the story moved around it).
++int RegisterGiftsTold();
 +
 +// ---- Down, not out (coop_down_moonmod.cpp) --------------------------------------------------------------------------
 +// player.down_rule_set {enabled}: while it holds, a hero whose life runs out on a floor plays their death and stays
@@ -2989,6 +3131,9 @@ index 00000000..f09df774
 +// live map into the record (TownBeforeSave, from EditDataSave).
 +bool TownOnScreen(int town); // the town loop runs that town (its own map or a house's inside)
 +void TownLiveSync();
++// Whether this town's live map may be written over its record: not while a rebuild from the record is pending for it
++// (the map lacks the other player's change, and writing it would take that change away).
++bool TownRecordWritable(int town);
 +void TownRebuildWanted(int town);
 +bool TownRebuildPending();
 +void TownRebuildStep();
@@ -3010,6 +3155,9 @@ index 00000000..f09df774
 +    std::size_t               cursor = 0;
 +};
 +bool          ChoiceOpen(Choice choice);
++// Closes the panel if this mod opened it, with no ui.choice_made (the mod closed it, so it knows); another mod's panel
++// is left open. Answers whether a panel was closed.
++bool          ChoiceCloseQuietly(std::string_view owner);
 +bool          ChoiceIsOpen();
 +const Choice *OpenChoice();
 +// Every frame while open: the pad moves the cursor; a pick or a cancel publishes ui.choice_made to the owner.
@@ -3179,10 +3327,10 @@ index 00000000..514a0d6d
 +} // namespace moonmod::coop
 diff --git a/port/include/moonmod/coop_save.hpp b/port/include/moonmod/coop_save.hpp
 new file mode 100644
-index 00000000..90795854
+index 00000000..9968f797
 --- /dev/null
 +++ b/port/include/moonmod/coop_save.hpp
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,108 @@
 +#pragma once
 +
 +// Co-op's split of a Chronicle Two save (save.world_export/import, save.player_export/import): a visit plays the
@@ -3281,9 +3429,14 @@ index 00000000..90795854
 +// The chapter a story progress stands for, as GetNowChapter gives it for a loaded save.
 +int                   ChapterOfProgress(int progress);
 +bool                  SlotPlayerExport(int slot, std::string &text, int &progress, std::string &error);
-+// Before the first write to a save in a run of the game the file is copied to
-+// <save root>/moonmod/coop-own-saves/<its name>: the save as it was before this session touched it.
++// Only a JSON save is written (an old memory-card save is refused until the game has converted it). The save keeps
++// its own hero and its own townsfolk (party_chara); the rest of the player's things are the text's. Before the first
++// write to a save in a run of the game the file is copied to
++// <save root>/moonmod/coop-own-saves/<its name>.YYYYMMDD-HHMMSS-NN<ext>: a new copy each run, never over an older
++// one, and the newest five of each save kept.
 +bool                  SlotPlayerImport(int slot, std::string_view text, std::string &error);
++// Forgets which saves were copied aside in this run, so the next write copies again (as a new run of the game does).
++void                  SlotCopiesForget();
 +
 +} // namespace moonmod::coop
 diff --git a/port/include/moonmod/coop_story.hpp b/port/include/moonmod/coop_story.hpp
@@ -4984,10 +5137,10 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..b7b6cde1
+index 00000000..87f32756
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,535 @@
+@@ -0,0 +1,536 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5222,6 +5375,7 @@ index 00000000..b7b6cde1
 +    {"dungeons.shared_event_run", "dungeons", "shared_event_run", "simulation", "game.write", "Co-op: run another player's floor-changing event here, at its place, once the player is free; the key it asks for is taken as given."},
 +    {"items.owned", "items", "owned", "any", "game.read", "The items the player carries (the bag and the active slots), each with its id, name and count."},
 +    {"ui.choice_open", "ui", "choice_open", "simulation", "game.write", "Open a panel of 1-6 options over the game until the player picks one or backs out (ui.choice_made)."},
++    {"ui.choice_close", "ui", "choice_close", "simulation", "game.write", "Close this mod's own open choice panel without a ui.choice_made; answers {closed}. Another mod's panel stays."},
 +    {"net.host", "net", "host", "any", "net.session", "Open an online room through the co-op relay; net.receive's connected event names its code."},
 +    {"net.join", "net", "join", "any", "net.session", "Join another player's online room by its five-letter code."},
 +    {"net.leave", "net", "leave", "any", "net.session", "Leave the online room (a host leaving ends it for everyone)."},
@@ -5916,10 +6070,10 @@ index 00000000..f77e8380
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_two_adapter.cpp b/port/src/moonmod/chronicle_two_adapter.cpp
 new file mode 100644
-index 00000000..e47a0c62
+index 00000000..2ba562cf
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_two_adapter.cpp
-@@ -0,0 +1,7252 @@
+@@ -0,0 +1,7314 @@
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "moonmod/coop.hpp"
 +#include "moonmod/audio_api.hpp"
@@ -7601,6 +7755,59 @@ index 00000000..e47a0c62
 +    return monster != nullptr && monster->state == ACTIVE_MONSTER_LIVE && monster->life > 0;
 +}
 +
++// The floor's loaded monster reference for a mod's enemy, loaded now when the floor does not have it yet: a custom
++// model through the game's own monster loader, else a copy of its template's reference under the enemy's own
++// number. Returns the reference's index, or -1 with why in `error`.
++int LoadModEnemyRefer(const ModCharacter &definition, std::string &error) {
++    CScene      *scene = DngMainScene;
++    CMonsterMan *manager = ActiveMonster;
++    if (scene == nullptr || manager == nullptr || manager->GetScene() != scene) {
++        error = "characters.spawn requires an active Chronicle Two dungeon";
++        return -1;
++    }
++    int refer_index = manager->SearchBaseIndex(definition.native_monster_id);
++    if (refer_index < 0) {
++        if (!definition.model_id.empty()) {
++            if (!IsMonsterManagerReadyForModSpawn(scene)) {
++                error = "the dungeon's native monster table is still loading; retry characters.spawn next tick";
++                return -1;
++            }
++            mgCMemory *memory = scene->GetStack(3);
++            if (memory == nullptr || !manager->EntryRefer(definition.native_monster_id, memory)) {
++                error = "Chronicle Two could not load the registered custom model through its native monster loader";
++                return -1;
++            }
++            refer_index = manager->SearchBaseIndex(definition.native_monster_id);
++            if (refer_index < 0) {
++                error = "the custom model did not enter the native monster reference table";
++                return -1;
++            }
++        } else {
++            int template_refer = manager->SearchBaseIndex(definition.template_monster_id);
++            if (template_refer < 0) {
++                error = IsMonsterManagerReadyForModSpawn(scene)
++                            ? "the enemy's template was not preloaded during floor setup; register characters before entering the floor"
++                            : "the dungeon's native monster table is still loading; retry characters.spawn next tick";
++                return -1;
++            }
++            refer_index = manager->SearchReferBlock();
++            if (refer_index < 0) {
++                error = "the dungeon monster reference table is full";
++                return -1;
++            }
++            manager->refer[refer_index] = manager->refer[template_refer];
++            manager->refer[refer_index].id = definition.native_monster_id;
++            manager->refer[refer_index].chara.tbl = GetMonsterTable(definition.native_monster_id);
++        }
++    }
++    if (manager->refer[refer_index].chara.GetFrame() == nullptr) {
++        error = !definition.model_id.empty() ? "the registered custom model was not usable by the native monster loader"
++                                             : "the enemy's inherited model is unavailable in the current game data";
++        return -1;
++    }
++    return refer_index;
++}
++
 +ApiCallResult SpawnCharacter(std::string_view mod_id, const Json &args) {
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) {
 +        return Invalid("expected {character = registered_enemy_id, position = {x, y, z}, rotation = optional {x, y, z}}");
@@ -7636,41 +7843,9 @@ index 00000000..e47a0c62
 +    if (scene == nullptr || manager == nullptr || manager->GetScene() != scene) {
 +        return Failed("characters.spawn requires an active Chronicle Two dungeon");
 +    }
-+    int refer_index = manager->SearchBaseIndex(definition->second.native_monster_id);
-+    if (refer_index < 0) {
-+        if (!definition->second.model_id.empty()) {
-+            if (!IsMonsterManagerReadyForModSpawn(scene)) {
-+                return Failed("the dungeon's native monster table is still loading; retry characters.spawn next tick");
-+            }
-+            mgCMemory *memory = scene->GetStack(3);
-+            if (memory == nullptr || !manager->EntryRefer(definition->second.native_monster_id, memory)) {
-+                return Failed("Chronicle Two could not load the registered custom model through its native monster loader");
-+            }
-+            refer_index = manager->SearchBaseIndex(definition->second.native_monster_id);
-+            if (refer_index < 0) return Failed("the custom model did not enter the native monster reference table");
-+        } else {
-+            int template_refer = manager->SearchBaseIndex(definition->second.template_monster_id);
-+            if (template_refer < 0) {
-+                const bool ready = IsMonsterManagerReadyForModSpawn(scene);
-+                if (!ready) {
-+                    return Failed("the dungeon's native monster table is still loading; retry characters.spawn next tick");
-+                }
-+                return Failed("the enemy's template was not preloaded during floor setup; register characters before entering the floor");
-+            }
-+            refer_index = manager->SearchReferBlock();
-+            if (refer_index < 0) return Failed("the dungeon monster reference table is full");
-+            manager->refer[refer_index] = manager->refer[template_refer];
-+            manager->refer[refer_index].id = definition->second.native_monster_id;
-+            manager->refer[refer_index].chara.tbl = GetMonsterTable(definition->second.native_monster_id);
-+        }
-+    }
-+    if (refer_index < 0) return Failed("the enemy was not added to the dungeon's loaded monster table");
-+    if (manager->refer[refer_index].chara.GetFrame() == nullptr) {
-+        if (!definition->second.model_id.empty()) {
-+            return Failed("the registered custom model was not usable by the native monster loader");
-+        }
-+        return Failed("the enemy's inherited model is unavailable in the current game data");
-+    }
++    std::string refer_error;
++    const int refer_index = LoadModEnemyRefer(definition->second, refer_error);
++    if (refer_index < 0) return Failed(refer_error);
 +
 +    for (auto entry = g_character_spawns.begin(); entry != g_character_spawns.end();) {
 +        if (!IsSpawnHandleCurrent(entry->second)) entry = g_character_spawns.erase(entry);
@@ -12684,6 +12859,47 @@ index 00000000..e47a0c62
 +                                {"frame", SharedRuntime().Frame()}});
 +}
 +
++int ChronicleTwoMonsterReferFor(int native_monster_id, std::string &error) {
++    CScene      *scene = DngMainScene;
++    CMonsterMan *manager = ActiveMonster;
++    if (GetNowLoopNo() != LOOP_DUNGEON || scene == nullptr || manager == nullptr || manager->GetScene() != scene) {
++        error = "not on a dungeon floor";
++        return -1;
++    }
++    if (native_monster_id < 0) {
++        error = "no such monster kind";
++        return -1;
++    }
++    if (const int loaded = manager->SearchBaseIndex(native_monster_id); loaded >= 0 && manager->refer[loaded].chara.GetFrame() != nullptr) {
++        return loaded;
++    }
++    // A mod's enemy: as characters.spawn loads it (both games run the same mods, so its number is the same in each).
++    const auto mod_enemy = std::ranges::find_if(g_characters, [native_monster_id](const auto &entry) {
++        return entry.second.native_monster_id == native_monster_id;
++    });
++    if (mod_enemy != g_characters.end()) return LoadModEnemyRefer(mod_enemy->second, error);
++    // One of the game's own kinds this floor did not load: through the game's own loader, as a floor's setup does.
++    if (manager->GetReferPtr2(native_monster_id) == nullptr) {
++        error = "no such monster kind in this game";
++        return -1;
++    }
++    if (!IsMonsterManagerReadyForModSpawn(scene)) {
++        error = "the dungeon's native monster table is still loading";
++        return -1;
++    }
++    mgCMemory *memory = scene->GetStack(3);
++    if (memory == nullptr || !manager->EntryRefer(native_monster_id, memory)) {
++        error = "the game's monster loader could not load this kind";
++        return -1;
++    }
++    const int loaded = manager->SearchBaseIndex(native_monster_id);
++    if (loaded < 0 || manager->refer[loaded].chara.GetFrame() == nullptr) {
++        error = "the kind did not enter the floor's monster table";
++        return -1;
++    }
++    return loaded;
++}
++
 +void ChronicleTwoTrackModSpawnedEnemy(std::string_view owner, std::string_view character_id, int slot,
 +                                      unsigned int generation, int native_monster_id) {
 +    if (owner.empty() || character_id.empty() || slot < 0 || slot >= MONSTER_ACTIVE_MAX || generation == 0 ||
@@ -14688,10 +14904,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..8534cf8e
+index 00000000..87499c11
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,998 @@
+@@ -0,0 +1,1045 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -14711,6 +14927,7 @@ index 00000000..8534cf8e
 +#include <set>
 +#include <string>
 +
++#include "dng_event.hpp"
 +#include "dng_main.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
@@ -15110,11 +15327,11 @@ index 00000000..8534cf8e
 +
 +ApiCallResult AvatarSetCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, x, y, z, heading, motion, tint = {r, g, b} or nil, name = text or nil, down = true or nil}";
++        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, ridepod = {leg, arm, body, pack} item_nos or nil, form = monster_id or nil, x, y, z, heading, motion, tint = {r, g, b} or nil, name = text or nil, down = true or nil}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
-+    if (!OnlyFields(request, {"slot", "character", "weapon", "outfit", "x", "y", "z", "heading", "motion", "tint", "name", "down"}, unknown)) {
++    if (!OnlyFields(request, {"slot", "character", "weapon", "outfit", "ridepod", "form", "x", "y", "z", "heading", "motion", "tint", "name", "down"}, unknown)) {
 +        return Invalid("unknown field: " + unknown);
 +    }
 +    int slot = 0;
@@ -15125,8 +15342,9 @@ index 00000000..8534cf8e
 +    if (character == "max") state.character = USER_CHARA_MAX;
 +    else if (character == "monica") state.character = USER_CHARA_MONICA;
 +    else if (character == "ridepod" || character == "monster") {
-+        // Max's ridepod and Monica's monster forms are not drawn yet: the hero stands in for them (AvatarState::stand_in),
-+        // so the other player is still seen where they are, and still someone a monster goes for.
++        // Max's ridepod and Monica's monster forms are drawn as themselves when ridepod (its parts) or form (the
++        // monster) says which; else, or when they fail to load, the hero stands in for them (AvatarState::stand_in), so
++        // the other player is still seen where they are, and still someone a monster goes for.
 +        state.character = character == "ridepod" ? USER_CHARA_MAX : USER_CHARA_MONICA;
 +        state.stand_in = true;
 +    } else return Invalid("character must be \"max\", \"monica\", \"ridepod\" or \"monster\"");
@@ -15144,6 +15362,20 @@ index 00000000..8534cf8e
 +                return Invalid("outfit must be {head, clothes, feet, sub}, each an item_no or left out");
 +            }
 +        }
++    }
++    if (request.contains("ridepod") && !request["ridepod"].is_null()) {
++        // The ridepod's four parts, as player.get's ridepod gives them: the leg, the arm, the body and the energy pack.
++        static constexpr const char *kRidepodUsage = "ridepod must be {leg, arm, body, pack}, each an item_no";
++        const Json &parts = request["ridepod"];
++        std::string strange;
++        if (!parts.is_object() || !OnlyFields(parts, {"leg", "arm", "body", "pack"}, strange)) return Invalid(kRidepodUsage);
++        const char *keys[4] = {"leg", "arm", "body", "pack"};
++        for (int part = 0; part < 4; ++part) {
++            if (!ReadBoundedInt(parts, keys[part], 1, ITEM_NO_MAX - 1, state.ridepod[part])) return Invalid(kRidepodUsage);
++        }
++    }
++    if (request.contains("form") && !request["form"].is_null() && !ReadBoundedInt(request, "form", 0, 4095, state.form)) {
++        return Invalid("form must be a monster_id");
 +    }
 +    if (!ReadNumber(request, "x", state.x, false) || !ReadNumber(request, "y", state.y, false) || !ReadNumber(request, "z", state.z, false) ||
 +        !ReadNumber(request, "heading", state.heading, false)) {
@@ -15221,9 +15453,14 @@ index 00000000..8534cf8e
 +        named[static_cast<std::size_t>(slot)] = true;
 +        (PuppetSet(slot, puppet) ? followed : refused).push_back(slot);
 +    }
-+    // A slot the host no longer lists is gone there.
++    // A slot the leader no longer lists is gone there, and so is a monster of this floor's the leader never listed
++    // (one the leader struck down before this game came onto the floor): the list is the leader's whole floor, and
++    // a monster left standing here would keep this game's floor from its clear.
 +    for (int slot = 0; slot < MONSTER_ACTIVE_MAX; ++slot) {
-+        if (!named[static_cast<std::size_t>(slot)] && IsPuppet(slot)) PuppetSet(slot, Puppet{});
++        if (named[static_cast<std::size_t>(slot)]) continue;
++        const CActiveMonster *monster = ActiveMonster->GetActiveMonster(slot);
++        const bool            here = monster != nullptr && (monster->state != ACTIVE_MONSTER_NONE || monster->chara_kind == ACTION_KIND_SCRIPT);
++        if (IsPuppet(slot) || here) PuppetSet(slot, Puppet{});
 +    }
 +    Json hits = Json::array();
 +    for (const PuppetHit &hit : TakePuppetHits()) hits.push_back({{"slot", hit.slot}, {"damage", hit.damage}});
@@ -15357,6 +15594,15 @@ index 00000000..8534cf8e
 +    return Ok({{"id", std::string(mod_id) + ":" + request["id"].get<std::string>()}, {"open", true}});
 +}
 +
++// ui.choice_close {}: the calling mod's own open panel closes, with no ui.choice_made; a panel another mod opened
++// stays. {closed = true} when a panel closed, {closed = false} when this mod had none open.
++ApiCallResult ChoiceCloseCall(std::string_view mod_id, const Json &args) {
++    static constexpr const char *kUsage = "expected {} or no argument";
++    if (!args.is_array() || args.size() > 1) return Invalid(kUsage);
++    if (args.size() == 1 && !(args[0].is_object() && args[0].empty()) && !args[0].is_null()) return Invalid(kUsage);
++    return Ok({{"closed", ChoiceCloseQuietly(mod_id)}});
++}
++
 +} // namespace
 +
 +int MotionNumberOf(CCharacter2 &chara) {
@@ -15393,9 +15639,19 @@ index 00000000..8534cf8e
 +    player["motion"] = std::max(0, MotionNumberOf(*hero));            // the motion the hero plays (the avatars play it on other screens)
 +    if (CUserDataManager *user = GetUserDataMan(); user != nullptr) {
 +        const int character = user->GetActiveChrNo();
-+        if (character == USER_CHARA_MAX || character == USER_CHARA_MONICA) {
-+            if (loop == LOOP_EDIT) player["town_character"] = CharacterName(character);
-+            if (CHARA_DATA *data = user->GetCharaDataPtr(character); data != nullptr && !player.contains("weapon")) {
++        if (character == USER_CHARA_ROBO) {
++            // The ridepod's parts, for the other games to build it as it is (world.avatar_set's ridepod).
++            const ROBO_DATA &robo = user->robo_data;
++            player["ridepod"] = {{"leg", robo.parts[ROBO_PART_LEG].item_no}, {"arm", robo.parts[ROBO_PART_ARM].item_no},
++                                 {"body", robo.parts[ROBO_PART_BODY].item_no}, {"pack", robo.parts[ROBO_PART_PACK].item_no}};
++        } else if (character == USER_CHARA_MONSTER) {
++            player["form"] = user->monster_id; // the monster whose form Monica wears (world.avatar_set's form)
++        }
++        // A ridepod or a form is the hero's second shape: what the hero wears goes with it (Max sits in the ridepod).
++        const int hero = character == USER_CHARA_ROBO ? USER_CHARA_MAX : character == USER_CHARA_MONSTER ? USER_CHARA_MONICA : character;
++        if (hero == USER_CHARA_MAX || hero == USER_CHARA_MONICA) {
++            if (loop == LOOP_EDIT && hero == character) player["town_character"] = CharacterName(character);
++            if (CHARA_DATA *data = user->GetCharaDataPtr(hero); data != nullptr && !player.contains("weapon")) {
 +                const int item_no = data->equip[CHARA_EQUIP_MELEE].item_no;
 +                if (item_no > 0) player["weapon"] = {{"id", "chronicle-two:item:" + std::to_string(item_no)}, {"item_no", item_no}, {"slot", CHARA_EQUIP_MELEE}};
 +                // What the hero wears and carries besides, for the other games to draw (world.avatar_set's outfit).
@@ -15441,6 +15697,12 @@ index 00000000..8534cf8e
 +        if (const std::optional<std::string> layout = FloorLayoutHash()) world["floor_layout"] = *layout;
 +        // Playing on the floor: the hero is there and no scene, menu or floor change holds the game.
 +        world["walking"] = MainChara__2 != nullptr && DngStatus.mode == DNG_STATUS_FIELD && !ChoiceIsOpen();
++        // The floor's clear as the game itself decides it (IsEventRun): the monsters it still counts (a monster
++        // struck down counts until its death has played out and its slot is free), the mimic chests not yet opened
++        // (a mimic is a monster to the rule), and whether the floor's clear has been given.
++        if (ActiveMonster != nullptr) world["monsters_counted"] = ActiveMonster->GetMonsterNum(-1.0f);
++        if (TreasureBoxMan != nullptr) world["mimic_chests"] = TreasureBoxMan->MimicCount();
++        if (BattleAreaScene != nullptr) world["floor_cleared"] = BattleAreaScene->battle_clear != 0;
 +        // The map this dungeon's own way out leads to (the game's table, as its menu's way out of a dungeon uses it).
 +        static constexpr const char *kWayOut[7] = {"d01e01", "s02", "g02", "g03", "g04", "d06e01", "m05"};
 +        if (DngStatus.dungeon_no >= 0 && DngStatus.dungeon_no < 7 && GetMapNameCount() > 0) {
@@ -15631,6 +15893,7 @@ index 00000000..8534cf8e
 +    if (path == "items.owned") return ItemsOwned(args);
 +    if (path == "georama.town_export" || path == "georama.town_import") return TownExportImport(operation, args);
 +    if (path == "ui.choice_open") return ChoiceOpenCall(mod_id, args);
++    if (path == "ui.choice_close") return ChoiceCloseCall(mod_id, args);
 +    if (path == "title.mode_register") return RegisterTitleMode(mod_id, args);
 +    if (path == "title.mode_set") return SetTitleMode(mod_id, args);
 +    if (path == "title.mode_remove") return RemoveTitleMode(mod_id, args);
@@ -15650,7 +15913,7 @@ index 00000000..8534cf8e
 +                             "world.avatar_set", "world.avatar_clear", "world.enter_map",
 +                             "monsters.mirror_get", "monsters.puppet_set", "monsters.puppet_clear", "monsters.mirror_hit",
 +                             "dungeons.set_seed", "dungeons.enter_floor", "dungeons.shared_events_get", "dungeons.shared_event_run",
-+                             "combat.strike_player", "items.owned", "georama.town_export", "georama.town_import", "ui.choice_open",
++                             "combat.strike_player", "items.owned", "georama.town_export", "georama.town_import", "ui.choice_open", "ui.choice_close",
 +                             "title.mode_register", "title.mode_set", "title.mode_remove"}) {
 +        config.api_capabilities.push_back({path, true, {}});
 +    }
@@ -15690,12 +15953,116 @@ index 00000000..8534cf8e
 +}
 +
 +} // namespace moonmod::coop
+diff --git a/port/src/moonmod/coop_avatar_names_moonmod.cpp b/port/src/moonmod/coop_avatar_names_moonmod.cpp
+new file mode 100644
+index 00000000..8ad0dbcf
+--- /dev/null
++++ b/port/src/moonmod/coop_avatar_names_moonmod.cpp
+@@ -0,0 +1,98 @@
++// Co-op's names over the other players' heroes (moonmod/coop.hpp): each avatar a scene draws carries its player's name
++// just over its head, in the game's own font, in towns and on dungeon floors. The place is measured as the scene draws
++// the body, with the camera it draws with (AvatarBody::DrawDirect: the point over the head goes through the camera's
++// world-to-screen matrix, as the game's damage numbers do, dng_damage.cpp); the name is drawn in the 2D pass after the
++// scene, over everything the scene drew.
++
++#include "moonmod/coop.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <string>
++
++#include "dng_main.hpp"
++#include "editctrl.hpp"
++#include "editloop.hpp"
++#include "font.hpp"
++#include "gfx/gfx.hpp"
++#include "mainloop.hpp"
++#include "photo.hpp"
++#include "platform/legacy_encoding.hpp"
++#include "scenesnd.hpp"
++#include "screen_overlay_anchor.hpp"
++
++namespace moonmod::coop {
++
++namespace {
++
++// A hero drawn shorter than this on the screen (in the screen's 448 lines) is too far for a name over it to be read
++// or to be told whose it is: the name goes. Between the two heights it fades in, so it never pops.
++constexpr float kHiddenBelow = 14.0f;
++constexpr float kFullFrom = 30.0f;
++// The name's letters: a little smaller than the game's own captions, outlined so they read over a bright wall or a
++// dark floor alike.
++constexpr int kGlyphHeight = 14;
++constexpr int kGlyphWidth = 11;
++
++// The interpolation of each avatar's name between frames (the presentation draws more frames than the game steps):
++// a new generation when the camera cuts or the name changes, so the name never slides across a cut.
++struct NameTrack {
++    ScreenOverlayAnchor anchor;
++    std::uint64_t       generation = 0;
++    std::string         name;
++};
++std::array<NameTrack, kAvatars> g_tracks;
++std::uint64_t                   g_next_generation = 0;
++
++// Whether the game shows the field now: no event scene, no photo, no menu over a floor, and (in a town) the player
++// walking, not building.
++bool FieldShown() {
++    if (NowTakePhoto() != 0) return false;
++    const int loop = GetNowLoopNo();
++    if (loop == LOOP_DUNGEON) {
++        if (DngMainScene == nullptr || BattleAreaScene == nullptr || DngStatus.mode != DNG_STATUS_FIELD) return false;
++        return DngMainScene->event_run == 0 && BattleAreaScene->script.running == 0;
++    }
++    if (loop == LOOP_EDIT) {
++        CScene *scene = GetMainScene();
++        return scene != nullptr && scene->event_run == 0 && IsWalkMode() != 0 && IsEditMode() == 0;
++    }
++    return false;
++}
++
++} // namespace
++
++void DrawAvatarNames() {
++    const bool shown = FieldShown();
++    for (int slot = 0; slot < kAvatars; ++slot) {
++        float       head[2], feet[2];
++        std::string name;
++        // (asked even when nothing is shown, so a measure from a frame without names is not used later)
++        if (!AvatarNameOnScreen(slot, head, feet, name) || !shown) continue;
++        const float tall = std::fabs(feet[1] - head[1]);
++        if (tall < kHiddenBelow) continue;
++        const float opacity = std::clamp((tall - kHiddenBelow) / (kFullFrom - kHiddenBelow), 0.0f, 1.0f);
++
++        std::string text = legacy_encoding::GameText(name);
++        if (text.empty()) continue;
++        CFont font;
++        font.SetDrawSize(kGlyphWidth, kGlyphHeight + 4);
++        font.SetClearance(kGlyphWidth, kGlyphHeight + 5);
++        font.SetFuchi(FUCHI_OUTLINE);
++        font.SetColor(128, 128, 128, static_cast<int>(128.0f * opacity));
++        int width = 0, height = 0;
++        font.CalcDrawWH(text.data(), &width, &height);
++        const int x = static_cast<int>(std::lround(head[0])) - width / 2;
++        const int y = static_cast<int>(std::lround(head[1])) - height;
++
++        NameTrack &track = g_tracks[static_cast<std::size_t>(slot)];
++        if (track.anchor.Update(x, y) || track.name != name || track.generation == 0) track.generation = ++g_next_generation;
++        track.name = name;
++        gfx::Interp2DScope interpolation({.key = static_cast<gfx::InterpKey>(reinterpret_cast<std::uintptr_t>(&track)), .generation = track.generation});
++        font.DrawDirect(text.data(), x, y);
++    }
++}
++
++} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_down_moonmod.cpp b/port/src/moonmod/coop_down_moonmod.cpp
 new file mode 100644
-index 00000000..7c06949a
+index 00000000..798f66f0
 --- /dev/null
 +++ b/port/src/moonmod/coop_down_moonmod.cpp
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,116 @@
 +// Co-op's "down, not out" (moonmod/coop.hpp, "Down, not out").
 +//
 +// Alone, a hero whose life runs out dies: the game runs the hero's death and raises its death event, which changes
@@ -15729,8 +16096,16 @@ index 00000000..7c06949a
 +} // namespace
 +
 +void SetDownRule(std::string_view owner, bool enabled) {
-+    if (enabled) g_rule_owner = std::string(owner);
-+    else if (g_rule_owner == owner) g_rule_owner.clear();
++    if (enabled) {
++        g_rule_owner = std::string(owner);
++        return;
++    }
++    if (g_rule_owner != owner) return;
++    g_rule_owner.clear();
++    // A hero lying under the rule when it ends is not left lying: the game's own death goes on, as when the mod
++    // that set the rule goes away.
++    std::string ignored;
++    if (g_down) HeroGiveUp(ignored);
 +}
 +
 +bool DownRule() { return !g_rule_owner.empty(); }
@@ -15898,10 +16273,10 @@ index 00000000..7902d263
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_register_moonmod.cpp b/port/src/moonmod/coop_register_moonmod.cpp
 new file mode 100644
-index 00000000..f360ae73
+index 00000000..859675bb
 --- /dev/null
 +++ b/port/src/moonmod/coop_register_moonmod.cpp
-@@ -0,0 +1,366 @@
+@@ -0,0 +1,403 @@
 +// Co-op's shared world as it changes (moonmod/coop.hpp, "The world as it changes"): the parts of the save that are
 +// the world's and change while two games play, told to a mod as they change in this game and taken from it as they
 +// change in another.
@@ -15954,10 +16329,22 @@ index 00000000..f360ae73
 +    std::array<s16, kStock>              stock{}; // Georama parts built and waiting to be placed
 +};
 +
-+// What the story's scripts gave this game's player since the last step: {item_no, count}.
-+std::vector<std::array<int, 2>> g_gifts;
++// What the scripts gave this game's player and is not told yet: {item_no, count, the step it was given at}. A
++// gift is the story's (for both players) only when the story itself moves around it: a story event that gives an
++// item sets a story flag in the same scene (the scripts set the event's flag, then add_item). A gift with no shared
++// story flag, counter or progress change within kGiftWindow steps of it (a chest, a shop, a villager's trade, kept
++// by a map flag or by nothing) is the player's own and is dropped.
++std::vector<std::array<int, 3>> g_gifts;
 +bool                            g_system_script = false; // a dungeon's system script runs: its gifts are the player's own
 +constexpr std::size_t           kGiftsKept = 32;
++constexpr int                   kGiftWindow = 300;
++int                             g_steps = 0;            // RegisterStep's own clock: one a frame while watched
++int                             g_story_moved = -1000000; // the step this game's story flags, counters or progress last changed at
++int                             g_gifts_told = 0;
++
++// A townsperson's state as the world has it: recruited, living in a house. Who walks with a player (IN_PARTY) is
++// that player's own pick, never told and never taken.
++int WorldRecruitStatus(int status) { return status & ~PARTY_CHARA_STATUS_IN_PARTY; }
 +
 +std::unique_ptr<Shared> g_shared;
 +std::string             g_watcher; // the mod told of changes; empty: nobody watches
@@ -16010,7 +16397,7 @@ index 00000000..f360ae73
 +    shared.progress = save.game_progress;
 +    for (int field = 0; field < 3; ++field) shared.party[static_cast<std::size_t>(field)] = PartyField(save.user_data, field);
 +    for (int i = 0; i < kRecruits; ++i) {
-+        shared.recruits[static_cast<std::size_t>(i)] = {save.user_data.party_chara[i].chara_no, save.user_data.party_chara[i].status};
++        shared.recruits[static_cast<std::size_t>(i)] = {save.user_data.party_chara[i].chara_no, WorldRecruitStatus(save.user_data.party_chara[i].status)};
 +    }
 +    std::copy(std::begin(save.save_dungeon.floor_info), std::end(save.save_dungeon.floor_info), shared.floors.begin());
 +    for (int town = 0; town < kTowns; ++town) shared.towns[static_cast<std::size_t>(town)] = TownFingerprint(save, town);
@@ -16042,14 +16429,19 @@ index 00000000..f360ae73
 +    g_shared.reset();
 +    g_gifts.clear();
 +    g_system_script = false;
++    g_steps = 0;
++    g_story_moved = -1000000;
++    g_gifts_told = 0;
 +}
++
++int RegisterGiftsTold() { return g_gifts_told; }
 +
 +void SystemScriptBegan() { g_system_script = true; }
 +
 +void StoryGave(int item_no, int count) {
 +    if (g_watcher.empty() || item_no <= 0 || count <= 0) return;
 +    if (GetNowLoopNo() == LOOP_DUNGEON && g_system_script) return; // a chest, a prize: each player's own
-+    if (g_gifts.size() < kGiftsKept) g_gifts.push_back({item_no, std::min(count, 999)});
++    if (g_gifts.size() < kGiftsKept) g_gifts.push_back({item_no, std::min(count, 999), g_steps});
 +}
 +
 +void RegisterStep() {
@@ -16064,9 +16456,11 @@ index 00000000..f360ae73
 +        g_running = false;
 +        return;
 +    }
++    ++g_steps;
 +    if (!g_running) { // a town or a floor begins (a save loaded, a visit begun): nothing to tell
 +        Rebase(*save);
 +        g_running = true;
++        g_gifts.clear();
 +        return;
 +    }
 +    Shared &shared = *g_shared;
@@ -16076,10 +16470,7 @@ index 00000000..f360ae73
 +        SharedRuntime().PublishToMod(g_watcher, "game.world.changed",
 +                                     {{"kind", kind}, {"id", id}, {"value", std::move(value)}, {"frame", SharedRuntime().Frame()}});
 +    };
-+    // What a scene gave this player: told once, as it was given (not a difference of the save: the bag is the
-+    // player's own, and only the story's gifts are for both).
-+    for (const std::array<int, 2> &gift : g_gifts) tell("gift", gift[0], gift[1]);
-+    g_gifts.clear();
++    const int told_before_story = told;
 +    for (int word = 0; word < kFlags / 32 && told < kChangesAFrame; ++word) {
 +        u32 differs = save->bit_flag[word] ^ shared.flags[static_cast<std::size_t>(word)];
 +        for (int bit = 0; differs != 0 && bit < 32 && told < kChangesAFrame; ++bit) {
@@ -16099,6 +16490,21 @@ index 00000000..f360ae73
 +        shared.progress = save->game_progress;
 +        tell("progress", 0, save->game_progress);
 +    }
++    if (told > told_before_story) g_story_moved = g_steps;
++    // What a story scene gave this player: told once, as it was given (not a difference of the save: the bag is the
++    // player's own, and only the story's gifts are for both); a gift the story did not move around is dropped.
++    for (auto gift = g_gifts.begin(); gift != g_gifts.end();) {
++        const int at = (*gift)[2];
++        if (g_story_moved >= at - kGiftWindow && g_story_moved <= at + kGiftWindow) {
++            tell("gift", (*gift)[0], (*gift)[1]);
++            ++g_gifts_told;
++            gift = g_gifts.erase(gift);
++        } else if (g_steps - at > kGiftWindow) {
++            gift = g_gifts.erase(gift);
++        } else {
++            ++gift;
++        }
++    }
 +    for (int field = 0; field < 3 && told < kChangesAFrame; ++field) {
 +        const int now = PartyField(save->user_data, field);
 +        if (now == shared.party[static_cast<std::size_t>(field)]) continue;
@@ -16106,7 +16512,7 @@ index 00000000..f360ae73
 +        tell("party", field, now);
 +    }
 +    for (int i = 0; i < kRecruits && told < kChangesAFrame; ++i) {
-+        const std::array<int, 2> now = {save->user_data.party_chara[i].chara_no, save->user_data.party_chara[i].status};
++        const std::array<int, 2> now = {save->user_data.party_chara[i].chara_no, WorldRecruitStatus(save->user_data.party_chara[i].status)};
 +        if (now == shared.recruits[static_cast<std::size_t>(i)]) continue;
 +        shared.recruits[static_cast<std::size_t>(i)] = now;
 +        tell("recruit", i, Json::array({now[0], now[1]}));
@@ -16184,7 +16590,10 @@ index 00000000..f360ae73
 +            error = "the story's progress is {id = 0, value = 0-1000}";
 +            return false;
 +        }
-+        save->game_progress = shared.progress = static_cast<s32>(number);
++        // Two games moving the story at once: the further one stands. What they sent is agreed, so a higher value
++        // here is told back on the next step and both end at the higher one.
++        save->game_progress = std::max(save->game_progress, static_cast<s32>(number));
++        shared.progress = static_cast<s32>(number);
 +        return true;
 +    }
 +    if (kind == "party") {
@@ -16206,9 +16615,12 @@ index 00000000..f360ae73
 +            error = "a townsperson is {id = 0-31, value = {chara_no, status}}";
 +            return false;
 +        }
++        // The world's part of the state is theirs; whether this one walks with this game's player stays this game's.
++        const int world = WorldRecruitStatus(static_cast<int>(status));
++        const int walks = save->user_data.party_chara[id].status & PARTY_CHARA_STATUS_IN_PARTY;
 +        save->user_data.party_chara[id].chara_no = static_cast<s16>(chara_no);
-+        save->user_data.party_chara[id].status = static_cast<u16>(status);
-+        shared.recruits[static_cast<std::size_t>(id)] = {static_cast<int>(chara_no), static_cast<int>(status)};
++        save->user_data.party_chara[id].status = static_cast<u16>(world | (world != 0 ? walks : 0));
++        shared.recruits[static_cast<std::size_t>(id)] = {static_cast<int>(chara_no), world};
 +        return true;
 +    }
 +    if (kind == "floor") {
@@ -16270,10 +16682,10 @@ index 00000000..f360ae73
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_save_moonmod.cpp b/port/src/moonmod/coop_save_moonmod.cpp
 new file mode 100644
-index 00000000..227fa720
+index 00000000..5df7921f
 --- /dev/null
 +++ b/port/src/moonmod/coop_save_moonmod.cpp
-@@ -0,0 +1,851 @@
+@@ -0,0 +1,998 @@
 +// Co-op's split of a save into the host's world and a player's own things (moonmod/coop_save.hpp).
 +
 +#include "moonmod/coop_save.hpp"
@@ -16282,6 +16694,8 @@ index 00000000..227fa720
 +#include <cstdint>
 +#include <cstdio>
 +#include <cstring>
++#include <ctime>
++#include <array>
 +#include <fstream>
 +#include <functional>
 +#include <iterator>
@@ -16579,6 +16993,11 @@ index 00000000..227fa720
 +            error = "the data comes from another build of the game; play on the same build";
 +            return false;
 +        }
++        // A field given twice would be taken twice and stand for one left out: the text is damaged.
++        if (std::ranges::any_of(found, [&field](const auto &seen) { return seen.first == &*field; })) {
++            error = "the data is damaged (a field given twice)";
++            return false;
++        }
 +        const std::string_view data(bytes.data() + at, size);
 +        if (field->variable() && !field->check(data, error)) return false;
 +        found.emplace_back(&*field, data);
@@ -16752,6 +17171,11 @@ index 00000000..227fa720
 +            if (!r.I16(p)) return damaged();
 +        }
 +        if (!r.U32(cells) || cells > kLayoutCellsMax) return damaged();
++        // The game reads a river grid's cells as num_x by num_z (CEditMap::LoadData): no other count is a grid.
++        if (grid.num_x < 0 || grid.num_z < 0 ||
++            static_cast<std::uint64_t>(grid.num_x) * static_cast<std::uint64_t>(grid.num_z) != cells) {
++            return damaged();
++        }
 +        grid.cells.resize(cells);
 +        if (!r.Bytes(grid.cells.data(), cells)) return damaged();
 +    }
@@ -16760,14 +17184,36 @@ index 00000000..227fa720
 +    return true;
 +}
 +
++namespace {
++
++// A town's record as the two games compare it: without save_count, which the game bumps each time it writes the
++// town (every house entered, every town edit event, every map change), so it says nothing about the town.
++std::unique_ptr<CEditData> ComparableRecord(const CEditData &record) {
++    auto copy = std::make_unique<CEditData>();
++    std::memcpy(static_cast<void *>(copy.get()), &record, sizeof(CEditData));
++    copy->save_count = 0;
++    return copy;
++}
++
++bool SameRecord(const CEditData &a, const CEditData &b) {
++    return std::memcmp(static_cast<const void *>(ComparableRecord(a).get()), static_cast<const void *>(ComparableRecord(b).get()),
++                       sizeof(CEditData)) == 0;
++}
++
++} // namespace
++
 +std::uint64_t TownFingerprint(const CSaveData &save, int town) {
 +    std::uint64_t hash = 1469598103934665603ull;
 +    const auto    mix = [&hash](std::string_view bytes) {
 +        for (const char c : bytes) hash = (hash ^ static_cast<unsigned char>(c)) * 1099511628211ull;
 +    };
 +    for (const Field &field : TownFields(const_cast<CSaveData &>(save), town)) {
-+        if (field.variable()) mix(field.write());
-+        else mix(std::string_view(static_cast<const char *>(field.data), field.size));
++        if (field.variable()) {
++            mix(field.write());
++        } else {
++            const std::unique_ptr<CEditData> record = ComparableRecord(*static_cast<const CEditData *>(field.data));
++            mix(std::string_view(reinterpret_cast<const char *>(record.get()), sizeof(CEditData)));
++        }
 +    }
 +    return hash;
 +}
@@ -16836,7 +17282,6 @@ index 00000000..227fa720
 +bool SameGrid(const TownGrid &a, const TownGrid &b) {
 +    return a.num_x == b.num_x && a.num_z == b.num_z && a.pos == b.pos && a.cells == b.cells;
 +}
-+bool SameLog(const EditPlaceLog &a, const EditPlaceLog &b) { return std::memcmp(&a, &b, sizeof(a)) == 0; }
 +
 +// The parts a layout holds (slots with a definition), by value.
 +std::vector<TownPart> Placed(const TownLayout &layout) {
@@ -16869,7 +17314,7 @@ index 00000000..227fa720
 +    // builder): theirs is the town. Taken whole it keeps its parts in their order and the placement log that
 +    // indexes them, which a merge by parts cannot (below).
 +    const bool untouched = LayoutBytes(now->layout) == LayoutBytes(before->layout);
-+    if (untouched && std::memcmp(static_cast<const void *>(now->record.get()), static_cast<const void *>(before->record.get()), sizeof(CEditData)) == 0) {
++    if (untouched && SameRecord(*now->record, *before->record)) {
 +        return ImportTown(edited, town, save, error);
 +    }
 +
@@ -16901,9 +17346,13 @@ index 00000000..227fa720
 +        layout.grids[i] = after->layout.grids[i];
 +    }
 +    // The placed parts: what both lists hold is neither taken away nor added (one for one, as a part may stand twice).
-+    std::vector<TownPart> placed = Placed(layout), removed = Placed(before->layout), added = Placed(after->layout);
++    std::vector<TownPart>                   removed = Placed(before->layout);
++    std::vector<std::pair<TownPart, int>> added; // their new parts, each with its index in their layout
++    for (std::size_t j = 0; j < after->layout.parts.size(); ++j) {
++        if (after->layout.parts[j].id != 0) added.emplace_back(after->layout.parts[j], static_cast<int>(j));
++    }
 +    for (auto it = removed.begin(); it != removed.end();) {
-+        const auto kept = std::ranges::find_if(added, [&](const TownPart &part) { return SamePart(part, *it); });
++        const auto kept = std::ranges::find_if(added, [&](const auto &part) { return SamePart(part.first, *it); });
 +        if (kept != added.end()) {
 +            added.erase(kept);
 +            it = removed.erase(it);
@@ -16911,21 +17360,71 @@ index 00000000..227fa720
 +            ++it;
 +        }
 +    }
-+    for (const TownPart &gone : removed) {
-+        const auto found = std::ranges::find_if(placed, [&](const TownPart &part) { return SamePart(part, gone); });
-+        if (found != placed.end()) placed.erase(found);
++    // The merged parts: this game's, less what they took away, then what they added. Each keeps where it came from,
++    // so the placement log can follow it.
++    std::vector<TownPart> merged;
++    std::vector<int>      mine_to_merged(layout.parts.size(), -1), theirs_to_merged(after->layout.parts.size(), -1);
++    for (std::size_t i = 0; i < layout.parts.size(); ++i) {
++        const TownPart &part = layout.parts[i];
++        if (part.id == 0) continue;
++        const auto gone = std::ranges::find_if(removed, [&](const TownPart &taken) { return SamePart(taken, part); });
++        if (gone != removed.end()) {
++            removed.erase(gone);
++            continue;
++        }
++        mine_to_merged[i] = static_cast<int>(merged.size());
++        merged.push_back(part);
 +    }
-+    for (const TownPart &part : added) placed.push_back(part);
-+    if (placed.size() > kLayoutPartsMax) placed.resize(kLayoutPartsMax);
-+    layout.parts = std::move(placed);
-+    // The placement log indexes parts, which moved: theirs is taken when it changed, else dropped (the game rebuilds
-+    // what it needs from the parts on load).
-+    bool log_changed = before->layout.place_log.size() != after->layout.place_log.size();
-+    for (std::size_t i = 0; !log_changed && i < after->layout.place_log.size(); ++i) {
-+        log_changed = !SameLog(before->layout.place_log[i], after->layout.place_log[i]);
++    const std::size_t mine_end = merged.size();
++    std::vector<bool> theirs_added(after->layout.parts.size(), false);
++    for (const auto &[part, j] : added) {
++        theirs_to_merged[static_cast<std::size_t>(j)] = static_cast<int>(merged.size());
++        theirs_added[static_cast<std::size_t>(j)] = true;
++        merged.push_back(part);
 +    }
-+    if (log_changed) layout.place_log = after->layout.place_log;
-+    else layout.place_log.clear();
++    // Their parts both games have: the same part among this game's.
++    std::vector<bool> matched(mine_end, false);
++    for (std::size_t j = 0; j < after->layout.parts.size(); ++j) {
++        if (theirs_to_merged[j] >= 0 || after->layout.parts[j].id == 0) continue;
++        for (std::size_t k = 0; k < mine_end; ++k) {
++            if (!matched[k] && SamePart(merged[k], after->layout.parts[j])) {
++                matched[k] = true;
++                theirs_to_merged[j] = static_cast<int>(k);
++                break;
++            }
++        }
++    }
++    const auto mapped = [](const std::vector<int> &map, int index) {
++        return index >= 0 && static_cast<std::size_t>(index) < map.size() && map[static_cast<std::size_t>(index)] >= 0 &&
++                       map[static_cast<std::size_t>(index)] < static_cast<int>(kLayoutPartsMax)
++                   ? map[static_cast<std::size_t>(index)]
++                   : -1;
++    };
++    // The placement log: a part saved as placed loads as placed only when the log says what it rests on
++    // (CEditMap::LoadData), so it is kept, never dropped. This game's entries, and theirs for the parts they added,
++    // each with its parts renumbered to the merged order; an entry whose part is gone goes with it.
++    std::vector<EditPlaceLog> log;
++    const auto keep = [&log](EditPlaceLog entry, int part, int base) {
++        if (part < 0 || part > 32767 || base > 32767) return;
++        entry.parts_no = static_cast<s16>(part);
++        entry.base_no = static_cast<s16>(base);
++        if (log.size() < kLayoutLogMax) log.push_back(entry);
++    };
++    for (const EditPlaceLog &entry : layout.place_log) {
++        if (entry.parts_no < 0) continue;
++        const int base = entry.base_no < 0 ? entry.base_no : mapped(mine_to_merged, entry.base_no);
++        if (entry.base_no >= 0 && base < 0) continue;
++        keep(entry, mapped(mine_to_merged, entry.parts_no), base);
++    }
++    for (const EditPlaceLog &entry : after->layout.place_log) {
++        if (entry.parts_no < 0 || static_cast<std::size_t>(entry.parts_no) >= theirs_added.size() || !theirs_added[static_cast<std::size_t>(entry.parts_no)]) continue;
++        const int base = entry.base_no < 0 ? entry.base_no : mapped(theirs_to_merged, entry.base_no);
++        if (entry.base_no >= 0 && base < 0) continue;
++        keep(entry, mapped(theirs_to_merged, entry.parts_no), base);
++    }
++    if (merged.size() > kLayoutPartsMax) merged.resize(kLayoutPartsMax);
++    layout.parts = std::move(merged);
++    layout.place_log = std::move(log);
 +
 +    std::memcpy(static_cast<void *>(&save.edit_data[town]), now->record.get(), sizeof(CEditData));
 +    PortTownLayout(save.edit_data[town]) = std::move(now->layout);
@@ -17051,11 +17550,71 @@ index 00000000..227fa720
 +namespace {
 +
 +std::set<int> g_slots_copied; // saves copied aside in this run of the game, before their first write
++constexpr std::size_t kCopiesKept = 5; // copies kept of each save, the newest
++
++// A save is copied aside before co-op first writes to it in a run of the game: a new copy each time, named with the
++// date and time it was taken and a number for copies taken in the same second (<name>.YYYYMMDD-HHMMSS-NN<ext>), never
++// over an older one, which may be the only good one. The newest five copies of that save are kept.
++bool CopyAside(const std::filesystem::path &path, std::string &error) {
++    const std::filesystem::path folder = PathsSaveRoot() / "moonmod" / "coop-own-saves";
++    std::error_code             failed;
++    std::filesystem::create_directories(folder, failed);
++    if (failed) {
++        error = "the save could not be copied aside before writing to it: " + failed.message();
++        return false;
++    }
++    const std::string stem = path.stem().string(), extension = path.extension().string();
++    const std::time_t now = std::time(nullptr);
++    std::tm           local{};
++#if defined(_WIN32)
++    localtime_s(&local, &now);
++#else
++    localtime_r(&now, &local);
++#endif
++    char stamp[32] = {};
++    std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &local);
++    std::filesystem::path aside;
++    for (int n = 0; n < 100; ++n) {
++        char number[4] = {};
++        std::snprintf(number, sizeof(number), "%02d", n);
++        const std::string name = stem + "." + stamp + "-" + number + extension; // (two in one second sort in order)
++        if (!std::filesystem::exists(folder / name, failed)) {
++            aside = folder / name;
++            break;
++        }
++    }
++    if (aside.empty()) {
++        error = "the save could not be copied aside before writing to it: no free name";
++        return false;
++    }
++    std::filesystem::copy_file(path, aside, std::filesystem::copy_options::none, failed);
++    if (failed) {
++        error = "the save could not be copied aside before writing to it: " + failed.message();
++        return false;
++    }
++    // The copies of this save (its own name, a stamp, its extension), oldest first by their stamps; the oldest go.
++    std::vector<std::filesystem::path> copies;
++    for (const auto &entry : std::filesystem::directory_iterator(folder, failed)) {
++        const std::string name = entry.path().filename().string();
++        if (name.size() > stem.size() + extension.size() + 1 && name.starts_with(stem + ".2") && name.ends_with(extension)) {
++            copies.push_back(entry.path());
++        }
++    }
++    std::ranges::sort(copies);
++    for (std::size_t i = 0; i + kCopiesKept < copies.size(); ++i) std::filesystem::remove(copies[i], failed);
++    return true;
++}
 +
 +// Reads one numbered save whole. A save document is large: the caller holds it on the heap.
 +bool ReadSlot(int slot, SaveDocument &document, std::filesystem::path &path, std::string &error) {
 +    for (const SaveSlot &found : SaveSlotScan(false).saves) {
 +        if (found.autosave || found.second_card || found.number != slot) continue;
++        // Only a save of this port's own kind: a legacy memory-card save is converted when the game lists saves
++        // outside a visit, and written here it would be JSON text over a binary file.
++        if (found.path.extension() != ".json") {
++            error = "that save is an old memory-card save; open it once outside a visit to convert it";
++            return false;
++        }
 +        const SaveSlotState state = SaveSlotRead(found.path, document);
 +        if (state != SaveSlotState::Ready) {
 +            error = std::string("that save can't be read: ") + SaveSlotStatus(state);
@@ -17071,6 +17630,8 @@ index 00000000..227fa720
 +} // namespace
 +
 +int ChapterOfProgress(int progress) { return progress < 2 ? 0 : progress < 4 ? 1 : progress - 2; }
++
++void SlotCopiesForget() { g_slots_copied.clear(); }
 +
 +std::vector<SlotInfo> SlotsList() {
 +    std::vector<SlotInfo> slots;
@@ -17103,18 +17664,16 @@ index 00000000..227fa720
 +    std::filesystem::path path;
 +    if (!ReadSlot(slot, *document, path, error)) return false;
 +    // Who the save plays as is its own story's: a visit may have been played as the other hero, or in a second shape.
-+    const s16 plays_as = document->image.save_data.user_data.active_chr_no;
++    // So are its townsfolk (who has been recruited and lives where is the story's; the host's world had its own).
++    CUserDataManager &user = document->image.save_data.user_data;
++    const s16         plays_as = user.active_chr_no;
++    auto              townsfolk = std::make_unique<std::array<unsigned char, sizeof(user.party_chara)>>();
++    std::memcpy(townsfolk->data(), &user.party_chara, sizeof(user.party_chara));
 +    if (!ImportPlayer(text, document->image.save_data, error)) return false;
-+    document->image.save_data.user_data.active_chr_no = plays_as;
++    user.active_chr_no = plays_as;
++    std::memcpy(&user.party_chara, townsfolk->data(), sizeof(user.party_chara));
 +    if (!g_slots_copied.contains(slot)) {
-+        const std::filesystem::path aside = PathsSaveRoot() / "moonmod" / "coop-own-saves" / path.filename();
-+        std::error_code             failed;
-+        std::filesystem::create_directories(aside.parent_path(), failed);
-+        if (!failed) std::filesystem::copy_file(path, aside, std::filesystem::copy_options::overwrite_existing, failed);
-+        if (failed) {
-+            error = "the save could not be copied aside before writing to it: " + failed.message();
-+            return false;
-+        }
++        if (!CopyAside(path, error)) return false;
 +        g_slots_copied.insert(slot);
 +    }
 +    if (SaveSlotWriteOwnThings(path, *document) != FilesResult::kWritten) {
@@ -17127,10 +17686,10 @@ index 00000000..227fa720
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_town_moonmod.cpp b/port/src/moonmod/coop_town_moonmod.cpp
 new file mode 100644
-index 00000000..c5a581fb
+index 00000000..e9c909c2
 --- /dev/null
 +++ b/port/src/moonmod/coop_town_moonmod.cpp
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,161 @@
 +// Co-op's towns as they are built (moonmod/coop.hpp, "A town as it is built").
 +//
 +// A town's Georama is two things in a running game: its record in the save, and, while the town is on screen, the
@@ -17145,11 +17704,14 @@ index 00000000..c5a581fb
 +
 +#include "moonmod/coop.hpp"
 +
++#include <cmath>
++#include <cstdio>
 +#include <cstring>
 +
 +#include "editevent.hpp"
 +#include "editloop.hpp"
 +#include "editmap.hpp"
++#include "editmode.hpp"
 +#include "mainloop.hpp"
 +#include "mapjump.hpp"
 +#include "mapselect.hpp"
@@ -17175,6 +17737,29 @@ index 00000000..c5a581fb
 +    return static_cast<CEditMap *>(map);
 +}
 +
++// After a rebuild, a player standing where a part just landed is set down on the nearest spot the game would let
++// them walk out of Georama mode onto (CheckEditToWalk's test): rings of 40 to 800 units around them, 16 spots each.
++// A spot that was not walkable before the rebuild (a bridge, a part's top) is left alone: the part did not cover it.
++void MovePlayerAside(CScene *scene, CCharacter2 *player, const float *stood) {
++    float ground[4];
++    if (CheckEditWalkSpot(scene, stood, ground) != 0) return;
++    for (int ring = 1; ring <= 20; ++ring) {
++        const float radius = 40.0f * static_cast<float>(ring);
++        for (int turn = 0; turn < 16; ++turn) {
++            const float angle = static_cast<float>(turn) * 3.14159265f / 8.0f;
++            const float spot[4] = {stood[0] + radius * std::cos(angle), stood[1], stood[2] + radius * std::sin(angle), 1.0f};
++            if (CheckEditWalkSpot(scene, spot, ground) == 0) continue;
++            float to[4] = {ground[0], ground[1] + 0.01f, ground[2], 1.0f}; // as EndEditMode sets the player down
++            player->SetPosition(to);
++            std::fprintf(stderr, "co-op: a part landed where the player stood (%.0f,%.0f,%.0f): moved to %.0f,%.0f,%.0f\n", stood[0],
++                         stood[1], stood[2], to[0], to[1], to[2]);
++            return;
++        }
++    }
++    std::fprintf(stderr, "co-op: a part landed where the player stood (%.0f,%.0f,%.0f) and no free spot is within 800\n", stood[0],
++                 stood[1], stood[2]);
++}
++
 +// The game's own load of a town (EditDataLoad) without its last step, the analysis: what the town now fulfils is
 +// worked out by the game that built the part and comes with the town's record. This game writes nothing.
 +void RebuildNow() {
@@ -17186,12 +17771,24 @@ index 00000000..c5a581fb
 +    if (map == nullptr || save == nullptr || on_screen != town) return;
 +    CEditData *record = save->GetEditData(town);
 +    if (record == nullptr) return;
++    // Where the player stands, and whether they could walk there before the town changed.
++    CScene      *shown = GetMainScene();
++    CCharacter2 *player = shown != nullptr ? shown->GetCharacter(shown->player_chara) : nullptr;
++    float        stood[4] = {};
++    bool         stood_free = false;
++    if (player != nullptr) {
++        float ground[4];
++        player->GetPosition(stood);
++        stood[3] = 1.0f;
++        stood_free = CheckEditWalkSpot(shown, stood, ground) != 0;
++    }
 +    map->ClearAllParts();
 +    map->LoadData(record);
 +    map->InitialPlaceParts(record);
 +    map->GroundBalance(0);
 +    map->UpdateHouse();
 +    if (CScene *scene = GetMainScene(); scene != nullptr) GeoUpdateNpcPos(scene);
++    if (player != nullptr && stood_free) MovePlayerAside(shown, player, stood);
 +}
 +
 +} // namespace
@@ -17208,8 +17805,13 @@ index 00000000..c5a581fb
 +    CEditMap *map = TownMap(town);
 +    CSaveData *save = GetSaveData();
 +    if (map == nullptr || save == nullptr) return;
++    if (!TownRecordWritable(town)) return;
 +    if (CEditData *record = save->GetEditData(town); record != nullptr) map->SaveData(record);
 +}
++
++// A live map behind its record (another player's change not yet built here) is never written over the record:
++// that would take the other player's part away, here and, sent back, in their game too.
++bool TownRecordWritable(int town) { return g_rebuild_town < 0 || g_rebuild_town != town; }
 +
 +void TownRebuildWanted(int town) { g_rebuild_town = town; }
 +
@@ -17251,10 +17853,10 @@ index 00000000..c5a581fb
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_ui_moonmod.cpp b/port/src/moonmod/coop_ui_moonmod.cpp
 new file mode 100644
-index 00000000..c6bd5cf0
+index 00000000..a37531e1
 --- /dev/null
 +++ b/port/src/moonmod/coop_ui_moonmod.cpp
-@@ -0,0 +1,527 @@
+@@ -0,0 +1,537 @@
 +// Co-op's screens (moonmod/coop.hpp): the choice panel over the game, a mod's title mode page, and a visit's start
 +// and end.
 +
@@ -17463,6 +18065,13 @@ index 00000000..c6bd5cf0
 +    return true;
 +}
 +
++bool ChoiceCloseQuietly(std::string_view owner) {
++    if (!g_choice || g_choice->owner != owner) return false;
++    g_choice.reset();
++    g_choice_grace = 0;
++    return true;
++}
++
 +bool ChoiceIsOpen() { return g_choice.has_value(); }
 +bool PanelHoldsPad() { return g_choice.has_value() && !g_choice_reads; }
 +const Choice *OpenChoice() { return g_choice ? &*g_choice : nullptr; }
@@ -17494,6 +18103,7 @@ index 00000000..c6bd5cf0
 +}
 +
 +void Draw2D() {
++    DrawAvatarNames(); // the other players' names, under the panel
 +    if (!g_choice) return;
 +    const Choice &choice = *g_choice;
 +    const int rows = static_cast<int>(choice.options.size());
@@ -17734,6 +18344,8 @@ index 00000000..c6bd5cf0
 +    return true;
 +}
 +
++void VisitStartForTests(std::string_view owner) { g_visit = Visit{std::string(owner), "test"}; }
++
 +void EndVisit(std::string_view reason) {
 +    if (!g_visit) return;
 +    const Visit ended = *g_visit;
@@ -17784,15 +18396,16 @@ index 00000000..c6bd5cf0
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..5b2f210c
+index 00000000..a1389ad0
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,770 @@
+@@ -0,0 +1,1000 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
 +#include "moonmod/coop.hpp"
 +#include "moonmod/coop_down.hpp"
++#include "moonmod/chronicle_two_adapter.hpp"
 +
 +#include <algorithm>
 +#include <array>
@@ -17802,6 +18415,7 @@ index 00000000..5b2f210c
 +#include <memory>
 +#include <numbers>
 +#include <string>
++#include <utility>
 +#include <vector>
 +
 +#include "character.hpp"
@@ -17812,6 +18426,7 @@ index 00000000..5b2f210c
 +#include "editctrl.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
++#include "menuchr.hpp"
 +#include "mglib.hpp"
 +#include "mg_memory.hpp"
 +#include "monster.hpp"
@@ -17862,6 +18477,10 @@ index 00000000..5b2f210c
 +    std::vector<std::shared_ptr<CCharacter2>> parts;
 +    float       at[3] = {0.0f, 0.0f, 0.0f}, heading = 0.0f;
 +    bool        placed = false;
++    // Drawn as the ridepod or the monster itself (not the hero standing in): it plays the reported motions. The
++    // ridepod's parts play them too, as the game's own CActionChara::SetMotion has every part of the chain do.
++    bool        shaped = false;
++    bool        parts_move = false;
 +    int         motion = -1;
 +    int         stand_in_gait = -1, stand_in_shown = -1; // a stand-in: 1 running, 0 standing
 +    int         town = 0;
@@ -17880,7 +18499,7 @@ index 00000000..5b2f210c
 +        }
 +        SetPosition(at[0], at[1], at[2]);
 +        SetRotation(0.0f, heading, 0.0f);
-+        if (target.stand_in) {
++        if (target.stand_in && !shaped) {
 +            // The hero standing in for a ridepod or a monster's form: their motion numbers are not the hero's, so
 +            // the hero runs while the reports move and stands when they stop (the names every hero's body has).
 +            if (far > 2.0f) stand_in_gait = 1;
@@ -17896,6 +18515,9 @@ index 00000000..5b2f210c
 +            if (target.motion != motion) {
 +                motion = target.motion;
 +                SetMotion(std::max(0, motion), 2);
++                if (parts_move) {
++                    for (const std::shared_ptr<CCharacter2> &part : parts) part->SetMotion(std::max(0, motion), 2);
++                }
 +            }
 +        }
 +        CCharacter2::Step();
@@ -17913,7 +18535,56 @@ index 00000000..5b2f210c
 +        const int drawn = CCharacter2::DrawDirect();
 +        for (const std::shared_ptr<CCharacter2> &part : parts) part->DrawDirect();
 +        if (tinted) mgSetAmbient(saved);
++        label_drawn = MeasureLabel();
 +        return drawn;
++    }
++
++    // Where the player's name goes on the screen, measured as the scene draws the body, with the camera it is drawn
++    // with: the points over its head and under its feet. DrawAvatarNames takes it in the 2D pass after the scene, once.
++    bool  label_drawn = false;
++    float label_head[2] = {0.0f, 0.0f}, label_feet[2] = {0.0f, 0.0f};
++
++private:
++    // A world point's place on the screen (from its top left, in the screen's own units), or false when it is behind
++    // the camera or off the screen.
++    static bool OnScreen(float *point, float out[2]) {
++        float clip[4];
++        sceVu0ApplyMatrix(clip, mgRenderInfo.world_screen, point);
++        if (!(clip[3] >= 1.0f)) return false; // behind the eye, or at it
++        int screen[4];
++        if (mgTransWorldScreen(screen, point) == 0) return false;
++        out[0] = static_cast<float>(screen[0]) / 16.0f;
++        out[1] = static_cast<float>(screen[1]) / 16.0f;
++        return std::isfinite(out[0]) && std::isfinite(out[1]);
++    }
++
++    // The highest joint of the body and its parts as they are drawn (the head's, or the hat's, or the ridepod's), and
++    // a fifth of the height again over it for the hair and the hat's crown. A body with no joints to read is taken
++    // by its info file's height.
++    bool MeasureLabel() {
++        float feet[4] = {at[0], at[1], at[2], 1.0f};
++        float top = -1.0e30f;
++        const auto reach = [&top](CCharacter2 &chara) {
++            mgCFrame *root = chara.CObjectFrame::frame;
++            if (root == nullptr || root->frame_list == nullptr) return;
++            for (int i = 0; i < root->frame_num; ++i) {
++                if (root->frame_list[i] == nullptr) continue;
++                float joint[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++                root->frame_list[i]->GetWorldPosition0(joint);
++                if (std::isfinite(joint[1])) top = std::max(top, joint[1]);
++            }
++        };
++        // (a hero's own joints only: a weapon held up would lift the name in every swing; its head joint sits at the
++        // neck, so a fifth again reaches over the hair. The ridepod's and a monster's joints are their shape's own.)
++        reach(*this);
++        if (shaped) {
++            for (const std::shared_ptr<CCharacter2> &part : parts) reach(*part);
++        }
++        const float over = shaped ? 1.1f : 1.2f;
++        float       height = top - feet[1];
++        if (!(height > 1.0f && height < 1000.0f)) height = (body_height > 1.0f ? body_height : 16.0f) / over;
++        float head[4] = {feet[0], feet[1] + height * over, feet[2], 1.0f};
++        return OnScreen(head, label_head) && OnScreen(feet, label_feet);
 +    }
 +};
 +
@@ -17923,7 +18594,7 @@ index 00000000..5b2f210c
 +    std::shared_ptr<AvatarBody> body;
 +    int                         loaded_character = -1;
 +    int                         loaded_town = -1;
-+    int                         loaded_outfit[5] = {-1, -1, -1, -1, -1}; // head, clothes, feet, weapon, second weapon as asked
++    std::array<int, 12>         loaded_look{}; // what the body was loaded as (LookOf): a new look is loaded in its place
 +    int                         slot = -1;
 +    CScene                     *scene = nullptr;
 +    int                         loop = -1;
@@ -17968,16 +18639,44 @@ index 00000000..5b2f210c
 +    return reinterpret_cast<unsigned char *>((reinterpret_cast<std::uintptr_t>(raw) + 63) & ~std::uintptr_t{63});
 +}
 +
-+bool Load(int index, CScene *scene, int slot, int town) {
-+    Avatar &a = g_avatars[static_cast<std::size_t>(index)];
-+    Unload(index);
++// What an avatar is drawn as, all in one row: when any of it changes the body is loaded again in its place.
++std::array<int, 12> LookOf(const AvatarState &s) {
++    return {s.character, s.stand_in ? 1 : 0, s.head, s.clothes, s.feet, s.weapon, s.sub, s.ridepod[0], s.ridepod[1], s.ridepod[2], s.ridepod[3], s.form};
++}
++
++// The shapes an avatar's body can be loaded as.
++enum class Shape { Hero, Ridepod, Monster };
++
++// The shape a report asks for: the ridepod or the monster on a floor when the other game said which parts or which
++// form, else the hero (standing in, if the player rides or wears a form).
++Shape WantedShape(const AvatarState &s, int town) {
++    if (town != 0 || !s.stand_in) return Shape::Hero;
++    if (s.character == USER_CHARA_MAX && std::ranges::all_of(s.ridepod, [](int item_no) { return item_no > 0; })) return Shape::Ridepod;
++    if (s.character == USER_CHARA_MONICA && s.form >= 0) return Shape::Monster;
++    return Shape::Hero;
++}
++
++// A frame by name on the body or on any part already hung on it, as CActionChara::SearchObject looks down the chain.
++mgCFrame *FindFrame(AvatarBody &body, const char *name) {
++    if (body.CObjectFrame::frame != nullptr) {
++        if (mgCFrame *found = body.CObjectFrame::frame->SearchFrame(name); found != nullptr) return found;
++    }
++    for (const std::shared_ptr<CCharacter2> &part : body.parts) {
++        if (part->CObjectFrame::frame == nullptr) continue;
++        if (mgCFrame *found = part->CObjectFrame::frame->SearchFrame(name); found != nullptr) return found;
++    }
++    return nullptr;
++}
++
++// Builds one body of a shape into the avatar's own memory: the file buffer and the stacks the game sizes for that
++// character (GetCharaMemAllocPtr). Gives nullptr when a file is missing or a frame to hang a part on is not there.
++std::shared_ptr<AvatarBody> Build(Avatar &a, int index, int town, Shape shape) {
 +    const int character = a.target.character;
-+    const std::optional<std::string> model = MainCharaModelName(character, town);
-+    if (!model || model->empty()) return false;
++    const int memory_kind = shape == Shape::Ridepod ? USER_CHARA_ROBO : shape == Shape::Monster ? USER_CHARA_MONSTER : USER_CHARA_MAX;
 +    const int quadwords = GetCharaMemAllocSize() + CHARA_MEM_STACK_NUM * 4 + 64;
 +    a.arena.assign(static_cast<std::size_t>(quadwords) * 16 + 64, 0);
 +    a.memory.stSetBuffer(reinterpret_cast<u_long128 *>(Aligned(a.arena.data())), quadwords);
-+    if (!GetCharaMemAllocPtr(&a.memory, a.stacks, USER_CHARA_MAX, town)) return false;
++    if (!GetCharaMemAllocPtr(&a.memory, a.stacks, memory_kind, town)) return nullptr;
 +    a.file.assign(kFileBytes + 64, 0);
 +    const std::span<unsigned char> buffer(Aligned(a.file.data()), kFileBytes);
 +    auto load = [&buffer](const std::string &path) {
@@ -17985,13 +18684,12 @@ index 00000000..5b2f210c
 +        int         size = 0;
 +        return !path.empty() && LoadFile(mutable_path.data(), buffer, &size) > 0 && size > 0;
 +    };
-+    auto body = std::make_shared<AvatarBody>();
++    auto *pack = reinterpret_cast<unsigned int *>(buffer.data());
++    auto  body = std::make_shared<AvatarBody>();
 +    body->Initialize();
 +    body->target = a.target;
 +    body->town = town;
 +    const int block = kTextureBlockBase + index;
-+    if (!load(dc2::character::ModelAssetPath(town != 0 ? "chara" : "mainchr", *model, false))) return false;
-+    body->LoadPack(reinterpret_cast<unsigned int *>(buffer.data()), "info", &a.stacks[0], &a.stacks[0], &a.stacks[0], block, nullptr);
 +    // What the hero wears and carries: the other player's own, as their game said it; what it did not say is as this
 +    // game's own hero of that name has it.
 +    constexpr int kEquipSlots = 5; // CHARA_DATA::equip, by CHARA_EQUIP_SLOT
@@ -18002,32 +18700,109 @@ index 00000000..5b2f210c
 +        }
 +    }
 +    const auto worn = [&own](int said, int equip_slot) { return said > 0 ? said : own[equip_slot]; };
-+    const int  clothes = worn(a.target.clothes, CHARA_EQUIP_CLOTHES), feet = worn(a.target.feet, CHARA_EQUIP_FEET);
++    // A part loaded from a file and hung on a frame of the body or of a part before it; false when either is missing.
++    const auto hang_file = [&](const std::string &path, const char *profile, int stack, const char *frame_name) {
++        if (body->CObjectFrame::frame == nullptr || !load(path)) return false;
++        auto part = std::make_shared<CCharacter2>();
++        part->Initialize();
++        part->LoadPack(pack, profile, &a.stacks[stack], &a.stacks[stack], &a.stacks[stack], block, body.get());
++        mgCFrame *at = FindFrame(*body, frame_name);
++        if (part->CObjectFrame::frame == nullptr || at == nullptr) return false;
++        part->CObjectFrame::frame->DeleteReference();
++        part->CObjectFrame::frame->SetReference(at);
++        body->parts.push_back(std::move(part));
++        return true;
++    };
++
++    if (shape == Shape::Ridepod) {
++        // The ridepod as the game builds it (charasetup.cpp: SetupMainUnit, SetupRobo, BuildRoboPartsInfoCore): the
++        // leg is the body, then the arm on the leg's body<n> frame (n the arm's own number), the body on "spine", Max
++        // seated in it ("mints", one model per body type and outfit) on "joint2", the energy pack on "joint1" and
++        // Max's hat on "hat"; last, the arm's "ude" frame takes the matrix of the body's arm<n> frame.
++        const int leg = a.target.ridepod[0], arm = a.target.ridepod[1], hull = a.target.ridepod[2], energy = a.target.ridepod[3];
++        CDataRoboPart *arm_info = GetRoboPartInfoData(arm), *hull_info = GetRoboPartInfoData(hull);
++        const auto     leg_name = ItemFileName(leg, 0), arm_name = ItemFileName(arm, 0), hull_name = ItemFileName(hull, 0),
++                   energy_name = ItemFileName(energy, 0);
++        if (arm_info == nullptr || hull_info == nullptr || !leg_name || !arm_name || !hull_name || !energy_name) return nullptr;
++        CGameData *game_data = GetGameDataPt();
++        CSaveData *save = GetSaveData();
++        int        costume = worn(a.target.clothes, CHARA_EQUIP_CLOTHES) - (game_data != nullptr ? game_data->GetDataTypeStartListNo(ITEM_DATA_MAX_CLOTHES) : 0);
++        costume = std::clamp(costume, 0, 5);
++        int body_type = hull_info->offset_no;
++        if (save != nullptr && save->GetBitFlag(SAVE_FLAG_COSTUME_UNLOCK)) body_type += 10;
++        char mints[32];
++        std::snprintf(mints, sizeof(mints), "mints%02d%c.gltf", body_type, static_cast<char>('a' + costume));
++        const std::string arm_frame = "body" + std::to_string(arm_info->GetOffsetNo());
++        const std::string mount_frame = "arm" + std::to_string(hull_info->GetOffsetNo());
++        if (!load(dc2::character::ModelAssetPath("dungeon/robo", *leg_name, true))) return nullptr;
++        body->LoadPack(pack, "info", &a.stacks[0], &a.stacks[0], &a.stacks[0], block, nullptr);
++        if (!hang_file(dc2::character::ModelAssetPath("dungeon/robo", *arm_name, true), "info", 1, arm_frame.c_str()) ||
++            !hang_file(dc2::character::ModelAssetPath("dungeon/robo", *hull_name, true), "info", 2, "spine") ||
++            !hang_file(dc2::character::ModelAssetPath("dungeon/robo", mints, false), "info", 2, "joint2") ||
++            !hang_file(dc2::character::ModelAssetPath("dungeon/robo", *energy_name, true), "info", 3, "joint1")) {
++            return nullptr;
++        }
++        // (Max's hat goes on if he wears one; the ridepod is whole without it)
++        if (const auto hat = ItemFilePath(worn(a.target.head, CHARA_EQUIP_HEAD), 0)) hang_file(*hat, "info", 2, "hat");
++        mgCFrame *ude = FindFrame(*body, "ude"), *mount = FindFrame(*body, mount_frame.c_str());
++        if (ude == nullptr || mount == nullptr) return nullptr;
++        sceVu0FMATRIX matrix;
++        sceVu0CopyMatrix(matrix, mount->trans_matrix);
++        ude->SetTransMatrix(matrix);
++        body->shaped = true;
++        body->parts_move = true;
++        return body;
++    }
++
++    if (shape == Shape::Monster) {
++        // A monster's form as the game loads it for Monica (SetupMainUnit): the monster's model, read with its own
++        // profile name.
++        const auto model = GetMonsterModelFile(a.target.form, MONSTER_FILE_MODEL);
++        const auto config = GetMonsterModelFile(a.target.form, MONSTER_FILE_CONFIG);
++        if (!model || !config || model->empty() || config->empty() || !load("dungeon/monster/" + *model)) return nullptr;
++        body->LoadPack(pack, config->c_str(), &a.stacks[0], &a.stacks[0], &a.stacks[0], block, nullptr);
++        if (body->CObjectFrame::frame == nullptr) return nullptr;
++        body->shaped = true;
++        return body;
++    }
++
++    const std::optional<std::string> model = MainCharaModelName(character, town);
++    if (!model || model->empty() || !load(dc2::character::ModelAssetPath(town != 0 ? "chara" : "mainchr", *model, false))) return nullptr;
++    body->LoadPack(pack, "info", &a.stacks[0], &a.stacks[0], &a.stacks[0], block, nullptr);
++    const int clothes = worn(a.target.clothes, CHARA_EQUIP_CLOTHES), feet = worn(a.target.feet, CHARA_EQUIP_FEET);
 +    if (const auto path = ItemFilePath(clothes, 0); clothes > 0 && path && load(*path)) {
-+        body->LoadSkin(reinterpret_cast<unsigned int *>(buffer.data()), const_cast<char *>("info"), const_cast<char *>(""), &a.stacks[1], block);
++        body->LoadSkin(pack, const_cast<char *>("info"), const_cast<char *>(""), &a.stacks[1], block);
 +    }
 +    if (const auto path = ItemFilePath(feet, 0); feet > 0 && path && load(*path)) {
-+        body->LoadSkin(reinterpret_cast<unsigned int *>(buffer.data()), const_cast<char *>("info"), const_cast<char *>(""), &a.stacks[5], block);
++        body->LoadSkin(pack, const_cast<char *>("info"), const_cast<char *>(""), &a.stacks[5], block);
 +    }
 +    // The parts, each on the body's frame the game hangs it on (charasetup.cpp, SetupMainUnit): the weapons only on
 +    // a floor, except Monica's armband, which she wears in town too.
 +    const bool monica = character == USER_CHARA_MONICA;
 +    const auto hang = [&](int item_no, int stack, const char *frame_name) {
-+        if (item_no <= 0 || body->CObjectFrame::frame == nullptr) return;
-+        const auto path = ItemFilePath(item_no, 0);
-+        if (!path || !load(*path)) return;
-+        auto part = std::make_shared<CCharacter2>();
-+        part->Initialize();
-+        part->LoadPack(reinterpret_cast<unsigned int *>(buffer.data()), "info", &a.stacks[stack], &a.stacks[stack], &a.stacks[stack], block, body.get());
-+        mgCFrame *at = body->CObjectFrame::frame->SearchFrame(const_cast<char *>(frame_name));
-+        if (part->CObjectFrame::frame == nullptr || at == nullptr) return;
-+        part->CObjectFrame::frame->DeleteReference();
-+        part->CObjectFrame::frame->SetReference(at);
-+        body->parts.push_back(std::move(part));
++        if (item_no <= 0) return;
++        if (const auto path = ItemFilePath(item_no, 0)) hang_file(*path, "info", stack, frame_name);
 +    };
 +    if (town == 0) hang(worn(a.target.weapon, CHARA_EQUIP_MELEE), 2, monica ? "sword_hand" : "ef00");
 +    if (town == 0 || monica) hang(worn(a.target.sub, CHARA_EQUIP_SUB), 3, monica ? "wr" : "gun_hand");
 +    hang(worn(a.target.head, CHARA_EQUIP_HEAD), 4, monica ? "ac" : "hat");
++    return body;
++}
++
++bool Load(int index, CScene *scene, int slot, int town) {
++    Avatar &a = g_avatars[static_cast<std::size_t>(index)];
++    Unload(index);
++    // The ridepod or the monster when asked for and it loads; else (or when it does not) the hero, standing in.
++    const Shape wanted = WantedShape(a.target, town);
++    std::shared_ptr<AvatarBody> body = Build(a, index, town, wanted);
++    if (!body && wanted != Shape::Hero) {
++        std::fprintf(stderr, "co-op: avatar %d's %s did not load; the hero stands in\n", index + 1, wanted == Shape::Ridepod ? "ridepod" : "monster form");
++        body = Build(a, index, town, Shape::Hero);
++    } else if (body && wanted != Shape::Hero) {
++        std::fprintf(stderr, "co-op: avatar %d is drawn as the %s\n", index + 1, wanted == Shape::Ridepod ? "ridepod" : "monster form");
++    }
++    if (!body) return false;
++    const int block = kTextureBlockBase + index;
 +    if (scene->AssignChara(slot, dc2::scene::CharacterResource::FromOwned(body), "coop_avatar") != slot) return false;
 +    scene->SetType(SCENE_DATA_CHARA, slot, SCENE_CHARA_TYPE_EVENT);
 +    scene->SetCharaTexb(slot, block);
@@ -18035,10 +18810,9 @@ index 00000000..5b2f210c
 +    scene->SetActive(SCENE_DATA_CHARA, slot);
 +    body->SetPosition(a.target.x, a.target.y, a.target.z);
 +    a.body = std::move(body);
-+    a.loaded_character = character;
++    a.loaded_character = a.target.character;
 +    a.loaded_town = town;
-+    const int asked[5] = {a.target.head, a.target.clothes, a.target.feet, a.target.weapon, a.target.sub};
-+    std::copy(asked, asked + 5, a.loaded_outfit);
++    a.loaded_look = LookOf(a.target);
 +    a.slot = slot;
 +    a.scene = scene;
 +    a.loop = GetNowLoopNo();
@@ -18215,6 +18989,18 @@ index 00000000..5b2f210c
 +    return true;
 +}
 +
++bool AvatarNameOnScreen(int slot, float head[2], float feet[2], std::string &name) {
++    if (!AvatarShown(slot)) return false;
++    const Avatar &a = g_avatars[static_cast<std::size_t>(slot)];
++    // (measured when the scene drew the body; a body the scene did not draw since has no place for a name)
++    const bool drawn = std::exchange(a.body->label_drawn, false);
++    if (!drawn || !a.body->placed || a.target.name.empty()) return false;
++    std::copy(a.body->label_head, a.body->label_head + 2, head);
++    std::copy(a.body->label_feet, a.body->label_feet + 2, feet);
++    name = a.target.name;
++    return true;
++}
++
 +void AvatarsStep() {
 +    CScene *scene = PlaceScene();
 +    const int loop = GetNowLoopNo();
@@ -18229,11 +19015,14 @@ index 00000000..5b2f210c
 +        }
 +        if (!a.wanted || scene == nullptr) continue;
 +        const int town = InTown() ? 1 : 0;
-+        const int asked[5] = {a.target.head, a.target.clothes, a.target.feet, a.target.weapon, a.target.sub};
-+        const bool changed = !std::equal(asked, asked + 5, a.loaded_outfit); // the other player changed what they wear
++        // (the other player changed hero, what they wear, or climbed into the ridepod or took a form)
++        const bool changed = LookOf(a.target) != a.loaded_look;
 +        if (a.loaded_character != a.target.character || a.loaded_town != town || !a.body || changed) {
 +            const int slot = (town != 0 ? kTownSlotBase : kDungeonSlotBase) + i;
-+            const bool taken = scene->IsActive(SCENE_DATA_CHARA, slot) != 0 && scene->GetCharacter(slot) != nullptr;
++            // (the slot holding this avatar's own body is not taken: a new hero, outfit or shape loads in its place,
++            // Load putting the old body out first)
++            const bool taken = scene->IsActive(SCENE_DATA_CHARA, slot) != 0 && scene->GetCharacter(slot) != nullptr &&
++                               (a.body == nullptr || scene->GetCharacter(slot) != a.body.get());
 +            if (taken || !Load(i, scene, slot, town)) {
 +                a.wanted = false; // a hero that can't be shown isn't tried every frame
 +                std::fprintf(stderr, "co-op: avatar %d can't be shown here (slot %d %s)\n", i + 1, slot, taken ? "taken" : "failed to load");
@@ -18246,21 +19035,73 @@ index 00000000..5b2f210c
 +
 +// ---- Monsters: the API ---------------------------------------------------------------------------------------------
 +
-+bool PuppetSet(int slot, const Puppet &puppet) {
++namespace {
++
++// Gone on the leader: gone here, without a death (no drops, no count). The slot is freed as the game frees a dead
++// monster's (CMonsterMan::ThinkHost): the kind goes too, since the floor's clear counts every slot of a script
++// monster's kind, so a copy left with it would keep this game's floor from ever being cleared.
++void FreeMonsterSlot(int slot) {
 +    CActiveMonster *monster = Monster(slot);
-+    if (monster == nullptr) return false;
++    if (monster == nullptr || (monster->state == ACTIVE_MONSTER_NONE && monster->chara_kind != ACTION_KIND_SCRIPT)) return;
++    monster->state = ACTIVE_MONSTER_NONE;
++    monster->chara_kind = ACTION_KIND_NONE;
++    monster->damage_req = ACTION_DAMAGE_REQ_NONE;
++    monster->life = 0;
++    if (DngMainScene != nullptr) DngMainScene->ResetActive(SCENE_DATA_CHARA, DNG_CHARA_SLOT_MONSTER + slot);
++}
++
++// The kinds a slot could not be given, each said once on the log (slot * 65536 + kind).
++std::vector<int> g_unmade;
++
++// A monster the leader's game gained after the floor was built (a mod's spawn, a boss's summons, an event's) is in
++// no slot here: one of its kind is made in the leader's slot, where it stands there, through the game's own
++// placement (CMonsterMan::SetActiveMonster), and becomes the copy. A monster of another kind in that slot is not on
++// the leader's floor and goes first. A kind this game does not know (a mod's enemy no mod here registered) is not
++// made: that slot alone is refused.
++CActiveMonster *MakePuppet(int slot, const Puppet &puppet) {
++    if (ActiveMonster == nullptr || DngMainScene == nullptr) return nullptr;
++    std::string why;
++    const int   refer = moonmod::ChronicleTwoMonsterReferFor(puppet.kind, why);
++    if (refer < 0) {
++        const int key = slot * 65536 + puppet.kind;
++        if (std::ranges::find(g_unmade, key) == g_unmade.end() && g_unmade.size() < 256) {
++            g_unmade.push_back(key);
++            std::fprintf(stderr, "co-op: the leader's monster in slot %d (kind %d) can't be made here: %s\n", slot, puppet.kind, why.c_str());
++        }
++        return nullptr;
++    }
++    FreeMonsterSlot(slot);
++    float at[4] = {puppet.x, puppet.y, puppet.z, 1.0f};
++    float turn[4] = {0.0f, puppet.heading, 0.0f, 1.0f};
++    CActiveMonster *made = ActiveMonster->SetActiveMonster(refer, at, turn, -1, slot);
++    if (made == nullptr || made->chara_type != DNG_CHARA_SLOT_MONSTER + slot) return nullptr;
++    DngMainScene->SetActive(SCENE_DATA_CHARA, DNG_CHARA_SLOT_MONSTER + slot);
++    std::fprintf(stderr, "co-op: made the leader's monster in slot %d (kind %d) here\n", slot, puppet.kind);
++    return made;
++}
++
++} // namespace
++
++bool PuppetSet(int slot, const Puppet &puppet) {
++    if (!OnFloor() || ActiveMonster == nullptr || slot < 0 || slot >= MONSTER_ACTIVE_MAX) return false;
++    CActiveMonster *monster = Monster(slot);
 +    PuppetSlot &p = g_puppets[static_cast<std::size_t>(slot)];
 +    if (puppet.state <= 0 || puppet.kind < 0) {
-+        // Gone on the host: gone here, without a death (no drops, no count).
-+        if (monster->state != ACTIVE_MONSTER_NONE) {
-+            monster->state = ACTIVE_MONSTER_NONE;
-+            monster->life = 0;
-+            if (DngMainScene != nullptr) DngMainScene->ResetActive(SCENE_DATA_CHARA, DNG_CHARA_SLOT_MONSTER + slot);
-+        }
++        FreeMonsterSlot(slot);
 +        p = PuppetSlot{};
 +        return true;
 +    }
-+    if (monster->state == ACTIVE_MONSTER_NONE || (monster->monster_id != puppet.kind && puppet.kind >= 0)) return false;
++    if (monster == nullptr || monster->state == ACTIVE_MONSTER_NONE || monster->monster_id != puppet.kind) {
++        // Struck down on the leader already: nothing to make here.
++        if (puppet.state != ACTIVE_MONSTER_LIVE || puppet.hp <= 0) {
++            if (monster != nullptr && monster->monster_id != puppet.kind) FreeMonsterSlot(slot);
++            p = PuppetSlot{};
++            return true;
++        }
++        monster = MakePuppet(slot, puppet);
++        if (monster == nullptr) return false;
++        p = PuppetSlot{};
++    }
 +    p.used = true;
 +    p.host = puppet;
 +    monster->life = std::clamp(puppet.hp, 0, 1000000);
@@ -18546,6 +19387,7 @@ index 00000000..5b2f210c
 +    }
 +    for (PuppetSlot &p : g_puppets) p = PuppetSlot{};
 +    g_puppets_pause = false;
++    g_unmade.clear();
 +    g_puppet_hits.clear();
 +    g_avatar_hits.clear();
 +    g_player_swapped = false;
@@ -28916,7 +29758,7 @@ index 3a177a37..0bfbd353 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 706fda8f..1a8289f5 100644
+index 706fda8f..802bb092 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
 @@ -4,6 +4,8 @@
@@ -28949,16 +29791,16 @@ index 706fda8f..1a8289f5 100644
 +    if (slot < 0 || slot >= MONSTER_ACTIVE_MAX) {
 +        return;
 +    }
-+    if (put != 0) {
+     if (put != 0) {
+-        if (put_num < num) {
+-            put_flag |= 1 << slot;
 +        BumpMoonModMonsterSlotGeneration(slot);
 +    }
 +    // put_flag has a bit per slot (retail's u32 covered the first 32), so each slot is counted once and a mod
 +    // despawn and the native death of the same monster cannot both release it.
 +    const auto bit = static_cast<std::size_t>(slot);
 +    const bool was_put = put_flag.test(bit);
-     if (put != 0) {
--        if (put_num < num) {
--            put_flag |= 1 << slot;
++    if (put != 0) {
 +        if (!was_put && put_num < num) {
 +            put_flag.set(bit);
              put_num += 1;
@@ -29002,7 +29844,37 @@ index 706fda8f..1a8289f5 100644
      BASE_MONSTER_TBL *entry = base_monster_define;
  
      while (entry->name[0] != 0) {
-@@ -2216,9 +2244,12 @@ void CMonsterMan::CheckDamage() {
+@@ -1058,7 +1086,7 @@ int CMonsterMan::EntryRefer(int monster_id, mgCMemory *memory) {
+     return true;
+ }
+ 
+-CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0FVECTOR rot, int param) {
++CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0FVECTOR rot, int param, int wanted_slot) {
+     const auto activation_scene = scene_view;
+     auto      *scene = activation_scene.Get();
+     if (scene == nullptr) {
+@@ -1079,7 +1107,19 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
+         return nullptr;
+     }
+ 
+-    slot = SearchActiveMonsterBlock();
++    if (wanted_slot >= 0) {
++        // A slot asked for by name is taken only when it is free, as SearchActiveMonsterBlock judges one.
++        if (wanted_slot >= MONSTER_ACTIVE_MAX) {
++            return nullptr;
++        }
++        const CActiveMonster *occupant = GetActiveMonster(wanted_slot);
++        if (occupant != nullptr && occupant->state != ACTIVE_MONSTER_NONE) {
++            return nullptr;
++        }
++        slot = wanted_slot;
++    } else {
++        slot = SearchActiveMonsterBlock();
++    }
+ 
+     if (slot < 0) {
+         return nullptr;
+@@ -2216,9 +2256,12 @@ void CMonsterMan::CheckDamage() {
                  damage *= 0.01f * static_cast<float>(prim->param->critical_rate);
              }
  
@@ -29015,7 +29887,7 @@ index 706fda8f..1a8289f5 100644
  
              if (monster->life <= 0) {
                  monster->life = 0;
-@@ -2655,6 +2686,7 @@ void CMonsterMan::ThinkHost() {
+@@ -2655,6 +2698,7 @@ void CMonsterMan::ThinkHost() {
              continue;
          }
          const auto bound_monster = active_views[i];
@@ -29023,7 +29895,20 @@ index 706fda8f..1a8289f5 100644
  
          monster->GetEntryObjectPos(CHARA_ENTRY_GROUP_TARGET, 0, monster->center_pos);
          monster->scoop.ok = false;
-@@ -2943,6 +2975,7 @@ void CMonsterMan::ThinkHost() {
+@@ -2738,7 +2782,11 @@ void CMonsterMan::ThinkHost() {
+                 monster->camera_dist = mgDistVector(camera_pos, own_pos);
+             }
+ 
+-            if (monster->state != ACTIVE_MONSTER_DEAD && monster->CheckView(priority_limit) == MONSTER_VIEW_OUT) {
++            // A monster out of sight rests, but one struck down still dies: a blow that reaches it out of sight (a
++            // mod's combat.damage, another co-op player's kill) would otherwise leave it in its slot, counted by the
++            // floor's clear, until the player came near. Retail only ever kills a monster in sight.
++            const bool dying = monster->damage_req == ACTION_DAMAGE_REQ_DEAD || (monster->max_life > 0 && monster->life <= 0);
++            if (monster->state != ACTIVE_MONSTER_DEAD && !dying && monster->CheckView(priority_limit) == MONSTER_VIEW_OUT) {
+                 continue;
+             }
+         }
+@@ -2943,6 +2991,7 @@ void CMonsterMan::ThinkHost() {
              monster->Step();
          }
      }
@@ -29480,7 +30365,7 @@ index e255e7d1..28e1ead8 100644
      }
      mode = requested_mode;
 diff --git a/port/src/object/world/editloop.cpp b/port/src/object/world/editloop.cpp
-index 1ef663b4..e3bad0ce 100644
+index 1ef663b4..e175b696 100644
 --- a/port/src/object/world/editloop.cpp
 +++ b/port/src/object/world/editloop.cpp
 @@ -1,3 +1,5 @@
@@ -29497,7 +30382,16 @@ index 1ef663b4..e3bad0ce 100644
  
  void EditModeChgStep(CScene *scene);
  
-@@ -1510,7 +1513,8 @@ int EditLoop() {
+@@ -1383,6 +1386,8 @@ int EditLoop() {
+             } else if (LoopMode == EDIT_LOOP_EDIT_MENU) {
+                 MainScene->GetMap(MainScene->active_map);
+                 MainScene->GetCharacter(MainScene->player_chara);
++                // co-op: a town another player changed is brought up to its record before this editor can edit it
++                moonmod::coop::TownBeforeSave();
+                 LoopMode = EDIT_LOOP_EDIT;
+                 MainScene->before_camera = MainScene->active_camera;
+                 MainScene->active_camera = 3;
+@@ -1510,7 +1515,8 @@ int EditLoop() {
                                  talk_position[3] = talk_height[1];
                                  CSceneEventData talk_event;
  
@@ -29507,7 +30401,7 @@ index 1ef663b4..e3bad0ce 100644
                                      MainScene->RunEvent(1000, &talk_event);
                                      dc2::log::PrintGame("chara No = %d\n", talk_event.chara_no);
                                  }
-@@ -1644,6 +1648,9 @@ int EditLoop() {
+@@ -1644,6 +1650,9 @@ int EditLoop() {
              menu_requested = PadCtrl.Btn(PAD_BTN_MENU) != 0 || sgGetItemOver() != 0;
              menu_button = PadCtrl.Btn(PAD_BTN_MENU);
              quick_change = EditOnGround() != 0 && PadCtrl.Btn(PAD_BTN_QUICK_CHANGE) != 0 && !SubGameRunning();
@@ -29517,7 +30411,15 @@ index 1ef663b4..e3bad0ce 100644
              CScene *const fade_scene = MainScene;
              int           cross_fading = fade_scene->fade.NowFade() && fade_scene->fade.cross;
  
-@@ -2338,6 +2345,8 @@ int EditMapJump(int map_no) {
+@@ -1779,6 +1788,7 @@ int EditLoop() {
+                         ResetViewMode(MainScene);
+                         MainScene->before_camera = MainScene->active_camera;
+                         MainScene->active_camera = 3;
++                        moonmod::coop::TownBeforeSave(); // co-op: as above, before the editor opens
+                         StartEditMode(MainScene);
+                         LoopMode = EDIT_LOOP_EDIT;
+                         KeepEditAnalyze();
+@@ -2338,6 +2348,8 @@ int EditMapJump(int map_no) {
          }
  
          map->area_no = MainScene->now_map_no;
@@ -29526,7 +30428,7 @@ index 1ef663b4..e3bad0ce 100644
          map->ClearAllParts();
          used_quads = main_data->stack_used - used_before;
          used_kb = (used_quads * 0x10) / 0x400;
-@@ -2544,6 +2553,10 @@ void EditDataSave() {
+@@ -2544,6 +2556,10 @@ void EditDataSave() {
      CEditData *edit_data = {};
      CEditMap  *map = {};
  
@@ -29537,7 +30439,7 @@ index 1ef663b4..e3bad0ce 100644
      if (InInterior() == 0) {
          edit_data = GetSaveData()->GetEditData(MapNo);
  
-@@ -3146,6 +3159,7 @@ int EditDrawCore() {
+@@ -3146,6 +3162,7 @@ int EditDrawCore() {
      DrawHelpMes();
      DrawEditHelpMes();
      EventTimeDraw();
@@ -29562,6 +30464,43 @@ index 7ea8ac9b..76e72a21 100644
      u_long128         load_buffer[0x780];
      char              file_name[0x40];
      char              text[0x80];
+diff --git a/port/src/object/world/editmode.cpp b/port/src/object/world/editmode.cpp
+index bfd467fd..7c0f4e2f 100644
+--- a/port/src/object/world/editmode.cpp
++++ b/port/src/object/world/editmode.cpp
+@@ -2265,15 +2265,18 @@ int CheckWalkToEdit(CScene *scene, float *position) {
+     return 1;
+ }
+ 
+-int CheckEditToWalk(CScene *scene, float *position) {
++int CheckEditToWalk(CScene *scene, float *position) { return CheckEditWalkSpot(scene, eCurPos, position); }
++
++// Retail's CheckEditToWalk, for any spot rather than the cursor alone (co-op asks it of where a player stands).
++int CheckEditWalkSpot(CScene *scene, const float *spot, float *position) {
+     float     cursor[4];
+     float     ground_hit[4];
+     mgVu0FBOX box{};
+     CCPoly    polys[512];
+     float     hit_positions[64][4];
+     int       hit_indices[64];
+-    std::memmove(cursor, eCurPos, sizeof(float) * 4);
+-    std::memmove(position, eCurPos, sizeof(float) * 4);
++    std::memmove(cursor, spot, sizeof(float) * 4);
++    std::memmove(position, spot, sizeof(float) * 4);
+     CEditMap *map = static_cast<CEditMap *>(scene->GetMap(scene->active_map));
+ 
+     if (map == nullptr) {
+@@ -2290,8 +2293,8 @@ int CheckEditToWalk(CScene *scene, float *position) {
+         return 0;
+     }
+ 
+-    std::memmove(box.max, eCurPos, sizeof(float) * 4);
+-    std::memmove(box.min, eCurPos, sizeof(float) * 4);
++    std::memmove(box.max, spot, sizeof(float) * 4);
++    std::memmove(box.min, spot, sizeof(float) * 4);
+     cursor[1] = 1000.0f;
+     box.max[0] += 20.0f;
+     box.max[1] = 10000.0f;
 diff --git a/port/src/object/world/mapjump.cpp b/port/src/object/world/mapjump.cpp
 index 0294cb9c..d5a15762 100644
 --- a/port/src/object/world/mapjump.cpp
@@ -31627,7 +32566,7 @@ index bec620c4..3b5a80f7 100644
              }
          } else {
 diff --git a/port/src/save_slots.cpp b/port/src/save_slots.cpp
-index fbf554ca..6acd28a2 100644
+index fbf554ca..215fa44f 100644
 --- a/port/src/save_slots.cpp
 +++ b/port/src/save_slots.cpp
 @@ -34,6 +34,7 @@
@@ -31638,7 +32577,18 @@ index fbf554ca..6acd28a2 100644
  #include "userdata.hpp"
  
  namespace fs = std::filesystem;
-@@ -639,6 +640,13 @@ SaveSlotList SaveSlotScan(bool include_autosave) {
+@@ -399,7 +400,9 @@ void ImportLegacy(const LegacySave &legacy, SaveSlotList &list, std::map<std::pa
+     auto document = std::make_unique<SaveDocument>();
+     if (SaveSlotRead(legacy.source, *document) == SaveSlotState::Ready) {
+         bool imported = AlreadyConverted(entries, ConvertedInfo(document->image));
+-        if (!imported && !list.read_failed) {
++        // Not during a co-op visit: every save write is held back then (SaveSlotWrite answers written and writes
++        // nothing), so a conversion would archive the legacy save with no JSON save in its place.
++        if (!imported && !list.read_failed && !moonmod::coop::VisitActive()) {
+             auto key = std::make_pair(legacy.number, legacy.second_card);
+             if (entries.contains(key)) {
+                 const int number = FirstFree(list.occupied);
+@@ -639,6 +642,13 @@ SaveSlotList SaveSlotScan(bool include_autosave) {
  }
  
  FilesResult SaveSlotWrite(const fs::path &path, const SaveDocument &document, bool replace) {
@@ -31652,7 +32602,7 @@ index fbf554ca..6acd28a2 100644
      const std::string text = SaveJsonWrite(document);
      const auto        result = FilesWrite(path, text.data(), text.size(), replace);
      if (result == FilesResult::kWritten) {
-@@ -650,6 +658,7 @@ FilesResult SaveSlotWrite(const fs::path &path, const SaveDocument &document, bo
+@@ -650,6 +660,7 @@ FilesResult SaveSlotWrite(const fs::path &path, const SaveDocument &document, bo
  }
  
  FilesResult SaveSlotWrite(const SaveSlot &slot, const SaveDocument &document) {
@@ -33867,6 +34817,100 @@ index 9ed25d79..2ebb8eb2 100644
 +    SetEventScript({}, nullptr);
 +    runtime.Stop();
 +}
+diff --git a/port/src/tests/georama_parts_test.cpp b/port/src/tests/georama_parts_test.cpp
+index b0c4efd1..453485a6 100644
+--- a/port/src/tests/georama_parts_test.cpp
++++ b/port/src/tests/georama_parts_test.cpp
+@@ -17,7 +17,9 @@
+ #include "editmap.hpp"
+ #include "editparts.hpp"
+ #include "mg_memory.hpp"
++#include "moonmod/coop_save.hpp"
+ #include "save_json.hpp"
++#include "savedata.hpp"
+ #include "stubs/editmap.hpp"
+ 
+ int CheckFenceChain(CEditParts *a, CEditParts *b);
+@@ -450,6 +452,79 @@ TEST(GeoramaParts, SavedTownsOfThousandsOfPartsLoadBack) {
+     EXPECT_EQ(PortFindTownLayout(*again)->parts.size(), count);
+ }
+ 
++// Co-op (review R3): when both games built in one town, the merged town keeps a placement log renumbered to its
++// merged parts, and loading it places every part. A part saved as placed loads as placed only through the log
++// (LoadData), so a merged town without one would load with its parts standing unplaced.
++TEST(GeoramaParts, AMergedTownLoadsEveryPartBothGamesPlaced) {
++    Town  town;
++    auto &ground = town.Define(1, EDIT_PARTS_ATR_GROUND);
++    town.Define(2, 0);
++    town.fixed.push_back({});
++    town.fixed[0].id = ground.id;
++    town.map->info_mngr.fix_parts = town.fixed.data();
++    town.map->info_mngr.fix_parts_num = 1;
++    town.map->ClearAllParts();
++    ASSERT_EQ(town.Part(0).state, EDIT_PARTS_STATE_PLACED);
++    const auto place = [&town](int base, float x) {
++        const int slot = town.Build(2);
++        town.Part(slot).state = EDIT_PARTS_STATE_PLACED;
++        town.Part(slot).SetPosition(x, 0.0f, 3.0f);
++        town.Rest(slot, base);
++        return slot;
++    };
++    // The town both games agreed on: three parts on the ground and one on top of another.
++    const int first = place(0, 10.0f);
++    place(0, 20.0f);
++    place(first, 30.0f);
++    place(0, 40.0f);
++    auto host = std::make_unique<CSaveData>();
++    host->Initialize();
++    town.map->SaveData(&host->edit_data[1]);
++    const std::string agreed = moonmod::coop::ExportTown(*host, 1);
++    host->edit_data[1].save_count += 3; // the host walked through houses since: its save count says nothing of the town
++
++    // The builder adds a part on the agreed first part, and one on the ground.
++    auto        builder = std::make_unique<CSaveData>();
++    std::string error;
++    builder->Initialize();
++    ASSERT_TRUE(moonmod::coop::ImportTown(agreed, 1, *builder, error)) << error;
++    TownLayout &theirs = PortTownLayout(builder->edit_data[1]);
++    ASSERT_EQ(theirs.parts.size(), 5u);
++    TownPart added = theirs.parts[static_cast<std::size_t>(first)];
++    added.pos = {50, 0, 3};
++    theirs.parts.push_back(added);
++    theirs.place_log.push_back({.parts_no = 5, .base_no = static_cast<s16>(first)});
++    added.pos = {60, 0, 3};
++    theirs.parts.push_back(added);
++    theirs.place_log.push_back({.parts_no = 6, .base_no = 0});
++    const std::string edited = moonmod::coop::ExportTown(*builder, 1);
++
++    // The host built too: a part on the ground, and its own live map saved since.
++    place(0, 70.0f);
++    town.map->SaveData(&host->edit_data[1]);
++    ASSERT_TRUE(moonmod::coop::MergeTown(agreed, edited, 1, *host, error)) << error;
++    const TownLayout *merged = PortFindTownLayout(host->edit_data[1]);
++    ASSERT_NE(merged, nullptr);
++    ASSERT_EQ(merged->parts.size(), 8u) << "the ground, four agreed, the host's one and the builder's two";
++    EXPECT_FALSE(merged->place_log.empty());
++
++    town.map->ClearAllParts();
++    town.map->LoadData(&host->edit_data[1]);
++    std::vector<int> xs;
++    for (int i = 1; i < town.map->edit_parts_max; ++i) {
++        CEditParts &part = town.Part(i);
++        if (part.name[0] == '\0') continue;
++        EXPECT_EQ(part.state, EDIT_PARTS_STATE_PLACED) << "slot " << i;
++        float pos[4];
++        part.GetPosition(pos);
++        xs.push_back(static_cast<int>(pos[0]));
++    }
++    std::ranges::sort(xs);
++    EXPECT_EQ(xs, (std::vector<int>{10, 20, 30, 40, 50, 60, 70}));
++    for (CEditData &data : host->edit_data) PortClearTownLayout(data);
++    for (CEditData &data : builder->edit_data) PortClearTownLayout(data);
++}
++
+ TEST(GeoramaPartsStorage, OversizedScriptTableDoesNotConstructOutsideTheArena) {
+     std::vector<u_long128> storage(16);
+     mgCMemory              memory;
 diff --git a/port/src/tests/moonmod_api_test.cpp b/port/src/tests/moonmod_api_test.cpp
 new file mode 100644
 index 00000000..2f2244b3
@@ -37667,10 +38711,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..5af0e6f7
+index 00000000..5b03a6ad
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,818 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -37786,7 +38830,7 @@ index 00000000..5af0e6f7
 +                             "world.avatar_set", "world.avatar_clear", "world.enter_map", "monsters.mirror_get", "monsters.puppet_set",
 +                             "monsters.puppet_clear", "monsters.mirror_hit", "dungeons.set_seed", "dungeons.enter_floor",
 +                             "dungeons.shared_events_get", "dungeons.shared_event_run", "combat.strike_player", "items.owned",
-+                             "georama.town_export", "georama.town_import", "ui.choice_open", "title.mode_register", "title.mode_set"}) {
++                             "georama.town_export", "georama.town_import", "ui.choice_open", "ui.choice_close", "title.mode_register", "title.mode_set"}) {
 +        EXPECT_TRUE(api.Supported(path)) << path;
 +    }
 +    // mods.* are the runtime's own (every game has them), not the adapter's.
@@ -37833,6 +38877,37 @@ index 00000000..5af0e6f7
 +    EXPECT_EQ(api.Call("world.avatar_clear", Json::array({{{"slot", 1}}})).status, ApiCallStatus::Ok);
 +    EXPECT_EQ(api.Call("world.avatar_clear").status, ApiCallStatus::Ok);
 +    EXPECT_EQ(api.Call("world.avatar_clear", Json::array({{{"slot", 9}}})).status, ApiCallStatus::InvalidArgument);
++}
++
++TEST(MoonModCoopApi, ARidepodSaysItsFourPartsAndAFormItsMonster) {
++    FloorFixture floor;
++    Api          api;
++    const auto   at = [](Json extra) {
++        Json request = {{"slot", 1}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"heading", 0.0}, {"name", "Host"}};
++        for (auto field = extra.begin(); field != extra.end(); ++field) request[field.key()] = field.value();
++        return Json::array({request});
++    };
++    // The ridepod's parts by item_no (leg, arm, body, pack), all four or none; a form by its monster_id.
++    const ApiCallResult riding = api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", {{"leg", 155}, {"arm", 145}, {"body", 135}, {"pack", 165}}}}));
++    ASSERT_EQ(riding.status, ApiCallStatus::Ok) << riding.message;
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "monster"}, {"form", 12}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", nullptr}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", {{"leg", 155}, {"arm", 145}, {"body", 135}}}})).status,
++              ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", {{"leg", 155}, {"arm", 145}, {"body", 135}, {"pack", 0}}}})).status,
++              ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", {{"leg", 155}, {"arm", 145}, {"body", 135}, {"pack", 165}, {"wheel", 1}}}})).status,
++              ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", {155, 145, 135, 165}}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "monster"}, {"form", -1}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "monster"}, {"form", "frog"}})).status, ApiCallStatus::InvalidArgument);
++    // Without a disc nothing loads: no body, so no name over a head, and the names' draw has nothing to draw.
++    float       head[2] = {}, feet[2] = {};
++    std::string name;
++    EXPECT_FALSE(moonmod::coop::AvatarNameOnScreen(0, head, feet, name));
++    EXPECT_FALSE(moonmod::coop::AvatarNameOnScreen(7, head, feet, name));
++    moonmod::coop::DrawAvatarNames();
++    EXPECT_EQ(api.Call("world.avatar_clear").status, ApiCallStatus::Ok);
 +}
 +
 +TEST(MoonModCoopApi, TheHostMirrorsItsMonstersAndAGuestFollowsThemAsPuppets) {
@@ -37885,6 +38960,35 @@ index 00000000..5af0e6f7
 +    EXPECT_FALSE(hit.value.at("killed").get<bool>());
 +    EXPECT_EQ((*floor.slots)[0].life, 35);
 +    EXPECT_EQ(api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 0}}})).status, ApiCallStatus::InvalidArgument);
++}
++
++TEST(MoonModCoopApi, AFollowersMonstersTheLeaderNoLongerHasLeaveTheFloorsCountForItsClear) {
++    FloorFixture floor;
++    Api          api;
++    floor.Live(0, 12, 80).chara_kind = ACTION_KIND_SCRIPT;
++    floor.Live(1, 3, 10).chara_kind = ACTION_KIND_SCRIPT;
++    floor.Live(2, 7, 30).chara_kind = ACTION_KIND_SCRIPT;
++    ASSERT_EQ(ActiveMonster->GetMonsterNum(-1.0f), 3);
++    const ApiCallResult before = api.Call("world.get");
++    ASSERT_EQ(before.status, ApiCallStatus::Ok) << before.message;
++    EXPECT_EQ(before.value.at("monsters_counted"), 3);
++    EXPECT_FALSE(before.value.at("floor_cleared").get<bool>());
++
++    // The leader lists slots 0 and 2: slot 1 (struck down there before this game came) goes here, slot and kind.
++    const Json slot0 = {{"slot", 0}, {"kind", 12}, {"state", 1}, {"hp", 80}};
++    const Json slot2 = {{"slot", 2}, {"kind", 7}, {"state", 1}, {"hp", 30}};
++    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({slot0, slot2})}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ((*floor.slots)[1].state, ACTIVE_MONSTER_NONE);
++    EXPECT_EQ((*floor.slots)[1].chara_kind, ACTION_KIND_NONE);
++    EXPECT_EQ(ActiveMonster->GetMonsterNum(-1.0f), 2);
++    // The leader's copy of slot 2 dies and its slot empties there: the copy here leaves the count too.
++    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({slot0})}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ((*floor.slots)[2].chara_kind, ACTION_KIND_NONE);
++    EXPECT_EQ(ActiveMonster->GetMonsterNum(-1.0f), 1);
++    // The leader's floor is empty: so is this one, and the game's own rule (IsEventRun) now gives its clear.
++    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array()}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ(ActiveMonster->GetMonsterNum(-1.0f), 0);
++    EXPECT_EQ(api.Call("world.get").value.at("monsters_counted"), 0);
 +}
 +
 +TEST(MoonModCoopApi, AMonstersTurnLooksAtTheNearestPlayerAndTheSwapIsUndone) {
@@ -38084,14 +39188,14 @@ index 00000000..5af0e6f7
 +    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "counter"}, {"id", 9}, {"value", -4}}})).status, ApiCallStatus::Ok);
 +    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "progress"}, {"id", 0}, {"value", 4}}})).status, ApiCallStatus::Ok);
 +    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "party"}, {"id", 0}, {"value", 3}}})).status, ApiCallStatus::Ok);
-+    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "recruit"}, {"id", 2}, {"value", {14, 1}}}})).status, ApiCallStatus::Ok);
++    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "recruit"}, {"id", 2}, {"value", {14, 3}}}})).status, ApiCallStatus::Ok);
 +    EXPECT_NE(save.GetBitFlag(207), 0);
 +    EXPECT_EQ(save.GetBitFlag(100), 0);
 +    EXPECT_EQ(save.short_flag[9], -4);
 +    EXPECT_EQ(save.game_progress, 4);
 +    EXPECT_EQ(save.user_data.party_member, 3);
 +    EXPECT_EQ(save.user_data.party_chara[2].chara_no, 14);
-+    EXPECT_EQ(save.user_data.party_chara[2].status, 1);
++    EXPECT_EQ(save.user_data.party_chara[2].status, PARTY_CHARA_STATUS_JOINED) << "joined, and not walking with this player";
 +    // A floor's record is merged: what either game did on the floor stands.
 +    DNG_FLOOR_SAVE &record = save.save_dungeon.floor_info[40];
 +    record.flag = 0x1;
@@ -38189,9 +39293,15 @@ index 00000000..5af0e6f7
 +    ASSERT_EQ(api.Call("player.give_up", Json::array()).status, ApiCallStatus::Ok);
 +    EXPECT_FALSE(HeroIsDown());
 +    EXPECT_EQ(DngMainScene->battle_area.script.event_no, 1200);
-+    // The rule goes with the mod that set it.
++    // The rule turned off while the hero lies down: the game's own death goes on, as when its mod goes away.
++    max->hp.now = 0.0f;
++    EXPECT_TRUE(HeroFalls(MainChara__2));
++    DngMainScene->battle_area.script.event_no = -1;
 +    ASSERT_EQ(api.Call("player.down_rule_set", Json::array({{{"enabled", false}}})).status, ApiCallStatus::Ok);
 +    EXPECT_FALSE(DownRule());
++    EXPECT_FALSE(HeroIsDown());
++    EXPECT_EQ(DngMainScene->battle_area.script.event_no, 1200);
++    // The rule goes with the mod that set it.
 +    EXPECT_FALSE(HeroFalls(MainChara__2));
 +    DngMainScene->battle_area.script.event_no = -1;
 +}
@@ -38211,10 +39321,14 @@ index 00000000..5af0e6f7
 +    // A rebuild wanted for a town that is no longer on screen is dropped: the town loads from its record.
 +    TownRebuildWanted(2);
 +    EXPECT_TRUE(TownRebuildPending());
++    // While it is pending the town's live map is not written over its record (it lacks the other player's change).
++    EXPECT_FALSE(TownRecordWritable(2));
++    EXPECT_TRUE(TownRecordWritable(1)) << "another town's map is";
 +    TownBeforeSave(); // (no live map to bring up to the record)
 +    EXPECT_TRUE(TownRebuildPending());
 +    TownRebuildStep();
 +    EXPECT_FALSE(TownRebuildPending());
++    EXPECT_TRUE(TownRecordWritable(2));
 +    TownLiveSync(); // and no editor runs, so nothing is written
 +}
 +
@@ -38260,6 +39374,118 @@ index 00000000..5af0e6f7
 +    EXPECT_FALSE(moonmod::coop::TitlePageOpen());
 +    EXPECT_EQ(api.Call("title.mode_remove", Json::array({{{"id", "coop"}}})).status, ApiCallStatus::Ok);
 +    EXPECT_EQ(moonmod::coop::TitleExtraRows(), 0);
++}
++
++// Review R6 and R7: the story's progress only goes forward (each game keeps the higher), and a townsperson's state
++// is shared without the in-party bit, which says who walks with this game's own player.
++TEST(MoonModCoopApi, TheRegisterKeepsTheHigherProgressAndEachGamesOwnPartyBit) {
++    FloorFixture floor;
++    Api          api;
++    CSaveData   &save = *floor.save;
++    ASSERT_EQ(api.Call("world.watch_set", Json::array({{{"enabled", true}}})).status, ApiCallStatus::Ok);
++    save.game_progress = 6;
++    moonmod::coop::RegisterStep();
++    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "progress"}, {"id", 0}, {"value", 4}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ(save.game_progress, 6) << "a game behind does not take this one's story back";
++    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "progress"}, {"id", 0}, {"value", 9}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ(save.game_progress, 9);
++    // Townsperson 3 walks with this game's player; the other game's says recruited and housed, and in its party.
++    save.user_data.party_chara[3].chara_no = 14;
++    save.user_data.party_chara[3].status = PARTY_CHARA_STATUS_JOINED | PARTY_CHARA_STATUS_IN_PARTY;
++    const int theirs = PARTY_CHARA_STATUS_IN_HOUSE | PARTY_CHARA_STATUS_JOINED | PARTY_CHARA_STATUS_IN_PARTY;
++    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "recruit"}, {"id", 3}, {"value", {14, theirs}}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ(save.user_data.party_chara[3].status, PARTY_CHARA_STATUS_IN_HOUSE | PARTY_CHARA_STATUS_JOINED | PARTY_CHARA_STATUS_IN_PARTY)
++        << "still walking here";
++    // Townsperson 4 walks with nobody here; theirs walks with the other player: here they are recruited, not in the party.
++    save.user_data.party_chara[4].chara_no = 15;
++    save.user_data.party_chara[4].status = 0;
++    ASSERT_EQ(api.Call("world.change_apply", Json::array({{{"kind", "recruit"}, {"id", 4}, {"value", {15, PARTY_CHARA_STATUS_JOINED | PARTY_CHARA_STATUS_IN_PARTY}}}})).status,
++              ApiCallStatus::Ok);
++    EXPECT_EQ(save.user_data.party_chara[4].status, PARTY_CHARA_STATUS_JOINED);
++    // The player here takes townsperson 4 into the party: that is not a change of the world, so nothing is told.
++    save.user_data.party_chara[4].status |= PARTY_CHARA_STATUS_IN_PARTY;
++    moonmod::coop::RegisterStep();
++    ASSERT_EQ(api.Call("world.watch_set", Json::array({{{"enabled", false}}})).status, ApiCallStatus::Ok);
++}
++
++// Review R9: an item the game gives is told to the other game only when the story moved (a flag, a counter or the
++// progress) within 300 frames of it: a story scene's gift. A chest, a shop or a trade moves no story and stays here.
++TEST(MoonModCoopApi, AGiftIsToldOnlyWhenTheStoryMovesBesideIt) {
++    FloorFixture floor;
++    Api          api;
++    CSaveData   &save = *floor.save;
++    ASSERT_EQ(api.Call("world.watch_set", Json::array({{{"enabled", true}}})).status, ApiCallStatus::Ok);
++    moonmod::coop::RegisterStep();
++    moonmod::coop::StoryGave(100, 1); // a chest in a town: no flag goes with it
++    for (int i = 0; i < 302; ++i) moonmod::coop::RegisterStep();
++    EXPECT_EQ(moonmod::coop::RegisterGiftsTold(), 0);
++    save.SetBitFlag(300, 1); // ...and a story flag set long after it does not bring it back
++    moonmod::coop::RegisterStep();
++    EXPECT_EQ(moonmod::coop::RegisterGiftsTold(), 0);
++    for (int i = 0; i < 302; ++i) moonmod::coop::RegisterStep(); // (well clear of that flag)
++    // A scene that gives an item and sets its flag a few frames later: told.
++    moonmod::coop::StoryGave(101, 1);
++    for (int i = 0; i < 20; ++i) moonmod::coop::RegisterStep();
++    EXPECT_EQ(moonmod::coop::RegisterGiftsTold(), 0) << "held while the story may still move";
++    save.SetBitFlag(301, 1);
++    moonmod::coop::RegisterStep();
++    EXPECT_EQ(moonmod::coop::RegisterGiftsTold(), 1);
++    // A scene that sets its flag first and then gives: told at once.
++    save.short_flag[7] = 3;
++    moonmod::coop::RegisterStep();
++    moonmod::coop::StoryGave(102, 2);
++    moonmod::coop::RegisterStep();
++    EXPECT_EQ(moonmod::coop::RegisterGiftsTold(), 2);
++    ASSERT_EQ(api.Call("world.watch_set", Json::array({{{"enabled", false}}})).status, ApiCallStatus::Ok);
++}
++
++// Job 2: a monster the leader has and this game does not (gained after the floor was built) is made here in the
++// leader's slot. A kind this game cannot make is refused for that slot only; the others still follow.
++TEST(MoonModCoopApi, AMonsterThisGameCannotMakeIsRefusedForItsSlotOnly) {
++    FloorFixture floor;
++    Api          api;
++    floor.Live(0, 12, 80);
++    floor.Live(2, 7, 30);
++    const Json slot0 = {{"slot", 0}, {"kind", 12}, {"state", 1}, {"hp", 80}};
++    const Json slot1 = {{"slot", 1}, {"kind", 32000}, {"state", 1}, {"hp", 10}}; // no such kind in this game
++    const Json slot2 = {{"slot", 2}, {"kind", 7}, {"state", 1}, {"hp", 30}};
++    const ApiCallResult followed = api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({slot0, slot1, slot2})}}}));
++    ASSERT_EQ(followed.status, ApiCallStatus::Ok) << followed.message;
++    EXPECT_EQ(followed.value.at("followed"), Json::array({0, 2}));
++    EXPECT_EQ(followed.value.at("refused"), Json::array({1}));
++    EXPECT_EQ((*floor.slots)[1].state, ACTIVE_MONSTER_NONE) << "nothing half made in the refused slot";
++    // The leader's monster in slot 1 already struck down there: nothing to make, and nothing refused.
++    const Json gone = {{"slot", 1}, {"kind", 32000}, {"state", ACTIVE_MONSTER_DEAD}, {"hp", 0}};
++    const ApiCallResult dead = api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({slot0, gone, slot2})}}}));
++    ASSERT_EQ(dead.status, ApiCallStatus::Ok) << dead.message;
++    EXPECT_TRUE(dead.value.at("refused").empty());
++    // A slot here holding another kind than the leader's, whose monster is gone there: freed here too.
++    floor.Live(1, 5, 20).chara_kind = ACTION_KIND_SCRIPT;
++    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({slot0, gone, slot2})}}})).status, ApiCallStatus::Ok);
++    EXPECT_EQ((*floor.slots)[1].state, ACTIVE_MONSTER_NONE);
++    EXPECT_EQ((*floor.slots)[1].chara_kind, ACTION_KIND_NONE);
++}
++
++// Review R11: a mod closes its own choice panel quietly; another mod's panel stays open.
++TEST(MoonModCoopApi, AModClosesItsOwnChoicePanelAndNoOneElses) {
++    FloorFixture floor;
++    Api          api;
++    const Json open = Json::array({{{"id", "ask"}, {"title", "Join?"}, {"options", Json::array({{{"title", "Yes"}}, {{"title", "No"}}})}}});
++    ASSERT_EQ(api.Call("ui.choice_open", open).status, ApiCallStatus::Ok);
++    const ApiCallResult other = api.Call("ui.choice_close", Json::array({Json::object()}), "another.mod");
++    ASSERT_EQ(other.status, ApiCallStatus::Ok) << other.message;
++    EXPECT_FALSE(other.value.at("closed").get<bool>());
++    EXPECT_TRUE(moonmod::coop::ChoiceIsOpen()) << "another mod's panel stays";
++    const ApiCallResult own = api.Call("ui.choice_close", Json::array({Json::object()}));
++    ASSERT_EQ(own.status, ApiCallStatus::Ok) << own.message;
++    EXPECT_TRUE(own.value.at("closed").get<bool>());
++    EXPECT_FALSE(moonmod::coop::ChoiceIsOpen());
++    EXPECT_FALSE(moonmod::coop::PanelHoldsPad());
++    EXPECT_FALSE(api.Call("ui.choice_close").value.at("closed").get<bool>()) << "nothing open: nothing closed";
++    EXPECT_EQ(api.Call("ui.choice_close", Json::array({{{"id", "ask"}}})).status, ApiCallStatus::InvalidArgument);
++    // Closed quietly, the mod may open the next one at once.
++    EXPECT_EQ(api.Call("ui.choice_open", open).status, ApiCallStatus::Ok);
++    moonmod::coop::ResetForTests();
 +}
 +
 +TEST(MoonModCoopApi, AChoicePanelOpensOverTheFloorAndAnswersThroughTheOwner) {
@@ -38309,10 +39535,10 @@ index 00000000..5af0e6f7
 +} // namespace
 diff --git a/port/src/tests/moonmod_coop_save_test.cpp b/port/src/tests/moonmod_coop_save_test.cpp
 new file mode 100644
-index 00000000..fc7e2f43
+index 00000000..8bf2d172
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_save_test.cpp
-@@ -0,0 +1,385 @@
+@@ -0,0 +1,528 @@
 +// Co-op's split of a Chronicle Two save (moonmod/coop_save.hpp): the world and a player's own things go across whole,
 +// each without the other; a town carries its record and its layout; a damaged or foreign one changes nothing; and the
 +// host's guests are kept beside the saves.
@@ -38326,6 +39552,9 @@ index 00000000..fc7e2f43
 +#include <memory>
 +#include <random>
 +#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
 +
 +#include "moonmod/coop_save.hpp"
 +#include "save_json.hpp"
@@ -38631,6 +39860,146 @@ index 00000000..fc7e2f43
 +    EXPECT_EQ(merged->parts.front().id, 43);
 +    EXPECT_EQ(merged->place_log.size(), theirs.place_log.size());
 +    EXPECT_NE(ExportTown(host.save(), 1), edited) << "the host's own culture points stand";
++}
++
++// Standard base64, as the text uses (unpacked form, from PlainText).
++std::string FromBase64(std::string_view in) {
++    static constexpr std::string_view kTable = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++    std::string out;
++    unsigned    value = 0;
++    int         bits = 0;
++    for (const char c : in) {
++        if (c == '=') break;
++        value = (value << 6) | static_cast<unsigned>(kTable.find(c));
++        bits += 6;
++        if (bits >= 8) {
++            bits -= 8;
++            out.push_back(static_cast<char>((value >> bits) & 0xFF));
++        }
++    }
++    return out;
++}
++std::string ToBase64(std::string_view bytes) {
++    static constexpr char kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++    std::string out;
++    for (std::size_t i = 0; i < bytes.size(); i += 3) {
++        const auto     at = [&bytes](std::size_t k) { return static_cast<unsigned>(static_cast<unsigned char>(bytes[k])); };
++        const unsigned v = (at(i) << 16) | ((i + 1 < bytes.size() ? at(i + 1) : 0) << 8) | (i + 2 < bytes.size() ? at(i + 2) : 0);
++        out.push_back(kTable[(v >> 18) & 63]);
++        out.push_back(kTable[(v >> 12) & 63]);
++        out.push_back(i + 1 < bytes.size() ? kTable[(v >> 6) & 63] : '=');
++        out.push_back(i + 2 < bytes.size() ? kTable[v & 63] : '=');
++    }
++    return out;
++}
++
++// Review R3: a town's save_count is bumped by the game at every house entered and every map change; it says nothing
++// of the town, so neither the fingerprint nor the merge's "nobody here changed it" looks at it.
++TEST(MoonModCoopSave, ATownsSaveCountIsNotPartOfTheTown) {
++    using moonmod::coop::TownFingerprint;
++    Save host(21), builder(22);
++    PortTownLayout(host.save().edit_data[1]) = SampleLayout(1);
++    const std::uint64_t built = TownFingerprint(host.save(), 1);
++    host.save().edit_data[1].save_count += 7;
++    EXPECT_EQ(TownFingerprint(host.save(), 1), built) << "a walk through a house is the same town";
++    host.save().edit_data[1].save_count -= 7;
++    const std::string agreed = ExportTown(host.save(), 1);
++    std::string       error;
++    ASSERT_TRUE(ImportTown(agreed, 1, builder.save(), error)) << error;
++    // The host walked through a house; the builder placed a part. The host's town is the builder's, taken whole.
++    host.save().edit_data[1].save_count += 2;
++    TownLayout &theirs = PortTownLayout(builder.save().edit_data[1]);
++    TownPart    part = theirs.parts.back();
++    part.pos = {90, 0, 9};
++    theirs.parts.push_back(part);
++    theirs.place_log.push_back({.parts_no = static_cast<s16>(theirs.parts.size() - 1), .base_no = 0});
++    const std::string edited = ExportTown(builder.save(), 1);
++    ASSERT_TRUE(moonmod::coop::MergeTown(agreed, edited, 1, host.save(), error)) << error;
++    EXPECT_EQ(ExportTown(host.save(), 1), edited) << "taken whole, log and all";
++}
++
++// Review R3: when both built, the placement log is kept, its parts renumbered to the merged order; an entry whose
++// part the other game took away goes with it.
++TEST(MoonModCoopSave, AMergedTownKeepsItsPlacementLogRenumbered) {
++    Save host(23), builder(24);
++    TownLayout base;
++    for (int i = 0; i < 4; ++i) {
++        TownPart part;
++        part.id = i == 0 ? 1 : 2;
++        part.state = 2;
++        part.pos = {static_cast<s16>(i * 10), 0, 0};
++        base.parts.push_back(part);
++    }
++    base.place_log = {{.parts_no = 1, .base_no = 0}, {.parts_no = 2, .base_no = 0}, {.parts_no = 3, .base_no = 2}};
++    PortTownLayout(host.save().edit_data[1]) = base;
++    const std::string agreed = ExportTown(host.save(), 1);
++    std::string       error;
++    ASSERT_TRUE(ImportTown(agreed, 1, builder.save(), error)) << error;
++    // The host puts a part (at x 40) on part 3; the builder takes part 1 away and puts one (at x 50) on part 2.
++    TownLayout &mine = PortTownLayout(host.save().edit_data[1]);
++    TownPart    put = mine.parts[1];
++    put.pos = {40, 0, 0};
++    mine.parts.push_back(put);
++    mine.place_log.push_back({.parts_no = 4, .base_no = 3});
++    TownLayout &theirs = PortTownLayout(builder.save().edit_data[1]);
++    theirs.parts.erase(theirs.parts.begin() + 1);
++    theirs.place_log = {{.parts_no = 1, .base_no = 0}, {.parts_no = 2, .base_no = 1}};
++    put.pos = {50, 0, 0};
++    theirs.parts.push_back(put);
++    theirs.place_log.push_back({.parts_no = 3, .base_no = 1});
++    ASSERT_TRUE(moonmod::coop::MergeTown(agreed, ExportTown(builder.save(), 1), 1, host.save(), error)) << error;
++    const TownLayout *merged = PortFindTownLayout(host.save().edit_data[1]);
++    ASSERT_NE(merged, nullptr);
++    // Parts: 0, 20, 30, the host's 40, the builder's 50.
++    ASSERT_EQ(merged->parts.size(), 5u);
++    const std::vector<int> xs = {merged->parts[0].pos[0], merged->parts[1].pos[0], merged->parts[2].pos[0], merged->parts[3].pos[0],
++                                 merged->parts[4].pos[0]};
++    EXPECT_EQ(xs, (std::vector<int>{0, 20, 30, 40, 50}));
++    // Log: 20 on 0, 30 on 20, 40 on 30 (the host's own, renumbered), 50 on 20 (theirs, renumbered); 10's entry gone.
++    ASSERT_EQ(merged->place_log.size(), 4u);
++    const auto entry = [&merged](std::size_t i) { return std::pair<int, int>(merged->place_log[i].parts_no, merged->place_log[i].base_no); };
++    EXPECT_EQ(entry(0), (std::pair<int, int>(1, 0)));
++    EXPECT_EQ(entry(1), (std::pair<int, int>(2, 1)));
++    EXPECT_EQ(entry(2), (std::pair<int, int>(3, 2)));
++    EXPECT_EQ(entry(3), (std::pair<int, int>(4, 1)));
++}
++
++// Review R8: a river grid whose cells are not num_x by num_z, or with a count below zero, is damaged; so is a text
++// that gives one field twice (and so leaves another out).
++TEST(MoonModCoopSave, AGridOfTheWrongSizeOrAFieldGivenTwiceIsRefused) {
++    TownLayout  layout = SampleLayout(1);
++    TownLayout  back;
++    std::string error;
++    ASSERT_TRUE(moonmod::coop::LayoutFromBytes(moonmod::coop::LayoutBytes(layout), back, error)) << error;
++    layout.grids[0].cells.pop_back(); // three cells for a 2 by 2 grid
++    EXPECT_FALSE(moonmod::coop::LayoutFromBytes(moonmod::coop::LayoutBytes(layout), back, error));
++    layout.grids[0].cells.clear();
++    layout.grids[0].num_x = -1;
++    layout.grids[0].num_z = 0;
++    EXPECT_FALSE(moonmod::coop::LayoutFromBytes(moonmod::coop::LayoutBytes(layout), back, error));
++    layout.grids[0].num_x = -2;
++    layout.grids[0].num_z = -2;
++    layout.grids[0].cells = {0, 0, 0, 0};
++    EXPECT_FALSE(moonmod::coop::LayoutFromBytes(moonmod::coop::LayoutBytes(layout), back, error));
++
++    // A town's text: its record (field 1) twice and no layout (field 2).
++    Save        town(25);
++    Save        other(26);
++    PortTownLayout(town.save().edit_data[1]) = SampleLayout(1);
++    const std::string plain = PlainText(ExportTown(town.save(), 1));
++    const std::size_t colon = plain.find(':');
++    ASSERT_NE(colon, std::string::npos);
++    const std::string tag = plain.substr(0, colon + 1);
++    const std::string bytes = FromBase64(plain.substr(colon + 1));
++    ASSERT_GE(bytes.size(), 6u);
++    std::uint32_t first = 0;
++    for (int k = 0; k < 4; ++k) first |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[2 + k])) << (8 * k);
++    const std::string record = bytes.substr(0, 6 + first);
++    ASSERT_TRUE(ImportTown(tag + ToBase64(bytes), 1, other.save(), error)) << error << " (the codec here reads the text back)";
++    const std::string before = ExportTown(other.save(), 1);
++    EXPECT_FALSE(ImportTown(tag + ToBase64(record + record), 1, other.save(), error));
++    EXPECT_NE(error.find("twice"), std::string::npos) << error;
++    EXPECT_EQ(ExportTown(other.save(), 1), before);
 +}
 +
 +struct TempDir {
@@ -45063,19 +46432,20 @@ index 65aba96b..e85edb50 100644
      InstallScript(kPressFirstPort);
      InitGamePad();
 diff --git a/port/src/tests/save_slots_test.cpp b/port/src/tests/save_slots_test.cpp
-index c615a878..dcb074cb 100644
+index c615a878..3b3b0f7e 100644
 --- a/port/src/tests/save_slots_test.cpp
 +++ b/port/src/tests/save_slots_test.cpp
-@@ -1,6 +1,8 @@
+@@ -1,6 +1,9 @@
  #include <gtest/gtest.h>
  #include <nlohmann/json.hpp>
  
++#include "moonmod/coop.hpp"
 +#include "moonmod/coop_save.hpp"
 +
  #include <algorithm>
  #include <array>
  #include <barrier>
-@@ -40,6 +42,7 @@
+@@ -40,6 +43,7 @@
  #include "play_time.hpp"
  #include "save_json.hpp"
  #include "save_slots.hpp"
@@ -45083,7 +46453,7 @@ index c615a878..dcb074cb 100644
  #include "scene.hpp"
  #include "scoped_global_object.hpp"
  
-@@ -908,6 +911,36 @@ TEST_F(SaveSlotTest, EligibleAutosaveLoadsDirectlyFromFinnyFrenzyMenu) {
+@@ -908,6 +912,36 @@ TEST_F(SaveSlotTest, EligibleAutosaveLoadsDirectlyFromFinnyFrenzyMenu) {
      EXPECT_EQ(rig.menu.phase, SAVE_LIST_PHASE_LOADING);
  }
  
@@ -45120,7 +46490,7 @@ index c615a878..dcb074cb 100644
  TEST_F(SaveSlotTest, FailedLoadDoesNotPartiallyReplaceLiveStateOrDeleteFile) {
      Write(SaveSlotPath(0));
      Corrupt(SaveSlotPath(0));
-@@ -1796,3 +1829,63 @@ TEST_F(SaveSlotTest, FailedSaveAdoptionKeepsPlayTimeFraction) {
+@@ -1796,3 +1830,130 @@ TEST_F(SaveSlotTest, FailedSaveAdoptionKeepsPlayTimeFraction) {
      PortPlayTimeCountFlag = old_flag;
      ClockSetTickRate(old_rate);
  }
@@ -45128,6 +46498,7 @@ index c615a878..dcb074cb 100644
 +// Co-op: a player who joins a room picks one of their own saves; its things come along and go back into it, and
 +// nothing else of it changes (moonmod/coop_save.hpp, save.slots_list and save.slot_player_export/import).
 +TEST_F(SaveSlotTest, CoopListsThePlayersSavesAndMovesTheirThingsWithoutTheirStory) {
++    moonmod::coop::SlotCopiesForget();
 +    image->save_data.game_progress = 2;
 +    image->save_data.user_data.money = 700;
 +    image->save_data.SetBitFlag(100, 1);
@@ -45172,10 +46543,15 @@ index c615a878..dcb074cb 100644
 +    EXPECT_NE(read->image.save_data.GetBitFlag(100), 0);
 +    EXPECT_EQ(moonmod::coop::SlotsList()[0].progress, 2);
 +
-+    // Before that first write the save was copied aside as it was.
-+    const fs::path aside = root / "moonmod" / "coop-own-saves" / SaveSlotPath(0).filename();
-+    auto           before = std::make_unique<SaveDocument>();
-+    ASSERT_EQ(SaveSlotRead(aside, *before), SaveSlotState::Ready);
++    // Before that first write the save was copied aside as it was, under its name and the time of the copy.
++    std::vector<fs::path> copies;
++    for (const auto &entry : fs::directory_iterator(root / "moonmod" / "coop-own-saves")) copies.push_back(entry.path());
++    ASSERT_EQ(copies.size(), 1u);
++    const std::string stem = SaveSlotPath(0).stem().string();
++    EXPECT_TRUE(copies[0].filename().string().starts_with(stem + ".2")) << copies[0];
++    EXPECT_EQ(copies[0].extension(), ".json");
++    auto before = std::make_unique<SaveDocument>();
++    ASSERT_EQ(SaveSlotRead(copies[0], *before), SaveSlotState::Ready);
 +    EXPECT_EQ(before->image.save_data.user_data.money, 700);
 +
 +    // What is not a player's things, or names no save, writes nothing.
@@ -45183,6 +46559,67 @@ index c615a878..dcb074cb 100644
 +    EXPECT_FALSE(moonmod::coop::SlotPlayerImport(9, after, error));
 +    ASSERT_EQ(SaveSlotRead(SaveSlotPath(0), *read), SaveSlotState::Ready);
 +    EXPECT_EQ(read->image.save_data.user_data.money, 12345);
++}
++
++// Co-op's copies of a save before it writes to it: one each run, none over another, the newest five kept (review R1);
++// the save keeps its own townsfolk (R7); and an old memory-card save is not written to (R10).
++TEST_F(SaveSlotTest, CoopCopiesASaveAsideEachRunKeepsFiveAndWritesOnlyAJsonSave) {
++    image->save_data.user_data.money = 700;
++    image->save_data.user_data.party_chara[3].chara_no = 14;
++    image->save_data.user_data.party_chara[3].status = PARTY_CHARA_STATUS_IN_HOUSE | PARTY_CHARA_STATUS_IN_PARTY;
++    Write(SaveSlotPath(0));
++    auto played = std::make_unique<SAVEDATA_FORMAT>();
++    std::memcpy(static_cast<void *>(played.get()), image.get(), sizeof(*image));
++    played->save_data.user_data.party_chara[3].chara_no = 2;
++    played->save_data.user_data.party_chara[3].status = 0; // the host's world had nobody there
++    const fs::path folder = root / "moonmod" / "coop-own-saves";
++    const auto     copies = [&folder] {
++        std::vector<fs::path> found;
++        for (const auto &entry : fs::directory_iterator(folder)) found.push_back(entry.path());
++        std::ranges::sort(found);
++        return found;
++    };
++    std::string error;
++    for (int run = 0; run < 7; ++run) {
++        moonmod::coop::SlotCopiesForget(); // a new run of the game
++        played->save_data.user_data.money = 1000 + run;
++        ASSERT_TRUE(moonmod::coop::SlotPlayerImport(0, moonmod::coop::ExportPlayer(played->save_data), error)) << error;
++        // A second write in the same run copies nothing more.
++        ASSERT_TRUE(moonmod::coop::SlotPlayerImport(0, moonmod::coop::ExportPlayer(played->save_data), error)) << error;
++        EXPECT_EQ(copies().size(), static_cast<std::size_t>(std::min(run + 1, 5))) << "run " << run;
++    }
++    // The five kept are the newest: the copies taken before runs 2 to 6, the save as runs 1 to 5 left it.
++    const std::vector<fs::path> kept = copies();
++    ASSERT_EQ(kept.size(), 5u);
++    for (std::size_t i = 0; i < kept.size(); ++i) {
++        auto copy = std::make_unique<SaveDocument>();
++        ASSERT_EQ(SaveSlotRead(kept[i], *copy), SaveSlotState::Ready) << kept[i];
++        EXPECT_EQ(copy->image.save_data.user_data.money, static_cast<int>(1001 + i)) << kept[i];
++    }
++    // The save's townsfolk are its own story's, whatever the visit's world had.
++    auto read = std::make_unique<SaveDocument>();
++    ASSERT_EQ(SaveSlotRead(SaveSlotPath(0), *read), SaveSlotState::Ready);
++    EXPECT_EQ(read->image.save_data.user_data.money, 1006);
++    EXPECT_EQ(read->image.save_data.user_data.party_chara[3].chara_no, 14);
++    EXPECT_EQ(read->image.save_data.user_data.party_chara[3].status, PARTY_CHARA_STATUS_IN_HOUSE | PARTY_CHARA_STATUS_IN_PARTY);
++
++    // An old memory-card save during a visit (when the game does not convert it): co-op neither reads its things nor
++    // writes to it, and says why. (Another story than slot 0's, which the game would take as converted already.)
++    image->unique_counter = 77;
++    image->save_data.play_time = 999;
++    WriteRaw(Raw(4));
++    const auto legacy = Bytes(Raw(4));
++    moonmod::coop::VisitStartForTests("test.coop");
++    moonmod::coop::SlotCopiesForget();
++    std::string things;
++    int         progress = 0;
++    EXPECT_FALSE(moonmod::coop::SlotPlayerExport(4, things, progress, error));
++    EXPECT_NE(error.find("old memory-card save"), std::string::npos) << error;
++    EXPECT_FALSE(moonmod::coop::SlotPlayerImport(4, moonmod::coop::ExportPlayer(played->save_data), error));
++    EXPECT_NE(error.find("old memory-card save"), std::string::npos) << error;
++    EXPECT_EQ(Bytes(Raw(4)), legacy) << "the legacy save is as it was";
++    moonmod::coop::ResetForTests();
++    moonmod::coop::SlotCopiesForget();
 +}
 diff --git a/port/src/tests/test_hooks_test.cpp b/port/src/tests/test_hooks_test.cpp
 index 4fa7974d..563c44d5 100644
