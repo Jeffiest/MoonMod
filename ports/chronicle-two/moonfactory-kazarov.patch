@@ -1,8 +1,131 @@
+diff --git a/cmake/KazarovRust.cmake b/cmake/KazarovRust.cmake
+index a4f044e..21349d8 100644
+--- a/cmake/KazarovRust.cmake
++++ b/cmake/KazarovRust.cmake
+@@ -8,6 +8,8 @@ if(DEFINED ENV{KZ_CORROSION_SOURCE_DIR} AND
+ endif()
+ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+     set(Rust_CARGO_TARGET x86_64-pc-windows-gnullvm CACHE STRING "Rust target for llvm-mingw" FORCE)
++elseif(EMSCRIPTEN)
++    set(Rust_CARGO_TARGET wasm32-unknown-emscripten CACHE STRING "Rust target for Emscripten" FORCE)
+ endif()
+ FetchContent_Declare(corrosion
+     URL https://github.com/corrosion-rs/corrosion/archive/refs/tags/v0.6.1.zip
+@@ -20,6 +22,18 @@ get_filename_component(KZ_RUST_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/../Cargo.toml
+ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+     # The desktop setup window (eframe, rfd) does not target iOS, which extracts without it.
+     corrosion_import_crate(MANIFEST_PATH ${KZ_RUST_MANIFEST} CRATES kazarov_core NO_DEFAULT_FEATURES LOCKED)
++elseif(EMSCRIPTEN)
++    # Nor the browser. The game there runs on pthreads (shared memory), which every wasm object linked into it
++    # must be built for, Rust's standard library included: the prebuilt one for wasm32-unknown-emscripten is not,
++    # so cargo builds it (-Zbuild-std, which stable cargo runs with RUSTC_BOOTSTRAP=1 and the rust-src component)
++    # with atomics and bulk memory, and with panics aborting: Rust's unwinding there is WebAssembly's own
++    # exceptions, which Asyncify does not take. The C and C++ the crates compile (zstd, cxx) take the same thread
++    # model through cc's CFLAGS.
++    corrosion_import_crate(MANIFEST_PATH ${KZ_RUST_MANIFEST} CRATES kazarov_core NO_DEFAULT_FEATURES LOCKED
++        FLAGS -Zbuild-std=std,panic_abort)
++    corrosion_add_target_rustflags(kazarov_core -Ctarget-feature=+atomics,+bulk-memory,+mutable-globals -Cpanic=abort)
++    corrosion_set_env_vars(kazarov_core RUSTC_BOOTSTRAP=1
++        "CFLAGS_wasm32_unknown_emscripten=-pthread -O2" "CXXFLAGS_wasm32_unknown_emscripten=-pthread -fexceptions -O2")
+ else()
+     corrosion_import_crate(MANIFEST_PATH ${KZ_RUST_MANIFEST} CRATES kazarov_core LOCKED)
+ endif()
+@@ -28,8 +42,11 @@ set(KZ_GAMEPLAY_ARCHIVE "${CMAKE_BINARY_DIR}/assets/data.zip")
+ corrosion_set_env_vars(kazarov_core "KAZAROV_GAMEPLAY_ARCHIVE=${KZ_GAMEPLAY_ARCHIVE}")
+ include(GNUInstallDirs)
+ install(FILES "${KZ_GAMEPLAY_ARCHIVE}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+-include("${CMAKE_CURRENT_LIST_DIR}/KazarovFfmpeg.cmake")
+-kz_ffmpeg(kazarov_core INTERFACE)
++# The browser has no FFmpeg: the game there plays no movies, and the extraction leaves them out (publish.rs).
++if(NOT EMSCRIPTEN)
++    include("${CMAKE_CURRENT_LIST_DIR}/KazarovFfmpeg.cmake")
++    kz_ffmpeg(kazarov_core INTERFACE)
++endif()
+ if(DEFINED KAZAROV_GAMEPLAY_ROOT)
+     corrosion_set_env_vars(kazarov_core "KAZAROV_GAMEPLAY_ROOT=${KAZAROV_GAMEPLAY_ROOT}")
+ else()
+@@ -38,12 +55,14 @@ else()
+         corrosion_set_env_vars(kazarov_core "KAZAROV_GAMEPLAY_ROOT=${KZ_GAMEPLAY_ROOT}")
+     endif()
+ endif()
+-find_program(KZ_FFMPEG_EXECUTABLE NAMES ffmpeg.exe ffmpeg HINTS "${KZ_FFMPEG_DIR}/bin")
+-if(KZ_FFMPEG_EXECUTABLE)
+-    corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG=${KZ_FFMPEG_EXECUTABLE}")
+-endif()
+-if(KZ_FFMPEG_DIR)
+-    corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG_INCLUDE=${KZ_FFMPEG_DIR}/include" "KAZAROV_FFMPEG_LIB=${KZ_FFMPEG_DIR}/lib")
++if(NOT EMSCRIPTEN)
++    find_program(KZ_FFMPEG_EXECUTABLE NAMES ffmpeg.exe ffmpeg HINTS "${KZ_FFMPEG_DIR}/bin")
++    if(KZ_FFMPEG_EXECUTABLE)
++        corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG=${KZ_FFMPEG_EXECUTABLE}")
++    endif()
++    if(KZ_FFMPEG_DIR)
++        corrosion_set_env_vars(kazarov_core "KAZAROV_FFMPEG_INCLUDE=${KZ_FFMPEG_DIR}/include" "KAZAROV_FFMPEG_LIB=${KZ_FFMPEG_DIR}/lib")
++    endif()
+ endif()
+ corrosion_add_cxxbridge(kazarov_bridge CRATE kazarov_core FILES rust/lib.rs rust/host_jobs.rs rust/host_models.rs)
+ get_target_property(kz_bridge_generated_include_dirs kazarov_bridge INTERFACE_INCLUDE_DIRECTORIES)
+diff --git a/include/platform/arena.hpp b/include/platform/arena.hpp
+index f55357a..d82e198 100644
+--- a/include/platform/arena.hpp
++++ b/include/platform/arena.hpp
+@@ -38,6 +38,11 @@ void ArenaRequireOneAbove4GiB(const void *const *bases, std::size_t count);
+ // the one nearest an address inside the image is the one that was truncated. Exact wherever the
+ // image sits.
+ inline std::uintptr_t WidenNear(std::uintptr_t anchor, std::uint32_t low) {
++#if UINTPTR_MAX <= 0xFFFFFFFFu
++    // 32-bit addresses (wasm32) are never truncated: the low 32 bits are the address.
++    static_cast<void>(anchor);
++    return low;
++#else
+     constexpr std::uintptr_t kWindow = std::uintptr_t{1} << 32;
+     std::uintptr_t           candidate = (anchor & ~(kWindow - 1)) | low;
+     if (candidate > anchor && candidate - anchor > kWindow / 2 && candidate >= kWindow) {
+@@ -46,6 +51,7 @@ inline std::uintptr_t WidenNear(std::uintptr_t anchor, std::uint32_t low) {
+         candidate += kWindow;
+     }
+     return candidate;
++#endif
+ }
+ 
+ // A pointer into the executable's image (a global, a static, a literal) back from the int the game
+diff --git a/include/platform/clock.hpp b/include/platform/clock.hpp
+index 111faab..0349daf 100644
+--- a/include/platform/clock.hpp
++++ b/include/platform/clock.hpp
+@@ -91,5 +91,15 @@ void ClockWaitNextTick(ClockWaitHook hook);
+ // Elapsed fraction of the current tick, in [0, 1); 1 when unbounded.
+ double ClockTickFraction();
+ 
++// The number of the host's last display frame, where the host tells the thread of each refresh of the screen: a
++// browser's animation frames. 0 where it does not (anywhere else, and in a browser until the first arrives).
++// A browser's timed waits are no finer than its system's timer (in Chrome on Windows a sleep of 1 ms ends up to
++// 15.6 ms later, most of a tick), while its frames arrive on time, so where there are frames the waits for a
++// tick end on the first frame at or after it, and the display paces itself by them.
++std::uint32_t ClockHostFrame();
++
++// Waits for the host's next display frame. Only where ClockHostFrame is not 0.
++void ClockWaitHostFrame();
++
+ // What `sceGsSyncV` and the end of a frame do: wait for the next tick, then pump.
+ std::int64_t ClockSyncV();
 diff --git a/include/platform/input.hpp b/include/platform/input.hpp
-index 3a686a9..536349d 100644
+index 3a686a9..a9a3c4c 100644
 --- a/include/platform/input.hpp
 +++ b/include/platform/input.hpp
-@@ -53,6 +53,8 @@ struct InputPadState {
+@@ -10,8 +10,9 @@
+ #include <TargetConditionals.h>
+ #endif
+ 
+-// Touch screens get an on-screen gamepad: Android's and iOS's ports draw it over the game.
+-#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
++// Touch screens get an on-screen gamepad: Android's and iOS's ports draw it over the game, and on the web the
++// page does on a touch screen.
++#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
+ #define KZ_TOUCH_OVERLAY 1
+ #endif
+ 
+@@ -53,6 +54,8 @@ struct InputPadState {
      std::uint8_t  left_y = kInputAxisCentre;
      std::uint8_t  right_x = kInputAxisCentre;
      std::uint8_t  right_y = kInputAxisCentre;
@@ -11,7 +134,7 @@ index 3a686a9..536349d 100644
      // D-pad bits the left-stick keys add only while the game is not reading the left stick: the
      // screens that read the d-pad alone (the developer menu, the dungeon loader).
      std::uint16_t stick_dpad = 0;
-@@ -166,6 +168,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
+@@ -166,6 +169,8 @@ InputPadState InputApplyKeyboardMouse(InputPadState base, const InputKeyboardMou
  // The stick byte the game's AxisCalibration reads as deflection * 128, deflection in [-1, 1]: the
  // dead zone is stepped over, so any motion moves the game.
  std::uint8_t InputStickByte(float deflection);
@@ -20,7 +143,7 @@ index 3a686a9..536349d 100644
  
  // Rebinds one action ("cross", "up", "lx-", "rx", ...) to the names given: SDL key names, Mouse1 to
  // Mouse5 (left, right, middle, X1, X2), and for the whole-axis actions lx ly rx ry MouseX or MouseY
-@@ -173,6 +177,15 @@ std::uint8_t InputStickByte(float deflection);
+@@ -173,6 +178,15 @@ std::uint8_t InputStickByte(float deflection);
  // the camera's own. Returns false if the action or a name is unknown or does not fit the action.
  bool InputBindKeys(std::string_view action, std::span<const std::string_view> keys);
  
@@ -36,11 +159,43 @@ index 3a686a9..536349d 100644
  // Restores the default bindings and mouse settings.
  void InputResetBindings();
  
+diff --git a/include/platform/memory.hpp b/include/platform/memory.hpp
+index 6f2304e..9aa59c1 100644
+--- a/include/platform/memory.hpp
++++ b/include/platform/memory.hpp
+@@ -27,5 +27,7 @@ void                 ArenaMemoryUnmap(ArenaMemory &memory);
+ kz::size_t           ArenaMemoryPageSize();
+ 
+ inline bool IsAbove4GiB(const void *pointer) {
+-    return reinterpret_cast<kz::uptr>(pointer) >> 32 != 0;
++    // Widened first: shifting a 32-bit pointer (WebAssembly) by 32 is undefined, and the compiler took the
++    // liberty of dropping both arms of a caller's ternary, printing whatever the stray pointer led to.
++    return static_cast<unsigned long long>(reinterpret_cast<kz::uptr>(pointer)) >> 32 != 0;
+ }
+diff --git a/src/c/movie_mux.c b/src/c/movie_mux.c
+index d00f4ef..d6d3d3f 100644
+--- a/src/c/movie_mux.c
++++ b/src/c/movie_mux.c
+@@ -27,7 +27,13 @@ static int memory_read(void *opaque, uint8_t *buffer, int size) {
+     return (int)count;
+ }
+ 
+-static int memory_write(void *opaque, const uint8_t *buffer, int size) {
++#if LIBAVFORMAT_VERSION_MAJOR >= 61
++typedef const uint8_t *write_packet_buffer;
++#else
++typedef uint8_t *write_packet_buffer;
++#endif
++
++static int memory_write(void *opaque, write_packet_buffer buffer, int size) {
+     MemoryFile *file = opaque;
+     if (!file->writable || size < 0 || (size_t)size > SIZE_MAX - file->position)
+         return AVERROR(EINVAL);
 diff --git a/src/cpp/gfx/displaylist.cpp b/src/cpp/gfx/displaylist.cpp
-index a1a0667..a7f469b 100644
+index 7456194..ed6bc19 100644
 --- a/src/cpp/gfx/displaylist.cpp
 +++ b/src/cpp/gfx/displaylist.cpp
-@@ -855,8 +855,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
+@@ -870,8 +870,48 @@ void BuildMatches(const DisplayList &list, const DisplayList &previous) {
      }
      cache.cameras.assign(list.cameras.size(), -1);
      if (!list.camera_cut) {
@@ -91,8 +246,217 @@ index a1a0667..a7f469b 100644
          }
      }
  }
+diff --git a/src/cpp/gfx/memory.cpp b/src/cpp/gfx/memory.cpp
+index ab953cf..37f5d92 100644
+--- a/src/cpp/gfx/memory.cpp
++++ b/src/cpp/gfx/memory.cpp
+@@ -9,6 +9,12 @@
+ #include "gfx/profile.hpp"
+ #include "kazarov/log.hpp"
+ 
++#ifdef __EMSCRIPTEN__
++// The web build's Vulkan runs on WebGPU or WebGL2, which share no memory with the CPU: what a span holds is
++// uploaded at the next submit (port/web/vulkan, port/web/gl).
++extern "C" void vkWebGpuMarkWritten(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size);
++#endif
++
+ namespace gfx::detail {
+ 
+ namespace {
+@@ -377,6 +383,9 @@ TransientSpan AllocateFromChunks(std::vector<TransientChunk> &chunks, uint32_t &
+         VkDeviceSize    offset = AlignUp(chunk.used, align);
+         if (offset + size <= chunk.buffer.size) {
+             chunk.used = offset + size;
++#ifdef __EMSCRIPTEN__
++            vkWebGpuMarkWritten(chunk.buffer.buffer, offset, size);
++#endif
+             return TransientSpan{chunk.buffer.buffer, offset, chunk.buffer.memory.mapped + offset};
+         }
+     }
+@@ -391,6 +400,9 @@ TransientSpan AllocateFromChunks(std::vector<TransientChunk> &chunks, uint32_t &
+         chunk.buffer = CreateBuffer(bytes, usage, true);
+     }
+     chunk.used = size;
++#ifdef __EMSCRIPTEN__
++    vkWebGpuMarkWritten(chunk.buffer.buffer, 0, size);
++#endif
+     chunks.push_back(chunk);
+     current = static_cast<uint32_t>(chunks.size() - 1);
+     return TransientSpan{chunk.buffer.buffer, 0, chunk.buffer.memory.mapped};
+diff --git a/src/cpp/gfx/renderer.cpp b/src/cpp/gfx/renderer.cpp
+index 2b2a69b..dbcc190 100644
+--- a/src/cpp/gfx/renderer.cpp
++++ b/src/cpp/gfx/renderer.cpp
+@@ -43,6 +43,11 @@ extern "C" {
+ #include "gfx/profile.hpp"
+ #include "kazarov/log.hpp"
+ 
++#ifdef __EMSCRIPTEN__
++// The page's canvas as a surface, from the web build's Vulkan on WebGPU or WebGL2 (port/web/vulkan, port/web/gl).
++extern "C" VkResult vkCreateCanvasSurfaceWEB(VkInstance instance, VkSurfaceKHR *surface);
++#endif
++
+ #ifdef __SWITCH__
+ namespace {
+ 
+@@ -2200,6 +2205,12 @@ void CreateInstance() {
+     }
+ 
+     std::vector<const char *> extensions;
++#ifdef __EMSCRIPTEN__
++    // The web build's Vulkan draws to the page's canvas (port/web); SDL has no Vulkan there.
++    if (!g.config.offscreen) {
++        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
++    }
++#else
+     if (!g.config.offscreen) {
+         uint32_t           sdl_count = 0;
+         const char *const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_count);
+@@ -2208,6 +2219,7 @@ void CreateInstance() {
+         }
+         extensions.assign(sdl_extensions, sdl_extensions + sdl_count);
+     }
++#endif
+     // Drivers that implement Vulkan on another API (MoltenVK on Metal) are only
+     // enumerated for an instance that says it handles VK_KHR_portability_subset.
+     bool portability = InstanceHasExtension(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+@@ -4112,9 +4124,15 @@ void RendererInit(SDL_Window *window, const RendererConfig &config) {
+     g.offscreen = config.offscreen;
+     g.layout = config.layout;
+     CreateInstance();
++#ifdef __EMSCRIPTEN__
++    if (!g.offscreen && vkCreateCanvasSurfaceWEB(g.instance, &g.surface) != VK_SUCCESS) {
++        Fatal("the page's canvas cannot be drawn to");
++    }
++#else
+     if (!g.offscreen && !SDL_Vulkan_CreateSurface(window, g.instance, nullptr, &g.surface)) {
+         Fatal("SDL_Vulkan_CreateSurface: %s", SDL_GetError());
+     }
++#endif
+     PickPhysicalDevice();
+     CreateDevice();
+     CreateFrames();
+@@ -4244,7 +4262,11 @@ void RendererShutdown() {
+     ShutdownMemory();
+     vkDestroyDevice(g.device, nullptr);
+     if (g.surface != VK_NULL_HANDLE) {
++#ifdef __EMSCRIPTEN__
++        vkDestroySurfaceKHR(g.instance, g.surface, nullptr);
++#else
+         SDL_Vulkan_DestroySurface(g.instance, g.surface, nullptr);
++#endif
+     }
+     if (g.messenger != VK_NULL_HANDLE) {
+         auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+diff --git a/src/cpp/platform/clock.cpp b/src/cpp/platform/clock.cpp
+index 8549f03..58583b1 100644
+--- a/src/cpp/platform/clock.cpp
++++ b/src/cpp/platform/clock.cpp
+@@ -9,6 +9,46 @@
+ 
+ #include "kazarov/log.hpp"
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++
++// The thread's animation frames, counted from 1 as they arrive; 0 before the first, and where the thread has
++// none. A hidden page gets no frames, so past a tenth of a second without one a timer counts one in its place,
++// and the game goes on, slowly, behind another tab.
++EM_JS(int, ClockWebFrame, (), {
++    if (Module.ctFrames === undefined) {
++        const frames = Module.ctFrames = {serial: 0, at: 0, waiting: null};
++        const arrived = () => {
++            frames.serial = frames.serial % 0x3fffffff + 1;
++            frames.at = performance.now();
++            const resolve = frames.waiting;
++            frames.waiting = null;
++            resolve?.();
++        };
++        const step = () => {
++            requestAnimationFrame(step);
++            arrived();
++        };
++        try {
++            requestAnimationFrame(step);
++            setInterval(() => {
++                if (frames.serial != 0 && performance.now() - frames.at >= 100) {
++                    arrived();
++                }
++            }, 50);
++        } catch (_none) {
++        }
++    }
++    return Module.ctFrames.serial;
++});
++
++EM_ASYNC_JS(void, ClockWebWaitFrame, (), {
++    await new Promise((resolve) => {
++        Module.ctFrames.waiting = resolve;
++    });
++});
++#endif
++
+ namespace {
+ 
+ using SteadyClock = std::chrono::steady_clock;
+@@ -66,6 +106,14 @@ std::int64_t TickAt(SteadyClock::time_point now) {
+ }
+ 
+ void SleepUntil(SteadyClock::time_point deadline) {
++#ifdef __EMSCRIPTEN__
++    if (ClockWebFrame() != 0) {
++        while (SteadyClock::now() < deadline) {
++            ClockWebWaitFrame();
++        }
++        return;
++    }
++#endif
+     if (deadline - SteadyClock::now() > kSpinMargin) {
+         std::this_thread::sleep_until(deadline - kSpinMargin);
+     }
+@@ -177,6 +225,20 @@ bool ClockPumping() {
+     return g_clock.pumping;
+ }
+ 
++std::uint32_t ClockHostFrame() {
++#ifdef __EMSCRIPTEN__
++    return static_cast<std::uint32_t>(ClockWebFrame());
++#else
++    return 0;
++#endif
++}
++
++void ClockWaitHostFrame() {
++#ifdef __EMSCRIPTEN__
++    ClockWebWaitFrame();
++#endif
++}
++
+ void ClockWaitNextTick() {
+     if (g_clock.unbounded) {
+         return;
+diff --git a/src/cpp/platform/files.cpp b/src/cpp/platform/files.cpp
+index c0dc8d2..c9295f7 100644
+--- a/src/cpp/platform/files.cpp
++++ b/src/cpp/platform/files.cpp
+@@ -266,6 +266,15 @@ int RenameExclusive(const fs::path &temp, const fs::path &path) {
+     return renamex_np(temp.c_str(), path.c_str(), RENAME_EXCL);
+ #elif defined(__SWITCH__)
+     return rename(temp.c_str(), path.c_str());
++#elif defined(__EMSCRIPTEN__)
++    // WasmFS has neither an exclusive rename nor hard links. The game is the only process on the browser's
++    // storage, so no one can take the name between this check and the rename.
++    struct stat existing;
++    if (lstat(path.c_str(), &existing) == 0) {
++        errno = EEXIST;
++        return -1;
++    }
++    return rename(temp.c_str(), path.c_str());
+ #else
+     errno = ENOSYS;
+     return -1;
 diff --git a/src/cpp/platform/input.cpp b/src/cpp/platform/input.cpp
-index c5a4797..e129c5a 100644
+index c5a4797..2d07dff 100644
 --- a/src/cpp/platform/input.cpp
 +++ b/src/cpp/platform/input.cpp
 @@ -8,6 +8,7 @@
@@ -177,7 +541,27 @@ index c5a4797..e129c5a 100644
  bool MouseAxisBound(int code) {
      return std::ranges::any_of(g_bindings, [&](const std::vector<Source> &sources) {
          return std::ranges::any_of(sources, [&](const Source &source) {
-@@ -1091,6 +1138,7 @@ void InputPoll() {
+@@ -1048,8 +1095,19 @@ static InputGlyphFamily GamepadFamily(SDL_Gamepad *gamepad) {
+ }
+ 
+ #ifdef KZ_TOUCH_OVERLAY
++#if defined(__EMSCRIPTEN__)
++// Whether the page is on a touch screen; the web port's port/web/src/touch.cpp says, as a browser always reports
++// a keyboard and a mouse. None of it in programs without that file.
++__attribute__((weak)) bool WebTouchScreen() { return false; }
++#endif
++
+ // The on-screen gamepad stands in for physical devices, so it hides while one is connected or held.
+ bool TouchOverlayWanted() {
++#if defined(__EMSCRIPTEN__)
++    return WebTouchScreen() &&
++           std::ranges::none_of(g_slots, [](const PadSlot &slot) { return slot.gamepad != nullptr; }) &&
++           std::ranges::find(g_keys, true) == g_keys.end();
++#endif
+     if (std::ranges::any_of(g_slots, [](const PadSlot &slot) { return slot.gamepad != nullptr; }) ||
+         SDL_HasKeyboard() || MouseButtons() != 0 || std::ranges::find(g_keys, true) != g_keys.end()) {
+         return false;
+@@ -1091,6 +1149,7 @@ void InputPoll() {
      }
      ReadTouchpad(g_slots[0].gamepad);
      PollHostActions();
@@ -185,7 +569,7 @@ index c5a4797..e129c5a 100644
  }
  
  void InputHandleEvent(const SDL_Event &event) {
-@@ -1161,6 +1209,7 @@ void InputHandleEvent(const SDL_Event &event) {
+@@ -1161,6 +1220,7 @@ void InputHandleEvent(const SDL_Event &event) {
          default:
              break;
      }
@@ -193,7 +577,7 @@ index c5a4797..e129c5a 100644
  }
  
  void InputLatchPad(int pad) {
-@@ -1556,6 +1605,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
+@@ -1556,6 +1616,56 @@ bool InputBindKeys(std::string_view action, std::span<const std::string_view> ke
      return false;
  }
  
@@ -250,7 +634,7 @@ index c5a4797..e129c5a 100644
  std::span<const InputActionInfo> InputActions() {
      static const std::vector<InputActionInfo> actions = [] {
          std::vector<InputActionInfo> list;
-@@ -1850,6 +1949,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
+@@ -1850,6 +1960,7 @@ void InputSetScriptedDevices(const InputKeyboardMouse &held) {
      g_scripted = held;
      g_scripted_wheel = held.mouse_wheel;
      PollHostActions();
@@ -258,3 +642,3418 @@ index c5a4797..e129c5a 100644
  }
  
  static bool g_movement_locked = false;
+diff --git a/src/cpp/platform/window.cpp b/src/cpp/platform/window.cpp
+index eee7359..12dcd45 100644
+--- a/src/cpp/platform/window.cpp
++++ b/src/cpp/platform/window.cpp
+@@ -280,6 +280,8 @@ void WindowInit(const WindowConfig &config) {
+ #endif
+     // SDL3 backs a Vulkan window on macOS with a CAMetalLayer (VK_EXT_metal_surface) by itself.
+     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
++    // On the web the renderer's Vulkan draws to the canvas itself (port/web); SDL has no Vulkan there.
++#ifndef __EMSCRIPTEN__
+     if (config.vulkan) {
+         flags |= SDL_WINDOW_VULKAN;
+ #ifdef _WIN32
+@@ -288,6 +290,7 @@ void WindowInit(const WindowConfig &config) {
+         }
+ #endif
+     }
++#endif
+     Placement placement = Place(config, SDL_GetPrimaryDisplay());
+     // An iOS window takes the whole display whatever is placed; fullscreen also hides the status bar.
+     if (placement.fullscreen || kIos) {
+diff --git a/src/cpp/sce/eekernel_threads.cpp b/src/cpp/sce/eekernel_threads.cpp
+index eba144f..b6bb5e3 100644
+--- a/src/cpp/sce/eekernel_threads.cpp
++++ b/src/cpp/sce/eekernel_threads.cpp
+@@ -89,6 +89,9 @@ _kz_fiber_trampoline:
+     bl _kz_fiber_entry
+     brk #0
+ )");
++#elif defined(__EMSCRIPTEN__)
++// WebAssembly has no way to swap stacks by hand; Emscripten's fibers unwind and rewind with Asyncify.
++#include <emscripten/fiber.h>
+ #else
+ #include <ucontext.h>
+ #endif
+@@ -208,6 +211,51 @@ void ContextDestroy(Context &c) {
+     c.sp = nullptr;
+ }
+ 
++#elif defined(__EMSCRIPTEN__)
++
++// Each fiber has its C stack and an Asyncify stack, where a suspended fiber's unwound call frames wait.
++constexpr std::size_t kAsyncifyStackSize = 256 * 1024;
++
++struct Context : SanitizerStack {
++    emscripten_fiber_t fiber{};
++    void              *stack = nullptr;
++    void              *asyncify_stack = nullptr;
++};
++
++void FiberStart(void *) {
++    RunEntry();
++}
++
++void ContextInitMain(Context &c) {
++    c.asyncify_stack = std::malloc(kAsyncifyStackSize);
++    if (c.asyncify_stack == nullptr) {
++        kz::Abort("eekernel", "out of memory for the main thread's Asyncify stack");
++    }
++    emscripten_fiber_init_from_current_context(&c.fiber, c.asyncify_stack, kAsyncifyStackSize);
++}
++
++void ContextCreate(Context &c) {
++    static_cast<SanitizerStack &>(c) = {};
++    c.stack = std::malloc(kStackSize);
++    c.asyncify_stack = std::malloc(kAsyncifyStackSize);
++    if (c.stack == nullptr || c.asyncify_stack == nullptr) {
++        kz::Abort("eekernel", "out of memory for a thread stack");
++    }
++    emscripten_fiber_init(&c.fiber, FiberStart, nullptr, c.stack, kStackSize, c.asyncify_stack,
++                          kAsyncifyStackSize);
++}
++
++void ContextSwitch(Context &prev, Context &next) {
++    emscripten_fiber_swap(&prev.fiber, &next.fiber);
++}
++
++void ContextDestroy(Context &c) {
++    std::free(c.stack);
++    std::free(c.asyncify_stack);
++    c.stack = nullptr;
++    c.asyncify_stack = nullptr;
++}
++
+ #else
+ 
+ struct Context : SanitizerStack {
+diff --git a/src/rust/archive.rs b/src/rust/archive.rs
+index 410851a..215f0fc 100644
+--- a/src/rust/archive.rs
++++ b/src/rust/archive.rs
+@@ -10,26 +10,26 @@ use std::io::{Read, Seek, SeekFrom, Write};
+ use std::ops::Range;
+ use std::path::{Path, PathBuf};
+ use std::sync::Arc;
+-use std::sync::atomic::{AtomicUsize, Ordering};
++use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+ 
+ const SECTOR: u64 = 2048;
+ const CHUNK: usize = 4 << 20;
+ 
+-struct ReadOnlyCursor<'a>(std::io::Cursor<&'a [u8]>);
++struct ReadOnlyCursor<R>(R);
+ 
+-impl Read for ReadOnlyCursor<'_> {
++impl<R: Read> Read for ReadOnlyCursor<R> {
+     fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+         self.0.read(output)
+     }
+ }
+ 
+-impl Seek for ReadOnlyCursor<'_> {
++impl<R: Seek> Seek for ReadOnlyCursor<R> {
+     fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+         self.0.seek(position)
+     }
+ }
+ 
+-impl Write for ReadOnlyCursor<'_> {
++impl<R> Write for ReadOnlyCursor<R> {
+     fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+         Err(std::io::ErrorKind::PermissionDenied.into())
+     }
+@@ -39,7 +39,42 @@ impl Write for ReadOnlyCursor<'_> {
+     }
+ }
+ 
+-impl gpt_disk_io::ReadWriteSeek for ReadOnlyCursor<'_> {}
++impl<R: Read + Seek> gpt_disk_io::ReadWriteSeek for ReadOnlyCursor<R> {}
++
++/// Reads a source by position, a range at a time: the ISO's directory is found without the whole image in memory.
++struct SourceReader {
++    source: SourceBytes,
++    position: u64,
++}
++
++impl Read for SourceReader {
++    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
++        let length = self.source.len();
++        if self.position >= length || output.is_empty() {
++            return Ok(0);
++        }
++        let count = (output.len() as u64).min(length - self.position);
++        let bytes = self
++            .source
++            .slice(self.position..self.position + count)
++            .map_err(|failure| std::io::Error::other(failure.0))?;
++        output[..bytes.len()].copy_from_slice(&bytes);
++        self.position += bytes.len() as u64;
++        Ok(bytes.len())
++    }
++}
++
++impl Seek for SourceReader {
++    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
++        let target = match position {
++            SeekFrom::Start(offset) => Some(offset),
++            SeekFrom::End(delta) => self.source.len().checked_add_signed(delta),
++            SeekFrom::Current(delta) => self.position.checked_add_signed(delta),
++        };
++        self.position = target.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
++        Ok(self.position)
++    }
++}
+ 
+ fn error(message: impl Into<String>) -> CoreError {
+     CoreError(message.into())
+@@ -148,11 +183,9 @@ struct Archive {
+ impl Archive {
+     fn extent_bytes(&self, extent: &Extent) -> CoreResult<Vec<u8>> {
+         if let Some(image) = &self.image_bytes {
+-            let start =
+-                usize::try_from(extent.offset).map_err(|_| error("source offset overflow"))?;
+-            let size = usize::try_from(extent.size).map_err(|_| error("source size overflow"))?;
++            let start = extent.offset;
+             let end = start
+-                .checked_add(size)
++                .checked_add(extent.size)
+                 .ok_or_else(|| error("source range overflow"))?;
+             if end > image.len() {
+                 return Err(error("truncated ISO extent"));
+@@ -188,10 +221,20 @@ fn image_extent(image: &Path, entry: &FileEntry) -> CoreResult<Extent> {
+     Ok(extent)
+ }
+ 
+-fn open_image_bytes(image: &Path, bytes: &[u8]) -> CoreResult<Archive> {
++fn open_image_source(image: &Path, source: &SourceBytes) -> CoreResult<Archive> {
++    open_image_reader(
++        image,
++        SourceReader {
++            source: source.clone(),
++            position: 0,
++        },
++    )
++}
++
++fn open_image_reader<R: Read + Seek>(image: &Path, reader: R) -> CoreResult<Archive> {
+     let block_size =
+         BlockSize::new(SECTOR as u32).ok_or_else(|| error("invalid ISO sector size"))?;
+-    let mut io = BlockIoAdapter::new(ReadOnlyCursor(std::io::Cursor::new(bytes)), block_size);
++    let mut io = BlockIoAdapter::new(ReadOnlyCursor(reader), block_size);
+     let volume = mount(&mut io, 0)
+         .map_err(|cause| error(format!("{}: ISO mount: {cause}", image.display())))?;
+     if u64::from(volume.logical_block_size) != SECTOR {
+@@ -260,7 +303,7 @@ fn open_image_bytes(image: &Path, bytes: &[u8]) -> CoreResult<Archive> {
+ }
+ 
+ fn open_image(image: &Path) -> CoreResult<Archive> {
+-    open_image_bytes(image, &SourceBytes::open_iso(image)?.bytes()?)
++    open_image_source(image, &SourceBytes::open_iso(image)?)
+ }
+ 
+ fn directory_file(root: &Path, name: &str) -> CoreResult<Extent> {
+@@ -498,7 +541,9 @@ enum SourceData {
+     /// while it is read.
+     Mapped {
+         file: File,
+-        length: usize,
++        length: u64,
++        /// The ranges are read, not mapped: the browser's file system has no file mappings.
++        read: bool,
+     },
+ }
+ 
+@@ -509,6 +554,39 @@ pub enum SourceSlice<'a> {
+     Read(Vec<u8>),
+ }
+ 
++/// What reading the source has cost: the reads made, their bytes, and the nanoseconds the readers waited.
++static READS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
++
++/// The reads of the source so far, for a log: "source read 1234 times, 2048 MiB, 12.3 s of waiting", the waiting
++/// summed over the workers. Empty when the source is in memory or mapped.
++pub fn read_text() -> String {
++    let [reads, bytes, nanos] = [0, 1, 2].map(|index| READS[index].load(Ordering::Relaxed));
++    if reads == 0 {
++        return String::new();
++    }
++    format!(
++        "source read {reads} times, {} MiB, {:.1} s of waiting",
++        bytes >> 20,
++        nanos as f64 / 1e9
++    )
++}
++
++/// Says on stderr what reading the source and the temporary file has cost up to this point. The browser's log
++/// always has it, since a phone's log is all there is to say where its time went; elsewhere
++/// DC2DATA_PROFILE_JOBS asks for it.
++pub fn read_note(label: &str) {
++    if !cfg!(target_os = "emscripten") && std::env::var_os("DC2DATA_PROFILE_JOBS").is_none() {
++        return;
++    }
++    let texts: Vec<String> = [read_text(), super::spill::io_text()]
++        .into_iter()
++        .filter(|text| !text.is_empty())
++        .collect();
++    if !texts.is_empty() {
++        eprintln!("extraction, {label}: {}", texts.join("; "));
++    }
++}
++
+ impl std::ops::Deref for SourceSlice<'_> {
+     type Target = [u8];
+ 
+@@ -521,6 +599,19 @@ impl std::ops::Deref for SourceSlice<'_> {
+     }
+ }
+ 
++/// Opens a file that is only read. The browser's storage reads a file opened only to read through a Blob, an
++/// asynchronous round trip for every read; a file opened to read and write gets a synchronous handle. So there
++/// that is asked for first, and nothing is written through it; a file locked by another tab is still read.
++pub fn open_read(path: &Path) -> std::io::Result<File> {
++    #[cfg(target_os = "emscripten")]
++    {
++        if let Ok(file) = fs::OpenOptions::new().read(true).write(true).open(path) {
++            return Ok(file);
++        }
++    }
++    File::open(path)
++}
++
+ impl SourceBytes {
+     pub fn owned(bytes: Vec<u8>) -> Self {
+         Self(Arc::new(SourceData::Owned(bytes)))
+@@ -532,15 +623,19 @@ impl SourceBytes {
+     }
+ 
+     pub fn open_iso_with_progress(path: &Path, phase: &Phase) -> CoreResult<Self> {
+-        let mut file = File::open(path)?;
+-        let length = usize::try_from(file.metadata()?.len())
+-            .map_err(|_| error("ISO exceeds addressable memory"))?;
+-        phase.set_total(length as u64);
+-        if cfg!(any(target_os = "ios", kazarov_mapped_source)) {
+-            phase.inc(length as u64);
+-            phase.add_bytes(length as u64);
+-            return Ok(Self(Arc::new(SourceData::Mapped { file, length })));
++        let mut file = open_read(path)?;
++        let length = file.metadata()?.len();
++        phase.set_total(length);
++        // iOS's address space and the browser's 4 GiB memory (wasm32) cannot hold a 4.7 GB disc image: there
++        // each resource reads its own range of the image while it is converted.
++        // DC2DATA_READ_SOURCE reads the image the browser's way anywhere, to measure and to check that way.
++        let read = cfg!(target_os = "emscripten") || std::env::var_os("DC2DATA_READ_SOURCE").is_some();
++        if read || cfg!(any(target_os = "ios", kazarov_mapped_source)) {
++            phase.inc(length);
++            phase.add_bytes(length);
++            return Ok(Self(Arc::new(SourceData::Mapped { file, length, read })));
+         }
++        let length = usize::try_from(length).map_err(|_| error("ISO exceeds addressable memory"))?;
+         let mut bytes = Vec::with_capacity(length);
+         let mut chunk = vec![0u8; CHUNK];
+         loop {
+@@ -558,9 +653,9 @@ impl SourceBytes {
+         Ok(Self::owned(bytes))
+     }
+ 
+-    pub fn len(&self) -> usize {
++    pub fn len(&self) -> u64 {
+         match &*self.0 {
+-            SourceData::Owned(bytes) => bytes.len(),
++            SourceData::Owned(bytes) => bytes.len() as u64,
+             SourceData::Mapped { length, .. } => *length,
+         }
+     }
+@@ -570,32 +665,42 @@ impl SourceBytes {
+     }
+ 
+     /// The bytes in range, which must lie inside the source.
+-    pub fn slice(&self, range: Range<usize>) -> CoreResult<SourceSlice<'_>> {
++    pub fn slice(&self, range: Range<u64>) -> CoreResult<SourceSlice<'_>> {
+         if range.start > range.end || range.end > self.len() {
+             return Err(error("source range outside the source"));
+         }
++        let count = usize::try_from(range.end - range.start)
++            .map_err(|_| error("source range exceeds addressable memory"))?;
+         match &*self.0 {
+-            SourceData::Owned(bytes) => Ok(SourceSlice::Borrowed(&bytes[range])),
+-            SourceData::Mapped { file, .. } => {
+-                if range.is_empty() {
++            SourceData::Owned(bytes) => {
++                // An owned source fits in memory, so its positions fit in usize.
++                let start = range.start as usize;
++                Ok(SourceSlice::Borrowed(&bytes[start..start + count]))
++            }
++            SourceData::Mapped { file, read, .. } => {
++                if count == 0 {
+                     return Ok(SourceSlice::Borrowed(&[]));
+                 }
+-                // SAFETY: the mapping is read-only, and the disc image is not changed during extraction.
+-                let mapped = unsafe {
+-                    memmap2::MmapOptions::new()
+-                        .offset(range.start as u64)
+-                        .len(range.len())
+-                        .map(file)
+-                };
+-                match mapped {
+-                    Ok(map) => Ok(SourceSlice::Mapped(map)),
++                if !*read {
++                    // SAFETY: the mapping is read-only, and the disc image is not changed during extraction.
++                    let mapped = unsafe {
++                        memmap2::MmapOptions::new()
++                            .offset(range.start)
++                            .len(count)
++                            .map(file)
++                    };
+                     // Without address space for a mapping there may still be memory for a copy.
+-                    Err(_) => {
+-                        let mut bytes = vec![0; range.len()];
+-                        read_at(file, range.start as u64, &mut bytes)?;
+-                        Ok(SourceSlice::Read(bytes))
++                    if let Ok(map) = mapped {
++                        return Ok(SourceSlice::Mapped(map));
+                     }
+                 }
++                let started = std::time::Instant::now();
++                let mut bytes = vec![0; count];
++                read_at(file, range.start, &mut bytes)?;
++                READS[0].fetch_add(1, Ordering::Relaxed);
++                READS[1].fetch_add(count as u64, Ordering::Relaxed);
++                READS[2].fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                Ok(SourceSlice::Read(bytes))
+             }
+         }
+     }
+@@ -625,29 +730,81 @@ fn read_at(file: &File, mut offset: u64, mut bytes: &mut [u8]) -> CoreResult<()>
+     Ok(())
+ }
+ 
++/// With DC2DATA_PROFILE_MEMORY set, says on stderr how large the program's memory is at this point. In the browser
++/// that memory only grows, to at most 4 GiB, so one large read sets what the whole extraction holds.
++pub fn memory_note(label: &str) {
++    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    if !*ASKED.get_or_init(|| std::env::var_os("DC2DATA_PROFILE_MEMORY").is_some()) {
++        return;
++    }
++    #[cfg(target_os = "emscripten")]
++    {
++        unsafe extern "C" {
++            fn emscripten_get_heap_size() -> usize;
++        }
++        // SAFETY: the function only reads the size of the program's memory.
++        let size = unsafe { emscripten_get_heap_size() };
++        eprintln!("memory: {} MiB at {label}", size >> 20);
++    }
++    #[cfg(not(target_os = "emscripten"))]
++    eprintln!("memory: {label}");
++}
++
+ /// A checked, immutable byte range of a retail resource.
+ #[derive(Clone)]
+ pub struct ResourceRef {
+     pub alias: String,
+     source: SourceBytes,
+-    range: Range<usize>,
++    range: Range<u64>,
++    /// The resource's first bytes and how many of them, once the index has had them in hand: the planners ask
++    /// tens of thousands of resources for a signature, and each answer would be a read of the disc image.
++    first: Option<([u8; FIRST], u8)>,
+ }
+ 
++/// How many of a resource's first bytes the index keeps with its reference.
++const FIRST: usize = 16;
++
+ impl ResourceRef {
+     /// The resource's bytes. From a mapped disc image they stay mapped only while the result lives, so a
+     /// converter holds them for the one resource it is converting.
+     pub fn bytes(&self) -> SourceSlice<'_> {
++        if self.len() >= 32 << 20 {
++            memory_note(&format!("read of {} ({} MiB)", self.alias, self.len() >> 20));
++        }
+         self.source
+             .slice(self.range.clone())
+             .unwrap_or_else(|failure| panic!("{}: cannot read the source: {failure}", self.alias))
+     }
+ 
+     pub fn len(&self) -> usize {
+-        self.range.len()
++        // A resource is read into memory whole, so its length fits in usize.
++        (self.range.end - self.range.start) as usize
++    }
++
++    /// The resource's first bytes, at most `count` of them, without reading the rest.
++    pub fn head(&self, count: usize) -> SourceSlice<'_> {
++        if let Some((first, kept)) = &self.first
++            && count.min(self.len()) <= *kept as usize
++        {
++            return SourceSlice::Borrowed(&first[..count.min(self.len())]);
++        }
++        let end = self.range.start + count.min(self.len()) as u64;
++        self.source
++            .slice(self.range.start..end)
++            .unwrap_or_else(|failure| panic!("{}: cannot read the source: {failure}", self.alias))
+     }
+ 
+     pub fn is_empty(&self) -> bool {
+-        self.range.is_empty()
++        self.range.start == self.range.end
++    }
++
++    /// Keeps the resource's first bytes with the reference; `bytes` is the resource from its start, all of it or
++    /// a head of it.
++    pub fn note_first(&mut self, bytes: &[u8]) {
++        let count = bytes.len().min(FIRST).min(self.len());
++        let mut first = [0; FIRST];
++        first[..count].copy_from_slice(&bytes[..count]);
++        self.first = Some((first, count as u8));
+     }
+ 
+     pub fn subrange(&self, alias: impl Into<String>, range: Range<usize>) -> CoreResult<Self> {
+@@ -657,17 +814,18 @@ impl ResourceRef {
+         let start = self
+             .range
+             .start
+-            .checked_add(range.start)
++            .checked_add(range.start as u64)
+             .ok_or_else(|| error("resource offset overflow"))?;
+         let end = self
+             .range
+             .start
+-            .checked_add(range.end)
++            .checked_add(range.end as u64)
+             .ok_or_else(|| error("resource offset overflow"))?;
+         Ok(Self {
+             alias: alias.into(),
+             source: self.source.clone(),
+             range: start..end,
++            first: None,
+         })
+     }
+ }
+@@ -718,7 +876,7 @@ impl SourceTree {
+             .then(|| SourceBytes::open_iso_with_progress(source, phase))
+             .transpose()?;
+         let mut archive = if let Some(image) = &image {
+-            open_image_bytes(source, &image.bytes()?)?
++            open_image_source(source, image)?
+         } else {
+             open_archive(source)?
+         };
+@@ -731,10 +889,8 @@ impl SourceTree {
+             } else {
+                 SourceBytes::owned(item.extent.read()?)
+             };
+-            let start =
+-                usize::try_from(item.extent.offset).map_err(|_| error("source offset overflow"))?;
+-            let size =
+-                usize::try_from(item.extent.size).map_err(|_| error("source size overflow"))?;
++            let start = item.extent.offset;
++            let size = item.extent.size;
+             let range = if image.is_some() {
+                 start
+                     ..start
+@@ -752,6 +908,7 @@ impl SourceTree {
+                     alias: item.rel.clone(),
+                     source: source_bytes,
+                     range,
++                    first: None,
+                 },
+             );
+         }
+@@ -833,6 +990,7 @@ impl SourceTree {
+                     alias: name.clone(),
+                     range: 0..bytes.len(),
+                     source: bytes,
++                    first: None,
+                 },
+             );
+         }
+@@ -878,10 +1036,29 @@ impl SourceTree {
+             .as_ref()
+             .ok_or_else(|| error("source is not an ISO"))?;
+         let mut hash = Sha256::new();
++        // The browser has no fast SHA-256, and a phone hashes a 4.7 GB image for most of a minute: there the
++        // image's length and a megabyte from each of 64 places in it stand for the image. The fingerprint only
++        // names the source in data.json; nothing compares it with another machine's.
++        if cfg!(target_os = "emscripten") {
++            const SAMPLES: u64 = 64;
++            const SAMPLE: u64 = 1 << 20;
++            hash.update(b"kazarov-source-sample-v1\0");
++            hash.update(image.len().to_le_bytes());
++            for index in 0..SAMPLES {
++                let start = (image.len().saturating_sub(SAMPLE) / (SAMPLES - 1)) * index;
++                let end = image.len().min(start + SAMPLE);
++                hash.update(&*image.slice(start..end)?);
++            }
++            return Ok(hash
++                .finalize()
++                .iter()
++                .map(|byte| format!("{byte:02x}"))
++                .collect());
++        }
+         hash.update(b"kazarov-source-file-v1\0");
+-        hash.update((image.len() as u64).to_le_bytes());
++        hash.update(image.len().to_le_bytes());
+         // A mapped image is hashed in pieces, so the whole of it is never mapped at once.
+-        let mut start = 0;
++        let mut start = 0u64;
+         while start < image.len() {
+             let end = image.len().min(start + (64 << 20));
+             hash.update(&*image.slice(start..end)?);
+diff --git a/src/rust/artifacts.rs b/src/rust/artifacts.rs
+index fef6831..7bea812 100644
+--- a/src/rust/artifacts.rs
++++ b/src/rust/artifacts.rs
+@@ -1,12 +1,12 @@
+ //! Bounded in-memory asset submission to one private ZIP writer.
+ use super::archive::{ResourceRef, SourceSlice};
+ use super::progress::Phase;
+-use super::zip_archive::{self, PreparedEntry, StreamWriter, Written};
++use super::zip_archive::{self, Placed, PreparedEntry, StreamWriter, Written};
+ use super::{CoreError, CoreResult};
+ use std::collections::HashSet;
+ use std::path::Path;
+ use std::sync::atomic::{AtomicBool, Ordering};
+-use std::sync::mpsc::{SyncSender, sync_channel};
++use std::sync::mpsc::{SyncSender, TryRecvError, sync_channel};
+ use std::sync::{Arc, Condvar, Mutex};
+ use std::thread::JoinHandle;
+ use std::time::{Duration, Instant};
+@@ -44,15 +44,89 @@ pub enum Category {
+ 
+ type JobRunner = Box<dyn FnOnce(&AssetSink) -> CoreResult<()> + Send>;
+ 
++static PROFILE_NANOS: [std::sync::atomic::AtomicU64; 8] =
++    [const { std::sync::atomic::AtomicU64::new(0) }; 8];
++static PROFILE_JOBS: [std::sync::atomic::AtomicU64; 8] =
++    [const { std::sync::atomic::AtomicU64::new(0) }; 8];
++
++/// With DC2DATA_PROFILE_JOBS set, says on stderr how long the jobs of each category have run so far, summed
++/// over the workers.
++pub fn profile_note(label: &str) {
++    super::archive::read_note(label);
++    if std::env::var_os("DC2DATA_PROFILE_JOBS").is_none() {
++        return;
++    }
++    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
++    let start = *START.get_or_init(Instant::now);
++    let names = [
++        "texture", "model", "audio", "movie", "script", "pack", "preserved", "gameplay",
++    ];
++    let mut line = format!("dc2data profile {:7.2}s {label}:", start.elapsed().as_secs_f64());
++    for (index, name) in names.iter().enumerate() {
++        let jobs = PROFILE_JOBS[index].load(Ordering::Relaxed);
++        if jobs != 0 {
++            line.push_str(&format!(
++                " {name} {:.1}s/{jobs}",
++                PROFILE_NANOS[index].load(Ordering::Relaxed) as f64 / 1e9
++            ));
++        }
++    }
++    eprintln!("{line}");
++}
++
++/// An entry a job names before it runs.
++#[derive(Clone, Debug)]
++pub struct Output {
++    pub name: String,
++    /// The job may end without writing it.
++    pub optional: bool,
++    /// A picture's width and height, known from planning.
++    pub extent: Option<(u32, u32)>,
++}
++
+ /// A conversion task admitted by byte estimate before its closure runs.
+ pub struct Job {
+     pub category: Category,
+     pub label: String,
+     pub work: u64,
+     pub estimated_bytes: usize,
++    /// The entries the job writes, when planning knows them all: a conversion a game reads from while it
++    /// runs lists them ahead and runs the job when one is asked for. None for a job that has to run before
++    /// anything is read.
++    pub outputs: Option<Vec<Output>>,
+     pub run: JobRunner,
+ }
+ 
++/// Follows a stream as it is written, for a reader of the unfinished archive.
++pub trait Observer: Send + Sync {
++    /// The file the stream grows in.
++    fn opened(&self, partial: &Path);
++    /// Entries now readable from that file, in the order written, and the declared jobs that have ended.
++    fn published(&self, entries: Vec<Placed>, finished: Vec<usize>);
++    /// True while a reader waits, so each entry is handed over as it is written.
++    fn hurried(&self) -> bool;
++}
++
++/// Flushes what the stream has appended and tells its observer of it.
++fn publish(
++    writer: &mut StreamWriter,
++    observer: &Option<Arc<dyn Observer>>,
++    pending: &mut Vec<Placed>,
++    finished: &mut Vec<usize>,
++    unpublished: &mut u64,
++) -> CoreResult<()> {
++    let Some(observer) = observer else {
++        return Ok(());
++    };
++    if pending.is_empty() && finished.is_empty() {
++        return Ok(());
++    }
++    writer.flush()?;
++    *unpublished = 0;
++    observer.published(std::mem::take(pending), std::mem::take(finished));
++    Ok(())
++}
++
+ impl super::jobs::ClassJob for Job {
+     fn class(&self) -> usize {
+         self.category as usize
+@@ -74,6 +148,9 @@ impl Job {
+         let started = Instant::now();
+         let result = (self.run)(sink);
+         let elapsed = started.elapsed();
++        PROFILE_NANOS[self.category as usize]
++            .fetch_add(elapsed.as_nanos() as u64, Ordering::Relaxed);
++        PROFILE_JOBS[self.category as usize].fetch_add(1, Ordering::Relaxed);
+         if elapsed >= Duration::from_secs(1) && std::env::var_os("DC2DATA_PROFILE_JOBS").is_some() {
+             eprintln!(
+                 "dc2data job {:?} [{}]: {:.3}s",
+@@ -183,6 +260,10 @@ impl Drop for MemoryPermit {
+ enum Message {
+     Entry(PreparedEntry, MemoryPermit, Category),
+     Completed(u64),
++    /// A declared job has written everything it will.
++    JobDone(usize),
++    /// Answered once everything sent before it is in the file and its observer knows.
++    Barrier(std::sync::mpsc::Sender<()>),
+     Finish,
+     Abort,
+ }
+@@ -232,7 +313,7 @@ impl AssetSink {
+     }
+ 
+     pub fn start(stage: &Path, budget_bytes: usize) -> CoreResult<Self> {
+-        Self::start_with_progress(stage, budget_bytes, Phase::noop(), 0)
++        Self::start_with_progress(stage, budget_bytes, Phase::noop(), 0, None)
+     }
+ 
+     pub fn start_with_progress(
+@@ -240,9 +321,13 @@ impl AssetSink {
+         budget_bytes: usize,
+         phase: Phase,
+         total_work: u64,
++        observer: Option<Arc<dyn Observer>>,
+     ) -> CoreResult<Self> {
+         std::fs::create_dir_all(stage)?;
+         let writer = StreamWriter::new(&stage.join("data.zip"))?;
++        if let Some(observer) = &observer {
++            observer.opened(writer.partial());
++        }
+         if total_work != 0 {
+             phase.set_total(total_work);
+         }
+@@ -258,18 +343,77 @@ impl AssetSink {
+             .spawn(move || {
+                 let result = (|| -> CoreResult<Written> {
+                     let mut writer = writer;
+-                    while let Ok(message) = receiver.recv() {
++                    // An observed stream hands over what it has written whenever it has nothing to
++                    // write, at each megabyte, and at once while a reader waits.
++                    let mut pending = Vec::new();
++                    let mut finished = Vec::new();
++                    let mut unpublished = 0u64;
++                    loop {
++                        let message = match receiver.try_recv() {
++                            Ok(message) => message,
++                            Err(TryRecvError::Empty) => {
++                                publish(
++                                    &mut writer,
++                                    &observer,
++                                    &mut pending,
++                                    &mut finished,
++                                    &mut unpublished,
++                                )?;
++                                match receiver.recv() {
++                                    Ok(message) => message,
++                                    Err(_) => break,
++                                }
++                            }
++                            Err(TryRecvError::Disconnected) => break,
++                        };
++                        let mut hand_over = false;
+                         match message {
+                             Message::Entry(entry, _permit, _category) => {
+-                                phase.add_bytes(writer.append(entry)?);
++                                let placed = writer.append(entry)?;
++                                phase.add_bytes(placed.written);
++                                if let Some(observer) = &observer {
++                                    unpublished += placed.written;
++                                    pending.push(placed);
++                                    hand_over = unpublished >= 1 << 20 || observer.hurried();
++                                }
+                             }
+                             Message::Completed(work) => phase.inc(work),
++                            Message::JobDone(job) => {
++                                finished.push(job);
++                                hand_over = observer.as_ref().is_some_and(|o| o.hurried());
++                            }
++                            Message::Barrier(reply) => {
++                                publish(
++                                    &mut writer,
++                                    &observer,
++                                    &mut pending,
++                                    &mut finished,
++                                    &mut unpublished,
++                                )?;
++                                let _ = reply.send(());
++                            }
+                             Message::Finish => {
++                                publish(
++                                    &mut writer,
++                                    &observer,
++                                    &mut pending,
++                                    &mut finished,
++                                    &mut unpublished,
++                                )?;
+                                 let written = writer.finish()?;
+                                 return Ok(written);
+                             }
+                             Message::Abort => return Err(fail("ZIP stream aborted")),
+                         }
++                        if hand_over {
++                            publish(
++                                &mut writer,
++                                &observer,
++                                &mut pending,
++                                &mut finished,
++                                &mut unpublished,
++                            )?;
++                        }
+                     }
+                     Err(fail("ZIP writer stopped before finish"))
+                 })();
+@@ -400,6 +544,29 @@ impl AssetSink {
+             })
+     }
+ 
++    /// Tells the stream's observer that a declared job has written everything it will. Sent by the job's
++    /// own thread after its entries, so it reaches the observer after them.
++    pub fn finished(&self, job: usize) -> CoreResult<()> {
++        self.inner.sender.send(Message::JobDone(job)).map_err(|_| {
++            self.cancel();
++            self.first_failure()
++                .unwrap_or_else(|| fail("ZIP writer stopped before a job ended"))
++        })
++    }
++
++    /// Waits until everything submitted so far is in the file and the stream's observer has been told.
++    pub fn barrier(&self) -> CoreResult<()> {
++        let (reply, done) = std::sync::mpsc::channel();
++        self.inner
++            .sender
++            .send(Message::Barrier(reply))
++            .map_err(|_| fail("ZIP writer stopped before a barrier"))?;
++        done.recv().map_err(|_| {
++            self.first_failure()
++                .unwrap_or_else(|| fail("ZIP writer stopped at a barrier"))
++        })
++    }
++
+     pub fn finish(self) -> CoreResult<Written> {
+         self.inner
+             .sender
+diff --git a/src/rust/audio.rs b/src/rust/audio.rs
+index d3ede3f..c995ded 100644
+--- a/src/rust/audio.rs
++++ b/src/rust/audio.rs
+@@ -1,6 +1,6 @@
+ //! Converts retail sound resources to PCM WAV and semantic JSON before publication.
+ use super::archive::ResourceRef;
+-use super::artifacts::{ArtifactBytes, AssetSink, Category, Job};
++use super::artifacts::{ArtifactBytes, AssetSink, Category, Job, Output};
+ use super::inventory::Inventory;
+ use super::progress::Phase;
+ use super::{CoreError, CoreResult};
+@@ -1113,6 +1113,12 @@ fn submit_json(sink: &AssetSink, name: &str, document: &Value) -> CoreResult<()>
+     )
+ }
+ 
++/// Whether a resource's first bytes are a sound stream's, read without the rest of it.
++fn stream_signature(resource: &ResourceRef) -> bool {
++    let head = resource.head(12);
++    head.starts_with(b"SShd") || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WAVE"))
++}
++
+ /// Plans sound and movie conversion without copying any retail source bytes.
+ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+     let mut jobs = Vec::new();
+@@ -1142,9 +1148,7 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+             || owns_config(key)
+             || key.ends_with(".vol")
+             || key.ends_with(".wav")
+-            || resource.bytes().starts_with(b"SShd")
+-            || (resource.bytes().starts_with(b"RIFF")
+-                && resource.bytes().get(8..12) == Some(b"WAVE"));
++            || stream_signature(resource);
+         if !owned {
+             continue;
+         }
+@@ -1179,6 +1183,7 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+                 label: key.clone(),
+                 work: (hd.len() + bd.len()) as u64,
+                 estimated_bytes: bd.len().saturating_mul(4).saturating_add(hd.len()),
++                outputs: None,
+                 run: Box::new(move |sink| {
+                     bank_with(&key, &hd.bytes(), &bd.bytes(), &mut |name, bytes| {
+                         sink.submit(
+@@ -1198,6 +1203,7 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+                 label: key.clone(),
+                 work: input.len() as u64,
+                 estimated_bytes: input.len().saturating_mul(4),
++                outputs: None,
+                 run: Box::new(move |sink| {
+                     let mut emit = |name: &str, bytes| {
+                         sink.submit(
+@@ -1215,6 +1221,11 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+                 }),
+             });
+         } else if key.ends_with(".pss") {
++            // A build without FFmpeg (the browser's) cannot write a movie: it leaves each out, and the game
++            // passes over a movie that is missing.
++            if !cfg!(kazarov_ffmpeg) {
++                continue;
++            }
+             let key = key.clone();
+             let input = resource.clone();
+             jobs.push(Job {
+@@ -1222,6 +1233,7 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+                 label: key.clone(),
+                 work: input.len() as u64,
+                 estimated_bytes: input.len().saturating_mul(3),
++                outputs: None,
+                 run: Box::new(move |sink| {
+                     let mp4 = movie_mp4_memory(&input.bytes())?;
+                     sink.submit(
+@@ -1231,11 +1243,7 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+                     )
+                 }),
+             });
+-        } else if key.ends_with(".wav")
+-            || resource.bytes().starts_with(b"SShd")
+-            || (resource.bytes().starts_with(b"RIFF")
+-                && resource.bytes().get(8..12) == Some(b"WAVE"))
+-        {
++        } else if key.ends_with(".wav") || stream_signature(resource) {
+             let key = key.clone();
+             let input = resource.clone();
+             jobs.push(Job {
+@@ -1243,6 +1251,11 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+                 label: key.clone(),
+                 work: input.len() as u64,
+                 estimated_bytes: input.len().saturating_mul(3),
++                outputs: Some(vec![Output {
++                    name: format!("{}.wav", key.trim_end_matches(".wav")),
++                    optional: false,
++                    extent: None,
++                }]),
+                 run: Box::new(move |sink| {
+                     sink.submit(
+                         format!("{}.wav", key.trim_end_matches(".wav")),
+@@ -1293,6 +1306,7 @@ pub fn plan_stream(inventory: &Inventory) -> CoreResult<AudioPlan> {
+             label: group.clone(),
+             work: 4096,
+             estimated_bytes: 4096,
++            outputs: None,
+             run: Box::new(move |sink| submit_json(sink, &output, &document)),
+         });
+         consumed.insert(original_group);
+diff --git a/src/rust/configs.rs b/src/rust/configs.rs
+index d0ccee5..b7c79b3 100644
+--- a/src/rust/configs.rs
++++ b/src/rust/configs.rs
+@@ -69,7 +69,14 @@ pub fn gameplay_documents(root: Option<&Path>) -> CoreResult<Vec<(&'static str,
+         return Ok(Vec::new());
+     }
+     let mut candidates = Vec::new();
+-    if let Some(directory) = std::env::current_exe()?.parent() {
++    // The browser has no /proc/self/exe: there the executable is /this.program and the seed is preloaded
++    // beside it (port/web/web.cmake). A host where the lookup fails still tries the game root below.
++    let executable_directory = std::env::current_exe()
++        .ok()
++        .and_then(|executable| executable.parent().map(Path::to_path_buf));
++    #[cfg(target_os = "emscripten")]
++    let executable_directory = executable_directory.or_else(|| Some(PathBuf::from("/")));
++    if let Some(directory) = executable_directory {
+         candidates.push(directory.join("assets/data.zip"));
+         candidates.push(directory.join("data.zip"));
+     }
+diff --git a/src/rust/core.rs b/src/rust/core.rs
+index f717803..00fa872 100644
+--- a/src/rust/core.rs
++++ b/src/rust/core.rs
+@@ -30,6 +30,8 @@ pub mod native_scripts;
+ pub mod packs;
+ #[path = "progress.rs"]
+ pub mod progress;
++#[path = "progressive.rs"]
++pub mod progressive;
+ #[path = "publish.rs"]
+ pub mod publish;
+ #[path = "spill.rs"]
+@@ -275,9 +277,12 @@ pub fn extract_with_policy(
+     jobs: usize,
+     script_policy: ScriptPublicationPolicy,
+ ) -> CoreResult<ExtractReport> {
++    if std::env::var_os("DC2DATA_PROGRESSIVE").is_some() {
++        return progressive_self_test(source, data_out, jobs, script_policy);
++    }
+     Reporter::new(&|_, _| {})
+         .with_console()
+-        .run(|reporter| extract_stages(source, data_out, jobs, reporter, script_policy))
++        .run(|reporter| extract_stages(source, data_out, jobs, reporter, script_policy, None))
+ }
+ 
+ /// Recognizes a complete, verified archive staged for the unchanged source.
+@@ -321,7 +326,140 @@ pub fn extract_with_progress_policy(
+     script_policy: ScriptPublicationPolicy,
+ ) -> CoreResult<ExtractReport> {
+     Reporter::new(progress)
+-        .run(|reporter| extract_stages(source, data_out, jobs, reporter, script_policy))
++        .run(|reporter| extract_stages(source, data_out, jobs, reporter, script_policy, None))
++}
++
++/// Extracts and publishes data while `session` serves reads of it: once the session is ready a game can
++/// start, and whatever it asks for is converted ahead of the rest. Returns when the archive is published.
++pub fn extract_progressive(
++    source: &Path,
++    data_out: &Path,
++    jobs: usize,
++    session: &std::sync::Arc<progressive::Session>,
++    script_policy: ScriptPublicationPolicy,
++) -> CoreResult<ExtractReport> {
++    run_progressive(source, data_out, jobs, session, script_policy, false)
++}
++
++fn run_progressive(
++    source: &Path,
++    data_out: &Path,
++    jobs: usize,
++    session: &std::sync::Arc<progressive::Session>,
++    script_policy: ScriptPublicationPolicy,
++    console: bool,
++) -> CoreResult<ExtractReport> {
++    let progress = |fraction: f32, stage: &'static str| session.progress(fraction, stage);
++    let reporter = Reporter::new(&progress);
++    let reporter = if console {
++        reporter.with_console()
++    } else {
++        reporter
++    };
++    let result = reporter.run(|reporter| {
++        extract_stages(source, data_out, jobs, reporter, script_policy, Some(session))
++    });
++    match &result {
++        Ok(_) => session.sealed(),
++        Err(error) => session.fail(&error.to_string()),
++    }
++    result
++}
++
++/// DC2DATA_PROGRESSIVE: extracts as a game would have it while it plays, with a reader that asks for
++/// scattered entries from the moment they are listed, then checks the listing against the archive.
++fn progressive_self_test(
++    source: &Path,
++    data_out: &Path,
++    jobs: usize,
++    script_policy: ScriptPublicationPolicy,
++) -> CoreResult<ExtractReport> {
++    use std::sync::Arc;
++    use std::time::{Duration, Instant};
++    let session = Arc::new(progressive::Session::new());
++    let started = Instant::now();
++    let reader = {
++        let session = session.clone();
++        std::thread::spawn(move || -> CoreResult<String> {
++            loop {
++                let status = session.status();
++                match status.phase {
++                    progressive::Phase::Preparing => std::thread::sleep(Duration::from_millis(20)),
++                    progressive::Phase::Failed => return Err(CoreError(status.error)),
++                    _ => break,
++                }
++            }
++            let ready = started.elapsed();
++            let fraction = session.status().fraction;
++            let count = session.count();
++            let (mut reads, mut absent, mut bytes, mut headers, mut wrong) = (0u32, 0u32, 0u64, 0u32, 0u32);
++            let mut waited = Duration::ZERO;
++            let mut longest = (Duration::ZERO, String::new());
++            for step in 0..count.min(400) {
++                let index = (step * 7919 + 13) % count;
++                let name = session.name(index)?;
++                let begun = Instant::now();
++                if !session.present(index)? {
++                    absent += 1;
++                    continue;
++                }
++                let picture = name.ends_with(".png");
++                let mut header = [0u8; 24];
++                if picture {
++                    session.prefix(index, &mut header)?;
++                }
++                let mut out = vec![0u8; session.size(index)? as usize];
++                session.read(index, &mut out)?;
++                let took = begun.elapsed();
++                if picture {
++                    headers += 1;
++                    if out.len() < 24 || out[..24] != header {
++                        wrong += 1;
++                    }
++                }
++                reads += 1;
++                bytes += out.len() as u64;
++                waited += took;
++                if took > longest.0 {
++                    longest = (took, name);
++                }
++            }
++            Ok(format!(
++                "ready after {:.1}s at {:.1}% of the run, {count} names listed; {reads} reads of {} \
++                 waited {:.1}s in all, the longest {:.2}s ({}); {absent} optional names absent; \
++                 {headers} picture headers asked ahead, {wrong} wrong",
++                ready.as_secs_f64(),
++                fraction * 100.0,
++                progress::size(bytes),
++                waited.as_secs_f64(),
++                longest.0.as_secs_f64(),
++                longest.1,
++            ))
++        })
++    };
++    let result = run_progressive(source, data_out, jobs, &session, script_policy, true);
++    let read = reader
++        .join()
++        .map_err(|_| CoreError("progressive reader panicked".into()))?;
++    let report = result?;
++    eprintln!("dc2data progressive: {}", read?);
++    let root = data_out
++        .parent()
++        .ok_or_else(|| CoreError("output must be <game-root>/data".into()))?;
++    let archive = zip_archive::Archive::open(&root.join(publish::ARCHIVE))?;
++    eprintln!("dc2data progressive: {}", session.compare(&archive)?);
++    let count = session.count();
++    let mut after = 0u32;
++    for step in 0..count.min(64) {
++        let index = (step * 104_729 + 7) % count;
++        if session.present(index)? {
++            let mut out = vec![0u8; session.size(index)? as usize];
++            session.read(index, &mut out)?;
++            after += 1;
++        }
++    }
++    eprintln!("dc2data progressive: {after} entries read through the session after publishing");
++    Ok(report)
+ }
+ 
+ const WORKER_STACK: usize = 16 << 20;
+@@ -424,23 +562,32 @@ fn execute_jobs(
+     phases: &[Option<Phase>; 8],
+     remaining: &[std::sync::atomic::AtomicU64; 8],
+ ) -> CoreResult<()> {
+-    use std::sync::atomic::Ordering;
+     jobs::run_interleaved(pool, jobs, phases.len(), |job| {
+-        let category = job.category as usize;
+-        let work = job.work;
+-        let phase = phases[category]
+-            .as_ref()
+-            .ok_or_else(|| CoreError("unplanned asset category".into()))?;
+-        phase.item(&job.label);
+-        job.execute(sink)?;
+-        phase.inc(work);
+-        if remaining[category].fetch_sub(work, Ordering::AcqRel) == work {
+-            phase.done();
+-        }
+-        Ok(())
++        run_job(job, sink, phases, remaining)
+     })
+ }
+ 
++fn run_job(
++    job: artifacts::Job,
++    sink: &artifacts::AssetSink,
++    phases: &[Option<Phase>; 8],
++    remaining: &[std::sync::atomic::AtomicU64; 8],
++) -> CoreResult<()> {
++    use std::sync::atomic::Ordering;
++    let category = job.category as usize;
++    let work = job.work;
++    let phase = phases[category]
++        .as_ref()
++        .ok_or_else(|| CoreError("unplanned asset category".into()))?;
++    phase.item(&job.label);
++    job.execute(sink)?;
++    phase.inc(work);
++    if remaining[category].fetch_sub(work, Ordering::AcqRel) == work {
++        phase.done();
++    }
++    Ok(())
++}
++
+ #[cfg(test)]
+ fn immutable_after_cleanup(published: &Path) -> CoreResult<Vec<zip_archive::Input>> {
+     Ok(publish::tree_inputs(published)?
+@@ -488,6 +635,7 @@ fn extract_stages(
+     jobs: usize,
+     reporter: &Reporter<'_>,
+     script_policy: ScriptPublicationPolicy,
++    progressive: Option<&std::sync::Arc<progressive::Session>>,
+ ) -> CoreResult<ExtractReport> {
+     use std::collections::HashSet;
+     use std::sync::{Arc, atomic::AtomicU64};
+@@ -510,6 +658,7 @@ fn extract_stages(
+     let gameplay_documents = configs::gameplay_documents(Some(root))?;
+     configs::initialize_character_plans(&gameplay_documents)?;
+     let pool = jobs::worker_pool(jobs, "dc2data", WORKER_STACK)?;
++    artifacts::profile_note("start");
+     let phase = reporter.phase(Stage::Fingerprint);
+     let initial_state = source_state(&source)?;
+     // The owned source image is shared by hashing, indexing, every converter and final validation.
+@@ -522,7 +671,10 @@ fn extract_stages(
+     reporter.done(Stage::Fingerprint);
+     let phase = reporter.phase(Stage::Extract);
+     let (files, bytes) = source_tree.totals();
+-    let inventory = inventory::Inventory::build(&source_tree)?;
++    archive::memory_note("the source opened");
++    let inventory = pool.install(|| inventory::Inventory::build_parallel(&source_tree))?;
++    archive::memory_note("the index built");
++    artifacts::profile_note("index built");
+     phase.set_total(files);
+     reporter.done(Stage::Extract);
+     let gameplay_plan_sha256 = configs::asset_plan_fingerprint();
+@@ -547,6 +699,8 @@ fn extract_stages(
+     });
+     let texture_plan = texture_plan?;
+     let audio_plan = audio_plan?;
++    archive::memory_note("textures and sound planned");
++    artifacts::profile_note("textures and sound planned");
+     let texture_paths: std::collections::BTreeMap<String, String> = texture_plan
+         .documents
+         .iter()
+@@ -567,6 +721,8 @@ fn extract_stages(
+             Arc::new(texture_plan.png_names.clone()),
+         )
+     })?;
++    archive::memory_note("models planned");
++    artifacts::profile_note("models planned");
+     let profiles = models::planned_profile_names(&inventory)?;
+     let mut consumed: HashSet<String> = texture_plan.consumed.iter().cloned().collect();
+     consumed.extend(audio_plan.consumed);
+@@ -581,6 +737,7 @@ fn extract_stages(
+         script_policy == ScriptPublicationPolicy::Retain,
+     )?;
+     consumed.extend(script_consumed);
++    archive::memory_note("scripts planned");
+     let texture_members = texture_plan
+         .documents
+         .iter()
+@@ -603,6 +760,8 @@ fn extract_stages(
+     all_jobs.extend(model_plan.into_initial_jobs());
+     all_jobs.extend(script_jobs);
+     all_jobs.extend(packs::plan_jobs(&inventory, &consumed, &texture_members)?);
++    archive::memory_note("packs planned");
++    artifacts::profile_note("packs planned");
+     for chunk in gameplay_documents.chunks(128) {
+         let documents = chunk.to_vec();
+         all_jobs.push(artifacts::Job {
+@@ -610,6 +769,7 @@ fn extract_stages(
+             label: documents[0].0.to_owned(),
+             work: documents.len() as u64,
+             estimated_bytes: documents.iter().map(|(_, bytes)| bytes.len()).sum(),
++            outputs: None,
+             run: Box::new(move |sink| {
+                 for (path, bytes) in documents {
+                     sink.submit(
+@@ -656,31 +816,73 @@ fn extract_stages(
+         conversion_memory_budget(),
+         archive_phase,
+         totals.iter().sum(),
++        progressive.map(|session| session.clone() as Arc<dyn artifacts::Observer>),
+     )?;
+-    let (model_jobs, other_jobs): (Vec<_>, Vec<_>) = all_jobs
+-        .into_iter()
+-        .partition(|job| job.category == artifacts::Category::Model);
+-    let (other_conversion, model_conversion) = pool.install(|| {
+-        rayon::join(
+-            || {
+-                execute_jobs(other_jobs, &pool, &sink, &phases, &remaining)?;
+-                expand_model_memory_budget(&sink)
+-            },
+-            || {
+-                execute_jobs(model_jobs, &pool, &sink, &phases, &remaining)?;
+-                let deferred = model_plan.finish_jobs(&sink, &|work, label| {
+-                    let category = artifacts::Category::Model as usize;
+-                    if let Some(phase) = &phases[category] {
+-                        phase.item(label);
+-                        phase.inc(work);
+-                        remaining[category].fetch_sub(work, std::sync::atomic::Ordering::AcqRel);
+-                    }
+-                })?;
+-                execute_jobs(deferred, &pool, &sink, &phases, &remaining)
+-            },
+-        )
+-    });
+-    let conversion = other_conversion.and(model_conversion);
++    let model_progress = |work: u64, label: &str| {
++        let category = artifacts::Category::Model as usize;
++        if let Some(phase) = &phases[category] {
++            phase.item(label);
++            phase.inc(work);
++            remaining[category].fetch_sub(work, std::sync::atomic::Ordering::AcqRel);
++        }
++    };
++    let conversion = if let Some(session) = progressive {
++        // Only what cannot name its outputs ahead runs before the game may read: the documents every
++        // scene's listing needs, and the model passes that decide which document each model job owns.
++        // The rest is listed by name, and runs in the order below unless a read asks for it sooner.
++        let (lazy, eager): (Vec<_>, Vec<_>) =
++            all_jobs.into_iter().partition(|job| job.outputs.is_some());
++        let (model_jobs, other_jobs): (Vec<_>, Vec<_>) = eager
++            .into_iter()
++            .partition(|job| job.category == artifacts::Category::Model);
++        let (other_conversion, model_conversion) = pool.install(|| {
++            rayon::join(
++                || execute_jobs(other_jobs, &pool, &sink, &phases, &remaining),
++                || {
++                    execute_jobs(model_jobs, &pool, &sink, &phases, &remaining)?;
++                    artifacts::profile_note("models analysed");
++                    let deferred = model_plan.finish_jobs(&sink, &model_progress)?;
++                    artifacts::profile_note("models previewed");
++                    Ok(deferred)
++                },
++            )
++        });
++        other_conversion
++            .and(model_conversion)
++            .and_then(|deferred| {
++                let mut lazy = lazy;
++                lazy.extend(deferred);
++                sink.barrier()?;
++                session.ready(jobs::interleave(lazy, phases.len()))?;
++                artifacts::profile_note("ready to be read");
++                pool.broadcast(|_| {
++                    session.work(&sink, &|job, sink| run_job(job, sink, &phases, &remaining))
++                })
++                .into_iter()
++                .collect::<CoreResult<Vec<()>>>()
++                .map(|_| ())
++            })
++    } else {
++        let (model_jobs, other_jobs): (Vec<_>, Vec<_>) = all_jobs
++            .into_iter()
++            .partition(|job| job.category == artifacts::Category::Model);
++        let (other_conversion, model_conversion) = pool.install(|| {
++            rayon::join(
++                || {
++                    execute_jobs(other_jobs, &pool, &sink, &phases, &remaining)?;
++                    expand_model_memory_budget(&sink)
++                },
++                || {
++                    execute_jobs(model_jobs, &pool, &sink, &phases, &remaining)?;
++                    artifacts::profile_note("models analysed");
++                    let deferred = model_plan.finish_jobs(&sink, &model_progress)?;
++                    artifacts::profile_note("models previewed");
++                    execute_jobs(deferred, &pool, &sink, &phases, &remaining)
++                },
++            )
++        });
++        other_conversion.and(model_conversion)
++    };
+     if let Err(error) = conversion {
+         let error = sink.first_failure().unwrap_or(error);
+         let _ = sink.abort();
+@@ -693,28 +895,47 @@ fn extract_stages(
+         "script_publication_policy":format!("{script_policy:?}"),
+         "texture_sources":texture_sources,
+     });
++    artifacts::profile_note("converted");
++    // The growing file takes its final name here and its place in the game's folder further down. A
++    // session reading it lets go of it for each move: a file some systems will not rename while it is open.
++    let suspended = progressive.map(|session| session.suspend()).transpose()?;
+     publish::seal_stream(sink, &published, marker)?;
++    if let Some(suspended) = suspended {
++        suspended.resume(&published.join(publish::ARCHIVE))?;
++    }
++    artifacts::profile_note("sealed");
+     reporter.done(Stage::Seal);
+     // No validation begins until every converter and the streaming writer have completed.
+-    let phase = reporter.phase(Stage::VerifyArchive);
+-    pool.install(|| {
+-        publish::verify_stream_with_progress(
+-            &published,
+-            &inventory,
+-            &converted_aliases,
+-            &profiles,
+-            &texture_paths,
+-            &phase,
+-            script_policy == ScriptPublicationPolicy::Retain,
+-        )
+-    })?;
++    // In the browser the whole archive is not read back and checked again, minutes a phone does not have:
++    // publishing still opens it and checks its size, and the game checks each entry's CRC as it reads it.
++    // DC2DATA_VERIFY asks for the full verification there.
++    if !cfg!(target_os = "emscripten") || std::env::var_os("DC2DATA_VERIFY").is_some() {
++        let phase = reporter.phase(Stage::VerifyArchive);
++        pool.install(|| {
++            publish::verify_stream_with_progress(
++                &published,
++                &inventory,
++                &converted_aliases,
++                &profiles,
++                &texture_paths,
++                &phase,
++                script_policy == ScriptPublicationPolicy::Retain,
++            )
++        })?;
++        reporter.done(Stage::VerifyArchive);
++    } else {
++        reporter.skip(Stage::VerifyArchive);
++    }
+     if source_state(&source)? != initial_state {
+         return Err(CoreError("source changed during extraction".into()));
+     }
+-    reporter.done(Stage::VerifyArchive);
+     reporter.phase(Stage::Publish);
+     let marker = publish::read_marker(&published)?;
++    let suspended = progressive.map(|session| session.suspend()).transpose()?;
+     publish::publish_verified(&published, root)?;
++    if let Some(suspended) = suspended {
++        suspended.resume(&root.join(publish::ARCHIVE))?;
++    }
+     let stage_path = stage.path().to_path_buf();
+     drop(stage);
+     remove_private_stage(&stage_path, &stage_path, root)?;
+diff --git a/src/rust/inventory.rs b/src/rust/inventory.rs
+index 9e8d567..5a362b8 100644
+--- a/src/rust/inventory.rs
++++ b/src/rust/inventory.rs
+@@ -1,12 +1,35 @@
+ //! Immutable retail resource inventory with checked references to nested PACK members.
+ use super::archive::{ResourceRef, SourceTree};
+ use super::{CoreError, CoreResult, models};
++use rayon::prelude::*;
+ use std::collections::{BTreeMap, BTreeSet};
+ 
+ fn fail(message: impl Into<String>) -> CoreError {
+     CoreError(message.into())
+ }
+ 
++/// Above this size a root's first entry header is looked at before all of it is read: the sound archive is a
++/// gigabyte and the movies are megabytes to hundreds of megabytes, and that header says they are no PACK.
++const HEAD_FIRST: usize = 1 << 20;
++
++/// Whether a root is a sound by its name. The sound archive's three thousand streams are a third of what the
++/// roots hold, so their first bytes are looked at before all of them are read, whatever their size.
++fn sound_name(alias: &str) -> bool {
++    alias
++        .rsplit_once('.')
++        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("wav"))
++}
++
++/// Whether a resource's first bytes are a sound stream's, as the sound planner knows one.
++fn sound_stream(head: &[u8]) -> bool {
++    head.starts_with(b"SShd") || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WAVE"))
++}
++
++/// A root's bytes hold a texture's signature somewhere: TIM2, IMG, IM2 or IM3.
++const TEXTURE_SIGNATURE: u8 = 1;
++/// A root's bytes hold a model's signature somewhere: MDS or MDT.
++const MODEL_SIGNATURE: u8 = 2;
++
+ /// One named PACK member in its original order, including duplicate-name identity.
+ #[derive(Clone)]
+ pub struct MemberRef {
+@@ -22,36 +45,91 @@ pub struct Inventory {
+     leaves: Vec<ResourceRef>,
+     nodes: BTreeMap<String, ResourceRef>,
+     members: BTreeMap<String, Vec<MemberRef>>,
++    /// The signatures found in each root the index read whole.
++    signatures: BTreeMap<String, u8>,
+ }
+ 
+-impl Inventory {
+-    pub fn build(source: &SourceTree) -> CoreResult<Self> {
+-        let mut inventory = Self {
+-            roots: Vec::new(),
+-            leaves: Vec::new(),
+-            nodes: BTreeMap::new(),
+-            members: BTreeMap::new(),
+-        };
+-        for name in source.names() {
+-            let resource = source.resource(name)?;
+-            inventory.roots.push(resource.clone());
+-            inventory.walk(resource, 0)?;
++/// What one root holds, in the order a walk of it meets them.
++#[derive(Default)]
++struct Tree {
++    nodes: Vec<ResourceRef>,
++    leaves: Vec<ResourceRef>,
++    members: Vec<(String, Vec<MemberRef>)>,
++    signatures: Option<u8>,
++}
++
++/// Which of the planners' signatures are anywhere in a root's bytes. Each of them has an M in it, so the bytes are
++/// searched for that one letter and looked at around it.
++fn signatures(bytes: &[u8]) -> u8 {
++    let mut found = 0;
++    let mut from = 0;
++    while let Some(step) = bytes[from..].iter().position(|&byte| byte == b'M') {
++        let at = from + step;
++        if at >= 2 && bytes.get(at - 2..at + 2) == Some(b"TIM2") {
++            found |= TEXTURE_SIGNATURE;
+         }
+-        Ok(inventory)
++        if at >= 1
++            && let Some(around) = bytes.get(at - 1..at + 3)
++            && around[0] == b'I'
++            && around[3] == 0
++            && matches!(around[2], b'G' | b'2' | b'3')
++        {
++            found |= TEXTURE_SIGNATURE;
++        }
++        if let Some(after) = bytes.get(at..at + 4)
++            && after[1] == b'D'
++            && after[3] == 0
++            && matches!(after[2], b'S' | b'T')
++        {
++            found |= MODEL_SIGNATURE;
++        }
++        if found == TEXTURE_SIGNATURE | MODEL_SIGNATURE {
++            break;
++        }
++        from = at + 1;
++    }
++    found
++}
++
++impl Tree {
++    /// Indexes one root. Its bytes are read once and every member inside it, however deep, is found in them:
++    /// read from a disc image a range at a time, each look at a member would be a read of its own, and a PACK
++    /// inside a PACK inside a PACK was read once for each of them.
++    fn of(mut root: ResourceRef) -> CoreResult<Self> {
++        let mut tree = Self::default();
++        if root.len() > HEAD_FIRST || sound_name(&root.alias) {
++            let head = root.head(models::PACK_HEADER).to_vec();
++            let sound = sound_stream(&head);
++            if sound || models::no_pack_at(&head) {
++                root.note_first(&head);
++                // A sound's samples are not searched: nothing in them is a texture or a model, and four of
++                // their bytes that happen to spell a signature would only send the stream to be analysed as one.
++                if sound {
++                    tree.signatures = Some(0);
++                }
++                tree.nodes.push(root.clone());
++                tree.leaves.push(root);
++                return Ok(tree);
++            }
++        }
++        let whole = root.clone();
++        let bytes = whole.bytes();
++        tree.signatures = Some(signatures(&bytes));
++        tree.walk(root, &bytes, 0)?;
++        Ok(tree)
+     }
+ 
+-    fn walk(&mut self, resource: ResourceRef, depth: usize) -> CoreResult<()> {
++    fn walk(&mut self, mut resource: ResourceRef, bytes: &[u8], depth: usize) -> CoreResult<ResourceRef> {
+         if depth > 16 {
+             return Err(fail("PACK nesting exceeds 16"));
+         }
+-        let alias = resource.alias.clone();
+-        if self.nodes.insert(alias.clone(), resource.clone()).is_some() {
+-            return Err(fail(format!("duplicate resource identity: {alias}")));
+-        }
+-        let Some(members) = models::pack(&resource.bytes()) else {
+-            self.leaves.push(resource);
+-            return Ok(());
++        resource.note_first(bytes);
++        self.nodes.push(resource.clone());
++        let Some(members) = models::pack(bytes) else {
++            self.leaves.push(resource.clone());
++            return Ok(resource);
+         };
++        let alias = resource.alias.clone();
+         let mut seen = BTreeSet::new();
+         let mut children = Vec::with_capacity(members.len());
+         for (index, member) in members.into_iter().enumerate() {
+@@ -65,16 +143,79 @@ impl Inventory {
+                 .checked_add(member.size)
+                 .ok_or_else(|| fail("PACK member range overflow"))?;
+             let child = resource.subrange(child_alias.clone(), member.start..end)?;
++            let inside = bytes
++                .get(member.start..end)
++                .ok_or_else(|| fail("PACK member outside its PACK"))?;
++            let child = self.walk(child, inside, depth + 1)?;
+             children.push(MemberRef {
+                 alias: child_alias,
+                 name: member.name,
+                 index,
+-                resource: child.clone(),
++                resource: child,
+             });
+-            self.walk(child, depth + 1)?;
+         }
+-        self.members.insert(alias, children);
+-        Ok(())
++        self.members.push((alias, children));
++        Ok(resource)
++    }
++}
++
++impl Inventory {
++    pub fn build(source: &SourceTree) -> CoreResult<Self> {
++        let trees = source
++            .names()
++            .map(|name| Tree::of(source.resource(name)?))
++            .collect::<CoreResult<Vec<_>>>()?;
++        Self::gather(trees)
++    }
++
++    /// `build` with the roots indexed on the calling thread pool's workers.
++    pub fn build_parallel(source: &SourceTree) -> CoreResult<Self> {
++        let names: Vec<&str> = source.names().collect();
++        let trees = names
++            .par_iter()
++            .map(|name| Tree::of(source.resource(name)?))
++            .collect::<CoreResult<Vec<_>>>()?;
++        Self::gather(trees)
++    }
++
++    fn gather(trees: Vec<Tree>) -> CoreResult<Self> {
++        let mut inventory = Self {
++            roots: Vec::with_capacity(trees.len()),
++            leaves: Vec::new(),
++            nodes: BTreeMap::new(),
++            members: BTreeMap::new(),
++            signatures: BTreeMap::new(),
++        };
++        for tree in trees {
++            let root = tree.nodes[0].clone();
++            if let Some(found) = tree.signatures {
++                inventory.signatures.insert(root.alias.clone(), found);
++            }
++            inventory.roots.push(root);
++            for node in tree.nodes {
++                let alias = node.alias.clone();
++                if inventory.nodes.insert(alias.clone(), node).is_some() {
++                    return Err(fail(format!("duplicate resource identity: {alias}")));
++                }
++            }
++            inventory.leaves.extend(tree.leaves);
++            inventory.members.extend(tree.members);
++        }
++        Ok(inventory)
++    }
++
++    /// Whether a root's bytes hold a texture's signature anywhere; None for a root the index did not read whole.
++    pub fn texture_signature(&self, root: &str) -> Option<bool> {
++        self.signatures
++            .get(root)
++            .map(|found| found & TEXTURE_SIGNATURE != 0)
++    }
++
++    /// Whether a root's bytes hold a model's signature anywhere; None for a root the index did not read whole.
++    pub fn model_signature(&self, root: &str) -> Option<bool> {
++        self.signatures
++            .get(root)
++            .map(|found| found & MODEL_SIGNATURE != 0)
+     }
+ 
+     pub fn roots(&self) -> &[ResourceRef] {
+@@ -97,3 +238,76 @@ impl Inventory {
+         self.nodes.keys().map(String::as_str)
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    /// The search the planners made of a file's bytes, four at a time.
++    fn searched(bytes: &[u8]) -> u8 {
++        let mut found = 0;
++        for window in bytes.windows(4) {
++            if matches!(window, b"TIM2" | b"IMG\0" | b"IM2\0" | b"IM3\0") {
++                found |= TEXTURE_SIGNATURE;
++            }
++            if matches!(window, b"MDS\0" | b"MDT\0") {
++                found |= MODEL_SIGNATURE;
++            }
++        }
++        found
++    }
++
++    #[test]
++    fn signatures_are_found_as_a_search_of_every_four_bytes_finds_them() {
++        let cases: &[&[u8]] = &[
++            b"",
++            b"M",
++            b"TIM",
++            b"TIM2",
++            b"..TIM2",
++            b"IMG",
++            b"IMG\0",
++            b"IM2\0tail",
++            b"..IM3\0",
++            b"IM4\0MDX\0",
++            b"MDS",
++            b"MDS\0",
++            b"..MDT\0",
++            b"MMDS\0",
++            b"TIMDS\0",
++            b"IMDT\0IM3\0",
++            b"MIMG\0M",
++            b"TIM2MDS\0",
++        ];
++        for case in cases {
++            assert_eq!(signatures(case), searched(case), "{case:?}");
++        }
++        // Every string of the signatures' own letters up to a length, then longer ones picked by a generator.
++        let letters = b"TIMDSG23\0x";
++        let mut state = 0x2545_f491_4f6c_dd1du64;
++        for length in 0..40usize {
++            for _ in 0..400 {
++                let bytes: Vec<u8> = (0..length)
++                    .map(|_| {
++                        state ^= state << 13;
++                        state ^= state >> 7;
++                        state ^= state << 17;
++                        letters[(state % letters.len() as u64) as usize]
++                    })
++                    .collect();
++                assert_eq!(signatures(&bytes), searched(&bytes), "{bytes:?}");
++            }
++        }
++    }
++
++    #[test]
++    fn a_sound_is_known_by_its_name_and_its_first_bytes() {
++        assert!(sound_name("sound/bgm/town.WAV"));
++        assert!(!sound_name("chara/c01.chr"));
++        assert!(!sound_name("wav"));
++        assert!(sound_stream(b"RIFF\x10\0\0\0WAVEfmt "));
++        assert!(sound_stream(b"SShd\x18\0\0\0"));
++        assert!(!sound_stream(b"RIFF\x10\0\0\0AVI "));
++        assert!(!sound_stream(b"RIF"));
++    }
++}
+diff --git a/src/rust/lib.rs b/src/rust/lib.rs
+index f82914d..4feb14b 100644
+--- a/src/rust/lib.rs
++++ b/src/rust/lib.rs
+@@ -32,6 +32,19 @@ mod ffi {
+         stage: String,
+     }
+ 
++    /// Where a progressive extraction is.
++    struct ProgressiveStatus {
++        /// 0 none, 1 preparing (nothing can be read yet), 2 ready, 3 published, 4 failed.
++        phase: u8,
++        /// The whole run's progress from 0 to 1, and the stage it is in.
++        fraction: f32,
++        stage: String,
++        /// Declared conversion jobs done and in all, once ready.
++        done: u64,
++        total: u64,
++        error: String,
++    }
++
+     enum ScriptPublicationPolicy {
+         Retain,
+         LuauOnly,
+@@ -56,6 +69,31 @@ mod ffi {
+             policy: ScriptPublicationPolicy,
+         ) -> Result<ExtractReport>;
+         fn extract_status() -> ExtractStatus;
++        /// Starts a progressive extraction's session, so its status can be asked before
++        /// progressive_run has begun on its own thread.
++        fn progressive_begin();
++        /// Extracts while the game reads: returns once data.zip is published, long after the session
++        /// became ready. Runs on a thread of its own.
++        fn progressive_run(
++            source: &str,
++            data_out: &str,
++            jobs: usize,
++            policy: ScriptPublicationPolicy,
++        ) -> Result<()>;
++        fn progressive_status() -> ProgressiveStatus;
++        /// The share of the run's progress at which a session becomes ready, about.
++        fn progressive_ready_fraction() -> f32;
++        /// The session's entries, sorted by name; fixed once it is ready.
++        fn progressive_count() -> usize;
++        fn progressive_name(index: usize) -> Result<String>;
++        /// Whether the entry exists. Waits only for one its conversion may leave out.
++        fn progressive_present(index: usize) -> Result<bool>;
++        /// These wait for the entry's conversion, which a read moves to the front.
++        fn progressive_size(index: usize) -> Result<u64>;
++        fn progressive_read(index: usize, out: &mut [u8]) -> Result<()>;
++        /// The entry's first bytes, at most its size; returns how many. A picture's first 24 bytes are
++        /// given from its planned size without converting it.
++        fn progressive_prefix(index: usize, out: &mut [u8]) -> Result<usize>;
+         fn extract_with_script_policy(
+             source: &str,
+             data_out: &str,
+@@ -116,8 +154,9 @@ mod ffi {
+         fn archive_entry_crc(archive: &Archive, index: usize) -> u32;
+         /// True when the entry's bytes are stored uncompressed in the file.
+         fn archive_entry_stored(archive: &Archive, index: usize) -> bool;
+-        /// Absolute file offset of the entry's data, 64-byte aligned.
+-        fn archive_entry_data_offset(archive: &Archive, index: usize) -> u64;
++        /// Absolute file offset of the entry's data, 64-byte aligned. An archive read through its file (the
++        /// browser, iOS) checks the entry's local header on this first call, which can fail.
++        fn archive_entry_data_offset(archive: &Archive, index: usize) -> Result<u64>;
+         /// Decompresses or copies one entry into `out` (exactly its size) and checks its CRC-32.
+         fn archive_read_entry(archive: &Archive, index: usize, out: &mut [u8]) -> Result<()>;
+         fn archive_path(archive: &Archive) -> String;
+@@ -210,6 +249,94 @@ fn extract_status() -> ffi::ExtractStatus {
+     }
+ }
+ 
++static PROGRESSIVE: std::sync::Mutex<Option<std::sync::Arc<core::progressive::Session>>> =
++    std::sync::Mutex::new(None);
++
++fn progressive_session() -> Result<std::sync::Arc<core::progressive::Session>, core::CoreError> {
++    PROGRESSIVE
++        .lock()
++        .unwrap()
++        .clone()
++        .ok_or_else(|| core::CoreError("no progressive extraction is running".into()))
++}
++
++fn progressive_begin() {
++    *PROGRESSIVE.lock().unwrap() = Some(std::sync::Arc::new(core::progressive::Session::new()));
++}
++
++fn progressive_run(
++    source: &str,
++    data_out: &str,
++    jobs: usize,
++    policy: ffi::ScriptPublicationPolicy,
++) -> Result<(), core::CoreError> {
++    let session = progressive_session()?;
++    let policy = match core_script_publication_policy(policy) {
++        Ok(policy) => policy,
++        Err(error) => {
++            session.fail(&error.to_string());
++            return Err(error);
++        }
++    };
++    core::extract_progressive(source.as_ref(), data_out.as_ref(), jobs, &session, policy)?;
++    Ok(())
++}
++
++fn progressive_status() -> ffi::ProgressiveStatus {
++    let Ok(session) = progressive_session() else {
++        return ffi::ProgressiveStatus {
++            phase: 0,
++            fraction: 0.0,
++            stage: String::new(),
++            done: 0,
++            total: 0,
++            error: String::new(),
++        };
++    };
++    let status = session.status();
++    ffi::ProgressiveStatus {
++        phase: match status.phase {
++            core::progressive::Phase::Preparing => 1,
++            core::progressive::Phase::Ready => 2,
++            core::progressive::Phase::Sealed => 3,
++            core::progressive::Phase::Failed => 4,
++        },
++        fraction: status.fraction,
++        stage: status.stage.to_owned(),
++        done: status.done as u64,
++        total: status.total as u64,
++        error: status.error,
++    }
++}
++
++fn progressive_ready_fraction() -> f32 {
++    core::progressive::READY_FRACTION
++}
++
++fn progressive_count() -> usize {
++    progressive_session().map_or(0, |session| session.count())
++}
++
++fn progressive_name(index: usize) -> Result<String, core::CoreError> {
++    progressive_session()?.name(index)
++}
++
++fn progressive_present(index: usize) -> Result<bool, core::CoreError> {
++    progressive_session()?.present(index)
++}
++
++fn progressive_size(index: usize) -> Result<u64, core::CoreError> {
++    progressive_session()?.size(index)
++}
++
++fn progressive_read(index: usize, out: &mut [u8]) -> Result<(), core::CoreError> {
++    progressive_session()?.read(index, out)
++}
++
++fn progressive_prefix(index: usize, out: &mut [u8]) -> Result<usize, core::CoreError> {
++    progressive_session()?.prefix(index, out)
++}
++
+ fn extract(
+     source: &str,
+     data_out: &str,
+@@ -748,7 +875,7 @@ fn archive_entry_stored(archive: &Archive, index: usize) -> bool {
+     archive.stored(index)
+ }
+ 
+-fn archive_entry_data_offset(archive: &Archive, index: usize) -> u64 {
++fn archive_entry_data_offset(archive: &Archive, index: usize) -> Result<u64, core::CoreError> {
+     archive.data_offset(index)
+ }
+ 
+diff --git a/src/rust/models.rs b/src/rust/models.rs
+index 91d3f6b..58b8e9e 100644
+--- a/src/rust/models.rs
++++ b/src/rust/models.rs
+@@ -1,6 +1,6 @@
+ //! Converts retail scene, mesh, skeleton and animation records into glTF and typed JSON.
+ use super::actions::{KeyAction, NameBook};
+-use super::artifacts::{ArtifactBytes, AssetSink, Category, Job};
++use super::artifacts::{ArtifactBytes, AssetSink, Category, Job, Output};
+ use super::progress::Phase;
+ use super::{CoreError, CoreResult};
+ use rayon::prelude::*;
+@@ -294,6 +294,23 @@ pub(crate) struct Member {
+     pub(crate) size: usize,
+     size_field: usize,
+ }
++/// The size of a PACK's entry header.
++pub(crate) const PACK_HEADER: usize = 76;
++
++/// Whether a resource's first entry header alone says it is no PACK, as `pack` finds with all of its bytes: a
++/// name that is empty, unterminated, or holds a control character or a path separator.
++pub(crate) fn no_pack_at(head: &[u8]) -> bool {
++    let Some(h) = head.get(..PACK_HEADER) else {
++        return false;
++    };
++    match h[..64].iter().position(|&v| v == 0) {
++        None | Some(0) => true,
++        Some(end) => h[..end]
++            .iter()
++            .any(|v| *v < 32 || matches!(*v, b'/' | b'\\')),
++    }
++}
++
+ pub(crate) fn pack(b: &[u8]) -> Option<Vec<Member>> {
+     if super::native_scripts::is_valid_script(b) {
+         return None;
+@@ -6074,7 +6091,45 @@ impl ModelPlan {
+         let final_weights = final_model_weights(&preview_nanos, &external_ops);
+         let final_work = apportion_model_work(&final_weights, final_budget);
+         let mut jobs = Vec::with_capacity(count.max(1));
++        // The documents each final job owns: what it will write is known here, before it runs.
++        let mut owned = vec![Vec::new(); count];
++        for (name, &owner) in owners.iter() {
++            if let Some(list) = owned.get_mut(owner) {
++                list.push(name.clone());
++            }
++        }
+         for (index, job) in native_jobs.into_iter().enumerate() {
++            let mut outputs = Vec::new();
++            for name in std::mem::take(&mut owned[index]) {
++                outputs.push(Output {
++                    name: Path::new(&name)
++                        .with_extension("game.json")
++                        .to_string_lossy()
++                        .replace('\\', "/"),
++                    optional: false,
++                    extent: None,
++                });
++                // A document with no buffer has no file for one.
++                outputs.push(Output {
++                    name: buffer_path(&name),
++                    optional: true,
++                    extent: None,
++                });
++                outputs.push(Output {
++                    name,
++                    optional: false,
++                    extent: None,
++                });
++            }
++            for icon in &job.icons {
++                for name in [&icon.path, &icon.image] {
++                    outputs.push(Output {
++                        name: name.clone(),
++                        optional: false,
++                        extent: None,
++                    });
++                }
++            }
+             let work = final_work[index];
+             let estimate = job.estimated_expanded_bytes();
+             let documents = documents.clone();
+@@ -6092,6 +6147,7 @@ impl ModelPlan {
+                 label,
+                 work,
+                 estimated_bytes: estimate,
++                outputs: Some(outputs),
+                 run: Box::new(move |sink| {
+                     let mut pairs = BTreeMap::new();
+                     let mut local = ConversionReport::default();
+@@ -6143,6 +6199,7 @@ impl ModelPlan {
+                 label: "models-finalize".into(),
+                 work: self.deferred_work,
+                 estimated_bytes: 1,
++                outputs: None,
+                 run: Box::new(|_| Ok(())),
+             });
+         }
+@@ -6343,11 +6400,14 @@ pub fn plan_source(
+             !lower.ends_with(".pss")
+                 && !matches!(lower.as_str(), "sound/sound.dat" | "sound/sound.hd3")
+                 && (candidates.contains(*name)
+-                    || source.resource(name).is_ok_and(|resource| {
+-                        resource
+-                            .bytes()
+-                            .windows(4)
+-                            .any(|signature| signature == b"MDS\0" || signature == b"MDT\0")
++                    // The index has looked for the signatures in every root it read whole.
++                    || inventory.model_signature(name).unwrap_or_else(|| {
++                        source.resource(name).is_ok_and(|resource| {
++                            resource
++                                .bytes()
++                                .windows(4)
++                                .any(|signature| signature == b"MDS\0" || signature == b"MDT\0")
++                        })
+                     }))
+         })
+         .map(str::to_owned)
+@@ -6373,6 +6433,7 @@ pub fn plan_source(
+             label: alias.clone(),
+             work,
+             estimated_bytes: (len as usize).saturating_mul(16).max(1 << 20),
++            outputs: None,
+             run: Box::new(move |_| {
+                 let mut analysis = analyze_file(
+                     &source,
+diff --git a/src/rust/native_scripts.rs b/src/rust/native_scripts.rs
+index 1bc8a2c..3b7a929 100644
+--- a/src/rust/native_scripts.rs
++++ b/src/rust/native_scripts.rs
+@@ -154,6 +154,13 @@ fn literal<'a>(b: &'a [u8], code: usize, insn: &Instruction) -> CoreResult<&'a [
+         .ok_or_else(|| fail("unterminated script string"))?;
+     Ok(&tail[..end])
+ }
++/// Whether a resource is a compiled script. Its signature is read first: the leaves include the sound archive and
++/// the movies, a gigabyte and more that no reader of scripts needs in memory.
++pub(crate) fn is_script_resource(resource: &super::archive::ResourceRef) -> bool {
++    matches!(resource.head(4).get(..4), Some(b"SB2\0" | b"STB\0"))
++        && is_valid_script(&resource.bytes())
++}
++
+ /// Recognizes complete compiled VM scripts before untagged archive heuristics inspect their headers.
+ pub(crate) fn is_valid_script(bytes: &[u8]) -> bool {
+     if !matches!(bytes.get(..4), Some(b"SB2\0" | b"STB\0")) {
+@@ -428,7 +435,7 @@ pub fn plan_jobs(
+     let mut jobs = Vec::new();
+     for resource in resources.leaves() {
+         let alias = resource.alias.clone();
+-        let valid_script = is_valid_script(&resource.bytes());
++        let valid_script = is_script_resource(resource);
+         if !publish_scripts && valid_script {
+             if !is_script_resource_name(&alias) {
+                 return Err(CoreError(format!(
+@@ -454,6 +461,7 @@ pub fn plan_jobs(
+             label: alias,
+             work: resource.len().max(1) as u64,
+             estimated_bytes: resource.len().saturating_mul(2),
++            outputs: None,
+             run: Box::new(move |sink: &AssetSink| {
+                 let (bytes, _) = migrate(&resource.bytes(), &lookup)?;
+                 sink.submit(name, ArtifactBytes::Owned(bytes), Category::Script)
+@@ -470,7 +478,7 @@ pub fn verify_archive_work(resources: &ResourceInventory, publish_scripts: bool)
+     resources
+         .leaves()
+         .iter()
+-        .filter(|resource| is_valid_script(&resource.bytes()))
++        .filter(|resource| is_script_resource(resource))
+         .count() as u64
+ }
+ 
+@@ -487,7 +495,7 @@ pub fn verify_archive(
+     let lookup = planned_lookup(resources, converted_aliases, profiles, texture_paths);
+     let mut character_scripts = BTreeMap::<String, BTreeSet<String>>::new();
+     for resource in resources.leaves() {
+-        if !publish_scripts || !is_valid_script(&resource.bytes()) {
++        if !publish_scripts || !is_script_resource(resource) {
+             continue;
+         }
+         let alias = &resource.alias;
+diff --git a/src/rust/packs.rs b/src/rust/packs.rs
+index eafcf61..060e957 100644
+--- a/src/rust/packs.rs
++++ b/src/rust/packs.rs
+@@ -1,5 +1,6 @@
+ //! Publishes ordinary retail PACK containers as directly readable asset directories.
+-use super::artifacts::{ArtifactBytes, AssetSink, Category, Job};
++use super::archive::ResourceRef;
++use super::artifacts::{ArtifactBytes, AssetSink, Category, Job, Output};
+ use super::inventory::Inventory;
+ use super::progress::Phase;
+ use super::{CoreError, CoreResult, models};
+@@ -69,7 +70,7 @@ pub fn assemble_retained(
+             .get(alias)
+             .ok_or_else(|| fail(format!("missing retail resource: {alias}")))?;
+         let members = inventory.members(alias);
+-        if members.is_some() || empty_archive(&resource.bytes(), alias) {
++        if members.is_some() || empty_archive_resource(resource, alias) {
+             if consumed_container(alias) {
+                 return Ok(());
+             }
+@@ -90,7 +91,7 @@ pub fn assemble_retained(
+             if let Some(members) = members {
+                 for member in members {
+                     if member.resource.is_empty()
+-                        && !empty_archive(&member.resource.bytes(), &member.alias)
++                        && !empty_archive_resource(&member.resource, &member.alias)
+                     {
+                         continue;
+                     }
+@@ -142,7 +143,7 @@ pub fn plan_jobs(
+             .get(alias)
+             .ok_or_else(|| fail(format!("missing retail resource: {alias}")))?;
+         let members = inventory.members(alias);
+-        if members.is_some() || empty_archive(&resource.bytes(), alias) {
++        if members.is_some() || empty_archive_resource(resource, alias) {
+             if consumed_container(alias) {
+                 return Ok(());
+             }
+@@ -157,6 +158,7 @@ pub fn plan_jobs(
+                 label: name.clone(),
+                 work: 1,
+                 estimated_bytes: bytes.len(),
++                outputs: None,
+                 run: Box::new(move |sink| {
+                     sink.submit(name, ArtifactBytes::Owned(bytes), Category::Pack)
+                 }),
+@@ -164,7 +166,7 @@ pub fn plan_jobs(
+             if let Some(members) = members {
+                 for member in members {
+                     if member.resource.is_empty()
+-                        && !empty_archive(&member.resource.bytes(), &member.alias)
++                        && !empty_archive_resource(&member.resource, &member.alias)
+                     {
+                         continue;
+                     }
+@@ -195,6 +197,11 @@ pub fn plan_jobs(
+             label: name.clone(),
+             work: resource.len().max(1) as u64,
+             estimated_bytes: resource.len(),
++            outputs: Some(vec![Output {
++                name: name.clone(),
++                optional: false,
++                extent: None,
++            }]),
+             run: Box::new(move |sink| {
+                 sink.submit(
+                     name,
+@@ -372,11 +379,19 @@ fn consumed_container(alias: &str) -> bool {
+         "chr" | "snd" | "img" | "tm2"
+     )
+ }
+-fn empty_archive(bytes: &[u8], alias: &str) -> bool {
++fn archive_name(alias: &str) -> bool {
+     matches!(
+         extension(alias).to_ascii_lowercase().as_str(),
+         "pcp" | "pac" | "mpk" | "ipk" | "pak" | "chr" | "snd"
+-    ) && (bytes.is_empty() || (bytes.len() >= 76 && bytes.iter().all(|byte| *byte == 0)))
++    )
++}
++fn empty_archive(bytes: &[u8], alias: &str) -> bool {
++    archive_name(alias) && (bytes.is_empty() || (bytes.len() >= 76 && bytes.iter().all(|byte| *byte == 0)))
++}
++/// `empty_archive` of a resource, which is read only when its name is an archive's: the leaves include the sound
++/// archive and the movies.
++fn empty_archive_resource(resource: &ResourceRef, alias: &str) -> bool {
++    archive_name(alias) && empty_archive(&resource.bytes(), alias)
+ }
+ fn clean_empty_directories(path: &Path) -> CoreResult<()> {
+     for entry in fs::read_dir(path)? {
+diff --git a/src/rust/progressive.rs b/src/rust/progressive.rs
+new file mode 100644
+index 0000000..2a28885
+--- /dev/null
++++ b/src/rust/progressive.rs
+@@ -0,0 +1,640 @@
++//! A conversion the game reads from while it runs.
++//!
++//! The run is planned whole before any job starts, so each output's name is known long before its bytes are.
++//! Once planning and the jobs that cannot name their outputs ahead are done the session is ready: it lists
++//! every name, and a read of one whose job has not run yet moves that job to the front and waits for it.
++use super::artifacts::{AssetSink, Job, Observer};
++use super::zip_archive::{self, Placed};
++use super::{CoreError, CoreResult};
++use std::collections::{HashMap, HashSet, VecDeque};
++use std::fs::File;
++use std::path::Path;
++use std::sync::atomic::{AtomicUsize, Ordering};
++use std::sync::{Condvar, Mutex, MutexGuard, RwLock, RwLockWriteGuard};
++
++/// The share of a whole run's progress at which the European disc becomes readable, measured natively. A
++/// host scales its "preparing" bar by it, so the bar ends where play begins.
++pub const READY_FRACTION: f32 = 0.40;
++
++fn fail(message: impl Into<String>) -> CoreError {
++    CoreError(message.into())
++}
++
++fn folder(name: &str) -> &str {
++    name.rsplit_once('/').map_or("", |(folder, _)| folder)
++}
++
++/// The first 24 bytes of a PNG of this size: its signature and the start of its header chunk.
++fn png_header(width: u32, height: u32) -> [u8; 24] {
++    let mut header = [0u8; 24];
++    header[..8].copy_from_slice(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
++    header[8..12].copy_from_slice(&13u32.to_be_bytes());
++    header[12..16].copy_from_slice(b"IHDR");
++    header[16..20].copy_from_slice(&width.to_be_bytes());
++    header[20..24].copy_from_slice(&height.to_be_bytes());
++    header
++}
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum Phase {
++    /// Planning, and the jobs whose outputs are not known ahead. Nothing can be read yet.
++    Preparing,
++    /// Every name is listed. A read waits for its job if that has not run.
++    Ready,
++    /// The archive is whole and published.
++    Sealed,
++    Failed,
++}
++
++pub struct Status {
++    pub phase: Phase,
++    /// The whole run's progress, 0 to 1, and the stage it is in.
++    pub fraction: f32,
++    pub stage: &'static str,
++    /// Declared jobs done and in all, once ready.
++    pub done: usize,
++    pub total: usize,
++    /// Entries written that no job had declared, and declared names whose job ended without them.
++    pub undeclared: u64,
++    pub missing: u64,
++    pub error: String,
++}
++
++enum Slot {
++    Pending {
++        job: usize,
++        optional: bool,
++        extent: Option<(u32, u32)>,
++    },
++    Written(Placed),
++    Absent,
++}
++
++#[derive(Clone, Copy, Eq, PartialEq)]
++enum Turn {
++    Queued,
++    Running,
++    Done,
++}
++
++struct State {
++    phase: Phase,
++    error: String,
++    fraction: f32,
++    stage: &'static str,
++    /// Entries written before the names were frozen.
++    early: Vec<Placed>,
++    names: Vec<String>,
++    slots: Vec<Slot>,
++    index: HashMap<String, usize>,
++    jobs: Vec<Option<Job>>,
++    turns: Vec<Turn>,
++    /// 0 in the background order, 1 moved up with its folder, 2 asked for by a reader.
++    rank: Vec<u8>,
++    outputs: Vec<Vec<usize>>,
++    urgent: VecDeque<usize>,
++    soon: VecDeque<usize>,
++    cursor: usize,
++    folders: HashMap<String, Vec<usize>>,
++    promoted: HashSet<String>,
++    done: usize,
++    undeclared: u64,
++    missing: u64,
++}
++
++impl State {
++    /// Moves the job of a pending entry to the front, and the jobs of its folder behind it: a scene that
++    /// wants one file of a folder soon wants the rest.
++    fn hurry(&mut self, index: usize) {
++        let Slot::Pending { job, .. } = self.slots[index] else {
++            return;
++        };
++        if self.turns[job] == Turn::Queued && self.rank[job] < 2 {
++            self.rank[job] = 2;
++            self.urgent.push_back(job);
++        }
++        let folder = folder(&self.names[index]).to_owned();
++        if !self.promoted.contains(&folder) {
++            if let Some(jobs) = self.folders.get(&folder) {
++                for &job in jobs {
++                    if self.turns[job] == Turn::Queued && self.rank[job] < 1 {
++                        self.rank[job] = 1;
++                        self.soon.push_back(job);
++                    }
++                }
++            }
++            self.promoted.insert(folder);
++        }
++    }
++
++    fn take(&mut self) -> Option<(usize, Job)> {
++        loop {
++            let id = if let Some(id) = self.urgent.pop_front() {
++                id
++            } else if let Some(id) = self.soon.pop_front() {
++                id
++            } else if self.cursor < self.jobs.len() {
++                self.cursor += 1;
++                self.cursor - 1
++            } else {
++                return None;
++            };
++            if self.turns[id] == Turn::Queued {
++                if let Some(job) = self.jobs[id].take() {
++                    self.turns[id] = Turn::Running;
++                    return Some((id, job));
++                }
++            }
++        }
++    }
++}
++
++pub struct Session {
++    state: Mutex<State>,
++    changed: Condvar,
++    /// The growing archive, then the published one. Held for writing, and empty, while it is renamed.
++    reader: RwLock<Option<File>>,
++    waiting: AtomicUsize,
++}
++
++struct Waiting<'a>(&'a AtomicUsize);
++
++impl Drop for Waiting<'_> {
++    fn drop(&mut self) {
++        self.0.fetch_sub(1, Ordering::AcqRel);
++    }
++}
++
++/// Reads stopped while the archive file is closed for a rename.
++pub struct Suspended<'a> {
++    session: &'a Session,
++    guard: Option<RwLockWriteGuard<'a, Option<File>>>,
++}
++
++impl Suspended<'_> {
++    /// Opens the archive where it now is and lets reads go on.
++    pub fn resume(mut self, path: &Path) -> CoreResult<()> {
++        let file = File::open(path)
++            .map_err(|error| fail(format!("{}: {error}", path.display())))?;
++        if let Some(mut guard) = self.guard.take() {
++            *guard = Some(file);
++        }
++        Ok(())
++    }
++}
++
++impl Drop for Suspended<'_> {
++    fn drop(&mut self) {
++        if self.guard.take().is_some() {
++            self.session
++                .fail("the conversion stopped before its archive was published");
++        }
++    }
++}
++
++impl Default for Session {
++    fn default() -> Self {
++        Self::new()
++    }
++}
++
++impl Session {
++    pub fn new() -> Self {
++        Self {
++            state: Mutex::new(State {
++                phase: Phase::Preparing,
++                error: String::new(),
++                fraction: 0.0,
++                stage: "",
++                early: Vec::new(),
++                names: Vec::new(),
++                slots: Vec::new(),
++                index: HashMap::new(),
++                jobs: Vec::new(),
++                turns: Vec::new(),
++                rank: Vec::new(),
++                outputs: Vec::new(),
++                urgent: VecDeque::new(),
++                soon: VecDeque::new(),
++                cursor: 0,
++                folders: HashMap::new(),
++                promoted: HashSet::new(),
++                done: 0,
++                undeclared: 0,
++                missing: 0,
++            }),
++            changed: Condvar::new(),
++            reader: RwLock::new(None),
++            waiting: AtomicUsize::new(0),
++        }
++    }
++
++    fn lock(&self) -> CoreResult<MutexGuard<'_, State>> {
++        self.state
++            .lock()
++            .map_err(|_| fail("progressive conversion state poisoned"))
++    }
++
++    pub fn progress(&self, fraction: f32, stage: &'static str) {
++        if let Ok(mut state) = self.state.lock() {
++            state.fraction = fraction;
++            state.stage = stage;
++        }
++    }
++
++    pub fn status(&self) -> Status {
++        match self.state.lock() {
++            Ok(state) => Status {
++                phase: state.phase,
++                fraction: state.fraction,
++                stage: state.stage,
++                done: state.done,
++                total: state.jobs.len(),
++                undeclared: state.undeclared,
++                missing: state.missing,
++                error: state.error.clone(),
++            },
++            Err(_) => Status {
++                phase: Phase::Failed,
++                fraction: 0.0,
++                stage: "",
++                done: 0,
++                total: 0,
++                undeclared: 0,
++                missing: 0,
++                error: "progressive conversion state poisoned".into(),
++            },
++        }
++    }
++
++    /// Ends the session with an error; every waiting read returns it.
++    pub fn fail(&self, message: &str) {
++        if let Ok(mut state) = self.state.lock() {
++            if !matches!(state.phase, Phase::Failed | Phase::Sealed) {
++                state.phase = Phase::Failed;
++                state.error = message.to_owned();
++            }
++        }
++        self.changed.notify_all();
++    }
++
++    /// Marks the archive whole and published.
++    pub fn sealed(&self) {
++        if let Ok(mut state) = self.state.lock() {
++            if state.phase == Phase::Ready {
++                state.phase = Phase::Sealed;
++            }
++        }
++        self.changed.notify_all();
++    }
++
++    /// Freezes the names: those written so far and those the remaining jobs declare. `jobs` run in this
++    /// order unless a reader asks for one sooner.
++    pub fn ready(&self, jobs: Vec<Job>) -> CoreResult<()> {
++        let mut state = self.lock()?;
++        if state.phase != Phase::Preparing {
++            return Err(fail("a progressive conversion is made ready once"));
++        }
++        let mut names: Vec<String> = state
++            .early
++            .iter()
++            .map(|placed| placed.name.clone())
++            .collect();
++        for job in &jobs {
++            names.extend(
++                job.outputs
++                    .iter()
++                    .flatten()
++                    .map(|output| output.name.clone()),
++            );
++        }
++        names.sort_unstable();
++        names.dedup();
++        let index: HashMap<String, usize> = names
++            .iter()
++            .enumerate()
++            .map(|(at, name)| (name.clone(), at))
++            .collect();
++        let mut slots: Vec<Slot> = names.iter().map(|_| Slot::Absent).collect();
++        for placed in std::mem::take(&mut state.early) {
++            let at = index[&placed.name];
++            slots[at] = Slot::Written(placed);
++        }
++        let mut outputs = vec![Vec::new(); jobs.len()];
++        let mut folders: HashMap<String, Vec<usize>> = HashMap::new();
++        for (id, job) in jobs.iter().enumerate() {
++            for output in job.outputs.iter().flatten() {
++                let at = index[&output.name];
++                if !matches!(slots[at], Slot::Absent) {
++                    state.undeclared += 1;
++                    if state.undeclared <= 8 {
++                        eprintln!("dc2data: output declared twice: {}", output.name);
++                    }
++                    continue;
++                }
++                slots[at] = Slot::Pending {
++                    job: id,
++                    optional: output.optional,
++                    extent: output.extent,
++                };
++                outputs[id].push(at);
++                let list = folders.entry(folder(&output.name).to_owned()).or_default();
++                if list.last() != Some(&id) {
++                    list.push(id);
++                }
++            }
++        }
++        state.names = names;
++        state.slots = slots;
++        state.index = index;
++        state.turns = vec![Turn::Queued; jobs.len()];
++        state.rank = vec![0; jobs.len()];
++        state.jobs = jobs.into_iter().map(Some).collect();
++        state.outputs = outputs;
++        state.folders = folders;
++        state.phase = Phase::Ready;
++        drop(state);
++        self.changed.notify_all();
++        Ok(())
++    }
++
++    /// One worker's loop: runs declared jobs, a reader's first, until none is left.
++    pub fn work(
++        &self,
++        sink: &AssetSink,
++        run: &(dyn Fn(Job, &AssetSink) -> CoreResult<()> + Sync),
++    ) -> CoreResult<()> {
++        loop {
++            let (id, job) = {
++                let mut state = self.lock()?;
++                if state.phase == Phase::Failed {
++                    return Err(fail(state.error.clone()));
++                }
++                match state.take() {
++                    Some(next) => next,
++                    None => return Ok(()),
++                }
++            };
++            if let Err(error) = run(job, sink) {
++                self.fail(&error.to_string());
++                return Err(error);
++            }
++            sink.finished(id)?;
++        }
++    }
++
++    /// Stops reads and closes the archive file, so the file can be renamed.
++    pub fn suspend(&self) -> CoreResult<Suspended<'_>> {
++        let mut guard = self
++            .reader
++            .write()
++            .map_err(|_| fail("progressive archive reader poisoned"))?;
++        *guard = None;
++        Ok(Suspended {
++            session: self,
++            guard: Some(guard),
++        })
++    }
++
++    pub fn count(&self) -> usize {
++        self.state.lock().map_or(0, |state| state.names.len())
++    }
++
++    pub fn name(&self, index: usize) -> CoreResult<String> {
++        self.lock()?
++            .names
++            .get(index)
++            .cloned()
++            .ok_or_else(|| fail("no such progressive entry"))
++    }
++
++    /// Where the entry lies, waiting for its job if that has not written it; None when the job ended
++    /// without it.
++    fn settle(&self, index: usize) -> CoreResult<Option<Placed>> {
++        let mut state = self.lock()?;
++        let mut waiting = None;
++        loop {
++            if state.phase == Phase::Failed {
++                return Err(fail(state.error.clone()));
++            }
++            match state.slots.get(index) {
++                None => return Err(fail("no such progressive entry")),
++                Some(Slot::Written(placed)) => return Ok(Some(placed.clone())),
++                Some(Slot::Absent) => return Ok(None),
++                Some(Slot::Pending { .. }) => {}
++            }
++            if waiting.is_none() {
++                state.hurry(index);
++                self.waiting.fetch_add(1, Ordering::AcqRel);
++                waiting = Some(Waiting(&self.waiting));
++            }
++            state = self
++                .changed
++                .wait(state)
++                .map_err(|_| fail("progressive conversion state poisoned"))?;
++        }
++    }
++
++    /// Whether the entry exists. Waits only for a name its job may leave out.
++    pub fn present(&self, index: usize) -> CoreResult<bool> {
++        {
++            let state = self.lock()?;
++            match state.slots.get(index) {
++                None => return Ok(false),
++                Some(Slot::Written(_)) => return Ok(true),
++                Some(Slot::Absent) => return Ok(false),
++                Some(Slot::Pending { optional, .. }) => {
++                    if !optional {
++                        return Ok(true);
++                    }
++                }
++            }
++        }
++        Ok(self.settle(index)?.is_some())
++    }
++
++    pub fn size(&self, index: usize) -> CoreResult<u64> {
++        match self.settle(index)? {
++            Some(placed) => Ok(placed.size),
++            None => Err(fail(format!(
++                "{}: not made by the conversion",
++                self.name(index)?
++            ))),
++        }
++    }
++
++    fn with_file<T>(&self, body: impl FnOnce(&File) -> CoreResult<T>) -> CoreResult<T> {
++        let reader = self
++            .reader
++            .read()
++            .map_err(|_| fail("progressive archive reader poisoned"))?;
++        match reader.as_ref() {
++            Some(file) => body(file),
++            None => Err(fail("the progressive archive is not open")),
++        }
++    }
++
++    /// Reads a whole entry, converting it first if its turn had not come.
++    pub fn read(&self, index: usize, out: &mut [u8]) -> CoreResult<()> {
++        let Some(placed) = self.settle(index)? else {
++            return Err(fail(format!(
++                "{}: not made by the conversion",
++                self.name(index)?
++            )));
++        };
++        self.with_file(|file| zip_archive::read_placed(file, &placed, out))
++    }
++
++    /// Reads the start of an entry and returns how many bytes it gave. The header of a picture not
++    /// converted yet is made from its planned size: a scene asks the size of far more pictures than it
++    /// draws, and none of them has to be converted for that.
++    pub fn prefix(&self, index: usize, out: &mut [u8]) -> CoreResult<usize> {
++        {
++            let state = self.lock()?;
++            if let Some(Slot::Pending {
++                extent: Some((width, height)),
++                ..
++            }) = state.slots.get(index)
++            {
++                if out.len() <= 24 {
++                    let header = png_header(*width, *height);
++                    let count = out.len();
++                    out.copy_from_slice(&header[..count]);
++                    return Ok(count);
++                }
++            }
++        }
++        let Some(placed) = self.settle(index)? else {
++            return Err(fail(format!(
++                "{}: not made by the conversion",
++                self.name(index)?
++            )));
++        };
++        let count = out.len().min(placed.size as usize);
++        if placed.method == zip_archive::METHOD_STORED {
++            self.with_file(|file| zip_archive::read_placed_prefix(file, &placed, &mut out[..count]))?;
++        } else {
++            let mut whole = vec![0u8; placed.size as usize];
++            self.with_file(|file| zip_archive::read_placed(file, &placed, &mut whole))?;
++            out[..count].copy_from_slice(&whole[..count]);
++        }
++        Ok(count)
++    }
++
++    /// Checks what the session listed against the published archive: the same names, each at the place
++    /// and with the size and CRC the session reads it by.
++    pub fn compare(&self, archive: &zip_archive::Archive) -> CoreResult<String> {
++        let state = self.lock()?;
++        let listed: HashMap<&str, usize> = (0..archive.len())
++            .map(|at| (archive.name(at), at))
++            .collect();
++        let mut written = 0usize;
++        let mut absent = 0usize;
++        let mut wrong = Vec::new();
++        for (index, slot) in state.slots.iter().enumerate() {
++            let name = state.names[index].as_str();
++            match slot {
++                Slot::Written(placed) => {
++                    written += 1;
++                    let same = match listed.get(name) {
++                        Some(&at) => {
++                            archive.size(at) == placed.size
++                                && archive.crc(at) == placed.crc
++                                && archive.data_offset(at)? == placed.data
++                        }
++                        None => false,
++                    };
++                    if !same {
++                        wrong.push(format!("{name} (differs from the archive)"));
++                    }
++                }
++                Slot::Absent => {
++                    absent += 1;
++                    if listed.contains_key(name) {
++                        wrong.push(format!("{name} (in the archive, absent in the session)"));
++                    }
++                }
++                Slot::Pending { .. } => wrong.push(format!("{name} (never settled)")),
++            }
++        }
++        if archive.len() != written
++            || !wrong.is_empty()
++            || state.undeclared != 0
++            || state.missing != 0
++        {
++            wrong.truncate(8);
++            return Err(fail(format!(
++                "progressive listing differs from the archive: {} archive entries, {written} written, \
++                 {} undeclared, {} declared and not written; {}",
++                archive.len(),
++                state.undeclared,
++                state.missing,
++                wrong.join(", ")
++            )));
++        }
++        Ok(format!(
++            "{written} entries as listed, {absent} optional names absent, none undeclared"
++        ))
++    }
++}
++
++impl Observer for Session {
++    fn opened(&self, partial: &Path) {
++        match File::open(partial) {
++            Ok(file) => {
++                if let Ok(mut reader) = self.reader.write() {
++                    *reader = Some(file);
++                }
++            }
++            Err(error) => self.fail(&format!("{}: {error}", partial.display())),
++        }
++    }
++
++    fn published(&self, entries: Vec<Placed>, finished: Vec<usize>) {
++        let Ok(mut state) = self.state.lock() else {
++            return;
++        };
++        for placed in entries {
++            if state.phase == Phase::Preparing {
++                state.early.push(placed);
++                continue;
++            }
++            match state.index.get(&placed.name).copied() {
++                Some(at) => state.slots[at] = Slot::Written(placed),
++                None => {
++                    state.undeclared += 1;
++                    if state.undeclared <= 8 {
++                        eprintln!("dc2data: entry written without being declared: {}", placed.name);
++                    }
++                }
++            }
++        }
++        for job in finished {
++            if job >= state.turns.len() {
++                continue;
++            }
++            for position in 0..state.outputs[job].len() {
++                let at = state.outputs[job][position];
++                if let Slot::Pending { optional, .. } = state.slots[at] {
++                    if !optional {
++                        state.missing += 1;
++                        if state.missing <= 8 {
++                            eprintln!("dc2data: declared output not written: {}", state.names[at]);
++                        }
++                    }
++                    state.slots[at] = Slot::Absent;
++                }
++            }
++            if state.turns[job] != Turn::Done {
++                state.turns[job] = Turn::Done;
++                state.done += 1;
++            }
++        }
++        drop(state);
++        self.changed.notify_all();
++    }
++
++    fn hurried(&self) -> bool {
++        self.waiting.load(Ordering::Acquire) != 0
++    }
++}
+diff --git a/src/rust/publish.rs b/src/rust/publish.rs
+index cf1295a..905559a 100644
+--- a/src/rust/publish.rs
++++ b/src/rust/publish.rs
+@@ -113,11 +113,12 @@ pub fn begin_stream(
+     budget_bytes: usize,
+     phase: Phase,
+     total_work: u64,
++    observer: Option<std::sync::Arc<dyn super::artifacts::Observer>>,
+ ) -> CoreResult<AssetSink> {
+     if root.join("data").exists() || root.join("port_data").exists() {
+         return Err(fail("streaming publication cannot use a staged asset tree"));
+     }
+-    AssetSink::start_with_progress(root, budget_bytes, phase, total_work)
++    AssetSink::start_with_progress(root, budget_bytes, phase, total_work, observer)
+ }
+ 
+ /// Completes a streamed ZIP and records its content identity beside the archive.
+@@ -528,6 +529,9 @@ fn lock_stage(path: &Path) -> CoreResult<StageGuard> {
+         .create(true)
+         .truncate(false)
+         .open(path.join(".lock"))?;
++    // The browser's file system (WasmFS) has no file locks; there one game, on its own thread, extracts into
++    // the page's storage, so there is no second extraction to keep out.
++    #[cfg(not(target_os = "emscripten"))]
+     lock.try_lock().map_err(|e| fail(e.to_string()))?;
+     Ok(StageGuard {
+         path: path.to_path_buf(),
+diff --git a/src/rust/spill.rs b/src/rust/spill.rs
+index 843d000..d1fcdf6 100644
+--- a/src/rust/spill.rs
++++ b/src/rust/spill.rs
+@@ -7,10 +7,41 @@
+ use super::CoreResult;
+ use std::borrow::Cow;
+ use std::fs::File;
++use std::sync::atomic::{AtomicU64, Ordering};
+ use std::sync::{Mutex, OnceLock};
+ 
+-/// Whether waiting bytes go to the temporary file: on iOS, and where tests ask for the iOS source path.
+-const SPILL: bool = cfg!(any(target_os = "ios", kazarov_mapped_source));
++/// Whether waiting bytes go to the temporary file: on iOS, in the browser (4 GiB of memory, wasm32), and where
++/// tests ask for the iOS source path. The browser's game points TMPDIR at its storage while it extracts
++/// (port/web/src/firstrun.cpp), so the file is not in memory there either.
++const SPILL: bool = cfg!(any(target_os = "ios", target_os = "emscripten", kazarov_mapped_source));
++
++/// What the temporary file has cost: its writes, their bytes and the nanoseconds the writers waited, then the
++/// same of its reads.
++static IO: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
++
++fn count(first: usize, bytes: usize, started: std::time::Instant) {
++    IO[first].fetch_add(1, Ordering::Relaxed);
++    IO[first + 1].fetch_add(bytes as u64, Ordering::Relaxed);
++    IO[first + 2].fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
++}
++
++/// The temporary file's writes and reads so far, for a log beside the source's reads; empty when nothing waits
++/// in a file.
++pub(crate) fn io_text() -> String {
++    let io: [u64; 6] = std::array::from_fn(|index| IO[index].load(Ordering::Relaxed));
++    if io[0] == 0 {
++        return String::new();
++    }
++    format!(
++        "temporary file written {} times, {} MiB, {:.1} s of waiting, and read {} times, {} MiB, {:.1} s",
++        io[0],
++        io[1] >> 20,
++        io[2] as f64 / 1e9,
++        io[3],
++        io[4] >> 20,
++        io[5] as f64 / 1e9
++    )
++}
+ 
+ pub(crate) enum SpilledBytes {
+     Memory(Vec<u8>),
+@@ -34,7 +65,9 @@ impl SpilledBytes {
+             Self::Memory(bytes) => Ok(Cow::Borrowed(bytes)),
+             Self::File { offset, length } => {
+                 let mut bytes = vec![0u8; *length];
++                let started = std::time::Instant::now();
+                 read_at(&spill()?.file, &mut bytes, *offset)?;
++                count(3, *length, started);
+                 Ok(Cow::Owned(bytes))
+             }
+         }
+@@ -57,6 +90,10 @@ fn spill() -> CoreResult<&'static Spill> {
+ 
+ fn open() -> std::io::Result<Spill> {
+     let path = std::env::temp_dir().join(format!("kazarov-spill-{}.bin", std::process::id()));
++    // The browser's storage cannot remove a file that is open, and its process id is always the same: a run
++    // that ended early left its file, which goes first; the game removes the directory after extracting.
++    #[cfg(target_os = "emscripten")]
++    let _ = std::fs::remove_file(&path);
+     let mut options = std::fs::OpenOptions::new();
+     options.read(true).write(true).create(true).truncate(true);
+     #[cfg(windows)]
+@@ -67,7 +104,7 @@ fn open() -> std::io::Result<Spill> {
+     }
+     let file = options.open(&path)?;
+     // Unlinked while open, so it goes with the process however that ends.
+-    #[cfg(unix)]
++    #[cfg(all(unix, not(target_os = "emscripten")))]
+     std::fs::remove_file(&path)?;
+     Ok(Spill {
+         file,
+@@ -82,7 +119,9 @@ fn append(bytes: &[u8]) -> CoreResult<u64> {
+         .lock()
+         .map_err(|_| super::CoreError("spill file lock poisoned".into()))?;
+     let offset = *end;
++    let started = std::time::Instant::now();
+     write_at(&spill.file, bytes, offset)?;
++    count(0, bytes.len(), started);
+     *end += bytes.len() as u64;
+     Ok(offset)
+ }
+diff --git a/src/rust/textures.rs b/src/rust/textures.rs
+index eafcbff..63383a9 100644
+--- a/src/rust/textures.rs
++++ b/src/rust/textures.rs
+@@ -1,5 +1,5 @@
+ use super::archive::ResourceRef;
+-use super::artifacts::{ArtifactBytes, AssetSink, Category, Job};
++use super::artifacts::{ArtifactBytes, AssetSink, Category, Job, Output};
+ use super::progress::Phase;
+ use super::{CoreError, CoreResult};
+ use rayon::prelude::*;
+@@ -1041,6 +1041,8 @@ struct Unit {
+     pictures: Vec<PictureRecord>,
+     pairs: Vec<(String, String, String)>,
+     written: BTreeSet<String>,
++    /// Width and height of each picture written, by the name it was written under.
++    extents: BTreeMap<String, (usize, usize)>,
+     asset_counts: BTreeMap<String, usize>,
+     raster_origins: BTreeMap<String, (String, usize)>,
+     edits: BTreeMap<String, TextureEdit>,
+@@ -1138,6 +1140,7 @@ impl Unit {
+             pictures: Vec::new(),
+             pairs: Vec::new(),
+             written: BTreeSet::new(),
++            extents: BTreeMap::new(),
+             asset_counts: BTreeMap::new(),
+             raster_origins: BTreeMap::new(),
+             edits: BTreeMap::new(),
+@@ -1167,6 +1170,7 @@ impl Unit {
+         *count += 1;
+         write(&relative, w, h, pixels)?;
+         self.written.insert(relative.clone());
++        self.extents.insert(relative.clone(), (w, h));
+         Ok(relative)
+     }
+     #[allow(clippy::too_many_arguments)]
+@@ -1471,6 +1475,8 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+     state.record_variants = true;
+     state.plan_only = true;
+     let mut roots = Vec::new();
++    // The pictures each root's job will write, as planning named them, with their sizes.
++    let mut root_outputs = Vec::new();
+     let no_write = |_: &str, _: usize, _: usize, _: &[u8]| Ok(());
+     let planned: Vec<CoreResult<Option<Unit>>> = inventory
+         .roots()
+@@ -1499,6 +1505,7 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+             }
+         }
+         roots.push(resource.clone());
++        root_outputs.push(unit.extents);
+     }
+     bake_variants(&mut state, &no_write, &|name| inventory.get(name).is_some())?;
+     let layout = std::sync::Arc::new(TextureLayout::new(&state)?);
+@@ -1525,6 +1532,7 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+             label: job_name.clone(),
+             work: 1,
+             estimated_bytes: bytes.len(),
++            outputs: None,
+             run: Box::new(move |sink| {
+                 sink.submit(job_name, ArtifactBytes::Owned(bytes), Category::Texture)
+             }),
+@@ -1536,15 +1544,26 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+         });
+     }
+     let png_names = layout.pngs.values().cloned().collect();
+-    for resource in roots {
++    for (resource, written) in roots.into_iter().zip(root_outputs) {
+         let layout = layout.clone();
+         let label = resource.alias.clone();
+         let estimate = resource.len().saturating_mul(3).max(1 << 20);
++        let outputs = written
++            .into_iter()
++            .filter_map(|(name, (width, height))| {
++                layout.pngs.get(&name).map(|png| Output {
++                    name: png.clone(),
++                    optional: false,
++                    extent: Some((width as u32, height as u32)),
++                })
++            })
++            .collect();
+         jobs.push(Job {
+             category: Category::Texture,
+             label,
+             work: 1 + (resource.len() as u64).div_ceil(256 << 10),
+             estimated_bytes: estimate,
++            outputs: Some(outputs),
+             run: Box::new(move |sink| emit_base_rasters(&resource, sink, &layout)),
+         });
+     }
+@@ -1552,6 +1571,16 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+         for name in &mut variant.names {
+             *name = layout.pngs[name].clone();
+         }
++        let outputs = variant
++            .names
++            .iter()
++            .zip(&variant.picture.levels)
++            .map(|(name, level)| Output {
++                name: name.clone(),
++                optional: false,
++                extent: Some((level.width as u32, level.height as u32)),
++            })
++            .collect();
+         let label = variant.names.first().cloned().unwrap_or_default();
+         let estimate = variant
+             .picture
+@@ -1564,6 +1593,7 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+             label,
+             work: 1,
+             estimated_bytes: estimate,
++            outputs: Some(outputs),
+             run: Box::new(move |sink| emit_variant(variant, sink)),
+         });
+     }
+@@ -1589,6 +1619,7 @@ pub fn plan_source(inventory: &super::inventory::Inventory) -> CoreResult<Textur
+                 label: name.clone(),
+                 work: 1 + (estimated_bytes as u64).div_ceil(256 << 10),
+                 estimated_bytes,
++                outputs: None,
+                 run: Box::new(move |sink| {
+                     sink.submit(name, ArtifactBytes::Owned(bytes), Category::Texture)
+                 }),
+@@ -1630,12 +1661,16 @@ fn plan_root_resource(
+     if !possible_texture(resource.len() as u64, key)? {
+         return Ok(None);
+     }
+-    if !resource.bytes().windows(4).any(|signature| {
+-        signature == b"TIM2"
+-            || signature == b"IMG\0"
+-            || signature == b"IM2\0"
+-            || signature == b"IM3\0"
+-    }) {
++    // The index has looked for the signatures in every root it read whole; any other is read for them here.
++    let signed = inventory.texture_signature(key).unwrap_or_else(|| {
++        resource.bytes().windows(4).any(|signature| {
++            signature == b"TIM2"
++                || signature == b"IMG\0"
++                || signature == b"IM2\0"
++                || signature == b"IM3\0"
++        })
++    });
++    if !signed {
+         if texture_extension {
+             return Err(fail(format!(
+                 "unrecognized standalone texture format: {key}"
+@@ -1643,15 +1678,17 @@ fn plan_root_resource(
+         }
+         return Ok(None);
+     }
++    // Read once: from a disc image each `bytes` is a read of its own.
++    let bytes = resource.bytes();
+     let no_write = |_: &str, _: usize, _: usize, _: &[u8]| Ok(());
+-    let transformed = unit.transform(&no_write, &resource.bytes(), key, 0)?;
++    let transformed = unit.transform(&no_write, &bytes, key, 0)?;
+     if transformed.is_some() && texture_extension {
+         return Err(fail(format!(
+             "unrecognized standalone texture format: {key}"
+         )));
+     }
+     if let Some(next) = transformed {
+-        if parse_pack(&resource.bytes()).is_none() && next != *resource.bytes() {
++        if parse_pack(&bytes).is_none() && next != *bytes {
+             unit.edits
+                 .insert(key.to_owned(), TextureEdit::Replace(next));
+         }
+@@ -2578,6 +2615,7 @@ mod tests {
+             label,
+             work: 1,
+             estimated_bytes: 1,
++            outputs: None,
+             run: Box::new(|_| Ok(())),
+         };
+         let plan = TexturePlan {
+diff --git a/src/rust/zip_archive.rs b/src/rust/zip_archive.rs
+index e768ae1..ad877ab 100644
+--- a/src/rust/zip_archive.rs
++++ b/src/rust/zip_archive.rs
+@@ -145,7 +145,36 @@ struct Entry {
+     crc: u32,
+     compressed: u64,
+     size: u64,
+-    data: u64,
++    /// Offset of the entry's local header.
++    local: u64,
++    /// Offset of the entry's data, once its local header is checked: at open for a mapped archive, at the
++    /// entry's first read for one read through its file.
++    data: std::sync::OnceLock<u64>,
++}
++
++/// Checks a local header (and the name after it, `header` holding both) against its central entry and gives the
++/// entry's data offset.
++fn local_data_offset(header: &[u8], entry: &Entry, directory_offset: u64) -> CoreResult<u64> {
++    let name = &entry.name;
++    if header.len() < LOCAL_HEADER
++        || u32_at(header, 0) != LOCAL_SIGNATURE
++        || u16_at(header, 8) != entry.method
++    {
++        return Err(fail(format!("invalid local header: {name}")));
++    }
++    let local_name_length = u16_at(header, 26) as usize;
++    let local_extra_length = u16_at(header, 28) as u64;
++    if local_name_length != name.len() || header[LOCAL_HEADER..] != *name.as_bytes() {
++        return Err(fail(format!("local header name mismatch: {name}")));
++    }
++    let data = entry.local + LOCAL_HEADER as u64 + local_name_length as u64 + local_extra_length;
++    if data
++        .checked_add(entry.compressed)
++        .is_none_or(|end| end > directory_offset)
++    {
++        return Err(fail(format!("entry data outside archive: {name}")));
++    }
++    Ok(data)
+ }
+ 
+ enum Backing {
+@@ -159,6 +188,8 @@ pub struct Archive {
+     backing: Backing,
+     length: u64,
+     entries: Vec<Entry>,
++    /// Where the central directory starts: every entry's data ends before it.
++    directory_offset: u64,
+ }
+ 
+ #[cfg(windows)]
+@@ -206,15 +237,62 @@ fn decompress_exact(source: &[u8], out: &mut [u8]) -> CoreResult<()> {
+     Ok(())
+ }
+ 
++/// Where an appended entry lies in a growing archive: enough to read it back before the archive is sealed.
++#[derive(Clone, Debug)]
++pub struct Placed {
++    pub name: String,
++    pub method: u16,
++    pub crc: u32,
++    pub compressed: u64,
++    pub size: u64,
++    /// Offset of the entry's data in the file.
++    pub data: u64,
++    /// Bytes the entry added to the file, its header and padding included.
++    pub written: u64,
++}
++
++/// Reads one placed entry's uncompressed bytes into `out` and verifies its CRC-32.
++pub fn read_placed(file: &File, placed: &Placed, out: &mut [u8]) -> CoreResult<()> {
++    if out.len() as u64 != placed.size {
++        return Err(fail(format!(
++            "buffer size {} does not match entry size {}: {}",
++            out.len(),
++            placed.size,
++            placed.name
++        )));
++    }
++    if placed.method == METHOD_STORED {
++        read_exact_at(file, out, placed.data)?;
++    } else {
++        let mut source = vec![0u8; placed.compressed as usize];
++        read_exact_at(file, &mut source, placed.data)?;
++        decompress_exact(&source, out).map_err(|e| fail(format!("{}: {e}", placed.name)))?;
++    }
++    if crc32fast::hash(out) != placed.crc {
++        return Err(fail(format!("CRC mismatch: {}", placed.name)));
++    }
++    Ok(())
++}
++
++/// Reads the first bytes of a stored placed entry. Its CRC is not checked: that takes the whole entry.
++pub fn read_placed_prefix(file: &File, placed: &Placed, out: &mut [u8]) -> CoreResult<()> {
++    if placed.method != METHOD_STORED || out.len() as u64 > placed.size {
++        return Err(fail(format!("no stored prefix to read: {}", placed.name)));
++    }
++    read_exact_at(file, out, placed.data)?;
++    Ok(())
++}
++
+ impl Archive {
+     /// Opens and validates an archive's central directory, preferring a memory map. On iOS it is read with
+     /// positioned reads instead: a map of the whole published archive, about 4 GB, takes address space the app
+     /// does not have to spare, so the disc image's mappings during verification or the game's arenas after
+     /// an extraction could no longer be placed.
+     pub fn open(path: &Path) -> CoreResult<Archive> {
+-        let map = !cfg!(any(target_os = "ios", kazarov_mapped_source));
++        // The browser has no file mappings, and a 3.8 GB archive does not fit its 4 GiB of memory.
++        let map = !cfg!(any(target_os = "ios", target_os = "emscripten", kazarov_mapped_source));
+         let context = |error: CoreError| fail(format!("{}: {error}", path.display()));
+-        let file = File::open(path).map_err(|e| context(e.into()))?;
++        let file = super::archive::open_read(path).map_err(|e| context(e.into()))?;
+         let length = file.metadata().map_err(|e| context(e.into()))?.len();
+         // SAFETY: archives are treated as immutable while open; concurrent truncation
+         // by another process is outside the supported contract.
+@@ -232,8 +310,9 @@ impl Archive {
+             backing,
+             length,
+             entries: Vec::new(),
++            directory_offset: 0,
+         };
+-        archive.entries = archive.parse().map_err(context)?;
++        (archive.entries, archive.directory_offset) = archive.parse().map_err(context)?;
+         Ok(archive)
+     }
+ 
+@@ -253,7 +332,7 @@ impl Archive {
+         }
+     }
+ 
+-    fn parse(&self) -> CoreResult<Vec<Entry>> {
++    fn parse(&self) -> CoreResult<(Vec<Entry>, u64)> {
+         if self.length < END_RECORD as u64 {
+             return Err(fail("not a ZIP archive"));
+         }
+@@ -396,38 +475,47 @@ impl Archive {
+             if method == METHOD_STORED && compressed != size {
+                 return Err(fail(format!("stored entry size mismatch: {name}")));
+             }
+-            let local_header = self.bytes(local, LOCAL_HEADER as u64)?;
+-            if u32_at(&local_header, 0) != LOCAL_SIGNATURE || u16_at(&local_header, 8) != method {
+-                return Err(fail(format!("invalid local header: {name}")));
+-            }
+-            let local_name_length = u16_at(&local_header, 26) as u64;
+-            let local_extra_length = u16_at(&local_header, 28) as u64;
+-            if self
+-                .bytes(local + LOCAL_HEADER as u64, local_name_length)?
+-                .as_ref()
+-                != raw_name
+-            {
+-                return Err(fail(format!("local header name mismatch: {name}")));
+-            }
+-            let data = local + LOCAL_HEADER as u64 + local_name_length + local_extra_length;
+-            if data
+-                .checked_add(compressed)
++            if local
++                .checked_add(LOCAL_HEADER as u64 + name_length as u64)
+                 .is_none_or(|end| end > directory_offset)
+             {
+-                return Err(fail(format!("entry data outside archive: {name}")));
++                return Err(fail(format!("local header outside archive: {name}")));
+             }
+-            entries.push(Entry {
++            let entry = Entry {
+                 name,
+                 method,
+                 crc,
+                 compressed,
+                 size,
+-                data,
+-            });
++                local,
++                data: std::sync::OnceLock::new(),
++            };
++            // A mapped archive checks every local header now, which costs nothing; one read through its file
++            // checks each when it is first read (`Archive::data`), as tens of thousands of reads at open are
++            // slow where each is a round trip (the browser's storage).
++            if matches!(self.backing, Backing::Mapped(_)) {
++                let data = local_data_offset(
++                    &self.bytes(local, (LOCAL_HEADER + name_length) as u64)?,
++                    &entry,
++                    directory_offset,
++                )?;
++                let _ = entry.data.set(data);
++            }
++            entries.push(entry);
+             at = next;
+         }
+         check_unique(entries.iter().map(|entry| entry.name.as_str()))?;
+-        Ok(entries)
++        Ok((entries, directory_offset))
++    }
++
++    /// The entry's data offset, checking its local header on first use.
++    fn data(&self, entry: &Entry) -> CoreResult<u64> {
++        if let Some(data) = entry.data.get() {
++            return Ok(*data);
++        }
++        let header = self.bytes(entry.local, (LOCAL_HEADER + entry.name.len()) as u64)?;
++        let data = local_data_offset(&header, entry, self.directory_offset)?;
++        Ok(*entry.data.get_or_init(|| data))
+     }
+ 
+     pub fn path(&self) -> &Path {
+@@ -465,8 +553,9 @@ impl Archive {
+         self.entries[index].method == METHOD_STORED
+     }
+ 
+-    pub fn data_offset(&self, index: usize) -> u64 {
+-        self.entries[index].data
++    /// The entry's data offset; an archive read through its file checks the entry's local header here first.
++    pub fn data_offset(&self, index: usize) -> CoreResult<u64> {
++        self.data(self.entry(index)?)
+     }
+ 
+     /// Reads one entry's uncompressed bytes into `out` and verifies its CRC-32.
+@@ -480,13 +569,14 @@ impl Archive {
+                 entry.name
+             )));
+         }
++        let data = self.data(entry)?;
+         if let (Backing::File(file), METHOD_STORED) = (&self.backing, entry.method) {
+             // Straight into the caller's buffer, without a copy of the whole entry in between.
+-            read_exact_at(file, out, entry.data)?;
++            read_exact_at(file, out, data)?;
+         } else if entry.method == METHOD_STORED {
+-            out.copy_from_slice(&self.bytes(entry.data, entry.compressed)?);
++            out.copy_from_slice(&self.bytes(data, entry.compressed)?);
+         } else {
+-            let source = self.bytes(entry.data, entry.compressed)?;
++            let source = self.bytes(data, entry.compressed)?;
+             decompress_exact(&source, out)
+                 .map_err(|e| fail(format!("{}: {}: {e}", self.path.display(), entry.name)))?;
+         }
+@@ -526,7 +616,7 @@ impl Archive {
+             .map(|index| {
+                 let entry = &self.entries[index];
+                 let bytes = if entry.method == METHOD_STORED {
+-                    let bytes = self.bytes(entry.data, entry.size)?;
++                    let bytes = self.bytes(self.data(entry)?, entry.size)?;
+                     if crc32fast::hash(&bytes) != entry.crc {
+                         return Err(fail(format!("CRC mismatch: {}", entry.name)));
+                     }
+@@ -644,7 +734,18 @@ impl StreamWriter {
+         Ok(Self(ProgressiveWriter::new(output)?))
+     }
+ 
+-    pub(crate) fn append(&mut self, entry: PreparedEntry) -> CoreResult<u64> {
++    /// The file the stream grows in until it is finished.
++    pub(crate) fn partial(&self) -> &Path {
++        &self.0.partial
++    }
++
++    /// Hands every appended byte to the file, so another handle can read it.
++    pub(crate) fn flush(&mut self) -> CoreResult<()> {
++        self.0.out.inner.flush()?;
++        Ok(())
++    }
++
++    pub(crate) fn append(&mut self, entry: PreparedEntry) -> CoreResult<Placed> {
+         if self.0.contains_name(&entry.name) {
+             return Err(fail(format!(
+                 "archive entry names collide ignoring case: {}",
+@@ -656,14 +757,24 @@ impl StreamWriter {
+             PreparedPayload::Compressed(bytes) => bytes.len() as u64,
+         };
+         let local = self.0.out.position;
+-        self.0.out.put(&local_header(
++        let header = local_header(
+             &entry.name,
+             entry.method,
+             entry.crc,
+             compressed,
+             entry.size,
+             local,
+-        ))?;
++        );
++        let mut placed = Placed {
++            name: entry.name.clone(),
++            method: entry.method,
++            crc: entry.crc,
++            compressed,
++            size: entry.size,
++            data: local + header.len() as u64,
++            written: 0,
++        };
++        self.0.out.put(&header)?;
+         match &entry.payload {
+             PreparedPayload::Stored(bytes) => self.0.out.put(&bytes.as_slice())?,
+             PreparedPayload::Compressed(bytes) => self.0.out.put(bytes)?,
+@@ -683,7 +794,8 @@ impl StreamWriter {
+         });
+         self.0.seen.insert(entry.name.to_ascii_lowercase());
+         self.0.exact_names.insert(entry.name);
+-        Ok(self.0.out.position - local)
++        placed.written = self.0.out.position - local;
++        Ok(placed)
+     }
+ 
+     pub(crate) fn finish(self) -> CoreResult<Written> {
+@@ -1215,10 +1327,10 @@ mod tests {
+             assert_eq!(archive.size(index), expected.len() as u64);
+             assert_eq!(archive.crc(index), crc32fast::hash(expected));
+             assert_eq!(archive.read(index).unwrap(), *expected);
+-            assert_eq!(archive.data_offset(index) % ALIGNMENT, 0);
++            assert_eq!(archive.data_offset(index).unwrap() % ALIGNMENT, 0);
+             assert_eq!(archive.stored(index), stored_by_name(name));
+             if archive.stored(index) {
+-                let at = archive.data_offset(index) as usize;
++                let at = archive.data_offset(index).unwrap() as usize;
+                 assert_eq!(&bytes[at..at + expected.len()], expected.as_slice());
+             }
+         }
+@@ -1314,7 +1426,7 @@ mod tests {
+         let index = (0..archive.len())
+             .find(|&i| archive.name(i) == "a/texture.png")
+             .unwrap();
+-        let at = archive.data_offset(index) as usize;
++        let at = archive.data_offset(index).unwrap() as usize;
+         drop(archive);
+         let mut bytes = fs::read(&output).unwrap();
+         bytes[at] ^= 0xff;
+@@ -1414,7 +1526,7 @@ mod tests {
+         let (output, files) = packed(temp.path());
+         let mut archive = Archive::open(&output).unwrap();
+         archive.backing = Backing::File(File::open(&output).unwrap());
+-        archive.entries = archive.parse().unwrap();
++        (archive.entries, archive.directory_offset) = archive.parse().unwrap();
+         for index in 0..archive.len() {
+             let expected = &files
+                 .iter()

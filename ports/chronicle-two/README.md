@@ -4,15 +4,15 @@ This integration embeds MoonMod / MoonFactory in the Chronicle Two PC port. It i
 shared Lua and native plugin runtime, Chronicle Two adapter, Mod Manager, game hooks, vendored
 Lua 5.5.1, native tests, and a two-launch executable smoke test. No retail data is distributed.
 
-The supported source revision is **7a7d7f29ae544a04e65634278d244b785d801066** of
-[TheMoonPeople/ChronicleTwo](https://github.com/TheMoonPeople/ChronicleTwo) (its `master` of November 2, 2026),
-with Kazarov at **fd72338a6aebf5c119947bb3150bba580217fec9**, the submodule commit that revision pins. The
+The supported source revision is **bcd1967255b238c745cb7f6ac085e2119207a60a** of
+[TheMoonPeople/ChronicleTwo](https://github.com/TheMoonPeople/ChronicleTwo) (its `master` of November 13, 2026),
+with Kazarov at **584cd2ef008d8c51b519b6e8d36212e49e8215dc**, the submodule commit that revision pins. The
 installer pins these revisions; applying this patch to newer upstream source is not verified.
 
 | File | Purpose |
 | --- | --- |
 | `moonfactory-chronicle-two.patch` | Game adapter, runtime, UI, engine hooks, and tests. |
-| `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule, and the camera matching the aerial dungeon map needs (a tick that draws through several cameras keeps each one's interpolation). |
+| `moonfactory-kazarov.patch` | Required digital/analog input polling in the Kazarov submodule, the camera matching the aerial dungeon map needs (a tick that draws through several cameras keeps each one's interpolation), the movie muxer building with FFmpeg 6 as well as 7, and the web build's changes (most of them under `__EMSCRIPTEN__`). |
 | `apply-moonfactory.ps1` | Pins source revisions, checks both patches, and applies them. |
 | `verify-headless.ps1` | Builds and runs the Chronicle Two MoonMod native tests; optionally checks executable startup. |
 
@@ -20,7 +20,8 @@ installer pins these revisions; applying this patch to newer upstream source is 
 
 Chronicle Two now keeps its native game sources in `port/` itself (`port/src/<domain>/<unit>.cpp`, declarations in
 `port/include/`), so MoonFactory edits them in place; there is no build-time copy of `ps2/src` to patch any more, and
-the patch does not touch `ps2/` at all. MoonFactory's own code lives in `port/src/moonmod/` and
+the patch touches `ps2/` in one line only (`ps2/include/savedatadungeon.hpp` drops a size check that
+`Records.Check` reads against `docs/port/records.md`; the port does not compile that header). MoonFactory's own code lives in `port/src/moonmod/` and
 `port/include/moonmod/`, with its Lua 5.5.1 in `port/third_party/lua-5.5.1/`. The game's code carries only what has to
 live there: capacity constants (`AUTOMAP_ROOM_MAX`, the item and weapon table sizes, the dungeon grid's room for mod
 floors), one-line hooks that call into `port/src/moonmod/`, and the declarations those hooks need in
@@ -88,6 +89,32 @@ capabilities before using game operations. The broader roadmap and historical ve
 describe work from the original development workspace; they are not a new retail validation of this
 distributed patch. Authored model rigs, fighting styles, independent dungeon graphs, and other open
 items remain unsupported. Test with an isolated save before using an existing playthrough.
+
+## Regenerated on November 15, 2026
+
+The patches were regenerated for ChronicleTwo `bcd19672` and Kazarov `584cd2ef` (`export_moonmod_patch.py` in the
+engine tree): the tree patch has 290 files and the Kazarov patch 29. Both apply cleanly (`git apply --check`) to a
+fresh checkout of upstream at that revision with Kazarov at its pin, and the patched checkout is file for file the
+engine tree in `port/` (but `port/web`), `scripts/`, `docs/`, `ps2/`, `tools/kazarov` and the two CMake files.
+
+A Linux Debug build of that patched checkout (clang 20 with libc++, Ubuntu 24.04 under WSL) built `darkchronicle`
+and `darkchronicle_tests`. What `verify-headless.ps1` runs (the `MoonMod*` cases, `Smoke.HeadlessFramesScreenshot`
+and `Records.Check`) is 126 cases: 124 pass and 2 skip (First Steps when the example package is not beside the
+checkout, and `MoonModNet.AHostAndAGuestMeetThroughTheRelay` when `DC2_COOP_RELAY` names no relay).
+
+In the engine tree itself, which is the same source:
+
+- with a local relay, the 35 co-op cases (`MoonModNet`, `MoonModCoop`) pass and two headless games meet through it;
+- the whole CPU suite is 2521 cases: 2475 pass, 32 do not run, and 14 fail. Ten of those are upstream's
+  crash-handler and log-file cases, known to fail there; four are `SaveSlotTest` cases that time out when the suite
+  runs six at a time and pass run alone;
+- with the owner's own disc (no retail data is distributed), the title screen, three scripted smokes, a determinism
+  check and three golden frames pass.
+
+Upstream renamed the monsters' Luau scripts. A native monster's `script` is now a name such as `sewer_rat` where it
+was the model's name (`e201a`); the `model` field is unchanged. Mods that compare `script` need the new names.
+
+Not checked: a Windows build, the browser build with these sources, and newer upstream commits.
 
 ## Verification on November 2, 2026
 
