@@ -264,6 +264,46 @@ local function hear_position(peer, rest)
              z = S.num(z), heading = S.num(heading), motion = math.floor(S.num(motion))}
 end
 
+-- Shots and spells (Chronicle Two): what a player's hero fires on a floor (Max's guns, Monica's magic, her magic
+-- sword's charge) and the trails of their blade's swings are sent as they happen ("F scene kind x y z dx dy dz value
+-- amount target frames", player.effects_take's entries), and the others draw them from that player's hero
+-- (world.avatar_effect): the same shot flying the same way, striking nothing there, since its hits are the firing
+-- game's and reach the monsters as that game's other hits do.
+S.shots = {MOST = 8} -- shots sent in one frame at most (a machine gun fires one a frame)
+function S.shots.send()
+  if not (game.player and game.player.effects_take) then return end
+  local taken = try(game.player.effects_take) -- (taken every frame, so none wait to be sent late)
+  local list = type(taken) == "table" and taken.effects or nil
+  if type(list) ~= "table" or not on_floor() or not next(others) then return end
+  for i, f in ipairs(list) do
+    if i > S.shots.MOST then break end
+    if type(f) == "table" then
+      -- (a blade's trail names its two frames, "frame0,frame1"; a shot has none, "-")
+      local frames = "-"
+      if type(f.frame0) == "string" and type(f.frame1) == "string" and f.frame0:match("^[%w_]+$") and f.frame1:match("^[%w_]+$") then
+        frames = f.frame0 .. "," .. f.frame1
+      end
+      send("all", "F", string.format("%s %d %.1f %.1f %.1f %.4f %.4f %.4f %d %.3f %d %s", my_scene, math.floor(S.num(f.kind)),
+                                     S.num(f.x), S.num(f.y), S.num(f.z), S.num(f.dx), S.num(f.dy), S.num(f.dz),
+                                     math.floor(S.num(f.value)), S.num(f.amount), math.floor(S.num(f.target or -1)), frames))
+    end
+  end
+end
+function S.shots.hear(peer, rest)
+  if #rest > 200 then return end
+  local scene, kind, x, y, z, dx, dy, dz, value, amount, target, frames =
+    rest:match("^(%S+) (%d) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%S+) (%-?%d+) ?(%S*)$")
+  local frame0, frame1 = (frames or ""):match("^([%w_]+),([%w_]+)$")
+  local o = others[peer]
+  -- (a shot on a floor this game is not on, or from a hero not shown here, is not drawn)
+  if not scene or not o or not o.slot or scene ~= my_scene or o.scene ~= scene then return end
+  value, target = tonumber(value), tonumber(target)
+  if not value or value < -1 or value > 65535 or not target or target < -1 or target > 255 then return end
+  try(game.world and game.world.avatar_effect, {slot = o.slot, kind = tonumber(kind), x = S.num(x), y = S.num(y), z = S.num(z),
+                                                 dx = S.num(dx), dy = S.num(dy), dz = S.num(dz), value = value,
+                                                 amount = S.num(amount), target = target, frame0 = frame0, frame1 = frame1})
+end
+
 -- Places' names (Chronicle Two, whose maps have names of their own): a game says what the place it stands in is
 -- called ("W scene name") when it gets there and to a player who joins, so an offer can say "Sindain" or "Max's
 -- House" for a map only the other game has seen.
@@ -2519,6 +2559,7 @@ local function message(peer, data)
   if kind == "RV" then fall.revived(peer, rest) return end
   if kind == "THX" then fall.thanked(peer, rest) return end
   if kind == "P" then hear_position(peer, rest) return end
+  if kind == "F" then S.shots.hear(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "W" then hear_place(rest) return end
   if kind == "O" then hear_outfit(peer, rest) return end
@@ -2734,7 +2775,7 @@ moonmod.on("game.tick", function(e)
     send_position()
     show_others()
   end
-  if S.role and S.code then mon.tick() end
+  if S.role and S.code then mon.tick(); S.shots.send() end
   if S.role then together.tick(); together.retry() end
   if S.role and S.code and S.frame % 10 == 0 then door.step() end
   if S.role == "host" and S.code and S.frame % CLOCK_EVERY == 0 then send_clock() end

@@ -689,6 +689,28 @@ assertion, which is not co-op's). The polish pass is the engine's second local c
 nothing in MoonMod is committed; the play copy and DC_Web are as they were. `ridepod` (a live scenario for the
 ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 note.
 
+**After the first hand playtest (2026-11-15, night).**
+- A monster one game could see was invisible in the other, though it could still be struck. The copies of the
+  leader's monsters (puppets) never ran the game's own view check (`CMonsterMan::ThinkHost`'s `CheckView` and its
+  fade), since their thinking is paused, so a copy that began out of view stayed faded out. `PuppetSight` in
+  `coop_world_moonmod.cpp` now runs the check for each copy every frame, from this game's hero and camera, and
+  `monsters.mirror_get` says `seen`. Live: the driver logs the copies near the visitor's hero and how many are
+  seen; in `hurt` every one near was seen (91 of 91 looks), and `hurt` 11/11 and `floor` 15/15 pass.
+- Shots and spells are seen on the other screen. The engine notes each shot this game's own hero fires (Max's
+  pistol, machine gun, launcher and laser, Monica's armband magic and her magic sword's charge; `HeroFired` in the
+  `Shot*` functions of `actscript.cpp`), `player.effects_take` hands them to the mod, which sends each at once
+  ("F scene kind x y z dx dy dz value amount target"), and the other game draws it from that player's avatar
+  (`world.avatar_effect`): the same effect, or the same bullet, grenade or beam, flying the same way. Nothing drawn
+  this way strikes: no collision primitive is made for it, and an effect marked `shown_only` makes none from its
+  script (`_COLPRIM_CREATE`); the hits stay the firing game's, as before. An effect the other game has not loaded
+  (its own hero is the other one) is loaded on first use, as the floor's scripts load theirs. The blade's trail goes
+  the same way (`HeroSwung` in `CActionChara::StepEffect`): the avatar has a trail of its own, made as the game makes
+  the hero's, and starts it between the same two frames of its weapon. Live: on the visitor's floor the driver draws
+  each kind from the host's avatar every five seconds; in `hurt` and `floor` every one was drawn (gun, machine gun,
+  grenade, laser, trail), and both pass (11/11, 15/15). Not carried yet: a thrown item held over the head and its
+  flight, the ridepod's rockets and missiles (its machine gun is), and the sounds of the shots. Monica's magic is
+  drawn by the same path as the gun's bullet, but no live run has fired it (the harness has no way to cast).
+
 ## 7. Risks
 
 - **Nothing here has met the real game.** K1 may find that avatars, copies or doors need rework, not fixes. It

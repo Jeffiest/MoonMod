@@ -94,6 +94,17 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   monsters stop being drawn. `down = true` lays the hero down (it holds its motion's last frame, so send the knockout
   motion): the monsters pass it by and no blow lands on it.
 
+- Shots, spells and trails (co-op, Chronicle Two). `player.effects_take()` (`game.read`) gives what this game's own
+  hero fired on the floor since the last call, oldest first, and forgets them: `{effects = {{kind, x, y, z, dx, dy, dz,
+  value, amount, target, frame0?, frame1?}, ...}}`. `kind` 1 Max's pistol, 2 a machine gun's bullet (his or the
+  ridepod's), 3 a grenade, 4 a laser (`value` its look, 0-2), 5 Monica's magic or her magic sword's charge (`value`
+  the effect's number, `amount` its tint, `target` the monster's scene slot it was aimed at), 6 the blade's trail
+  (`frame0` and `frame1` the weapon's frames it runs between, `value` its length, `amount` the steps it fades over,
+  `target` the steps it holds first). Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
+  (`game.write`) draws another player's from their avatar: the same effect, flying the same way, striking nothing in
+  this game (it makes no attack, and an effect's own script makes none either). `{shown = false}` when that avatar is
+  not on this floor or the effect can't be made; an effect this game hasn't loaded is loaded on first use.
+
 - Down, not out (co-op). `player.down_rule_set({enabled})` (`game.write`): while it is on, a party knocked out on a
   dungeon floor (no one left to switch to, and no Revival Powder: the powder still works first) doesn't get the game
   over. The hero lies on its knockout motion, the monsters pass it by, and `player.get().down` is true, until the mod

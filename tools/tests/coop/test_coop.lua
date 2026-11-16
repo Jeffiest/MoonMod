@@ -34,6 +34,7 @@ local function make_game(name, opts)
   S.slot_writes = {}
   S.applied = {}
   S.hero_log = {}
+  S.shots_out, S.shots_drawn = {}, {} -- the hero's shots (player.effects_take), and the others' drawn here
   local env = setmetatable({}, {__index = _G})
   env.moonmod = {
     on = function(event, fn) S.handlers[event] = S.handlers[event] or {}; table.insert(S.handlers[event], fn) end,
@@ -77,6 +78,7 @@ local function make_game(name, opts)
       transition = function(a) S.entered[#S.entered + 1] = "to " .. a.id; return {queued = true} end,
       set_time = function(a) S.clock = a.fraction; S.clock_sets = (S.clock_sets or 0) + 1; return {time = {fraction = a.fraction}} end,
       avatar_set = function(a) S.avatars[a.slot] = a; return {slot = a.slot, shown = true} end,
+      avatar_effect = function(a) S.shots_drawn[#S.shots_drawn + 1] = a; return {shown = true} end,
       avatar_clear = function(a) if a and a.slot then S.avatars[a.slot] = nil else S.avatars = {} end; return {cleared = true} end,
       -- Chronicle Two's shared world (opts.shared): what the game is asked to watch, and the changes it is given
       watch_set = opts.shared and function(a) S.watching = a.enabled; return {enabled = a.enabled} end or nil,
@@ -88,6 +90,7 @@ local function make_game(name, opts)
     },
     player = {
       get = function() return S.player end,
+      effects_take = function() local out = S.shots_out; S.shots_out = {}; return {effects = out} end,
       down_rule_set = function(a) S.down_rule = a.enabled; return {enabled = a.enabled} end,
       revive = function(a)
         if not S.player.down then return nil, {message = "the player isn't down"} end
@@ -386,10 +389,26 @@ do
   h.player.position = {x = 300, y = 0, z = 200}
   both(h, g, 48)
   check(g.avatars[1] and g.avatars[1].x == 300, "the host's moves reach the guest")
+  -- the host fires: the guest draws the shot from the host's hero, as it flew
+  h.shots_out = {{kind = 5, x = 300, y = 10, z = 200, dx = 0, dy = 0, dz = 1, value = 41, amount = 0.75, target = 25}}
+  both(h, g, 4)
+  local shot = g.shots_drawn[1]
+  check(#g.shots_drawn == 1 and shot.slot == 1 and shot.kind == 5 and shot.x == 300 and shot.dz == 1 and shot.value == 41 and
+        math.abs(shot.amount - 0.75) < 0.001 and shot.target == 25 and #h.shots_drawn == 0,
+        "a shot the host fires is drawn on the guest's floor from the host's hero, once")
+  h.shots_out = {{kind = 6, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 12, amount = 8, target = 2, frame0 = "sw_00", frame1 = "sw01"}}
+  both(h, g, 4)
+  local swing = g.shots_drawn[2]
+  check(#g.shots_drawn == 2 and swing.kind == 6 and swing.frame0 == "sw_00" and swing.frame1 == "sw01" and swing.value == 12,
+        "and the trail of the host's blade, between the same two frames")
+  table.remove(g.shots_drawn)
   -- the guest goes down a floor: each is out of the other's sight
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 99}
   both(h, g, 48)
   check(g.avatars[1] == nil and h.avatars[1] == nil, "on different floors neither sees the other")
+  h.shots_out = {{kind = 1, x = 300, y = 10, z = 200, dx = 0, dy = 0, dz = 1}}
+  both(h, g, 4)
+  check(#g.shots_drawn == 1, "and the host's shots aren't drawn on another floor")
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 4242}
   both(h, g, 48)
   check(h.avatars[1] ~= nil, "back on the same floor, the host sees the guest again")

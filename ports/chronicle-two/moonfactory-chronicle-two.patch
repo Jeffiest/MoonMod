@@ -1809,6 +1809,18 @@ index 3b6f404d..77428a79 100644
 + * answers 1, as retail does.
 + */
 +int CheckEditWalkSpot(CScene *scene, const float *spot, float *position);
+diff --git a/port/include/effscript.hpp b/port/include/effscript.hpp
+index 9775764b..ab163513 100644
+--- a/port/include/effscript.hpp
++++ b/port/include/effscript.hpp
+@@ -325,6 +325,7 @@ struct _EFF_SCRIPT {
+     _EFF_SCRIPT  *prev{};                     /**< Previous effect in the manager's list, which is ordered by texture block. */
+     _EFF_SCRIPT  *next{};                     /**< Next effect in the manager's list. */
+     u_char        unk_148[0x8]{};
++    bool          shown_only{}; /**< MoonMod co-op: another player's shot drawn here; its script makes no attack. */
+ };
+ 
+ STATIC_ASSERT(sizeof(_EFF_SCRIPT) == 0x150);
 diff --git a/port/include/gamedata.hpp b/port/include/gamedata.hpp
 index 3da0892f..7e3da8b7 100644
 --- a/port/include/gamedata.hpp
@@ -2907,10 +2919,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..37927324
+index 00000000..8ad96453
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,331 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3027,6 +3039,39 @@ index 00000000..37927324
 +// font in the 2D pass after the scene, with its camera: the choice panel's Draw2D calls it first, so a panel lies
 +// over them.
 +void DrawAvatarNames();
++
++// ---- What a hero fires: shots and spells seen on the other screens (coop_world_moonmod.cpp) -------------------------
++// actscript.cpp tells each shot this game's own hero fires (HeroFired); player.effects_take gives them to the mod,
++// whose peers draw them from that player's avatar (world.avatar_effect): the same effect, flying the same way, with no
++// attack in it (the shot's damage is the firing game's own, and reaches the host's monsters as that game's hits do).
++
++enum class HeroShot : int {
++    Gun = 1,        // Max's pistol: the bullet and the muzzle flash
++    MachineGun = 2, // Max's machine gun or the ridepod's: a bullet of the burst
++    Grenade = 3,    // Max's launcher: a grenade
++    Laser = 4,      // Max's laser: a beam (value: its look, LASER_VISUAL_*)
++    Magic = 5,      // Monica's armband or her magic sword's charge (value: the effect base, amount: its tint)
++    Trail = 6,      // a blade's trail: from frame0 to frame1 of the hero's weapon (value: its length, amount: the steps
++                    // it fades over, target: the steps it holds first); pos and dir are not used
++};
++struct HeroEffect {
++    int   kind = 0; // HeroShot
++    float pos[3] = {0.0f, 0.0f, 0.0f};
++    float dir[3] = {0.0f, 0.0f, 0.0f};
++    int   value = 0;
++    float amount = 0.0f;
++    int   target = -1; // the monster's scene slot the shot was aimed at (the same slot in every game), or -1
++    std::string frame0, frame1; // a trail's ends: frames of the weapon, by name
++};
++// actscript.cpp: a character fired; kept when it is this game's hero.
++void                    HeroFired(const void *chara, HeroShot kind, const float *pos, const float *dir, int value = 0,
++                                  float amount = 0.0f, int target = -1);
++// actionchara.cpp: a character's blade began a trail (CActionChara::StepEffect); kept when it is this game's hero.
++void                    HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold);
++std::vector<HeroEffect> TakeHeroEffects();
++// Draws another player's shot from avatar slot (0-2). False when the avatar is not on this floor or the effect can't
++// be made here.
++bool                    AvatarEffect(int slot, const HeroEffect &effect);
 +
 +// ---- Monsters: the host's (coop_world_moonmod.cpp) -----------------------------------------------------------------
 +
@@ -5141,10 +5186,10 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..87f32756
+index 00000000..6362652a
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,538 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5178,6 +5223,7 @@ index 00000000..87f32756
 +    {"player.down_rule_set", "player", "down_rule_set", "any", "game.write", "Co-op: {enabled}: while on, a hero whose life runs out on a floor goes down (player.get().down) and lies there instead of the game's death (change hero, or game over)."},
 +    {"player.revive", "player", "revive", "simulation", "game.write", "Co-op: stand a hero who is down back up with {hp}, where they lie or at {x, y, z}."},
 +    {"player.give_up", "player", "give_up", "simulation", "game.write", "Co-op: a hero who is down gives up: the game's own death runs."},
++    {"player.effects_take", "player", "effects_take", "any", "game.read", "Co-op: the shots and spells this game's hero fired on the floor since the last call ({effects = {kind, x, y, z, dx, dy, dz, value, amount, target}...}), for world.avatar_effect on the other games."},
 +    {"party.room_hero_set", "party", "room_hero_set", "any", "game.write", "Co-op: this game plays one hero, {hero = 'max' or 'monica'}, whatever the story's party says, until room_hero_clear; the other hero cannot be changed to, and nothing is written into the save."},
 +    {"party.room_hero_clear", "party", "room_hero_clear", "any", "game.write", "Co-op: the party is the story's again."},
 +    {"party.town_active", "party", "town_active", "simulation", "game.read", "Read Chronicle's selected playable body for the active town scene."},
@@ -5366,6 +5412,7 @@ index 00000000..87f32756
 +    {"dungeons.enter_floor", "dungeons", "enter_floor", "simulation", "game.write", "Enter floor floor_id of the current dungeon (or, from a town, of dungeon_id), built again from the start."},
 +    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
++    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell (an entry of their player.effects_take, with slot 1-3) as it flew in their game, striking nothing here."},
 +    {"world.enter_map", "world", "enter_map", "simulation", "game.write", "Co-op: walk into a town or one of its maps by map number (world.get().map_no), from a town or a dungeon floor."},
 +    {"world.watch_set", "world", "watch_set", "any", "game.read", "Co-op: {enabled}: tell this mod (game.world.changed) of each change this game makes to the save's shared world: story flags and counters, the story's progress, the story's party, joinable townsfolk, dungeon floor records, Georama parts in stock, items the story's scripts give (gift), and that a town's Georama changed (as it is built, part by part)."},
 +    {"world.change_apply", "world", "change_apply", "any", "game.write", "Co-op: write another game's change {kind, id, value} (as game.world.changed gives it) into this game's save without telling it back; a floor's record is merged."},
@@ -14908,10 +14955,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..87499c11
+index 00000000..d3aca1e1
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1045 @@
+@@ -0,0 +1,1093 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -15329,6 +15376,50 @@ index 00000000..87499c11
 +
 +// ---- Avatars and monsters ---------------------------------------------------------------------------------------------------
 +
++// player.effects_take: the shots and spells this game's hero fired since the last call, oldest first.
++ApiCallResult EffectsTakeCall(const Json &args) {
++    if (!args.is_array() || !args.empty()) return Invalid("player.effects_take takes no arguments");
++    Json effects = Json::array();
++    for (const HeroEffect &e : TakeHeroEffects()) {
++        Json entry = {{"kind", e.kind}, {"x", e.pos[0]}, {"y", e.pos[1]}, {"z", e.pos[2]}, {"dx", e.dir[0]}, {"dy", e.dir[1]},
++                      {"dz", e.dir[2]}, {"value", e.value}, {"amount", e.amount}, {"target", e.target}};
++        if (!e.frame0.empty()) {
++            entry["frame0"] = e.frame0;
++            entry["frame1"] = e.frame1;
++        }
++        effects.push_back(std::move(entry));
++    }
++    return Ok({{"effects", std::move(effects)}});
++}
++
++// world.avatar_effect: another player's shot, drawn from their avatar.
++ApiCallResult AvatarEffectCall(const Json &args) {
++    static constexpr const char *kUsage =
++        "expected {slot = 1-3, kind = 1-6, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil} (player.effects_take's entries)";
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
++    const Json &request = args[0];
++    std::string unknown;
++    if (!OnlyFields(request, {"slot", "kind", "x", "y", "z", "dx", "dy", "dz", "value", "amount", "target", "frame0", "frame1"}, unknown)) {
++        return Invalid("unknown field: " + unknown);
++    }
++    int        slot = 0;
++    HeroEffect e;
++    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 6, e.kind)) return Invalid(kUsage);
++    for (const char *key : {"frame0", "frame1"}) {
++        if (!request.contains(key) || request[key].is_null()) continue;
++        if (!request[key].is_string() || request[key].get<std::string>().size() > 31) return Invalid(kUsage);
++        (key[5] == '0' ? e.frame0 : e.frame1) = request[key].get<std::string>();
++    }
++    if (!ReadNumber(request, "x", e.pos[0], true) || !ReadNumber(request, "y", e.pos[1], true) || !ReadNumber(request, "z", e.pos[2], true) ||
++        !ReadNumber(request, "dx", e.dir[0], true) || !ReadNumber(request, "dy", e.dir[1], true) || !ReadNumber(request, "dz", e.dir[2], true) ||
++        !ReadNumber(request, "amount", e.amount, false)) {
++        return Invalid(kUsage);
++    }
++    if (request.contains("value") && !request["value"].is_null() && !ReadBoundedInt(request, "value", -1, 65535, e.value)) return Invalid(kUsage);
++    if (request.contains("target") && !request["target"].is_null() && !ReadBoundedInt(request, "target", -1, 255, e.target)) return Invalid(kUsage);
++    return Ok({{"shown", AvatarEffect(slot - 1, e)}});
++}
++
 +ApiCallResult AvatarSetCall(const Json &args) {
 +    static constexpr const char *kUsage =
 +        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, ridepod = {leg, arm, body, pack} item_nos or nil, form = monster_id or nil, x, y, z, heading, motion, tint = {r, g, b} or nil, name = text or nil, down = true or nil}";
@@ -15422,7 +15513,9 @@ index 00000000..87499c11
 +            const auto round = [](float v) { return std::round(v * 10.0f) / 10.0f; };
 +            monsters.push_back({{"slot", slot}, {"kind", m->monster_id}, {"state", m->state}, {"hp", m->life}, {"max_hp", m->max_life},
 +                                {"x", round(at[0])}, {"y", round(at[1])}, {"z", round(at[2])},
-+                                {"heading", std::round(rotation[1] * 1000.0f) / 1000.0f}, {"motion", MotionNumberOf(*m)}});
++                                {"heading", std::round(rotation[1] * 1000.0f) / 1000.0f}, {"motion", MotionNumberOf(*m)},
++                                // (drawn in this game: in sight of its hero, or fading in or out)
++                                {"seen", m->view_state != MONSTER_VIEW_OUT && m->view_state != MONSTER_VIEW_INIT && m->view_alpha > 0.0f}});
 +        }
 +    }
 +    Json hits = Json::array();
@@ -15859,6 +15952,8 @@ index 00000000..87499c11
 +        return Ok({{"kept", true}});
 +    }
 +    if (path == "world.avatar_set") return AvatarSetCall(args);
++    if (path == "world.avatar_effect") return AvatarEffectCall(args);
++    if (path == "player.effects_take") return EffectsTakeCall(args);
 +    if (path == "world.avatar_clear") {
 +        int slot = 0;
 +        if (!args.is_array() || args.size() > 1 ||
@@ -15914,7 +16009,7 @@ index 00000000..87499c11
 +                             "save.account_list", "save.account_remove", "save.slots_list", "save.slot_player_export", "save.slot_player_import",
 +                             "party.room_hero_set", "party.room_hero_clear", "world.watch_set", "world.change_apply",
 +                             "player.down_rule_set", "player.revive", "player.give_up",
-+                             "world.avatar_set", "world.avatar_clear", "world.enter_map",
++                             "world.avatar_set", "world.avatar_clear", "world.enter_map", "world.avatar_effect", "player.effects_take",
 +                             "monsters.mirror_get", "monsters.puppet_set", "monsters.puppet_clear", "monsters.mirror_hit",
 +                             "dungeons.set_seed", "dungeons.enter_floor", "dungeons.shared_events_get", "dungeons.shared_event_run",
 +                             "combat.strike_player", "items.owned", "georama.town_export", "georama.town_import", "ui.choice_open", "ui.choice_close",
@@ -18409,10 +18504,10 @@ index 00000000..a37531e1
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..a1389ad0
+index 00000000..c1d693f4
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1000 @@
+@@ -0,0 +1,1236 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -18422,6 +18517,7 @@ index 00000000..a1389ad0
 +
 +#include <algorithm>
 +#include <array>
++#include <cctype>
 +#include <cmath>
 +#include <cstdio>
 +#include <cstring>
@@ -18436,11 +18532,16 @@ index 00000000..a1389ad0
 +#include "dataread.hpp"
 +#include "dng_event.hpp"
 +#include "dng_main.hpp"
++#include "dng_object.hpp"
 +#include "editctrl.hpp"
++#include "effscript.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
++#include "maintex.hpp"
 +#include "menuchr.hpp"
++#include "cameracontrol.hpp"
 +#include "mglib.hpp"
++#include "mg_math.hpp"
 +#include "mg_memory.hpp"
 +#include "monster.hpp"
 +#include "savedata.hpp"
@@ -18799,6 +18900,8 @@ index 00000000..a1389ad0
 +    if (town == 0) hang(worn(a.target.weapon, CHARA_EQUIP_MELEE), 2, monica ? "sword_hand" : "ef00");
 +    if (town == 0 || monica) hang(worn(a.target.sub, CHARA_EQUIP_SUB), 3, monica ? "wr" : "gun_hand");
 +    hang(worn(a.target.head, CHARA_EQUIP_HEAD), 4, monica ? "ac" : "hat");
++    // The blade's trail, made as the game makes its hero's (charasetup.cpp, SetupMainUnit), for world.avatar_effect.
++    if (town == 0) SetSwordBlurEffect(body.get(), &a.stacks[2], character);
 +    return body;
 +}
 +
@@ -18862,6 +18965,49 @@ index 00000000..a1389ad0
 +    return count;
 +}
 +
++// A copy's sight is this game's own: whether it is near this game's hero, and its fade in and out of sight and away
++// from the camera, as CMonsterMan::ThinkHost works them out for a monster that thinks here. A copy's thinking rests
++// (DNG_PAUSE_MONSTER_AI), and with it all of that: a copy placed out of sight stayed out of sight, never drawn, while
++// blows still reached it.
++void PuppetSight(CActiveMonster *monster) {
++    auto *hero = DngMainScene != nullptr ? DngMainScene->GetCharacter(DNG_CHARA_SLOT_PARTY) : nullptr;
++    if (hero == nullptr) {
++        monster->view_state = MONSTER_VIEW_IN;
++        monster->view_alpha = 1.0f;
++        return;
++    }
++    float hero_at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    float own_at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    hero->GetPosition(hero_at);
++    monster->GetPosition(own_at);
++    monster->target_dist = mgDistVector(hero_at, own_at);
++    if (auto *camera = static_cast<CCameraControl *>(DngMainScene->GetCamera(DngMainScene->active_camera)); camera != nullptr) {
++        float camera_at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++        camera->GetPos(camera_at);
++        monster->camera_dist = mgDistVector(camera_at, own_at);
++    }
++    // (a copy is never put to rest for the number of monsters about: the leader already chose which ones act)
++    monster->CheckView(MONSTER_ACTIVE_MAX + 1);
++    if (monster->view_state == MONSTER_VIEW_FADE_OUT) {
++        monster->view_alpha -= 0.05f;
++        if (monster->view_alpha <= 0.0f) {
++            monster->view_alpha = 0.0f;
++            monster->view_state = MONSTER_VIEW_OUT;
++        }
++    } else if (monster->view_state == MONSTER_VIEW_FADE_IN) {
++        monster->view_alpha += 0.05f;
++        if (!(monster->view_alpha < 1.0f)) {
++            monster->view_alpha = 1.0f;
++            monster->view_state = MONSTER_VIEW_IN;
++        }
++    }
++    if (monster->camera_dist < 4.0f * monster->body_width) {
++        monster->camera_alpha = std::max(0.0f, monster->camera_alpha - 1.0f / 12.0f);
++    } else {
++        monster->camera_alpha = std::min(1.0f, monster->camera_alpha + 1.0f / 12.0f);
++    }
++}
++
 +void PuppetsStep() {
 +    if (!InDungeon() || BattleAreaScene == nullptr) {
 +        if (std::ranges::any_of(g_puppets, &PuppetSlot::used)) PuppetsClear();
@@ -18884,8 +19030,9 @@ index 00000000..a1389ad0
 +            p.motion = p.host.motion;
 +            monster->SetMotion(p.host.motion, 2);
 +        }
-+        // Its own thoughts are paused with every monster's: the copy still animates.
++        // Its own thoughts are paused with every monster's: the copy still animates, and comes into sight here.
 +        monster->Step();
++        PuppetSight(monster);
 +    }
 +    // A guest's floor is the host's: the monsters' own scripts rest while any copy stands.
 +    if (any && !g_puppets_pause) {
@@ -19044,6 +19191,189 @@ index 00000000..a1389ad0
 +        }
 +        a.body->target = a.target;
 +    }
++}
++
++// ---- What a hero fires -----------------------------------------------------------------------------------------------
++
++namespace {
++
++std::vector<HeroEffect> g_hero_effects;
++constexpr std::size_t   kHeroEffectsKept = 64; // a mod that stops taking them loses the oldest, not the game's memory
++
++// The muzzle flash every gun of Max's shows at the muzzle.
++char kMuzzleFlash[] = "\x83}\x83Y\x83\x8B\x83t\x83\x89\x83" "b\x83V\x83\x85";
++char kBullet[] = "\x8F" "e\x92" "e";
++
++// An effect base this game has not loaded (its own hero is the other one: Max's gun effects in Monica's game, her
++// magic in Max's), loaded as the floor's scripts load theirs (_LOAD_EFFECT_SCRIPT): into the scene's third stack, at
++// the floor's level, so it goes with the floor.
++bool EnsureBase(CEffectScriptMan &fx, int base_no) {
++    if (base_no < 0 || DngMainScene == nullptr) return false;
++    for (const EFF_SPT_BASE *loaded : fx.base) {
++        if (loaded != nullptr && loaded->base_no == base_no) return true;
++    }
++    const int level = std::exchange(fx.level, 3);
++    const int built = fx.LoadBaseEffSpt(base_no, DngMainScene->GetStack(3), -1);
++    fx.level = level;
++    if (built < 0) std::fprintf(stderr, "co-op: effect base %d can't be loaded for another player's shot\n", base_no);
++    else std::fprintf(stderr, "co-op: effect base %d loaded for another player's shots\n", base_no);
++    return built >= 0;
++}
++
++// The last effect made, marked as drawn only (its script makes no attack), from a point.
++bool Drawn(CEffectScriptMan &fx, float *pos) {
++    if (fx.now == nullptr) return false;
++    fx.now->shown_only = true;
++    fx.SetScriptVect1(pos, 0, -1);
++    return true;
++}
++
++bool MakeEffect(CEffectScriptMan &fx, char *name, float *pos) {
++    // (by number: the by-name call answers the effect's slot, which is -1 for one made without a slot, as these are)
++    const int base_no = fx.SearchBaseNo(name);
++    if (!EnsureBase(fx, base_no) || fx.CreateEffSpt(base_no, 0, 0) == nullptr) {
++        std::fprintf(stderr, "co-op: effect %d not made for another player's shot\n", base_no);
++        return false;
++    }
++    return Drawn(fx, pos);
++}
++
++int TargetHere(int target) {
++    // a monster slot of the floor that holds a monster here too; else the shot flies straight
++    if (target < DNG_CHARA_SLOT_MONSTER || target >= DNG_CHARA_SLOT_MONSTER_END || DngMainScene == nullptr) return -1;
++    return DngMainScene->GetCharacter(target) != nullptr ? target : -1;
++}
++
++} // namespace
++
++void HeroFired(const void *chara, HeroShot kind, const float *pos, const float *dir, int value, float amount, int target) {
++    if (chara == nullptr || chara != MainChara__2 || !InDungeon()) return;
++    HeroEffect e;
++    e.kind = static_cast<int>(kind);
++    for (int axis = 0; axis < 3; ++axis) {
++        e.pos[axis] = pos[axis];
++        e.dir[axis] = dir[axis];
++    }
++    e.value = value;
++    e.amount = amount;
++    e.target = target;
++    if (g_hero_effects.size() >= kHeroEffectsKept) g_hero_effects.erase(g_hero_effects.begin());
++    g_hero_effects.push_back(e);
++}
++
++// A frame's name as a trail message carries it: letters, digits and _ only, and short.
++static bool FrameNameOk(const std::string &name) {
++    return !name.empty() && name.size() < 32 &&
++           std::ranges::all_of(name, [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
++}
++
++void HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold) {
++    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || frame0 == nullptr || frame1 == nullptr) return;
++    HeroEffect e;
++    e.kind = static_cast<int>(HeroShot::Trail);
++    e.frame0 = frame0;
++    e.frame1 = frame1;
++    if (!FrameNameOk(e.frame0) || !FrameNameOk(e.frame1)) return;
++    e.value = length;
++    e.amount = static_cast<float>(fade);
++    e.target = hold;
++    if (g_hero_effects.size() >= kHeroEffectsKept) g_hero_effects.erase(g_hero_effects.begin());
++    g_hero_effects.push_back(std::move(e));
++}
++
++std::vector<HeroEffect> TakeHeroEffects() { return std::exchange(g_hero_effects, {}); }
++
++// As the firing game's own actscript.cpp draws each shot (ShotNormalGun and the others), less the attack: no collision
++// primitive, so it strikes nothing here (the firing game's hits are what count).
++bool AvatarEffect(int slot, const HeroEffect &e) {
++    if (!AvatarShown(slot) || !InDungeon() || FxScriptMan == nullptr || DngStatus.mode != DNG_STATUS_FIELD) return false;
++    for (int axis = 0; axis < 3; ++axis) {
++        if (!std::isfinite(e.pos[axis]) || !std::isfinite(e.dir[axis])) return false;
++    }
++    CEffectScriptMan &fx = *FxScriptMan;
++    float pos[4] = {e.pos[0], e.pos[1], e.pos[2], 1.0f};
++    float dir[4] = {e.dir[0], e.dir[1], e.dir[2], 0.0f};
++    switch (static_cast<HeroShot>(e.kind)) {
++        case HeroShot::Gun: {
++            if (!MakeEffect(fx, kBullet, pos)) return false;
++            float flight[4];
++            sceVu0ScaleVector(flight, dir, 20.0f);
++            fx.SetScriptVect2(flight, 0, -1);
++            MakeEffect(fx, kMuzzleFlash, pos);
++            return true;
++        }
++        case HeroShot::MachineGun: {
++            const float length = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
++            if (!(length > 0.0001f)) return false;
++            MachineGun.Set(pos, dir);
++            const int index = MachineGun.index;
++            // (Set takes the next free bullet; when every bullet flies it takes none, and the one at index is another's)
++            if (index >= 0 && index < MACHINE_GUN_BULLET_NUM && MachineGun.life[index] == 90 &&
++                MachineGun.start_pos[index][0] == pos[0] && MachineGun.start_pos[index][2] == pos[2]) {
++                MachineGun.col_prim_id[index] = -1;
++            }
++            MakeEffect(fx, kMuzzleFlash, pos);
++            return true;
++        }
++        case HeroShot::Grenade: {
++            float muzzle[4];
++            sceVu0ScaleVector(muzzle, dir, 500.0f);
++            sceVu0AddVector(muzzle, pos, muzzle);
++            dir[1] += 0.1f;
++            CRocketLauncher *launcher = RocketLauncher.Get();
++            if (launcher == nullptr) return false;
++            launcher->SetPos(pos, muzzle, dir);
++            launcher->target_chara = TargetHere(e.target);
++            launcher->speed = 20.0f;
++            launcher->homing_delay = 4;
++            launcher->homing_time = launcher->target_chara >= 0 ? 30 : 0;
++            launcher->col_prim_id = -1;
++            MakeEffect(fx, kMuzzleFlash, pos);
++            return true;
++        }
++        case HeroShot::Laser: {
++            const int type = std::clamp(e.value, 0, 2);
++            float muzzle[4], aim[4];
++            sceVu0ScaleVector(muzzle, dir, 20.0f);
++            sceVu0AddVector(muzzle, pos, muzzle);
++            sceVu0ScaleVector(aim, dir, 500.0f);
++            sceVu0AddVector(aim, muzzle, aim);
++            CLaserGun *laser = LaserGun.Get();
++            if (laser == nullptr) return false;
++            laser->SetPos(muzzle, aim, dir);
++            laser->target_chara = -1;
++            laser->speed = 30.0f;
++            laser->homing_delay = 99999;
++            laser->homing_time = 0;
++            laser->SetVisualCode(type);
++            laser->col_prim_id = -1;
++            if (MakeEffect(fx, kMuzzleFlash, pos)) {
++                // (the flash in the beam's colours, as ShotLaserGun has them)
++                static constexpr float kColours[3][4] = {{64, 128, 64, 128}, {64, 64, 128, 128}, {128, 32, 128, 180}};
++                fx.SetValue(0, 1, 0, -1);
++                for (int i = 0; i < 4; ++i) fx.SetValue(i + 1, kColours[type][i], 0, -1);
++            }
++            return true;
++        }
++        case HeroShot::Magic: {
++            if (!EnsureBase(fx, e.value) || fx.CreateEffSpt(e.value, 0, 0) == nullptr || !Drawn(fx, pos)) return false;
++            fx.SetScriptVect2(dir, 0, -1);
++            fx.SetValue(0, std::isfinite(e.amount) ? e.amount : 0.0f, -1, -1);
++            fx.SetScriptTargetId(TargetHere(e.target), -1, -1);
++            return true;
++        }
++        case HeroShot::Trail: {
++            // The avatar's own blade draws it (its trail made in Build), between the same two frames of its weapon.
++            AvatarBody &body = *g_avatars[static_cast<std::size_t>(slot)].body;
++            if (body.shaped || body.sword_effect[0] == nullptr || !FrameNameOk(e.frame0) || !FrameNameOk(e.frame1)) return false;
++            mgCFrame *start = FindFrame(body, e.frame0.c_str()), *end = FindFrame(body, e.frame1.c_str());
++            if (start == nullptr || end == nullptr) return false;
++            body.sword_effect[0]->StartEffect(start, end, std::clamp(e.value, 1, 64), std::clamp(static_cast<int>(e.amount), 0, 120),
++                                              std::clamp(e.target, 0, 120));
++            return true;
++        }
++    }
++    return false;
 +}
 +
 +// ---- Monsters: the API ---------------------------------------------------------------------------------------------
@@ -19403,6 +19733,7 @@ index 00000000..a1389ad0
 +    g_unmade.clear();
 +    g_puppet_hits.clear();
 +    g_avatar_hits.clear();
++    g_hero_effects.clear();
 +    g_player_swapped = false;
 +    g_events_out.clear();
 +    g_waiting = Waiting{};
@@ -28678,15 +29009,25 @@ index 10ac7b34..3d4eed00 100644
  
  void DrawTakePhotoSystem(int texture, CInventUserData *user_data) {
 diff --git a/port/src/object/dun/actionchara.cpp b/port/src/object/dun/actionchara.cpp
-index 97732c47..fb930955 100644
+index 97732c47..b164691f 100644
 --- a/port/src/object/dun/actionchara.cpp
 +++ b/port/src/object/dun/actionchara.cpp
-@@ -1,3 +1,4 @@
+@@ -1,3 +1,5 @@
++#include "moonmod/coop.hpp"
 +#include "moonmod/coop_down.hpp"
  #include "common.h"
  
  #include <libvu0.h>
-@@ -3287,7 +3288,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -1049,6 +1051,8 @@ void CActionChara::StepEffect() {
+                             sword_effect[slot->sword_no]->StartEffect(
+                                 start_frame, end_frame, slot->length, slot->fade_time,
+                                 slot->hold_time);
++                            moonmod::coop::HeroSwung(this, slot->frame0.CString(), slot->frame1.CString(), slot->length,
++                                                     slot->fade_time, slot->hold_time); // co-op: seen on the others' screens
+                             slot->wait = 5;
+                         }
+                     }
+@@ -3287,7 +3291,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
          AllDeleteDamage();
          prog_no = ACTION_PROG_DEAD;
          damage_req = ACTION_DAMAGE_REQ_NONE;
@@ -28698,7 +29039,7 @@ index 97732c47..fb930955 100644
      }
  
      if (damage_req == ACTION_DAMAGE_REQ_HOLD) {
-@@ -3316,7 +3320,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -3316,7 +3323,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
      } else {
          script.resume();
  
@@ -32637,6 +32978,84 @@ index 0e0d3789..48d69d3a 100644
  
  /**
   * Writes the current town save and optional spawn or the recorded dungeon floor-entry save, preserving the
+diff --git a/port/src/script/actscript.cpp b/port/src/script/actscript.cpp
+index a0105f01..d5281233 100644
+--- a/port/src/script/actscript.cpp
++++ b/port/src/script/actscript.cpp
+@@ -35,6 +35,7 @@
+ #include "mg_texture.hpp"
+ #include "mglib.hpp"
+ #include "monster.hpp"
++#include "moonmod/coop.hpp"
+ #include "object.hpp"
+ #include "padcontrol.hpp"
+ #include "runscript.hpp"
+@@ -1760,6 +1761,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+     action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
+     float tint = (float) effect_power / 255.0f;
+     tint *= 1.5f;
++    moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Magic, position, direction,
++                             action_info.chara->effect_man->SearchBaseNo(effect_name), tint, action_info.chara->target_no);
+     action_info.chara->effect_man->SetValue(0, tint, -1, -1);
+     action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
+     CColPrim *prim = ColPrimMan.GetPrim();
+@@ -1782,6 +1785,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+  *
+  */
+ void ShotNormalGun(float *position, float *direction) {
++    moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Gun, position, direction);
+     action_info.chara->effect_man->CreateEffSpt("\x8F"
+                                                 "e\x92"
+                                                 "e",
+@@ -1814,6 +1818,7 @@ void ShotNormalGun(float *position, float *direction) {
+  *
+  */
+ void ShotMachineGun(float *position, float *direction, char *damage_name, float damage) {
++    moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::MachineGun, position, direction);
+     MachineGun.Set(position, direction);
+     CColPrim *prim = ColPrimMan.GetPrim();
+     int       col_prim_id = -1;
+@@ -1845,6 +1850,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
+  *
+  */
+ void ShotGrenadGun(float *position, float *direction) {
++    moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Grenade, position, direction, 0, 0.0f,
++                             action_info.chara->target_no);
+     float muzzle[4];
+     sceVu0ScaleVector(muzzle, direction, 500.0f);
+     sceVu0AddVector(muzzle, position, muzzle);
+@@ -1885,6 +1892,7 @@ void ShotGrenadGun(float *position, float *direction) {
+  *
+  */
+ void ShotLaserGun(float *position, float *direction, int type) {
++    moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Laser, position, direction, type);
+     float muzzle[4];
+     float target[4];
+     sceVu0ScaleVector(muzzle, direction, 20.0f);
+@@ -2125,6 +2133,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
+     action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
+     action_info.chara->effect_man->SetValue(0, 0.0f, -1, -1);
+     action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
++    moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Magic, position, direction,
++                             action_info.chara->effect_man->SearchBaseNo(effects[info->GetMagicSwordElem()]), 0.0f,
++                             action_info.chara->target_no);
+     CColPrim *prim = ColPrimMan.GetPrim();
+ 
+     if (prim != nullptr) {
+diff --git a/port/src/script/effscript.cpp b/port/src/script/effscript.cpp
+index 7adb508e..16762816 100644
+--- a/port/src/script/effscript.cpp
++++ b/port/src/script/effscript.cpp
+@@ -4696,6 +4696,9 @@ int _COLPRIM_CREATE(dc2::script::RunArguments args) {
+     if (now_script == nullptr || args.Remaining() < 1 || args.Remaining() > 2) {
+         return 0;
+     }
++    if (now_script->shown_only) { // MoonMod co-op: another player's shot is only drawn here; it strikes in its own game
++        return 0;
++    }
+     char *damage_name = dc2::script::RunCString(args++);
+     int   owner = args.Remaining() > 0 ? dc2::script::RunInteger(args) : now_script->user_id;
+     if (now_script->colprim != nullptr) {
 diff --git a/port/src/script/runscript_opcodes.cpp b/port/src/script/runscript_opcodes.cpp
 index 4c665de3..2516ccd5 100644
 --- a/port/src/script/runscript_opcodes.cpp
@@ -38724,10 +39143,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..5b03a6ad
+index 00000000..cb7e74ed
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,818 @@
+@@ -0,0 +1,857 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -38840,7 +39259,8 @@ index 00000000..5b03a6ad
 +    for (const char *path : {"session.get", "session.start", "session.finish", "save.world_export", "save.player_export", "save.account_list",
 +                             "save.slots_list", "save.slot_player_export", "save.slot_player_import", "party.room_hero_set",
 +                             "party.room_hero_clear", "world.watch_set", "world.change_apply",
-+                             "world.avatar_set", "world.avatar_clear", "world.enter_map", "monsters.mirror_get", "monsters.puppet_set",
++                             "world.avatar_set", "world.avatar_clear", "world.enter_map", "world.avatar_effect", "player.effects_take",
++                             "monsters.mirror_get", "monsters.puppet_set",
 +                             "monsters.puppet_clear", "monsters.mirror_hit", "dungeons.set_seed", "dungeons.enter_floor",
 +                             "dungeons.shared_events_get", "dungeons.shared_event_run", "combat.strike_player", "items.owned",
 +                             "georama.town_export", "georama.town_import", "ui.choice_open", "ui.choice_close", "title.mode_register", "title.mode_set"}) {
@@ -38890,6 +39310,44 @@ index 00000000..5b03a6ad
 +    EXPECT_EQ(api.Call("world.avatar_clear", Json::array({{{"slot", 1}}})).status, ApiCallStatus::Ok);
 +    EXPECT_EQ(api.Call("world.avatar_clear").status, ApiCallStatus::Ok);
 +    EXPECT_EQ(api.Call("world.avatar_clear", Json::array({{{"slot", 9}}})).status, ApiCallStatus::InvalidArgument);
++}
++
++TEST(MoonModCoopApi, TheHerosShotsAreTakenOnceAndAnotherPlayersAreDrawnOnlyFromTheirAvatar) {
++    FloorFixture  floor;
++    Api           api;
++    CActionChara *previous_hero = MainChara__2;
++    // (only compared with, never touched: the hero is who fired)
++    alignas(16) static unsigned char hero_storage[16];
++    alignas(16) static unsigned char other_storage[16];
++    MainChara__2 = reinterpret_cast<CActionChara *>(hero_storage);
++    const float at[3] = {1.0f, 2.0f, 3.0f}, way[3] = {0.0f, 0.0f, 1.0f};
++    moonmod::coop::HeroFired(hero_storage, moonmod::coop::HeroShot::Laser, at, way, 2);
++    moonmod::coop::HeroFired(other_storage, moonmod::coop::HeroShot::Gun, at, way); // a monster's or a scene's: not the hero's
++    moonmod::coop::HeroFired(hero_storage, moonmod::coop::HeroShot::Magic, at, way, 41, 0.75f, 25);
++    const ApiCallResult taken = api.Call("player.effects_take");
++    ASSERT_EQ(taken.status, ApiCallStatus::Ok) << taken.message;
++    const Json &effects = taken.value.at("effects");
++    ASSERT_EQ(effects.size(), 2u);
++    EXPECT_EQ(effects[0].at("kind"), 4);
++    EXPECT_EQ(effects[0].at("value"), 2);
++    EXPECT_EQ(effects[0].at("z"), 3.0f);
++    EXPECT_EQ(effects[1].at("kind"), 5);
++    EXPECT_EQ(effects[1].at("value"), 41);
++    EXPECT_EQ(effects[1].at("amount"), 0.75f);
++    EXPECT_EQ(effects[1].at("target"), 25);
++    EXPECT_TRUE(api.Call("player.effects_take").value.at("effects").empty()); // taken once
++    MainChara__2 = previous_hero;
++
++    // Another player's shot needs their avatar on this floor (none here without a disc) and a whole request.
++    const Json shot = Json::array({{{"slot", 1}, {"kind", 1}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0}, {"dy", 0.0}, {"dz", 1.0}}});
++    const ApiCallResult drawn = api.Call("world.avatar_effect", shot);
++    ASSERT_EQ(drawn.status, ApiCallStatus::Ok) << drawn.message;
++    EXPECT_FALSE(drawn.value.at("shown").get<bool>());
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 9}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
++                                                            {"dy", 0.0}, {"dz", 1.0}}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 1}, {"x", 0.0}}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 1}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
++                                                            {"dy", 0.0}, {"dz", 1.0}, {"damage", 5}}})).status, ApiCallStatus::InvalidArgument);
 +}
 +
 +TEST(MoonModCoopApi, ARidepodSaysItsFourPartsAndAFormItsMonster) {

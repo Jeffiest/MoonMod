@@ -273,6 +273,37 @@ moonmod.on("game.tick", function(e)
     log(string.format("state frame=%d session=%s context=%s dungeon=%s floor=%s seed=%s layout=%s walking=%s town=%s map=%s pos=%s monsters=%d hp=%d counted=%s mimics=%s cleared=%s step=%d character=%s",
       frame, tostring(s.kind), tostring(w.context), tostring(w.dungeon_id), tostring(w.floor_id), tostring(w.floor_seed), tostring(w.floor_layout), tostring(w.walking), tostring(w.town_map),
       tostring(w.map_no), pos, alive, hp, tostring(w.monsters_counted), tostring(w.mimic_chests), tostring(w.floor_cleared), at, tostring(p.character)))
+    -- A visiting game's copies near its hero, and how many of them its game draws (monsters.mirror_get's seen). Only
+    -- the visitor asks: on the game that runs the monsters the call would take the blows on avatars the co-op mod sends on.
+    if s.kind == "visit" and w.context == "dungeon" and p.position then
+      local got = try(game.monsters.mirror_get)
+      local near, seen = 0, 0
+      for _, m in ipairs(type(got) == "table" and got.monsters or {}) do
+        local dx, dz = (m.x or 0) - p.position.x, (m.z or 0) - p.position.z
+        if m.state == 1 and dx * dx + dz * dz < 250 * 250 then
+          near = near + 1
+          if m.seen then seen = seen + 1 end
+        end
+      end
+      log(string.format("sight frame=%d near=%d seen=%d", frame, near, seen))
+      -- The host's hero's shots drawn here (world.avatar_effect, slot 1: the host): a gun, a machine gun, a grenade and
+      -- a laser in turn, from where this hero stands, the way it faces.
+      if frame % 300 == 0 then
+        local kind = (frame // 300) % 4 + 1
+        local h = p.heading or 0
+        local r = try(game.world.avatar_effect, {slot = 1, kind = kind, x = p.position.x, y = p.position.y + 10, z = p.position.z,
+                                                 dx = math.sin(h), dy = 0, dz = math.cos(h), value = kind == 4 and 1 or 0})
+        log(string.format("shot frame=%d kind=%d shown=%s", frame, kind, tostring(type(r) == "table" and r.shown)))
+        -- and a blade's trail on the host's hero, between two frames Max's body has (or Monica's)
+        local t = try(game.world.avatar_effect, {slot = 1, kind = 6, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 12,
+                                                 amount = 8, target = 2, frame0 = "ef00", frame1 = "gun_hand"})
+        if not (type(t) == "table" and t.shown) then
+          t = try(game.world.avatar_effect, {slot = 1, kind = 6, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 12,
+                                             amount = 8, target = 2, frame0 = "sword_hand", frame1 = "wr"})
+        end
+        log(string.format("shot frame=%d kind=6 shown=%s", frame, tostring(type(t) == "table" and t.shown)))
+      end
+    end
   end
   if frame == 300 then
     local w, werr = try(game.world.get)
