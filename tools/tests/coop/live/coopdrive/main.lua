@@ -288,12 +288,26 @@ moonmod.on("game.tick", function(e)
       log(string.format("sight frame=%d near=%d seen=%d", frame, near, seen))
       -- The host's hero's shots drawn here (world.avatar_effect, slot 1: the host): a gun, a machine gun, a grenade and
       -- a laser in turn, from where this hero stands, the way it faces.
+      -- An item the host's hero holds up and, two seconds on, throws ahead (kind 8: amount 0 held, 1 thrown).
+      if frame % 600 == 0 or frame % 600 == 120 then
+        local throw = frame % 600 == 120
+        local h = p.heading or 0
+        local r = try(game.world.avatar_effect, {slot = 1, kind = 8, x = p.position.x + math.sin(h) * 120, y = p.position.y,
+                                                 z = p.position.z + math.cos(h) * 120, dx = math.sin(h), dy = 0, dz = math.cos(h),
+                                                 value = 0x114, amount = throw and 1 or 0})
+        log(string.format("shot frame=%d kind=8.%s shown=%s", frame, throw and "throw" or "hold", tostring(type(r) == "table" and r.shown)))
+      end
       if frame % 300 == 0 then
-        local kind = (frame // 300) % 4 + 1
+        -- (and the ridepod's: a rocket or a missile, kind 7, and its laser or beam, kind 4 with look 3 or 4)
+        local turn = frame // 300
+        local kind = ({1, 2, 3, 4, 7})[turn % 5 + 1]
+        local value = 0
+        if kind == 4 then value = ({1, 3, 4})[(turn // 5) % 3 + 1] end
+        if kind == 7 then value = (turn // 5) % 2 end
         local h = p.heading or 0
         local r = try(game.world.avatar_effect, {slot = 1, kind = kind, x = p.position.x, y = p.position.y + 10, z = p.position.z,
-                                                 dx = math.sin(h), dy = 0, dz = math.cos(h), value = kind == 4 and 1 or 0})
-        log(string.format("shot frame=%d kind=%d shown=%s", frame, kind, tostring(type(r) == "table" and r.shown)))
+                                                 dx = math.sin(h), dy = 0, dz = math.cos(h), value = value})
+        log(string.format("shot frame=%d kind=%d.%d shown=%s", frame, kind, value, tostring(type(r) == "table" and r.shown)))
         -- and a blade's trail on the host's hero, between two frames Max's body has (or Monica's)
         local t = try(game.world.avatar_effect, {slot = 1, kind = 6, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 12,
                                                  amount = 8, target = 2, frame0 = "ef00", frame1 = "gun_hand"})

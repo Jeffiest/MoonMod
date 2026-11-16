@@ -2919,10 +2919,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..8ad96453
+index 00000000..087024fa
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,333 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3049,10 +3049,12 @@ index 00000000..8ad96453
 +    Gun = 1,        // Max's pistol: the bullet and the muzzle flash
 +    MachineGun = 2, // Max's machine gun or the ridepod's: a bullet of the burst
 +    Grenade = 3,    // Max's launcher: a grenade
-+    Laser = 4,      // Max's laser: a beam (value: its look, LASER_VISUAL_*)
++    Laser = 4,      // Max's laser, or the ridepod's laser or beam: a shot (value: its look, LASER_VISUAL_* 0-4)
 +    Magic = 5,      // Monica's armband or her magic sword's charge (value: the effect base, amount: its tint)
 +    Trail = 6,      // a blade's trail: from frame0 to frame1 of the hero's weapon (value: its length, amount: the steps
 +                    // it fades over, target: the steps it holds first); pos and dir are not used
++    Rocket = 7,     // the ridepod's launcher (value 0) or a missile (value 1, scattered here as the game scatters it)
++    Throw = 8,      // an item held up to throw (amount 0), thrown to pos (1) or put away (2); value: its item_no
 +};
 +struct HeroEffect {
 +    int   kind = 0; // HeroShot
@@ -14955,7 +14957,7 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..d3aca1e1
+index 00000000..062d9a22
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
 @@ -0,0 +1,1093 @@
@@ -15395,7 +15397,7 @@ index 00000000..d3aca1e1
 +// world.avatar_effect: another player's shot, drawn from their avatar.
 +ApiCallResult AvatarEffectCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, kind = 1-6, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil} (player.effects_take's entries)";
++        "expected {slot = 1-3, kind = 1-8, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil} (player.effects_take's entries)";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
@@ -15404,7 +15406,7 @@ index 00000000..d3aca1e1
 +    }
 +    int        slot = 0;
 +    HeroEffect e;
-+    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 6, e.kind)) return Invalid(kUsage);
++    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 8, e.kind)) return Invalid(kUsage);
 +    for (const char *key : {"frame0", "frame1"}) {
 +        if (!request.contains(key) || request[key].is_null()) continue;
 +        if (!request[key].is_string() || request[key].get<std::string>().size() > 31) return Invalid(kUsage);
@@ -18504,10 +18506,10 @@ index 00000000..a37531e1
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..c1d693f4
+index 00000000..55f90984
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1236 @@
+@@ -0,0 +1,1322 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -18712,6 +18714,7 @@ index 00000000..c1d693f4
 +    int                         slot = -1;
 +    CScene                     *scene = nullptr;
 +    int                         loop = -1;
++    int                         held_effect = -1; // the effect of an item it holds up to throw (its slot under the avatar's), or -1
 +    // Its own memory: the file it reads and the stacks its model, motions and images live in.
 +    std::vector<unsigned char>  file;
 +    std::vector<unsigned char>  arena;
@@ -18734,6 +18737,11 @@ index 00000000..c1d693f4
 +
 +void Unload(int index) {
 +    Avatar &a = g_avatars[static_cast<std::size_t>(index)];
++    // (what it was drawing goes with it: an item held up, a shot in flight that follows it)
++    if (a.slot >= 0 && GetNowLoopNo() == LOOP_DUNGEON && FxScriptMan != nullptr && a.scene == DngMainScene) {
++        FxScriptMan->ClearEffectFromChrid(a.slot);
++    }
++    a.held_effect = -1;
 +    if (a.scene != nullptr && a.slot >= 0 && a.scene->GetCharacter(a.slot) == a.body.get()) {
 +        a.scene->ResetActive(SCENE_DATA_CHARA, a.slot);
 +    }
@@ -19169,6 +19177,10 @@ index 00000000..c1d693f4
 +        // Another place, or the scene gave the slot to someone else: the body goes; the mod's wish stays.
 +        if (a.body && (scene != a.scene || loop != a.loop || scene == nullptr || scene->GetCharacter(a.slot) != a.body.get())) {
 +            a.body.reset(); // the scene's slot was reset with the scene; nothing of ours to take back
++            if (scene != nullptr && scene == a.scene && scene == DngMainScene && FxScriptMan != nullptr && a.slot >= 0) {
++                FxScriptMan->ClearEffectFromChrid(a.slot); // (the same floor, its slot given to another: our effects go)
++            }
++            a.held_effect = -1; // (on another floor, the floor's effects went with it)
 +            a.loaded_character = -1;
 +            a.slot = -1;
 +            a.scene = nullptr;
@@ -19332,27 +19344,103 @@ index 00000000..c1d693f4
 +            return true;
 +        }
 +        case HeroShot::Laser: {
-+            const int type = std::clamp(e.value, 0, 2);
++            // 0-2 Max's laser (ShotLaserGun: from 20 ahead of the muzzle, straight); 3 the ridepod's laser and 4 its
++            // beam (actscript.cpp's _SHOT: from the muzzle, as their look flies and homes)
++            const int type = std::clamp(e.value, 0, 4);
++            const bool ridepod = type >= LASER_VISUAL_CYAN;
 +            float muzzle[4], aim[4];
-+            sceVu0ScaleVector(muzzle, dir, 20.0f);
++            sceVu0ScaleVector(muzzle, dir, ridepod ? 0.0f : 20.0f);
 +            sceVu0AddVector(muzzle, pos, muzzle);
 +            sceVu0ScaleVector(aim, dir, 500.0f);
-+            sceVu0AddVector(aim, muzzle, aim);
++            sceVu0AddVector(aim, ridepod ? pos : muzzle, aim);
 +            CLaserGun *laser = LaserGun.Get();
 +            if (laser == nullptr) return false;
 +            laser->SetPos(muzzle, aim, dir);
-+            laser->target_chara = -1;
-+            laser->speed = 30.0f;
-+            laser->homing_delay = 99999;
-+            laser->homing_time = 0;
++            laser->target_chara = ridepod ? TargetHere(e.target) : -1;
++            if (!ridepod) {
++                laser->speed = 30.0f;
++                laser->homing_delay = 99999;
++                laser->homing_time = 0;
++            }
 +            laser->SetVisualCode(type);
 +            laser->col_prim_id = -1;
-+            if (MakeEffect(fx, kMuzzleFlash, pos)) {
-+                // (the flash in the beam's colours, as ShotLaserGun has them)
-+                static constexpr float kColours[3][4] = {{64, 128, 64, 128}, {64, 64, 128, 128}, {128, 32, 128, 180}};
++            if (MakeEffect(fx, kMuzzleFlash, ridepod ? muzzle : pos)) {
++                // (the flash in the shot's colours, as ShotLaserGun and _SHOT have them)
++                static constexpr float kColours[5][4] = {{64, 128, 64, 128}, {64, 64, 128, 128}, {128, 32, 128, 180},
++                                                         {0, 128, 128, 160}, {128, 64, 0, 160}};
 +                fx.SetValue(0, 1, 0, -1);
 +                for (int i = 0; i < 4; ++i) fx.SetValue(i + 1, kColours[type][i], 0, -1);
 +            }
++            return true;
++        }
++        case HeroShot::Throw: {
++            // As CActionChara::EntryThrowItem, ThrowItemObject and RemoveThrowItem do it, owned by the avatar (the
++            // effect keeps the item on its owner's "item" frame until it is thrown).
++            Avatar &a = g_avatars[static_cast<std::size_t>(slot)];
++            const int owner = a.slot;
++            const int phase = static_cast<int>(e.amount);
++            if (phase == 2 || phase == 0) { // put away, or a new one held up: the one held goes
++                if (a.held_effect >= 0) fx.DeleteEffSpt(owner, a.held_effect);
++                a.held_effect = -1;
++                if (phase == 2) return true;
++            }
++            if (phase == 1) {
++                if (a.held_effect < 0) return false;
++                fx.SetScriptProgNo(EFFECT_SCRIPT_PROG_FINISH, owner, a.held_effect);
++                fx.SetScriptVect1(pos, owner, a.held_effect);
++                a.held_effect = -1;
++                return true;
++            }
++            if (phase != 0 || e.value <= 0 || e.value >= ITEM_NO_MAX) return false;
++            if (a.body->shaped || FindFrame(*a.body, "item") == nullptr) return false; // (nothing to hold it up with)
++            // The item's model, as EntryThrowItem picks it from the dungeon's throwables (the first for any other).
++            static constexpr int kThrown[] = {0x114, 0x118, 0x119, 0x11A, 0x11B, 0x11C, 0x11D, 0x11E, 0x11F,
++                                              0x120, 0x121, 0x122, 0x123, 0x124, ITEM_ID_GIFT_CAPSULE, 0x186, 0x187, 0x133};
++            int model = 0;
++            for (int i = 0; i < static_cast<int>(std::size(kThrown)); ++i) {
++                if (kThrown[i] == e.value) model = i;
++            }
++            char thrown[] = "\x8E\xE8\x93\x8A\x82\xB0\x94\x9A\x92" "e";
++            const int base_no = fx.SearchBaseNo(thrown);
++            if (!EnsureBase(fx, base_no)) return false;
++            _EFF_SCRIPT *held = fx.CreateEffSpt(base_no, owner, 1);
++            if (held == nullptr) return false;
++            held->shown_only = true;
++            a.held_effect = held->slot;
++            fx.SetValue(0, 1, owner, held->slot);
++            fx.SetValue(1, e.value, owner, held->slot);
++            if (ActionScriptEnv.item_chara != nullptr) {
++                fx.SetCharacter(&ActionScriptEnv.item_chara[model], owner, held->slot);
++                fx.SetTexb(ActionScriptEnv.texb, owner, held->slot);
++            }
++            return true;
++        }
++        case HeroShot::Rocket: {
++            float ahead[4];
++            sceVu0ScaleVector(ahead, dir, 500.0f);
++            sceVu0AddVector(ahead, pos, ahead);
++            const bool missile = e.value == 1;
++            if (missile) {
++                // Scattered as _SHOT scatters a missile, from numbers of our own: the game's draws are its own play's.
++                static std::uint32_t scatter = 12345u;
++                const auto next = [] {
++                    scatter = scatter * 1664525u + 1013904223u;
++                    return static_cast<float>(scatter >> 8) / 16777216.0f; // 0 to 1
++                };
++                dir[0] += dir[2] * (next() - 0.5f);
++                dir[2] += dir[0] * (next() - 0.5f);
++                dir[1] += next();
++            }
++            CRocketLauncher *launcher = RocketLauncher.Get();
++            if (launcher == nullptr) return false;
++            launcher->SetPos(pos, ahead, dir);
++            launcher->target_chara = TargetHere(e.target);
++            if (!missile) {
++                launcher->speed = 20.0f;
++                launcher->homing_delay = 2;
++                launcher->homing_time = 30;
++            }
++            launcher->col_prim_id = -1;
 +            return true;
 +        }
 +        case HeroShot::Magic: {
@@ -29009,7 +29097,7 @@ index 10ac7b34..3d4eed00 100644
  
  void DrawTakePhotoSystem(int texture, CInventUserData *user_data) {
 diff --git a/port/src/object/dun/actionchara.cpp b/port/src/object/dun/actionchara.cpp
-index 97732c47..b164691f 100644
+index 97732c47..611c1df4 100644
 --- a/port/src/object/dun/actionchara.cpp
 +++ b/port/src/object/dun/actionchara.cpp
 @@ -1,3 +1,5 @@
@@ -29018,7 +29106,38 @@ index 97732c47..b164691f 100644
  #include "common.h"
  
  #include <libvu0.h>
-@@ -1049,6 +1051,8 @@ void CActionChara::StepEffect() {
+@@ -635,6 +637,10 @@ void CActionChara::ThrowItemObject() {
+             sceVu0ScaleVector(target, target, 120.0f);
+             sceVu0AddVector(target, target, position);
+             effect_man->SetScriptVect1(target, 0, throw_effect);
++            {
++                const CGameDataUsed *held = &GetBattleCharaInfo()->GetActiveItemInfo(0)[DngStatus.active_item];
++                moonmod::coop::HeroFired(this, moonmod::coop::HeroShot::Throw, target, front_vec, held->item_no, 1.0f);
++            }
+             hold_type = ACTION_HOLD_NONE;
+ 
+             item = GetBattleCharaInfo()->GetActiveItemInfo(0);
+@@ -731,6 +737,9 @@ void CActionChara::EntryThrowItem() {
+     if (throw_effect < 0) {
+         dc2::log::PrintGame("effect entry err\n");
+     } else {
++        float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++        GetPosition(at);
++        moonmod::coop::HeroFired(this, moonmod::coop::HeroShot::Throw, at, front_vec, item_no, 0.0f); // held up
+         effect_man->SetValue(0, 1, 0, throw_effect);
+         effect_man->SetValue(1, item_no, 0, throw_effect);
+ 
+@@ -764,6 +773,9 @@ void CActionChara::RemoveThrowItem() {
+ 
+             if (effect_no >= 0) {
+                 effect_man->DeleteEffSpt(0, effect_no);
++                float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++                GetPosition(at);
++                moonmod::coop::HeroFired(this, moonmod::coop::HeroShot::Throw, at, front_vec, 0, 2.0f); // put away
+             }
+ 
+             hold_type = ACTION_HOLD_NONE;
+@@ -1049,6 +1061,8 @@ void CActionChara::StepEffect() {
                              sword_effect[slot->sword_no]->StartEffect(
                                  start_frame, end_frame, slot->length, slot->fade_time,
                                  slot->hold_time);
@@ -29027,7 +29146,7 @@ index 97732c47..b164691f 100644
                              slot->wait = 5;
                          }
                      }
-@@ -3287,7 +3291,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -3287,7 +3301,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
          AllDeleteDamage();
          prog_no = ACTION_PROG_DEAD;
          damage_req = ACTION_DAMAGE_REQ_NONE;
@@ -29039,7 +29158,7 @@ index 97732c47..b164691f 100644
      }
  
      if (damage_req == ACTION_DAMAGE_REQ_HOLD) {
-@@ -3316,7 +3323,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -3316,7 +3333,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
      } else {
          script.resume();
  
@@ -32979,7 +33098,7 @@ index 0e0d3789..48d69d3a 100644
  /**
   * Writes the current town save and optional spawn or the recorded dungeon floor-entry save, preserving the
 diff --git a/port/src/script/actscript.cpp b/port/src/script/actscript.cpp
-index a0105f01..d5281233 100644
+index a0105f01..fa51cc78 100644
 --- a/port/src/script/actscript.cpp
 +++ b/port/src/script/actscript.cpp
 @@ -35,6 +35,7 @@
@@ -33042,8 +33161,45 @@ index a0105f01..d5281233 100644
      CColPrim *prim = ColPrimMan.GetPrim();
  
      if (prim != nullptr) {
+@@ -2224,6 +2235,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+ 
+     if (whp[0] > 0) {
+         if (attack_type == WEAPON_ATTACK_LAUNCHER) {
++            moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Rocket, position, direction, 0, 0.0f,
++                                     action_info.chara->target_no);
+             sceVu0ScaleVector(rocket_target, direction, 500.0f);
+             sceVu0AddVector(rocket_target, position, rocket_target);
+             CRocketLauncher *launcher = RocketLauncher.Get();
+@@ -2266,6 +2279,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+         }
+ 
+         if (attack_type == WEAPON_ATTACK_MISSILE) {
++            // (the way it is aimed, before the missile's own scatter: the other games scatter theirs)
++            moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Rocket, position, direction, 1, 0.0f,
++                                     action_info.chara->target_no);
+             sceVu0ScaleVector(missile_target, direction, 500.0f);
+             sceVu0AddVector(missile_target, position, missile_target);
+             direction[0] += direction[2] * (fRand(1.0f) - 0.5f);
+@@ -2297,6 +2313,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+             sceVu0AddVector(laser_target, position, laser_target);
+             sceVu0SubVector(direction, target_pos, position);
+             sceVu0Normalize(direction, direction);
++            moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Laser, position, direction, LASER_VISUAL_CYAN,
++                                     0.0f, action_info.chara->target_no);
+             CLaserGun *laser = LaserGun.Get();
+ 
+             if (laser != nullptr) {
+@@ -2334,6 +2352,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+             sceVu0AddVector(beam_target, position, beam_target);
+             sceVu0ScaleVector(beam_offset, direction, 20.0f);
+             sceVu0AddVector(position, position, beam_offset);
++            moonmod::coop::HeroFired(action_info.chara, moonmod::coop::HeroShot::Laser, position, direction, LASER_VISUAL_ORANGE,
++                                     0.0f, action_info.chara->target_no);
+             CLaserGun *laser = LaserGun.Get();
+ 
+             if (laser != nullptr) {
 diff --git a/port/src/script/effscript.cpp b/port/src/script/effscript.cpp
-index 7adb508e..16762816 100644
+index 7adb508e..d1bcceaf 100644
 --- a/port/src/script/effscript.cpp
 +++ b/port/src/script/effscript.cpp
 @@ -4696,6 +4696,9 @@ int _COLPRIM_CREATE(dc2::script::RunArguments args) {
@@ -33056,6 +33212,24 @@ index 7adb508e..16762816 100644
      char *damage_name = dc2::script::RunCString(args++);
      int   owner = args.Remaining() > 0 ? dc2::script::RunInteger(args) : now_script->user_id;
      if (now_script->colprim != nullptr) {
+@@ -4967,6 +4970,17 @@ int _ES_CREATE(dc2::script::RunArguments args) {
+     }
+     int   handle = -1;
+     char *name = dc2::script::RunCString(args++);
++    // MoonMod co-op: what another player's shot starts (its blast, its sparks) is only drawn here too.
++    _EFF_SCRIPT *const parent = now_script;
++    _EFF_SCRIPT *const before = EffScriptMan->now;
++    struct MarkChild {
++        _EFF_SCRIPT *parent, *before;
++        ~MarkChild() {
++            if (parent->shown_only && EffScriptMan->now != nullptr && EffScriptMan->now != before && EffScriptMan->now != parent) {
++                EffScriptMan->now->shown_only = true;
++            }
++        }
++    } mark{parent, before};
+ 
+     switch (args.Remaining()) {
+         case 0:
 diff --git a/port/src/script/runscript_opcodes.cpp b/port/src/script/runscript_opcodes.cpp
 index 4c665de3..2516ccd5 100644
 --- a/port/src/script/runscript_opcodes.cpp

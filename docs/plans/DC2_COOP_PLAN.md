@@ -707,8 +707,16 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   the same way (`HeroSwung` in `CActionChara::StepEffect`): the avatar has a trail of its own, made as the game makes
   the hero's, and starts it between the same two frames of its weapon. Live: on the visitor's floor the driver draws
   each kind from the host's avatar every five seconds; in `hurt` and `floor` every one was drawn (gun, machine gun,
-  grenade, laser, trail), and both pass (11/11, 15/15). Not carried yet: a thrown item held over the head and its
-  flight, the ridepod's rockets and missiles (its machine gun is), and the sounds of the shots. Monica's magic is
+  grenade, laser, trail), and both pass (11/11, 15/15). The ridepod's shots followed (2026-11-16): its rockets and
+  missiles (`HeroShot::Rocket`, a missile scattered on the drawing side from numbers of its own, not the game's) and
+  its laser and beam (`Laser` looks 3 and 4), besides its machine gun. Then thrown items (`HeroShot::Throw`, from
+  `EntryThrowItem`, `ThrowItemObject` and `RemoveThrowItem`): the avatar holds the item up on its "item" frame, throws
+  it to where it landed in the firing game, or puts it away, by the game's own thrown-item effect owned by the avatar.
+  And an effect drawn only now passes that on to the effects its script starts (`_ES_CREATE`): a fireball's or a
+  bomb's blast is drawn only too, where before a child effect could have struck the copies of monsters. Live (hurt
+  11/11, floor 15/15): every kind drawn, 10 items held and 9 thrown in `hurt`. Not seen with eyes yet: whether the
+  held item sits in the avatar's hand. Not carried: the sounds of the shots (the other hero's sound bank is not
+  loaded, and the game's sounds have no place to come from). Monica's magic is
   drawn by the same path as the gun's bullet, but no live run has fired it (the harness has no way to cast).
 
 ## 7. Risks

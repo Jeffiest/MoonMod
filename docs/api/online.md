@@ -97,7 +97,9 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
 - Shots, spells and trails (co-op, Chronicle Two). `player.effects_take()` (`game.read`) gives what this game's own
   hero fired on the floor since the last call, oldest first, and forgets them: `{effects = {{kind, x, y, z, dx, dy, dz,
   value, amount, target, frame0?, frame1?}, ...}}`. `kind` 1 Max's pistol, 2 a machine gun's bullet (his or the
-  ridepod's), 3 a grenade, 4 a laser (`value` its look, 0-2), 5 Monica's magic or her magic sword's charge (`value`
+  ridepod's), 3 a grenade, 4 a laser (`value` its look: 0-2 Max's, 3 the ridepod's laser, 4 its beam), 7 the ridepod's
+  rocket (`value` 0) or missile (1), 8 an item to throw (`value` its `item_no`; `amount` 0 held up, 1 thrown to `x, y,
+  z`, 2 put away), 5 Monica's magic or her magic sword's charge (`value`
   the effect's number, `amount` its tint, `target` the monster's scene slot it was aimed at), 6 the blade's trail
   (`frame0` and `frame1` the weapon's frames it runs between, `value` its length, `amount` the steps it fades over,
   `target` the steps it holds first). Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
