@@ -226,9 +226,9 @@ function OPS.georama_probe(step)
   if type(got) ~= "table" then return nil, err end
   local p = try(game.player.get) or {}
   local w = try(game.world.get) or {}
-  log(string.format("georama town=%d placed=%d standing=%s anchors=%d templates=%d pos=%s", step.town or 0, #(got.placed_parts or {}),
+  log(string.format("georama town=%d placed=%d standing=%s anchors=%d templates=%d pos=%s editing=%s", step.town or 0, #(got.placed_parts or {}),
       tostring(w.georama_live_parts), #(got.placement_anchors or {}), #(got.native_piece_templates or {}),
-      p.position and string.format("%.0f,%.0f,%.0f", p.position.x, p.position.y, p.position.z) or "-"))
+      p.position and string.format("%.0f,%.0f,%.0f", p.position.x, p.position.y, p.position.z) or "-", tostring(w.editing)))
   if step.list then
     for _, t in ipairs(got.native_piece_templates or {}) do log("georama template " .. flat(t)) end
     for _, a in ipairs(got.placement_anchors or {}) do
@@ -244,6 +244,8 @@ function OPS.georama_probe(step)
 end
 function OPS.leave() return try(game.session.finish) end
 function OPS.mark(step) return true end
+-- The story's progress raised (a debug save from --jump georama:N is before the co-op gate).
+function OPS.progress(step) return try(game.world.change_apply, {kind = "progress", id = 0, value = step.value or 4}) end
 -- The ridepod's fuel (a ridepod the Core has just brought has none, and an empty one cannot be climbed into).
 function OPS.ridepod_fuel(step)
   return try(game.player.ridepod_set, {max_fuel = step.amount or 300, fuel = step.amount or 300})

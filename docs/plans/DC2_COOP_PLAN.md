@@ -718,6 +718,24 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   held item sits in the avatar's hand. Not carried: the sounds of the shots (the other hero's sound bank is not
   loaded, and the game's sounds have no place to come from). Monica's magic is
   drawn by the same path as the gun's bullet, but no live run has fired it (the harness has no way to cast).
+- Two players building in one town (2026-11-16). A player in a town's Georama editor saw nothing of the other's
+  parts until they left it: `georama.town_import` answered "busy" while that town's editor was open. Now the editor
+  takes the town between its actions (`EditModeBetweenActions` in `editmode.cpp`: no wall being chosen, no part,
+  river or removal animating, no control lock, no menu about to open; `IsEditModeTool` in `editloop.cpp`): the
+  player's own parts are written into the record first, the other game's town is merged into that, and the live map
+  is built again at once (`TownEditorReady`, `RebuildNow`). The editor's undo is pointed at its part's new slot, and
+  how many of the held part are left is counted again (`EditModeAfterRebuild`). Mid-action it still answers "busy"
+  and the mod tries again. Since a joiner's editor now takes the host's towns while the joiner builds, the host's
+  answer to one part could arrive after the joiner placed the next and take that one away for a moment: the joiner
+  numbers each town it sends ("#n" before it), the host's towns say the last number of that joiner's they hold, and a
+  joiner holds a host town that is behind (for ten seconds at most, then the host's word stands). Live:
+  `build_edit` 13/13, the host sitting in Sindain's editor while the joiner builds (the town built again in the
+  editor twice); `build` 12/12 and `towns` 9/9 still pass. The story save `town:0` jumps into has Georama shut at
+  that point (`MENU_DEBUG_BIT_CTRL_NO_GEORAMA`), so `build_edit` starts from the game's own Georama debug save
+  (`georama:0`) and raises its progress past the gate first (coopdrive `progress`). Not tested live: the joiner in
+  the editor (the "#n" hold is in the mod's tests), undo after a rebuild, and two in one editor by hand.
+  On the way: a mod description over 1,024 characters makes the engine refuse the whole mod without a word in the
+  log; the mod's tests now check its length.
 
 ## 7. Risks
 

@@ -163,6 +163,7 @@ local function make_game(name, opts)
         if S.busy_town == a.town_id then return nil, {code = "failed", message = "busy: the player is editing"} end
         S.towns[a.town_id] = a.data
         S.last_base = a.base
+        if S.imports then S.imports[#S.imports + 1] = a.data end
         return {town_id = a.town_id, imported = true, merged = a.base ~= nil, reloaded = S.map.town_map == a.town_id}
       end,
     },
@@ -1009,6 +1010,9 @@ do
   for name in (settings or ""):gmatch('"name": "(.-)"') do if #name > 96 then long[#long + 1] = name:sub(1, 30) end end
   check(settings and #long == 0, "every setting's name fits the engine's 96 bytes (else the game refuses the whole mod)",
         table.concat(long, " / "))
+  local description = text:match('"description": "(.-)",\n')
+  check(description and #description <= 1024, "the mod's description fits the engine's 1024 bytes (else the game refuses the whole mod)",
+        description and #description)
 end
 
 print("Falling and getting back up")
@@ -1725,6 +1729,19 @@ do
   check(h.towns[4] == "DCT24:a windmill and a well" and h.last_base == "DCT24:start",
         "once free the host takes the newest town, measured from the town before the first part that waited", tostring(h.last_base))
   check(g.towns[4] == "DCT24:a windmill and a well", "and sends it on")
+  -- a joiner placing parts one after another (its editor takes towns while it builds) takes no host town that does
+  -- not yet hold its newest part: the host's answer to the first part would take the second away for a moment
+  g.imports = {}
+  g.towns[2] = "DCT22:a pier and a crane"
+  g.emit("game.world.changed", {kind = "town", id = 2, value = 79})
+  g.towns[2] = "DCT22:a pier, a crane and a boat"
+  g.emit("game.world.changed", {kind = "town", id = 2, value = 80})
+  town_tick()
+  check(h.towns[2] == "DCT22:a pier, a crane and a boat", "the host takes both parts", tostring(h.towns[2]))
+  check(#g.imports == 0 and g.towns[2] == "DCT22:a pier, a crane and a boat",
+        "the joiner does not take the host's answer to its first part, which lacks the second", tostring(g.imports[1]))
+  check(k.towns[2] == "DCT22:a pier, a crane and a boat", "the other joiner gets both")
+  g.imports = nil
   -- a part built is in the world's stock for either player to place
   h.emit("game.world.changed", {kind = "stock", id = 12, value = 2})
   town_tick()

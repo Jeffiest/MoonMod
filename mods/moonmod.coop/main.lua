@@ -1117,6 +1117,27 @@ local TOWNS = TOWN_NAMES
 local editing_town = nil
 local editing_base = nil  -- that town when the editor opened
 local waiting_towns = {} -- town -> {data, from}
+-- Chronicle Two takes a town into its editor while its player builds there, so a joiner placing parts one after
+-- another must not take a host's town that does not yet hold its newest part (that part would blink out until the
+-- host's answer to it came). A joiner numbers each town it sends (a "#n" line before it); the host's towns say the
+-- last number of that joiner's it has taken, and a joiner holds a host town that is behind for tn.HOLD frames at
+-- most: the host's answer is on the way, and after that the host's word stands.
+-- (one table, not seven locals: the main chunk is at Luau's 200-local limit)
+local tn = {
+  seq = {},   -- joiner: town -> the number of the last town it sent
+  acked = {}, -- host: peer -> town -> the last number of theirs taken
+  held = {},  -- joiner: town -> {data, since}
+  HOLD = 600,
+}
+function tn.numbered(n, data) return "#" .. tostring(n) .. "\n" .. data end
+function tn.for_peer(peer, town, data) -- the host's town for one player, with what of theirs it holds
+  return tn.numbered(tn.acked[peer] and tn.acked[peer][town] or 0, data)
+end
+function tn.took(peer, town, n)
+  if not (peer and town and n) then return end
+  tn.acked[peer] = tn.acked[peer] or {}
+  if n > (tn.acked[peer][town] or 0) then tn.acked[peer][town] = n end
+end
 
 local function take_town(data, from, base)
   local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
@@ -1132,7 +1153,8 @@ local function take_town(data, from, base)
       -- a builder sends a town at every part, each measured from the one before: what waits is the newest town,
       -- measured from the oldest town not yet taken
       local was = waiting_towns[town]
-      waiting_towns[town] = {data = data, from = from, base = (base and was and was.base and was.from == from) and was.base or base}
+      waiting_towns[town] = {data = data, from = from, base = (base and was and was.base and was.from == from) and was.base or base,
+                             seq = was and was.from == from and was.seq or nil}
     end
     if not errmsg(err):find("busy") then moonmod.log("warn", "co-op town: " .. errmsg(err)) end
     return false
@@ -1157,10 +1179,12 @@ end
 local function send_merged(town)
   local export = try(game.georama and game.georama.town_export, {town_id = town})
   if not (export and export.data) then return end
-  for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
+  for id in pairs(S.players) do send_pieces(id, "TOWN", tn.for_peer(id, town, export.data)) end
 end
 
 local function town_from(peer, payload)
+  local n, rest = payload:match("^#(%d+)\n(.*)$")
+  if n then payload, n = rest, tonumber(n) end
   local cut = payload:find("\n", 1, true)
   local data = cut and payload:sub(1, cut - 1) or payload
   local base = cut and payload:sub(cut + 1) or nil
@@ -1173,8 +1197,20 @@ local function town_from(peer, payload)
       if town then send_merged(town) end
       return
     end
-    if take_town(data, peer, base) and town then send_merged(town) end
+    local took = take_town(data, peer, base)
+    if not took and town and waiting_towns[town] and waiting_towns[town].from == peer then
+      -- busy: the number goes with the newest town waiting, and is said when it is taken
+      if n and n > (waiting_towns[town].seq or 0) then waiting_towns[town].seq = n end
+      return
+    end
+    tn.took(peer, town, n) -- taken, or not to be taken: either way the host's town that follows is its answer
+    if town then send_merged(town) end
   elseif peer == 0 then
+    if town and n and n < (tn.seq[town] or 0) then
+      tn.held[town] = {data = data, since = tn.held[town] and tn.held[town].since or S.frame}
+      return
+    end
+    tn.held[town or -1] = nil
     take_town(data, 0)
   end
 end
@@ -1231,7 +1267,7 @@ local function watch_editing()
   local export = try(game.georama and game.georama.town_export, {town_id = town})
   if not (export and export.data) then return end
   if S.role == "host" then
-    for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
+    for id in pairs(S.players) do send_pieces(id, "TOWN", tn.for_peer(id, town, export.data)) end
   elseif S.role == "guest" then
     send_pieces(0, "TOWN", export.data .. (editing_base and ("\n" .. editing_base) or ""))
   end
@@ -1241,7 +1277,17 @@ end
 -- A town that came while its player was busy is tried again (the host sent it on when it first came).
 local function retry_towns()
   for town, w in pairs(waiting_towns) do
-    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then send_merged(town) end
+    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then
+      tn.took(w.from, town, w.seq)
+      send_merged(town)
+    end
+  end
+  -- a host town held for an answer that never came: the host's word stands
+  for town, h in pairs(tn.held) do
+    if S.frame - h.since >= tn.HOLD then
+      tn.held[town] = nil
+      take_town(h.data, 0)
+    end
   end
 end
 
@@ -1457,6 +1503,7 @@ local function stop(reason)
     try(game.ui.choice_close, {})
   end
   waiting_towns, editing_town, editing_base = {}, nil, nil
+  tn.seq, tn.acked, tn.held = {}, {}, {}
   door.scene = nil
   if S.stopped then S.stopped() end
   show_room()
@@ -1634,9 +1681,10 @@ function S.town_changed(town)
   local base = shared.towns[town]
   shared.towns[town] = now
   if S.role == "host" then
-    for peer, p in pairs(S.players) do if p.in_visit then send_pieces(peer, "TOWN", now) end end
+    for peer, p in pairs(S.players) do if p.in_visit then send_pieces(peer, "TOWN", tn.for_peer(peer, town, now)) end end
   elseif base then
-    send_pieces(0, "TOWN", now .. "\n" .. base)
+    tn.seq[town] = (tn.seq[town] or 0) + 1
+    send_pieces(0, "TOWN", tn.numbered(tn.seq[town], now .. "\n" .. base))
   end
   if AUTOTEST then moonmod.log("info", "COOPTEST town " .. town .. " sent") end
 end
@@ -1682,6 +1730,7 @@ function shared.hold(rest)
   shared.held[#shared.held + 1] = rest
 end
 function shared.hold_town(data)
+  data = data:match("^#%d+\n(.*)$") or data -- a joiner not yet in has sent nothing: the number says nothing
   local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
   if town and town >= 0 and town <= 4 then shared.held_towns[town] = data end
 end

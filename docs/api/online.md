@@ -264,8 +264,12 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   player builds, so `town` is told at each part placed, moved or taken away, not only on leaving the editor.
   `georama.town_import` into a town this game's player stands in answers `reloaded = false, rebuilding = true`:
   nobody is walked back to the entrance; the town on screen is built again from its record where the player
-  stands, as soon as they walk free (after a scene or a menu, or on coming out of a house). It is still refused
-  as `busy` while this game's player is in that town's editor.
+  stands, as soon as they walk free (after a scene or a menu, or on coming out of a house). A player in that town's
+  editor gets it too, between the editor's actions: their own parts are written into the record first, the town is
+  merged into that, and the editor's map is built again at once (`rebuilt = true`). Mid-action (a part held against
+  a wall, a part, river or removal animating, the menu opening) it is refused as `busy`, to be tried again. The co-op
+  mod numbers a joiner's towns ("#n" before the town) and the host's towns say the last of that joiner's they hold, so
+  a joiner still building never takes a host town that lacks its newest part.
 - Who runs a floor: in Chronicle Two the co-op mod has a floor's monsters run by whoever was on it first, host or
   joiner (`monsters.mirror_get` there, `monsters.puppet_set` in the other game), and by the other when the first
   leaves. The engine's operations do not care which game is the host.
