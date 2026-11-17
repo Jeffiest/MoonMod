@@ -1,4 +1,4 @@
--- Online Co-op (moonmod.coop): play together, up to four, through the co-op relay (game.net.*).
+-- Online Co-op (moonmod.coop): play Dark Cloud (up to four) or Dark Cloud 2 (two) together through the co-op relay (game.net.*).
 --
 -- The host plays their own save and opens a room (Mod Manager > Online Co-op > Host, or F8); the relay gives it a
 -- five-letter code. A friend picks Online Co-op on the title screen, sets the code and joins. Their game says hello
@@ -14,7 +14,6 @@
 local PROTOCOL = 9
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
-local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from
 local LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 local function try(fn, ...)
@@ -23,6 +22,26 @@ local function try(fn, ...)
   if ok then return value end
   return nil
 end
+
+-- Which game this is: Dark Cloud (Chronicle) or Dark Cloud 2 (Chronicle Two). The messages are the same; the names,
+-- the towns each dungeon is reached from and the save texts' tags differ.
+local GAME = (function()
+  local info = try(game.info and game.info.get)
+  return type(info) == "table" and info.id == "chronicle-two" and "chronicle-two" or "chronicle"
+end)()
+local DC2 = GAME == "chronicle-two"
+local GAME_NAME = DC2 and "Dark Cloud 2" or "Dark Cloud"
+local TOWN_TAG = DC2 and "DCT2" or "DCT1" -- georama.town_export's tag: "DCT1<town>:" or "DCT2<town>:"
+local THINGS_TAG = DC2 and "DCP2" or "DCP1" -- save.player_export's tag
+local DUNGEON_TOWN = {[0] = 0, [1] = 1, [2] = 2, [3] = 3, [4] = 4, [5] = 4, [6] = 0} -- the town each dungeon is reached from (both games: seven dungeons, five towns)
+local DUNGEONS = DC2 and {[0] = "Underground Channel", "Rainbow Butterfly Wood", "Starlight Canyon", "Ocean's Roar Cave", "Mount Gundor",
+                          "Moon Flower Palace", "Zelmite Mine"}
+                     or {[0] = "Divine Beast Cave", "Wise Owl Forest", "Shipwreck", "Sun and Moon Temple", "Moon Sea",
+                         "Gallery of Time", "Demon Shaft"}
+-- The towns with Georama, by the number their Georama goes by (georama.town_export's town_id): Chronicle's five
+-- towns; Chronicle Two's five Georama maps (Palm Brinks has none).
+local TOWN_NAMES = DC2 and {[0] = "Sindain", "Balance Valley", "Veniccio", "Heim Rada", "Moon Flower Palace"}
+                       or {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
 local function call(fn, ...)
   if type(fn) ~= "function" then return nil, {code = "unsupported", message = "this engine has no such operation"} end
   local ok, value, err = pcall(fn, ...)
@@ -87,6 +106,8 @@ function S.scene_ok(scene)
   return scene:match("^[TH]%d+$") ~= nil or scene:match("^D%d+:%d+:%-?%d+$") ~= nil
 end
 S.greeted = {} -- peer -> true once it has said hello on this connection
+S.ROOM_FOR = DC2 and 2 or 4 -- the players a room holds, the host among them
+S.guest_own = {} -- peer -> the story progress of the save it brings (Chronicle Two), said before its hello
 local code = moonmod.storage.get("code") or "-----" -- the code being typed on the title page
 -- A live test run (tools/tests/coop/live) puts its wishes here: {role = "host"|"guest", code?, follow?, where?, at?}. Players never
 -- have it: nothing but that harness writes this storage key.
@@ -151,7 +172,7 @@ local function show_room()
   for peer in pairs(S.names) do seen[peer] = true end
   for _ in pairs(seen) do count = count + 1 end
   if S.rejoin then hud(string.format("CO-OP %s  reconnecting...", S.code or "....")) return end
-  hud(string.format("CO-OP %s  %d of 4", S.code or "....", count))
+  hud(string.format("CO-OP %s  %d of %d", S.code or "....", count, S.ROOM_FOR))
   -- the others in the room, by name, under it: each with their ping, or "no signal"
   local names = {}
   for peer, name in pairs(S.names) do
@@ -183,6 +204,15 @@ local function scene_of(w)
     if not w.floor_id or w.floor_id < 0 or not w.floor_seed or w.floor_seed == 0 then return nil end
     return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id, tostring(w.floor_seed))
   end
+  if DC2 then
+    -- Chronicle Two numbers its maps across the whole game, and a town's area is not a place (Palm Brinks is five
+    -- maps in one area): a place is the map the town runs (scene_map), "T12", or inside a house that map and the
+    -- house in one number (map * 1000 + house), "H12034".
+    local map, house = tonumber(w.scene_map), tonumber(w.house)
+    if not map or map < 0 or map > 999 or map ~= math.floor(map) then return nil end
+    if house and house >= 0 and house <= 999 and house == math.floor(house) then return "H" .. (map * 1000 + house) end
+    return "T" .. map
+  end
   if w.town_map then return "T" .. w.town_map end -- walking (or in a menu) in a town
   if w.map_no then return "H" .. w.map_no end     -- a house (or another of a town's maps)
   return nil
@@ -204,7 +234,10 @@ local function show_others()
     local here = slot and o.state and my_scene and o.scene == my_scene and S.frame - o.heard < QUIET
     if here then
       local st = o.state
-      try(game.world and game.world.avatar_set, {slot = slot, character = st.character, weapon = st.weapon, x = st.x, y = st.y, z = st.z,
+      try(game.world and game.world.avatar_set, {slot = slot, character = st.character, weapon = st.weapon, outfit = o.outfit,
+                                  ridepod = st.character == "ridepod" and o.ridepod or nil,
+                                  form = st.character == "monster" and o.form or nil,
+                                  x = st.x, y = st.y, z = st.z,
                                   heading = st.heading, motion = st.motion, tint = peer ~= 0 and GUEST_TINT or nil,
                                   name = o.name or (peer == 0 and "Host" or ("Player " .. peer)),
                                   down = o.down ~= nil and o.down ~= "up" or nil})
@@ -231,9 +264,128 @@ local function hear_position(peer, rest)
              z = S.num(z), heading = S.num(heading), motion = math.floor(S.num(motion))}
 end
 
+-- Shots and spells (Chronicle Two): what a player's hero fires on a floor (Max's guns, Monica's magic, her magic
+-- sword's charge), the trails of their blade's swings and the sounds their hero makes are sent as they happen ("F
+-- scene kind x y z dx dy dz value amount target frames", player.effects_take's entries), and the others draw them from
+-- that player's hero (world.avatar_effect): the same shot flying the same way, striking nothing there, since its hits
+-- are the firing game's and reach the monsters as that game's other hits do. A sound (kind 9) names its bank in
+-- frames ("CH_000,CH_000"), as a trail names its two frames.
+S.shots = {MOST = 8} -- shots sent in one frame at most (a machine gun fires one a frame)
+function S.shots.send()
+  if not (game.player and game.player.effects_take) then return end
+  local taken = try(game.player.effects_take) -- (taken every frame, so none wait to be sent late)
+  local list = type(taken) == "table" and taken.effects or nil
+  if type(list) ~= "table" or not on_floor() or not next(others) then return end
+  for i, f in ipairs(list) do
+    if i > S.shots.MOST then break end
+    if type(f) == "table" then
+      -- (a blade's trail names its two frames, "frame0,frame1"; a shot has none, "-")
+      local frames = "-"
+      if type(f.frame0) == "string" and type(f.frame1) == "string" and f.frame0:match("^[%w_]+$") and f.frame1:match("^[%w_]+$") then
+        frames = f.frame0 .. "," .. f.frame1
+      end
+      send("all", "F", string.format("%s %d %.1f %.1f %.1f %.4f %.4f %.4f %d %.3f %d %s", my_scene, math.floor(S.num(f.kind)),
+                                     S.num(f.x), S.num(f.y), S.num(f.z), S.num(f.dx), S.num(f.dy), S.num(f.dz),
+                                     math.floor(S.num(f.value)), S.num(f.amount), math.floor(S.num(f.target or -1)), frames))
+    end
+  end
+end
+function S.shots.hear(peer, rest)
+  if #rest > 200 then return end
+  local scene, kind, x, y, z, dx, dy, dz, value, amount, target, frames =
+    rest:match("^(%S+) (%d) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%S+) (%-?%d+) ?(%S*)$")
+  local frame0, frame1 = (frames or ""):match("^([%w_]+),([%w_]+)$")
+  local o = others[peer]
+  -- (a shot on a floor this game is not on, or from a hero not shown here, is not drawn)
+  if not scene or not o or not o.slot or scene ~= my_scene or o.scene ~= scene then return end
+  value, target = tonumber(value), tonumber(target)
+  if not value or value < -1 or value > 65535 or not target or target < -1 or target > 255 then return end
+  try(game.world and game.world.avatar_effect, {slot = o.slot, kind = tonumber(kind), x = S.num(x), y = S.num(y), z = S.num(z),
+                                                 dx = S.num(dx), dy = S.num(dy), dz = S.num(dz), value = value,
+                                                 amount = S.num(amount), target = target, frame0 = frame0, frame1 = frame1})
+end
+
+-- Places' names (Chronicle Two, whose maps have names of their own): a game says what the place it stands in is
+-- called ("W scene name") when it gets there and to a player who joins, so an offer can say "Sindain" or "Max's
+-- House" for a map only the other game has seen.
+S.places, S.places_n, S.my_place = {}, 0, nil
+local function say_place(to)
+  if S.my_place then send(to, "W", S.my_place) end
+end
+local function note_place(scene, w)
+  local title = DC2 and scene and type(w) == "table" and type(w.map_title) == "string" and w.map_title or nil
+  local name = title and cut((title:gsub("%c", " ")), 40):match("^%s*(.-)%s*$") or ""
+  local said = scene and name ~= "" and (scene .. " " .. name) or nil
+  if said == S.my_place then return end
+  S.my_place = said
+  if said then
+    if not S.places[scene] then S.places_n = S.places_n + 1 end
+    S.places[scene] = name
+    say_place("all")
+  end
+end
+local function hear_place(rest)
+  if #rest > 80 then return end
+  local scene, name = rest:match("^(%S+) (.+)$")
+  if not scene or not S.scene_ok(scene) then return end
+  name = cut((name:gsub("%c", " ")), 40):match("^%s*(.-)%s*$")
+  if name == "" then return end
+  if not S.places[scene] then
+    if S.places_n >= 96 then S.places, S.places_n = {}, 0 end -- no game has that many places to name
+    S.places_n = S.places_n + 1
+  end
+  S.places[scene] = name
+end
+
+-- What a hero wears (Chronicle Two, whose heroes change hats, clothes and shoes): a game says its hero's outfit
+-- ("O head clothes feet sub", item numbers, 0 for none) when it changes and to a player who joins, and the others
+-- draw that player's hero in it (world.avatar_set's outfit) instead of in their own hero's.
+S.my_outfit = nil
+local function say_outfit(to)
+  if S.my_outfit then send(to, "O", S.my_outfit) end
+end
+local function note_outfit(p)
+  local o = type(p) == "table" and type(p.outfit) == "table" and p.outfit or nil
+  if not o then return end
+  local function item(v)
+    v = tonumber(v)
+    return v and v > 0 and v < 4096 and math.floor(v) or 0
+  end
+  -- (and the ridepod's four parts, leg arm body pack, and the monster's form plus one: what the others draw when this
+  -- player rides the ridepod or wears a form; 0 for none)
+  local r = type(p.ridepod) == "table" and p.ridepod or {}
+  local form = tonumber(p.form)
+  form = form and form >= 0 and form < 4095 and math.floor(form) + 1 or 0
+  local text = string.format("%d %d %d %d %d %d %d %d %d", item(o.head), item(o.clothes), item(o.feet), item(o.sub),
+                             item(r.leg), item(r.arm), item(r.body), item(r.pack), form)
+  if text == S.my_outfit then return end
+  S.my_outfit = text
+  say_outfit("all")
+end
+local function hear_outfit(peer, rest)
+  local o = others[peer]
+  if not o or #rest > 48 then return end
+  -- four numbers from a game that says no more, nine from one that says the ridepod's parts and the form too
+  local head, clothes, feet, sub, more = rest:match("^(%d+) (%d+) (%d+) (%d+)(.*)$")
+  if not head then return end
+  local function item(v)
+    v = tonumber(v)
+    return v and v > 0 and v < 4096 and v or nil
+  end
+  o.outfit = {head = item(head), clothes = item(clothes), feet = item(feet), sub = item(sub)}
+  local leg, arm, body, pack, form = more:match("^ (%d+) (%d+) (%d+) (%d+) (%d+)$")
+  o.ridepod, o.form = nil, nil
+  if leg and item(leg) and item(arm) and item(body) and item(pack) then
+    o.ridepod = {leg = item(leg), arm = item(arm), body = item(body), pack = item(pack)}
+  end
+  if form and item(form) then o.form = item(form) - 1 end
+end
+
 -- Names: each game says its player's name ("N name") on joining, and the others answer with theirs.
 local function say_name(to)
   send(to, "N", cut(my_name() or ("Player " .. tostring(S.me_peer or "?")), 24))
+  say_place(to)
+  say_outfit(to)
 end
 
 local function hear_name(peer, rest)
@@ -286,9 +438,12 @@ local function send_position()
   if not S.role or not S.code then return end
   local w = try(game.world.get)
   my_scene = settled_scene(w)
+  if S.place_step then S.place_step() end -- (the monsters' section, below: who runs this floor)
+  note_place(my_scene, w)
   local text = "-"
   if my_scene then
     local p = try(game.player and game.player.get)
+    note_outfit(p)
     if p and p.position then
       text = string.format("%s %s %s %.1f %.1f %.1f %.3f %d", my_scene, p.town_character or p.character,
                            tostring(p.weapon and p.weapon.item_no or "-"), p.position.x, p.position.y, p.position.z,
@@ -310,7 +465,9 @@ local function floor_seed(dungeon, floor)
 end
 moonmod.on("game.dungeon.generating", function(e)
   if not (S.role and S.code and type(e) == "table") or e.back_floor then return end
-  try(game.dungeons and game.dungeons.set_seed, {seed = floor_seed(e.dungeon_id or 0, e.floor_id or 0)})
+  -- (a live test may name the seed, so a scenario meets the same floor every run)
+  local seed = AUTOTEST and tonumber(AUTOTEST.seed) or floor_seed(e.dungeon_id or 0, e.floor_id or 0)
+  try(game.dungeons and game.dungeons.set_seed, {seed = seed})
 end)
 
 -- Monsters: the host's -------------------------------------------------------------------------------------------
@@ -325,15 +482,46 @@ end)
 local MIRROR_EVERY = 4    -- frames between the host's monster reports
 local mon = {puppets = false, scene = nil, said_none = false}
 
+-- Chronicle Two: a floor's monsters are run by whoever was on the floor first (its leader), host or joiner, since
+-- either may go into a dungeon alone and be joined there. The one who comes second copies them as they stand (what
+-- the first already struck down stays down), and takes the floor over when the first leaves it. Two who take one
+-- floor in the same moment both think they lead: the host's stands, and the joiner gives way when it hears the
+-- host's monsters. In Chronicle the host's game runs every floor it is on.
+mon.lead = nil -- the floor this game leads (Chronicle Two)
+mon.at = nil   -- the floor it last took stock of
+function mon.others_here()
+  for peer, o in pairs(others) do
+    if o.scene and o.scene == my_scene and S.frame - (o.heard or 0) < QUIET then return peer end
+  end
+  return nil
+end
+function mon.leading()
+  if not DC2 then return S.role == "host" end
+  return my_scene ~= nil and mon.lead == my_scene
+end
+function S.place_step() -- as often as this game looks where it is
+  if not DC2 then return end
+  if not on_floor() then mon.lead, mon.at = nil, nil return end
+  if mon.at ~= my_scene then
+    mon.at = my_scene
+    mon.lead = mon.others_here() == nil and my_scene or nil -- first on the floor: it is this game's to run
+    if AUTOTEST then moonmod.log("info", "COOPTEST floor " .. (mon.lead and "led" or "followed") .. " " .. my_scene) end
+  elseif mon.lead ~= my_scene and mon.others_here() == nil then
+    mon.lead = my_scene -- the one who ran it left: the monsters go on from where they stand, as this game's
+    mon.release()
+    if AUTOTEST then moonmod.log("info", "COOPTEST floor taken over " .. my_scene) end
+  end
+end
+
 function mon.peer_with_avatar(slot)
   for peer, o in pairs(others) do if o.slot == slot then return peer end end
   return nil
 end
 
 function mon.host_step()
-  if not on_floor() then
-    -- off the floors: the guests' copies are theirs again
-    if not mon.said_none then send("all", "M", "- -") end
+  if not on_floor() or not mon.leading() then
+    -- off the floors (or, in Chronicle Two, on one another player runs): the others' copies are theirs again
+    if not mon.said_none and not (DC2 and on_floor()) then send("all", "M", "- -") end
     mon.said_none = true
     return
   end
@@ -354,7 +542,10 @@ function mon.host_step()
   mon.count = alive -- for the live tests' report
   for _, hit in ipairs(got.hits or {}) do
     local peer = mon.peer_with_avatar(hit.avatar)
-    if peer then send(peer, "D", string.format("%d %d %d", hit.damage, hit.kind or 0, hit.flags or 0)) end
+    if peer then
+      send(peer, "D", string.format("%d %d %d", hit.damage, hit.kind or 0, hit.flags or 0))
+      if AUTOTEST then moonmod.log("info", string.format("COOPTEST blow on peer %d strength %d kind %d", peer, hit.damage, hit.kind or 0)) end
+    end
   end
 end
 
@@ -364,9 +555,21 @@ function mon.release()
 end
 
 function mon.hear(peer, rest)
-  if S.role ~= "guest" or peer ~= 0 or #rest > 12000 then return end
+  if #rest > 12000 then return end
+  if DC2 then
+    local theirs = rest:match("^(%S+) ")
+    if mon.leading() then
+      -- both took this floor at once: the host's monsters stand, and the joiner gives way
+      if S.role == "host" or theirs ~= my_scene then return end
+      mon.lead = nil
+      if AUTOTEST then moonmod.log("info", "COOPTEST floor given to the host " .. my_scene) end
+    end
+  elseif S.role ~= "guest" or peer ~= 0 then
+    return
+  end
   local scene, list = rest:match("^(%S+) (%S+)$")
   if not scene or scene ~= my_scene then mon.release() return end
+  mon.from = peer
   local monsters = {}
   if list ~= "-" then
     for item in list:gmatch("[^;]+") do
@@ -388,7 +591,7 @@ function mon.hear(peer, rest)
   if refused >= 2 then
     link.refused_since = link.refused_since or S.frame
     if S.frame - link.refused_since > 300 and link.out_of_step_here then
-      link.out_of_step_here(string.format("%d of the host's monsters aren't on your floor", refused))
+      link.out_of_step_here(string.format("%d of %s monsters aren't on your floor", refused, link.whose(peer)), peer)
     end
   else
     link.refused_since = nil
@@ -398,7 +601,7 @@ function mon.hear(peer, rest)
     mon.scene = scene
     -- every blow this guest landed on a copy (a weapon's, a bomb's, a thrown item's) goes to the host's monster
     for _, hit in ipairs(type(got) == "table" and got.hits or {}) do
-      send(0, "H", string.format("%d %d", hit.slot, math.floor(hit.damage)))
+      send(DC2 and peer or 0, "H", string.format("%d %d", hit.slot, math.floor(hit.damage)))
     end
   end
 end
@@ -420,15 +623,19 @@ function mon.struck(rest)
   local p = try(game.player and game.player.get)
   if not (damage and my_scene and p and p.position) then return end
   -- kind as the host's hit list has it: 2 a small hit (a flinch), 3 or 4 a blow (a knock-back)
-  try(game.combat and game.combat.strike_player, {x = p.position.x, y = p.position.y + 8, z = p.position.z, radius = 12,
+  local took = try(game.combat and game.combat.strike_player, {x = p.position.x, y = p.position.y + 8, z = p.position.z, radius = 12,
       damage = math.min(9999, tonumber(damage)), kind = tonumber(kind) >= 3 and "heavy" or "light"})
+  if AUTOTEST and type(took) == "table" then
+    moonmod.log("info", string.format("COOPTEST struck hit=%s damage=%s hp=%s%s", tostring(took.hit), tostring(took.damage), tostring(took.hp),
+                                      took.reason and (" reason=" .. tostring(took.reason)) or ""))
+  end
 end
 
 function mon.tick()
-  if S.role == "host" and S.frame % MIRROR_EVERY == 0 then mon.host_step() end
+  if (S.role == "host" or (DC2 and S.role)) and S.frame % MIRROR_EVERY == 0 then mon.host_step() end
   -- A host that stops sending (paused, in a menu) leaves its monsters held where they are; a guest who leaves the
   -- floor has its own monsters on the next.
-  if S.role == "guest" and mon.puppets and (mon.scene ~= my_scene or not on_floor()) then mon.release() end
+  if (S.role == "guest" or DC2) and mon.puppets and (mon.scene ~= my_scene or not on_floor()) then mon.release() end
 end
 
 -- Doors: opened for everyone ----------------------------------------------------------------------------------------
@@ -540,9 +747,6 @@ end
 -- how much. The giver's game takes it first, then sends it ("V g amount" / "V i id count name"); the other game puts it
 -- in its wallet or bag and sends back whatever didn't fit ("V back ..."), which comes back to the giver.
 
-local DUNGEONS = {[0] = "Divine Beast Cave", "Wise Owl Forest", "Shipwreck", "Sun and Moon Temple", "Moon Sea",
-                  "Gallery of Time", "Demon Shaft"}
-local TOWN_NAMES = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
 local together = {queue = {}, open = nil, owed = {}, got = {}}
 -- A gift's bounds: no more Gilda than a wallet holds, no more of an item than a bag's slot; and from one player in a
 -- minute, no more than two wallets and forty gifts. What is over goes back to the giver.
@@ -555,9 +759,11 @@ end
 
 function together.place(scene)
   local d, f = scene:match("^D(%d+):(%-?%d+):")
-  if d then return string.format("%s, floor %s", DUNGEONS[tonumber(d)] or "a dungeon", tostring((tonumber(f) or 0) + 1)) end
+  -- Chronicle counts a dungeon's floors from zero; Chronicle Two's own numbers start at one
+  if d then return string.format("%s, floor %s", DUNGEONS[tonumber(d)] or "a dungeon", tostring((tonumber(f) or 0) + (DC2 and 0 or 1))) end
+  if S.places[scene] then return S.places[scene] end -- Chronicle Two: the name the game there gave it
   local t = scene:match("^T(%d+)$")
-  if t then return TOWN_NAMES[tonumber(t)] or "a town" end
+  if t then return not DC2 and TOWN_NAMES[tonumber(t)] or "a town" end
   if scene:match("^H%d+$") then return "a house" end
   return "somewhere"
 end
@@ -586,6 +792,7 @@ moonmod.on("ui.choice_made", function(e)
   together.open = nil
   local option = not e.cancelled and e.index and p.options[e.index] or nil
   if option and option.pick then option.pick() end
+  if not option and p.on_cancel then p.on_cancel() end -- backed out of: a question another player waits on is answered
 end)
 
 -- Following -----------------------------------------------------------------------------------------------------------
@@ -613,7 +820,10 @@ function together.join(peer, scene, waiting)
       ok, err = call(game.dungeons.enter_floor, {dungeon_id = where.dungeon_id, floor_id = where.floor_id})
     end
   else
-    local map = tonumber(scene:match("^[TH](%d+)$"))
+    local kind, number = scene:match("^([TH])(%d+)$")
+    local map = tonumber(number)
+    -- Chronicle Two: a house's number holds its town's map too; the way in is the town's, to its entrance
+    if map and DC2 and kind == "H" then map = math.floor(map / 1000) end
     if map then ok, err = call(game.world and game.world.enter_map, {map_no = map}) end
   end
   if ok then together.waiting = nil return end
@@ -636,6 +846,10 @@ end
 
 function S.moved(peer, scene)
   if not scene or scene == my_scene or not setting("follow_offers", true) then return end
+  -- Chronicle Two: the question is asked when the other player goes onto a dungeon floor, and only then. Its towns
+  -- are many maps each (Palm Brinks alone is five districts, and every house is one more), so asking at each would
+  -- ask at every door; a player in a town is joined from the Mod Manager.
+  if DC2 and scene:sub(1, 1) ~= "D" then return end
   -- six offers from one player in half a minute at most: more is no one walking
   local o = others[peer]
   if o then
@@ -645,6 +859,10 @@ function S.moved(peer, scene)
   end
   -- a guest still on the title page (its visit not begun) has nowhere to follow from
   if S.role == "guest" and not (S.guest and S.guest.visiting) then return end
+  -- Chronicle Two: a house on the street this player stands in is no place to be walked to (joining one walks to its
+  -- town map's entrance); its door is right there
+  local house = DC2 and tonumber(scene:match("^H(%d+)$"))
+  if house and my_scene == "T" .. math.floor(house / 1000) then return end
   -- one offer per player: a newer move replaces one not yet shown
   for i = #together.queue, 1, -1 do
     if together.queue[i].follow == peer then table.remove(together.queue, i) end
@@ -896,13 +1114,34 @@ end
 -- (georama.town_import); a player walking in it is walked into it again, at the town's entrance, so no one stands in
 -- a house that just went up. A town arriving while its player is busy in it (editing, a menu) waits and is tried again.
 
-local TOWNS = {[0] = "Norune", "Matataki", "Queens", "Muska Lacka", "Yellow Drops"}
+local TOWNS = TOWN_NAMES
 local editing_town = nil
 local editing_base = nil  -- that town when the editor opened
 local waiting_towns = {} -- town -> {data, from}
+-- Chronicle Two takes a town into its editor while its player builds there, so a joiner placing parts one after
+-- another must not take a host's town that does not yet hold its newest part (that part would blink out until the
+-- host's answer to it came). A joiner numbers each town it sends (a "#n" line before it); the host's towns say the
+-- last number of that joiner's it has taken, and a joiner holds a host town that is behind for tn.HOLD frames at
+-- most: the host's answer is on the way, and after that the host's word stands.
+-- (one table, not seven locals: the main chunk is at Luau's 200-local limit)
+local tn = {
+  seq = {},   -- joiner: town -> the number of the last town it sent
+  acked = {}, -- host: peer -> town -> the last number of theirs taken
+  held = {},  -- joiner: town -> {data, since}
+  HOLD = 600,
+}
+function tn.numbered(n, data) return "#" .. tostring(n) .. "\n" .. data end
+function tn.for_peer(peer, town, data) -- the host's town for one player, with what of theirs it holds
+  return tn.numbered(tn.acked[peer] and tn.acked[peer][town] or 0, data)
+end
+function tn.took(peer, town, n)
+  if not (peer and town and n) then return end
+  tn.acked[peer] = tn.acked[peer] or {}
+  if n > (tn.acked[peer][town] or 0) then tn.acked[peer][town] = n end
+end
 
 local function take_town(data, from, base)
-  local town = tonumber(data:match("^DCT1(%d+):"))
+  local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
   if not town then return end
   if not base then
     -- already so here (the merged town coming back to the one who built it): nothing to take, no walk back
@@ -911,13 +1150,27 @@ local function take_town(data, from, base)
   end
   local ok, err = call(game.georama and game.georama.town_import, {town_id = town, data = data, base = base})
   if not ok then
-    if errmsg(err):find("busy") then waiting_towns[town] = {data = data, from = from, base = base} end
+    if errmsg(err):find("busy") then
+      -- a builder sends a town at every part, each measured from the one before: what waits is the newest town,
+      -- measured from the oldest town not yet taken
+      local was = waiting_towns[town]
+      waiting_towns[town] = {data = data, from = from, base = (base and was and was.base and was.from == from) and was.base or base,
+                             seq = was and was.from == from and was.seq or nil}
+    end
     if not errmsg(err):find("busy") then moonmod.log("warn", "co-op town: " .. errmsg(err)) end
     return false
   end
   waiting_towns[town] = nil
+  if S.town_taken then S.town_taken(town) end
   local who = from == 0 and "The host" or (S.players[from] and S.players[from].name) or "A player"
-  if from ~= nil then toast(who .. " changed " .. (TOWNS[town] or "a town") .. (ok.reloaded and "; back to its entrance" or "")) end
+  if DC2 and from ~= nil then who = together.name(from) end -- a room of two: the other player, by name
+  -- a town that comes part by part (Chronicle Two) is announced once in a while, not at every part
+  local quiet = S.towns_watched and S.town_told and S.town_told[town] and S.frame - S.town_told[town] < 60 * 60
+  if S.towns_watched then S.town_told = S.town_told or {} S.town_told[town] = S.frame end
+  if from ~= nil and not quiet then
+    toast(who .. (S.towns_watched and " is building in " or " changed ") .. (TOWNS[town] or "a town") ..
+          (ok.reloaded and "; back to its entrance" or ""))
+  end
   return true
 end
 
@@ -927,14 +1180,16 @@ end
 local function send_merged(town)
   local export = try(game.georama and game.georama.town_export, {town_id = town})
   if not (export and export.data) then return end
-  for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
+  for id in pairs(S.players) do send_pieces(id, "TOWN", tn.for_peer(id, town, export.data)) end
 end
 
 local function town_from(peer, payload)
+  local n, rest = payload:match("^#(%d+)\n(.*)$")
+  if n then payload, n = rest, tonumber(n) end
   local cut = payload:find("\n", 1, true)
   local data = cut and payload:sub(1, cut - 1) or payload
   local base = cut and payload:sub(cut + 1) or nil
-  local town = tonumber(data:match("^DCT1(%d+):"))
+  local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
   if S.role == "host" then
     -- a guest's word is only what it changed (it comes with the town it started from): the whole town is the host's
     -- to say, so one without that is not taken, and the guest gets the host's town back
@@ -943,8 +1198,20 @@ local function town_from(peer, payload)
       if town then send_merged(town) end
       return
     end
-    if take_town(data, peer, base) and town then send_merged(town) end
+    local took = take_town(data, peer, base)
+    if not took and town and waiting_towns[town] and waiting_towns[town].from == peer then
+      -- busy: the number goes with the newest town waiting, and is said when it is taken
+      if n and n > (waiting_towns[town].seq or 0) then waiting_towns[town].seq = n end
+      return
+    end
+    tn.took(peer, town, n) -- taken, or not to be taken: either way the host's town that follows is its answer
+    if town then send_merged(town) end
   elseif peer == 0 then
+    if town and n and n < (tn.seq[town] or 0) then
+      tn.held[town] = {data = data, since = tn.held[town] and tn.held[town].since or S.frame}
+      return
+    end
+    tn.held[town or -1] = nil
     take_town(data, 0)
   end
 end
@@ -957,8 +1224,10 @@ local function name_of(peer)
   return (o and o.name) or (peer == 0 and "The host") or (S.players[peer] and S.players[peer].name) or "Another player"
 end
 local function warn_builders(town, peer)
+  -- (Chronicle Two sends a town at every part placed, so there the last change to a spot stands, not the last to leave)
   toast(name_of(peer) .. " is building in " .. (TOWNS[town] or "this town") ..
-        " too: you both keep your work, but where you change the same spot the last to leave wins")
+        (DC2 and " too: you both keep your work, but where you change the same spot the last change wins" or
+         " too: you both keep your work, but where you change the same spot the last to leave wins"))
 end
 local function hear_builder(peer, rest)
   local town, on = rest:match("^(%d+) ([01])$")
@@ -968,11 +1237,18 @@ local function hear_builder(peer, rest)
   if on == "1" and editing_town == town then warn_builders(town, peer) end
 end
 
+-- The town being edited, by the number its Georama goes by: Chronicle's town map; Chronicle Two's Georama town
+-- (world.get().georama_town: its town_map is an area, which is not that number).
+local function town_edited(w)
+  if DC2 then return tonumber(w.georama_town) end
+  return w.town_map
+end
+
 local function watch_editing()
   local w = try(game.world.get)
-  if type(w) == "table" and w.editing then
-    if editing_town ~= w.town_map then
-      editing_town = w.town_map
+  if type(w) == "table" and w.editing and town_edited(w) ~= nil then
+    if editing_town ~= town_edited(w) then
+      editing_town = town_edited(w)
       -- the town as it is now: what this player changes is measured from it
       local start = try(game.georama and game.georama.town_export, {town_id = editing_town})
       editing_base = start and start.data or nil
@@ -985,10 +1261,14 @@ local function watch_editing()
   local town = editing_town
   editing_town = nil
   send("all", "B", town .. " 0")
+  -- Chronicle Two with the world watched: the town goes out whenever the engine says it changed (S.town_changed),
+  -- at every part placed and at what the town works out once the building is done; leaving the editor only makes
+  -- sure of it
+  if S.towns_watched then editing_base = nil S.town_changed(town) return end
   local export = try(game.georama and game.georama.town_export, {town_id = town})
   if not (export and export.data) then return end
   if S.role == "host" then
-    for id in pairs(S.players) do send_pieces(id, "TOWN", export.data) end
+    for id in pairs(S.players) do send_pieces(id, "TOWN", tn.for_peer(id, town, export.data)) end
   elseif S.role == "guest" then
     send_pieces(0, "TOWN", export.data .. (editing_base and ("\n" .. editing_base) or ""))
   end
@@ -998,7 +1278,17 @@ end
 -- A town that came while its player was busy is tried again (the host sent it on when it first came).
 local function retry_towns()
   for town, w in pairs(waiting_towns) do
-    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then send_merged(town) end
+    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then
+      tn.took(w.from, town, w.seq)
+      send_merged(town)
+    end
+  end
+  -- a host town held for an answer that never came: the host's word stands
+  for town, h in pairs(tn.held) do
+    if S.frame - h.since >= tn.HOLD then
+      tn.held[town] = nil
+      take_town(h.data, 0)
+    end
   end
 end
 
@@ -1201,6 +1491,10 @@ local function stop(reason)
   builders = {}
   if reason then toast("Co-op: " .. reason) end
   S.role, S.code, S.players, S.pieces, S.guest, S.names, S.guest_mods = nil, nil, {}, {}, nil, {}, {}
+  S.guest_own = {}
+  if S.own_reset then S.own_reset() end
+  if S.heroes_reset then S.heroes_reset() end
+  if S.shared_reset then S.shared_reset() end
   S.rejoin, S.closing, S.host_bye, S.joined_at = nil, nil, nil, nil
   link.heard, link.ping, link.quiet, link.refused_since, link.out_of_step = {}, {}, {}, nil, {}
   S.greeted, S.keep_soon = {}, nil
@@ -1210,12 +1504,376 @@ local function stop(reason)
     try(game.ui.choice_close, {})
   end
   waiting_towns, editing_town, editing_base = {}, nil, nil
+  tn.seq, tn.acked, tn.held = {}, {}, {}
   door.scene = nil
   if S.stopped then S.stopped() end
   show_room()
   -- A visit is the host's world: it ends with the room, however the room ended (the session's end comes back here
   -- with no room left to stop).
   if visiting then try(game.session.finish) end
+end
+
+-- A player's own save (Chronicle Two) -------------------------------------------------------------------------------
+-- In Dark Chronicle a player who joins brings one of their own saves: its things come along (save.slot_player_export)
+-- and are written back into it as they play (save.slot_player_import), things only: its story stays its own, and the
+-- host keeps nothing of theirs. Co-op opens once a save's story is past the talk with Donny at the Channel Entrance
+-- (story progress own.GATE): for the save the host plays, and for the save a joiner picks. An engine without these
+-- operations keeps the older way, the joiner's things kept by the host.
+local own = {GATE = 2, slot = nil, things = nil, progress = nil, warned = nil}
+own.CLOSED = "Co-op opens once you have talked to Donny at the Channel Entrance."
+
+-- The saves a joiner may bring, those past the gate: {slot, progress, chapter}. nil: this engine has no such list.
+function own.saves()
+  if not DC2 then return nil end
+  local got = try(game.save and game.save.slots_list)
+  if type(got) ~= "table" or type(got.slots) ~= "table" then return nil end
+  local list = {}
+  for _, s in ipairs(got.slots) do
+    local slot, progress = type(s) == "table" and tonumber(s.slot), type(s) == "table" and tonumber(s.progress)
+    if slot and progress and s.ready == true and progress >= own.GATE and slot >= 0 and slot < 10000 then
+      list[#list + 1] = {slot = math.floor(slot), progress = math.floor(progress), chapter = math.floor(tonumber(s.chapter) or 0)}
+    end
+  end
+  table.sort(list, function(a, b) return a.slot < b.slot end)
+  return list
+end
+
+-- The save picked (remembered between runs), else the first that may join.
+function own.picked(list)
+  local want = tonumber(moonmod.storage.get("own_slot"))
+  for _, s in ipairs(list) do if s.slot == want then return s end end
+  return list[1]
+end
+
+function own.pick_next()
+  local list = own.saves()
+  local now = list and own.picked(list)
+  if not now then return end
+  for i, s in ipairs(list) do
+    if s.slot == now.slot then moonmod.storage.set("own_slot", list[i % #list + 1].slot) return end
+  end
+end
+
+function own.label(s) return string.format("File %d (chapter %d)", s.slot + 1, s.chapter) end
+function S.own_reset() own.slot, own.things, own.progress, own.warned, own.unused = nil, nil, nil, nil, nil end -- with the room (stop)
+
+-- The save's things, read before the room is joined: nothing is asked of a room that can't be entered.
+function own.take()
+  own.slot, own.things, own.progress = nil, nil, nil
+  local list = own.saves()
+  if not list then return true end -- the older way
+  local pick = own.picked(list)
+  if not pick then return false, own.CLOSED end
+  local got, err = call(game.save.slot_player_export, {slot = pick.slot})
+  if not got or type(got.data) ~= "string" then return false, "Can't read " .. own.label(pick) .. ": " .. cut(errmsg(err), 40) end
+  own.slot, own.things, own.progress = pick.slot, got.data, pick.progress
+  return true
+end
+
+-- The player's things as they stand, into their save. True when written.
+function own.write()
+  local things = try(game.save.player_export)
+  if not (things and things.data) then return false end
+  local ok, err = call(game.save.slot_player_import, {slot = own.slot, data = things.data})
+  if ok then return true end
+  moonmod.log("warn", "co-op: writing your things into your save: " .. errmsg(err))
+  if not own.warned then
+    own.warned = true
+    toast("Co-op: your things could not be written into your save: " .. cut(errmsg(err), 60))
+  end
+  return false
+end
+
+-- The world as it changes (Chronicle Two) ---------------------------------------------------------------------------
+-- The host's save is the world, and in Dark Chronicle either player may change it while they play apart: a scene
+-- seen, a floor cleared, a townsperson won over. Each game asks its engine to tell it of the changes it makes to the
+-- shared parts of the save (world.watch_set, game.world.changed: story flags and counters, the story's progress, the
+-- story's party, joinable townsfolk, dungeon floor records) and sends each one ("X kind id value"); the other game
+-- writes it into its own save (world.change_apply), which does not tell it back. A joiner's changes go to the host,
+-- which passes them to any other joiner; the host's go to every joiner. Only the host's game saves the world.
+local shared = {on = false, KINDS = {flag = 1, counter = 1, progress = 1, party = 1, recruit = 2, floor = 9, stock = 1, gift = 1}}
+
+function shared.watch()
+  if not DC2 or shared.on or not S.role then return end
+  if call(game.world and game.world.watch_set, {enabled = true}) then
+    shared.on = true
+    if shared.towns_begin then shared.towns_begin() end
+  end
+end
+
+function S.shared_reset() -- with the room (stop)
+  if shared.on then try(game.world and game.world.watch_set, {enabled = false}) end
+  shared.on = false
+  S.towns_watched = nil
+  shared.held, shared.held_towns, shared.told, shared.told_n = {}, {}, {}, 0
+end
+
+-- A change as text: "kind id value", a list's numbers joined with commas, a flag 1 or 0.
+function shared.encode(e)
+  local count = type(e) == "table" and shared.KINDS[e.kind]
+  local id = count and tonumber(e.id)
+  if not id then return nil end
+  local v = e.value
+  if e.kind == "flag" then return string.format("flag %d %d", id, v and 1 or 0) end
+  if count == 1 then
+    v = tonumber(v)
+    return v and string.format("%s %d %d", e.kind, id, v) or nil
+  end
+  if type(v) ~= "table" or #v ~= count then return nil end
+  local parts = {}
+  for i = 1, count do
+    local n = tonumber(v[i])
+    if not n then return nil end
+    parts[i] = string.format("%d", n)
+  end
+  return string.format("%s %d %s", e.kind, id, table.concat(parts, ","))
+end
+
+function shared.decode(text)
+  if #text > 160 then return nil end
+  local kind, id, values = text:match("^(%l+) (%d+) ([%-%d,]+)$")
+  local count = kind and shared.KINDS[kind]
+  if not count then return nil end
+  local list = {}
+  for n in values:gmatch("[^,]+") do
+    local v = tonumber(n)
+    if not v or v ~= math.floor(v) or v < -2147483648 or v > 2147483647 then return nil end
+    list[#list + 1] = math.floor(v)
+  end
+  if #list ~= count then return nil end
+  local value = list
+  if kind == "flag" then value = list[1] == 1 elseif count == 1 then value = list[1] end
+  return {kind = kind, id = tonumber(id), value = value}
+end
+
+function shared.tell(text, but)
+  if S.role == "host" then
+    for peer, p in pairs(S.players) do
+      if p.in_visit and peer ~= but then send(peer, "X", text) end
+    end
+  elseif S.role == "guest" and S.guest and S.guest.visiting and but ~= 0 then
+    send(0, "X", text)
+  end
+end
+
+-- A town's Georama: the engine says only that it changed (kind "town"); the town itself goes as it always has
+-- ("TOWN"): the host's whole, a joiner's with the town it was changed from, which the host merges and sends on.
+-- shared.towns holds each town as the games last agreed it, a joiner's "changed from". The engine writes a town
+-- being built into its record part by part, so a town goes at every part placed, moved or taken away, and a game
+-- whose player stands in that town builds it again where they stand.
+shared.towns = {}
+function shared.town_now(town)
+  local export = try(game.georama and game.georama.town_export, {town_id = town})
+  return export and export.data or nil
+end
+function shared.towns_begin()
+  shared.towns = {}
+  for town = 0, 4 do shared.towns[town] = shared.town_now(town) end
+  S.towns_watched = true
+end
+function S.town_taken(town) -- a town that came from another game: what stands now is agreed
+  if shared.on then shared.towns[town] = shared.town_now(town) end
+end
+function S.town_changed(town)
+  if not shared.on or town < 0 or town > 4 then return end
+  if S.role == "guest" and not (S.guest and S.guest.visiting) then return end
+  local now = shared.town_now(town)
+  if not now or now == shared.towns[town] then return end
+  local base = shared.towns[town]
+  shared.towns[town] = now
+  if S.role == "host" then
+    for peer, p in pairs(S.players) do if p.in_visit then send_pieces(peer, "TOWN", tn.for_peer(peer, town, now)) end end
+  elseif base then
+    tn.seq[town] = (tn.seq[town] or 0) + 1
+    send_pieces(0, "TOWN", tn.numbered(tn.seq[town], now .. "\n" .. base))
+  end
+  if AUTOTEST then moonmod.log("info", "COOPTEST town " .. town .. " sent") end
+end
+
+-- Two games changing one flag or counter in the same moment would each take the other's value and end crossed: the
+-- host's word stands. The host remembers what it told of each flag and counter, and a joiner's change of the same one
+-- within shared.CROSS frames of it is not taken; the host's is sent to that joiner again. (The story's progress keeps
+-- the higher value and a floor's record merges in the engine, so those two need no rule here.)
+shared.told, shared.told_n, shared.CROSS = {}, 0, 180
+function shared.mine(text) -- a change this game made, as told
+  if S.role ~= "host" then return end
+  local kind, id = text:match("^(%l+) (%d+) ")
+  if kind ~= "flag" and kind ~= "counter" then return end
+  if shared.told_n >= 512 then -- no more than a moment's worth is ever needed
+    for key, t in pairs(shared.told) do if S.frame - t.at > shared.CROSS then shared.told[key] = nil; shared.told_n = shared.told_n - 1 end end
+  end
+  local key = kind .. " " .. id
+  if not shared.told[key] then shared.told_n = shared.told_n + 1 end
+  shared.told[key] = {at = S.frame, text = text}
+end
+
+moonmod.on("game.world.changed", function(e)
+  if not shared.on or type(e) ~= "table" then return end
+  if e.kind == "town" then
+    local town = tonumber(e.id)
+    if town then S.town_changed(math.floor(town)) end
+    return
+  end
+  local text = shared.encode(e)
+  if text then
+    shared.mine(text)
+    shared.tell(text)
+  end
+end)
+
+-- A joiner's game hears the host's changes from the moment the host has sent its world, which is before its own visit
+-- has begun: those are held (the newest shared.HOLD) and taken, in order, as the visit begins, as are the newest
+-- towns the host sent in that time. Dropped, they would never come again: the host has moved on from them.
+shared.held, shared.held_towns, shared.HOLD = {}, {}, 300
+function shared.hold(rest)
+  if #rest > 160 then return end
+  if #shared.held >= shared.HOLD then table.remove(shared.held, 1) end
+  shared.held[#shared.held + 1] = rest
+end
+function shared.hold_town(data)
+  data = data:match("^#%d+\n(.*)$") or data -- a joiner not yet in has sent nothing: the number says nothing
+  local town = tonumber(data:match("^" .. TOWN_TAG .. "(%d+):"))
+  if town and town >= 0 and town <= 4 then shared.held_towns[town] = data end
+end
+function shared.take_held() -- as the visit begins, once the world is watched
+  local held, towns = shared.held, shared.held_towns
+  shared.held, shared.held_towns = {}, {}
+  for _, rest in ipairs(held) do shared.hear(0, rest) end
+  for town = 0, 4 do if towns[town] then take_town(towns[town], 0) end end
+end
+
+function shared.hear(peer, rest)
+  if not shared.on then return end
+  if S.role == "guest" and peer ~= 0 then return end -- a joiner's world comes from the host alone
+  local change = shared.decode(rest)
+  if not change then return end
+  if S.role == "host" then
+    local told = shared.told[change.kind .. " " .. change.id]
+    if told and S.frame - told.at <= shared.CROSS and told.text ~= rest then
+      send(peer, "X", told.text) -- crossed with the host's own change: the host's stands, in both games
+      return
+    end
+  end
+  if not call(game.world.change_apply, change) then return end
+  if S.role == "host" then shared.tell(rest, peer) end
+  -- what a scene gave the other player it gave this one too (each has a bag of their own)
+  if change.kind == "gift" then
+    toast("Co-op: " .. ((S.names and S.names[peer]) or (peer == 0 and "the host" or "your friend")) ..
+          " was given something in a scene; it is in your bag too")
+  end
+end
+
+-- Heroes (Chronicle Two) --------------------------------------------------------------------------------------------
+-- In Dark Chronicle a room gives each game one hero (party.room_hero_set): the host plays Max and a joiner Monica,
+-- from the gate on, long before the story has her. Either may ask to swap ("SW ask", the Mod Manager's "Ask to swap
+-- heroes" or F9); the other is asked on a panel and answers ("SW yes" / "SW no"); on yes both games change the hero
+-- they play, each to its own copy of the other hero with its own gear. The engine makes the change once the player is
+-- free (walking a town or a floor). The host tells a joiner how the room stands ("SW is0" / "SW is1").
+local heroes = {swapped = false, asked = nil, offered = nil, set = nil}
+
+function heroes.mine()
+  local host_plays = heroes.swapped and "monica" or "max"
+  if S.role == "host" then return host_plays end
+  return host_plays == "max" and "monica" or "max"
+end
+
+function heroes.name(hero) return hero == "max" and "Max" or "Monica" end
+
+function heroes.apply()
+  if not DC2 or not S.role then return end
+  local hero = heroes.mine()
+  if heroes.set == hero then return end
+  if call(game.party and game.party.room_hero_set, {hero = hero}) then heroes.set = hero end
+end
+
+function S.heroes_reset() -- with the room (stop)
+  if heroes.set then try(game.party and game.party.room_hero_clear) end
+  heroes.swapped, heroes.asked, heroes.offered, heroes.set = false, nil, nil, nil
+end
+
+-- The one other player of a two-player room: a swap is between two.
+function heroes.other()
+  if S.role == "guest" then return S.guest and S.guest.visiting and 0 or nil end
+  local found
+  for peer, p in pairs(S.players) do
+    if p.in_visit then
+      if found then return nil end
+      found = peer
+    end
+  end
+  return found
+end
+
+function heroes.ask()
+  if not DC2 then return end
+  if not S.role or not heroes.set then toast("Co-op: heroes are swapped in a room, with another player") return end
+  local peer = heroes.other()
+  if not peer then toast("Co-op: swapping heroes takes exactly two players") return end
+  if heroes.asked and S.frame - heroes.asked < 600 then toast("Co-op: you asked already; waiting for " .. together.name(peer)) return end
+  heroes.asked = S.frame
+  send(peer, "SW", "ask")
+  toast("Co-op: asked " .. together.name(peer) .. " to swap heroes")
+end
+
+-- How the room stands is the host's word: after every swap the host says it again ("SW is0" / "SW is1"), so two games
+-- that crossed (both asked at once, or an answer to a question given up on) end on the host's heroes, never both
+-- playing one hero.
+function heroes.tell()
+  local peer = S.role == "host" and heroes.other()
+  if peer then send(peer, "SW", heroes.swapped and "is1" or "is0") end
+end
+
+function heroes.swap()
+  heroes.swapped = not heroes.swapped
+  heroes.asked = nil
+  heroes.apply()
+  toast("Co-op: heroes swapped; you play " .. heroes.name(heroes.mine()) .. " now")
+  heroes.tell()
+end
+
+function heroes.hear(peer, rest)
+  if not DC2 then return end
+  if S.role == "guest" and peer == 0 and (rest == "is0" or rest == "is1") then -- how the room stands, from its host
+    local was = heroes.set and heroes.mine()
+    heroes.swapped = rest == "is1"
+    heroes.asked = nil
+    heroes.apply()
+    if was and was ~= heroes.mine() then toast("Co-op: you play " .. heroes.name(heroes.mine()) .. ", as the room has it") end
+    return
+  end
+  if not heroes.set or peer ~= heroes.other() then return end
+  if rest == "ask" then
+    -- both asked at once: each takes the other's question as the answer to its own
+    if heroes.asked and S.frame - heroes.asked < 600 then
+      send(peer, "SW", "yes")
+      heroes.swap()
+      return
+    end
+    if heroes.offered and S.frame - heroes.offered < 300 then return end -- one panel, however often it is asked
+    heroes.offered = S.frame
+    local would = heroes.name(heroes.mine() == "max" and "monica" or "max")
+    local function answer(yes)
+      send(peer, "SW", yes and "yes" or "no")
+      if yes then heroes.swap() end
+    end
+    if AUTOTEST and AUTOTEST.swap_answer ~= nil then -- the live test answers by itself
+      moonmod.log("info", "COOPTEST swap asked -> " .. (AUTOTEST.swap_answer and "yes" or "no"))
+      answer(AUTOTEST.swap_answer == true)
+      return
+    end
+    together.ask({title = together.name(peer) .. " wants to swap heroes", subtitle = "You would play " .. would .. ".",
+                  options = {{title = "Swap", subtitle = "Play " .. would, pick = function() answer(true) end},
+                             {title = "Not now", pick = function() answer(false) end}},
+                  on_cancel = function() answer(false) end})
+  elseif rest == "yes" then
+    if heroes.asked then heroes.swap() -- only the answer to this game's own question
+    else heroes.tell() end -- an answer to a question given up on: the joiner hears how the room stands
+  elseif rest == "no" then
+    if heroes.asked then
+      heroes.asked = nil
+      toast("Co-op: " .. together.name(peer) .. " would rather not swap now")
+    end
+  end
 end
 
 -- Host --------------------------------------------------------------------------------------------------------------
@@ -1227,19 +1885,41 @@ local function host()
     toast("Co-op: host from your own save, in a town or a dungeon")
     return
   end
+  if DC2 then
+    local w = try(game.world.get)
+    local progress = type(w) == "table" and tonumber(w.progress)
+    if progress and progress < own.GATE then toast(own.CLOSED) return end
+  end
   local ok, err = net_open("host", {})
   if not ok then toast("Co-op: can't host: " .. errmsg(err)) return end
   S.role = "host"
   toast("Co-op: opening a room...")
 end
 
--- The town a guest arrives in: the host's, or the one its dungeon is reached from.
+-- The town a guest arrives in: the host's, or the one its dungeon is reached from. Chronicle names a town by its map
+-- (0-4); Chronicle Two by its area (world.get().town_map), its maps being numbered across the whole game.
 local function arrival_town()
   local w = try(game.world.get) or {}
   if w.context == "dungeon" and w.dungeon_id then return DUNGEON_TOWN[w.dungeon_id] or 0 end
+  if DC2 then
+    local town = tonumber(w.town_map)
+    if town and town >= 0 and town <= 4 then return town end
+    return 0
+  end
   local map = tonumber(w.map_id)
   if map and map >= 0 and map <= 4 then return map end
   return 0
+end
+
+-- Chronicle Two: the map itself. Palm Brinks has no Georama map, so its area names no map to start in; its own
+-- number does (world.get().map_no). On a floor that number is still the town the host walked in from, which is
+-- where a joiner arrives; the floor is offered to them from there.
+local function arrival_map()
+  if not DC2 then return nil end
+  local w = try(game.world.get) or {}
+  local map = tonumber(w.map_no)
+  if map and map >= 0 and map == math.floor(map) and map < 10000 then return map end
+  return nil
 end
 
 local function welcome(peer, hello)
@@ -1257,6 +1937,17 @@ local function welcome(peer, hello)
       end
       p.id, p.in_visit = nil, nil -- gone quiet: the newcomer is that player now
     end
+  end
+  -- Chronicle Two is played by two: one is Max and the other Monica (S.ROOM_FOR; a player who has gone quiet for
+  -- ten seconds is no longer counted, so their place is free if they do not come back)
+  local here = 1
+  for other, p in pairs(S.players) do
+    if other ~= peer and p.id and S.frame - (link.heard[other] or -100000) < 600 then here = here + 1 end
+  end
+  if here >= S.ROOM_FOR then
+    S.greeted[peer] = nil
+    send(peer, "REFUSE", DC2 and "this room already has its two players (Dark Cloud 2 is played by two)" or "this room is full")
+    return
   end
   local name = type(hello.name) == "string" and cut((hello.name:gsub("%c", " ")), 24):match("^%s*(.-)%s*$") or ""
   if name == "" then name = "Player " .. (peer + 1) end
@@ -1277,19 +1968,34 @@ local function welcome(peer, hello)
     end
     send_pieces(peer, "SETTINGS", rm.host_settings(host_mods))
   end
+  -- Chronicle Two: a joiner brings a save of their own, whose story must be past the gate as the host's is
+  local brings = S.guest_own[peer]
+  if brings and brings < own.GATE then
+    send(peer, "REFUSE", "your save has not talked to Donny at the Channel Entrance yet")
+    return
+  end
+  S.players[peer].own = brings ~= nil
   -- back after a dropped connection: their visit went on, so no world, only "carry on"
   if hello.back then
     S.players[peer].in_visit = true
+    if DC2 then send(peer, "SW", heroes.swapped and "is1" or "is0") end -- the heroes as they stand now
     send(peer, "RESUME")
     toast("Co-op: " .. name .. " is back in (reconnected)")
     show_room()
     return
   end
-  local world = try(game.save.world_export)
-  if not world or not world.data then send(peer, "REFUSE", "the host's game can't share its world right now") return end
-  local account = try(game.save.account_get, {id = id})
+  local world, world_err = call(game.save.world_export)
+  if not world or not world.data then
+    moonmod.log("warn", "co-op: the world can't be shared: " .. errmsg(world_err)) -- the reason, for bug reports
+    send(peer, "REFUSE", "the host's game can't share its world right now")
+    return
+  end
+  local account = not S.players[peer].own and try(game.save.account_get, {id = id}) or nil
   send_pieces(peer, "WORLD", world.data)
-  if type(account) == "table" and account.data then
+  if S.players[peer].own then
+    send(peer, "OWN")
+    toast("Co-op: " .. name .. " joins with their own save")
+  elseif type(account) == "table" and account.data then
     send_pieces(peer, "PLAYER", account.data)
     toast("Co-op: " .. name .. " is back")
   else
@@ -1297,14 +2003,16 @@ local function welcome(peer, hello)
     toast("Co-op: " .. name .. " joins for the first time")
   end
   S.players[peer].in_visit = true
-  send(peer, "START", tostring(arrival_town()))
+  if DC2 then send(peer, "SW", heroes.swapped and "is1" or "is0") end -- before START: the hero the joiner begins as
+  local arrival = arrival_map()
+  send(peer, "START", tostring(arrival_town()) .. (arrival and (" " .. arrival) or ""))
   show_room()
 end
 
 local function keep(peer, data)
   local player = S.players[peer]
   -- only a guest whose visit this host began, and only what a game's things look like
-  if not (player and player.id and player.in_visit) or data:sub(1, 4) ~= "DCP1" then return end
+  if not (player and player.id and player.in_visit) or player.own or data:sub(1, 4) ~= THINGS_TAG then return end
   local ok, err = call(game.save.account_set, {id = player.id, name = player.name, data = data})
   if not ok then
     moonmod.log("warn", "co-op: keeping " .. player.name .. "'s things: " .. errmsg(err))
@@ -1328,6 +2036,8 @@ local function join()
   -- another room's list of mods needed is that room's: joining this one starts afresh
   local kept = moonmod.storage.get("needed")
   if type(kept) == "table" and kept.code ~= code then moonmod.storage.set("needed", nil) end
+  local ready, why = own.take()
+  if not ready then S.status = why return end
   local ok, err = net_open("join", {code = code})
   if not ok then S.status = "Can't join: " .. cut(errmsg(err), 60) return end
   S.role = "guest"
@@ -1341,7 +2051,15 @@ local function begin_visit()
   local g = S.guest
   if not g or g.started or not g.world or not g.map or not (g.player or g.new) then return end
   g.started = true
-  local ok, err = call(game.session.start, {visit = {world = g.world, player = g.player, map = g.map}})
+  -- Only things that came out of this player's own save go back into it. A host that answered with things of its
+  -- own keeping, or a new player's (PLAYER, NEW: an older host, or one that did not take the save), leaves the save
+  -- alone: those things are the host's to keep, as in Chronicle.
+  if own.slot and not g.own then
+    moonmod.log("warn", "co-op: the host didn't take File " .. (own.slot + 1) .. "; it is left as it is")
+    own.unused, own.slot, own.progress = own.slot + 1, nil, nil
+  end
+  heroes.apply() -- before the visit: it starts as the hero the room gives this game
+  local ok, err = call(game.session.start, {visit = {world = g.world, player = g.player, map = g.map, map_no = g.map_no}})
   if not ok then
     S.status = "The visit could not start: " .. errmsg(err):sub(1, 60)
     stop()
@@ -1349,10 +2067,15 @@ local function begin_visit()
   end
   S.status = "Off to the host's world..."
   g.world, g.player = nil, nil -- the engine has them now
+  own.things = nil
 end
 
 local function send_things()
   if S.role ~= "guest" or not (S.guest and S.guest.visiting) then return end
+  if own.slot then -- a save of their own: the things go into it, not to the host
+    if own.write() then S.kept_at = S.frame end
+    return
+  end
   local things = try(game.save.player_export)
   if things and things.data and send_pieces(0, "KEEP", things.data) then S.kept_at = S.frame end
 end
@@ -1413,6 +2136,14 @@ local function kept_ago()
   return s < 2 and "just now" or (s .. " seconds ago")
 end
 
+-- A guest's things, as the visit ends under it: a save of its own (Chronicle Two) takes them now, while the visit
+-- still runs; the host has them as last kept. Said as the end of a message: "; your things ...".
+local function things_at_end()
+  if own.slot and own.write() then return "; your things are in your save" end
+  if own.slot then return "; your save has your things as of " .. kept_ago() end
+  return "; your things were last kept " .. kept_ago()
+end
+
 -- A guest's connection dropped with the room still open: carry on alone and try to get back in.
 function link.lost(reason)
   forget_all()
@@ -1428,7 +2159,7 @@ end
 
 function link.give_up(why)
   S.status = "Couldn't get back into the room."
-  stop(why .. "; your things were last kept " .. kept_ago()) -- and the visit ends with it
+  stop(why .. things_at_end()) -- and the visit ends with it
 end
 
 function link.rejoin_step()
@@ -1455,8 +2186,8 @@ function link.closed(reason)
   end
   if visiting and not S.host_bye and not reason:find("host left", 1, true) then link.lost(reason) return end
   local why
-  if S.host_bye then why = "the host closed the room; your things were kept"
-  elseif visiting then why = "the host's game left the room; your things were last kept " .. kept_ago()
+  if S.host_bye then why = "the host closed the room" .. (own.slot and visiting and things_at_end() or "; your things were kept")
+  elseif visiting then why = "the host's game left the room" .. things_at_end()
   else why = "the room closed: " .. reason end
   S.status = "The room closed: " .. cut(reason, 80)
   stop(why) -- the host's world went with the host: a visit ends, back to the title
@@ -1467,8 +2198,14 @@ end
 function link.close_room()
   if S.closing then stop("you closed the room") return end -- a second press: at once
   local waiting, any = {}, false
-  for peer, p in pairs(S.players) do if p.id then waiting[peer], any = true, true end end
-  if not any then stop("you closed the room") return end
+  for peer, p in pairs(S.players) do if p.id and not p.own then waiting[peer], any = true, true end end -- a save of their own needs no keeping
+  if not any then
+    -- a joiner with a save of their own is still told first, so their game writes their things into it before the
+    -- visit ends with the room
+    for _, p in pairs(S.players) do if p.id and p.in_visit then send("all", "BYE") break end end
+    stop("you closed the room")
+    return
+  end
   S.closing = {since = S.frame, waiting = waiting}
   send("all", "BYE")
   toast("Co-op: closing the room; keeping your guests' things first (F10 again: close now)")
@@ -1485,16 +2222,26 @@ function link.closing_step()
   end
 end
 
--- Out of step with the host: offered once per floor.
-function link.out_of_step_here(why)
-  if S.role ~= "guest" or not my_scene or link.out_of_step[my_scene] then return end
+-- Whose floor this game is measured against: in Chronicle the host's; in Chronicle Two that of the player who runs
+-- it, host or joiner, by name.
+function link.whose(peer)
+  if not DC2 then return "the host's" end
+  return together.name(peer or 0) .. "'s"
+end
+
+-- Out of step with the host (Chronicle Two: with the player who runs the floor, either way round): offered once per
+-- floor.
+function link.out_of_step_here(why, peer)
+  peer = DC2 and peer or 0
+  if not (S.role == "guest" or (DC2 and S.role)) or not my_scene or link.out_of_step[my_scene] then return end
   link.out_of_step[my_scene] = true
-  local host_scene = others[0] and others[0].scene
+  local host_scene = others[peer] and others[peer].scene
   moonmod.log("warn", "co-op: out of step on " .. my_scene .. ": " .. why)
   if not host_scene or host_scene:sub(1, 1) ~= "D" then toast("Co-op: " .. why) return end
-  together.ask({title = "Out of step with the host", subtitle = why:sub(1, 96), options = {
-    {title = "Walk in again beside the host", subtitle = together.place(host_scene), pick = function() together.join(0, host_scene) end},
-    {title = "Stay as I am", subtitle = "Mod Manager: Resync with the host"},
+  local who = DC2 and together.name(peer) or "the host"
+  together.ask({title = "Out of step with " .. who, subtitle = why:sub(1, 96), options = {
+    {title = "Walk in again beside " .. who, subtitle = together.place(host_scene), pick = function() together.join(peer, host_scene) end},
+    {title = "Stay as I am", subtitle = DC2 and "Mod Manager: Resync the floor" or "Mod Manager: Resync with the host"},
   }})
 end
 
@@ -1507,7 +2254,9 @@ function link.host_check()
   if anyone then send("all", "K", my_scene .. " " .. #(door.log[my_scene] or {})) end
 end
 
-function link.guest_check(rest)
+-- (Chronicle Two: either game checks against the other, since either may run the floor; peer is who said "K".)
+function link.guest_check(rest, peer)
+  peer = peer or 0
   local scene, doors = rest:match("^(%S+) (%d+)$")
   if not (scene and my_scene) then return end
   local hd, hf, hs = scene:match("^D(%d+):(%-?%d+):(%S+)$")
@@ -1515,32 +2264,46 @@ function link.guest_check(rest)
   if not (hd and md) or hd ~= md or hf ~= mf then return end -- not on the host's floor
   local w = try(game.world.get)
   if hs ~= ms then
+    -- two games that built one floor apart each run their own (neither sees the other on it): the host's stands, as
+    -- when two take one floor at once, and the joiner is the one offered to walk in again
+    if DC2 and S.role == "host" then return end
     -- a back floor is built by the game itself, not from the room's seed: that one can't match
-    if not (type(w) == "table" and w.back_floor) then link.out_of_step_here("your floor isn't built like the host's") end
+    if not (type(w) == "table" and w.back_floor) then link.out_of_step_here("your floor isn't built like " .. link.whose(peer), peer) end
   elseif tonumber(doors) > #(door.log[my_scene] or {}) then
-    send(0, "SYNC", my_scene)
+    send(peer, "SYNC", my_scene)
   end
 end
 
--- The host answers a guest's "SYNC scene": the doors opened there, and the clock.
+-- The host answers a guest's "SYNC scene": the doors opened there, and the clock (the host's alone to give).
 function link.resync_for(peer, scene)
   for _, text in ipairs(door.log[scene] or {}) do send(peer, "E", scene .. " " .. text) end
-  send_clock()
+  if S.role == "host" then send_clock() end
 end
 
 function link.resync()
-  if S.role ~= "guest" or not S.code or S.rejoin then toast("Co-op: only a guest in a room resyncs with the host") return end
-  send(0, "SYNC", my_scene or "-")
+  -- Chronicle Two: the host asks its joiner too, since a floor may be the joiner's to run
+  local peer = S.role == "guest" and 0 or (DC2 and S.role == "host" and heroes.other()) or nil
+  if not peer or not S.code or S.rejoin then
+    toast(DC2 and "Co-op: there is no one in the room to resync with" or "Co-op: only a guest in a room resyncs with the host")
+    return
+  end
+  send(peer, "SYNC", my_scene or "-")
   link.out_of_step[my_scene or "-"] = nil
-  toast("Co-op: asked the host for the doors and the time again")
+  toast(DC2 and ("Co-op: asked " .. together.name(peer) .. " for this floor's open doors again") or
+        "Co-op: asked the host for the doors and the time again")
 end
 
 -- Falling and getting back up -----------------------------------------------------------------------------------------
 -- In a room, a player whose party is knocked out on a floor goes down rather than out (player.down_rule_set): they lie
 -- there, the monsters pass them by, and their game says so ("DN down", then "DN out", "DN up"), which the others show
--- on that player's hero. Another player standing beside them holds Revive (R, or the right stick) for three seconds,
--- which a hit breaks, or presses it once with a Revival Powder in their bag, which it uses: the fallen player gets up
--- with a third of their HP (half with the powder). Their own Revival Powder still works first, as in the game.
+-- on that player's hero. Another player standing beside them holds Revive (R, or the right stick; in Dark Cloud 2 V,
+-- or the left stick) for three seconds, which a hit breaks, or presses it once with a Revival Powder (Dark Cloud 2's
+-- Resurrection Powder) in their bag, which it uses: the fallen player gets up with a third of their HP (half with the
+-- powder). Their own Revival Powder still works first, as in the game.
+--
+-- Dark Cloud 2's pad gives R3 to the ridepod and the monster forms (and R, the keyboard's R2, to the first-person
+-- view); L3 changes hero, which does nothing in a room, where each game plays one hero (party.room_hero_set). So
+-- Revive is L3 there, and V, the keyboard's L3.
 --
 -- Down lasts fall.DOWN_FOR; then they're out: still lying there, back on their feet beside another player after a wait that
 -- grows with each fall on the floor (30 seconds, then 15 more each time), or at once when no one else is left on the
@@ -1551,6 +2314,9 @@ local fall = {state = "up", since = 0, deaths = 0, floor = nil, rule = nil, hold
               TOWNS = {[0] = "chronicle:location:norune-village", "chronicle:location:matataki-village",
                        "chronicle:location:queens", "chronicle:location:muska-lacka", "chronicle:location:yellow-drops"}}
 fall.DOWN_FOR, fall.OUT_FIRST, fall.OUT_MORE, fall.REVIVE_HOLD, fall.REVIVE_REACH, fall.WIPE_AFTER = 1800, 1800, 900, 180, 48, 120
+fall.KEYS = DC2 and {"V", "Gamepad:leftstick"} or {"R", "Gamepad:rightstick"} -- Revive's keys, and as the player reads them
+fall.KEYS_SAID = DC2 and "V / left stick" or "R / right stick"
+fall.POWDER = DC2 and "Resurrection Powder" or "Revival Powder"
 
 -- The rule follows the room: on while in one (and the setting is on), off otherwise.
 -- A guest whose connection dropped keeps the rule while it gets back in (a blip is not a knockout): alone on the
@@ -1596,7 +2362,7 @@ function fall.hear(peer, rest)
     fall.forced = true
   end
   if o.down ~= "up" and (was == nil or was == "up") and o.scene and o.scene == my_scene then
-    toast("Co-op: " .. peer_name(peer) .. " is down! Stand beside them and hold Revive (R / right stick)")
+    toast("Co-op: " .. peer_name(peer) .. " is down! Stand beside them and hold Revive (" .. fall.KEYS_SAID .. ")")
   end
 end
 
@@ -1667,9 +2433,16 @@ end
 function fall.wipe_step()
   if fall.wiping then
     if S.frame >= fall.wiping.at then
-      local town = fall.wiping.town
+      local town, map = fall.wiping.town, fall.wiping.map
       fall.wiping = nil
-      local ok, err = call(game.world and game.world.transition, {id = town})
+      local ok, err
+      if DC2 then
+        -- Chronicle Two: out of the dungeon by the map its own way out leads to (world.get().exit_map), or the
+        -- town this player came into it from
+        ok, err = call(game.world and game.world.enter_map, {map_no = map})
+      else
+        ok, err = call(game.world and game.world.transition, {id = town})
+      end
       if not ok then toast("Co-op: can't walk back to town (" .. errmsg(err):sub(1, 60) .. ")") end
     end
     return
@@ -1687,8 +2460,10 @@ function fall.wipe_step()
   fall.wipe_since = nil
   local d = tonumber(my_scene:match("^D(%d+):"))
   local town = fall.TOWNS[DUNGEON_TOWN[d or 0] or 0]
+  local w = DC2 and try(game.world.get) or nil
+  local map = type(w) == "table" and (tonumber(w.exit_map) or tonumber(w.map_no)) or nil
   if fall.get_up(1 / 2, nil, "the party fell; back to town, with all your things", "fell") then
-    fall.wiping = {town = town, at = S.frame + 30}
+    fall.wiping = {town = town, map = map, at = S.frame + 30}
   end
 end
 
@@ -1697,7 +2472,8 @@ end
 function fall.powder()
   local got = try(game.items and game.items.owned)
   for _, it in ipairs(type(got) == "table" and got.items or {}) do
-    if tostring(it.name):lower() == "revival powder" and (tonumber(it.count) or 0) > 0 then return it end
+    local name = tostring(it.name):lower() -- (Chronicle's Revival Powder, Chronicle Two's Resurrection Powder)
+    if (name == "revival powder" or name == "resurrection powder") and (tonumber(it.count) or 0) > 0 then return it end
   end
   return nil
 end
@@ -1790,7 +2566,7 @@ function fall.thanked(peer, rest)
     fall.pending = nil
     local took = try(game.items.remove, {id = w.id, count = 1})
     if type(took) == "table" and (tonumber(took.removed) or 0) > 0 then
-      toast("Co-op: you used a Revival Powder on " .. peer_name(peer))
+      toast("Co-op: you used a " .. fall.POWDER .. " on " .. peer_name(peer))
     end
   end
   toast("Co-op: " .. peer_name(peer) .. " is back on their feet")
@@ -1808,8 +2584,8 @@ end
 
 -- What a host takes from a game that has joined the room but whose visit it hasn't begun, and what a guest leaves
 -- alone until its own visit has.
-S.BEFORE_VISIT = {PING = true, PONG = true, N = true, P = true, MODS = true, HELLO = true, BACK = true, LEAVING = true}
-S.VISIT_ONLY = {TOWN = true, C = true, RV = true, M = true, D = true, E = true, B = true}
+S.BEFORE_VISIT = {PING = true, PONG = true, N = true, P = true, MODS = true, OWN = true, HELLO = true, BACK = true, LEAVING = true}
+S.VISIT_ONLY = {TOWN = true, C = true, RV = true, M = true, D = true, E = true, B = true, X = true}
 
 local function message(peer, data)
   local kind, rest = data:match("^(%u+) ?(.*)$")
@@ -1819,6 +2595,12 @@ local function message(peer, data)
     local p = S.players[peer]
     if not (p and p.in_visit) and not S.BEFORE_VISIT[kind] then return end
   elseif S.VISIT_ONLY[kind] and not (S.guest and S.guest.visiting) then
+    -- Chronicle Two: the host's changes to the world, and its towns, are held until the visit begins (shared.hold)
+    if DC2 and peer == 0 and S.role == "guest" and S.guest and kind == "X" then shared.hold(rest) end
+    if DC2 and peer == 0 and S.role == "guest" and S.guest and kind == "TOWN" then
+      local whole = take_piece(peer, kind, rest)
+      if whole then shared.hold_town(whole) end
+    end
     return
   end
   if kind == "PING" then if #rest <= 12 and rest:match("^%d+$") then send(peer, "PONG", rest) end return end
@@ -1827,23 +2609,38 @@ local function message(peer, data)
   if kind == "RV" then fall.revived(peer, rest) return end
   if kind == "THX" then fall.thanked(peer, rest) return end
   if kind == "P" then hear_position(peer, rest) return end
+  if kind == "F" then S.shots.hear(peer, rest) return end
   if kind == "N" then hear_name(peer, rest) return end
+  if kind == "W" then hear_place(rest) return end
+  if kind == "O" then hear_outfit(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
   if kind == "V" then together.hear(peer, rest) return end
+  if kind == "SW" then heroes.hear(peer, rest) return end
+  if kind == "X" then shared.hear(peer, rest) return end
   if kind == "C" then if S.role == "guest" and peer == 0 then hear_clock(rest) end return end
   if kind == "M" then mon.hear(peer, rest) return end
   if kind == "E" then door.hear(rest) return end
-  if kind == "H" then if S.role == "host" then mon.hit_on_host(peer, rest) end return end
-  if kind == "D" then if S.role == "guest" and peer == 0 then mon.struck(rest) end return end
+  if kind == "H" then if mon.leading() then mon.hit_on_host(peer, rest) end return end
+  if kind == "D" then
+    -- a blow from the game that runs this floor's monsters: the host's, or in Chronicle Two the leader's
+    if DC2 and (mon.puppets and mon.from == peer) or (not DC2 and S.role == "guest" and peer == 0) then mon.struck(rest) end
+    return
+  end
   if kind == "TOWN" then
     local whole = take_piece(peer, kind, rest)
     if whole then town_from(peer, whole) end
     return
   end
+  -- Chronicle Two: a floor is checked and resynced either way round (Chronicle: a guest against the host, below)
+  if DC2 and kind == "K" then link.guest_check(rest, peer) return end
+  if DC2 and kind == "SYNC" then link.resync_for(peer, rest) return end
   if S.role == "host" then
     if kind == "MODS" then
       local whole = take_piece(peer, kind, rest)
       if whole then S.guest_mods[peer] = rm.decode_list(whole) end
+    elseif kind == "OWN" then
+      local progress = #rest <= 6 and tonumber(rest:match("^%d+$"))
+      if progress and not S.greeted[peer] then S.guest_own[peer] = progress end
     elseif kind == "HELLO" or kind == "BACK" then
       if S.greeted[peer] then return end -- once a connection: a second hello would send the world again
       S.greeted[peer] = true
@@ -1863,7 +2660,8 @@ local function message(peer, data)
     if kind == "BYE" then
       S.host_bye = S.frame
       send_things()
-      toast("Co-op: the host is closing the room; your things are going to them")
+      toast(own.slot and "Co-op: the host is closing the room; your things are in your save" or
+            "Co-op: the host is closing the room; your things are going to them")
       return
     end
     if kind == "RESUME" then
@@ -1897,7 +2695,16 @@ local function message(peer, data)
       if g.world then moonmod.storage.set("needed", nil) end
     elseif kind == "PLAYER" then g.player = take_piece(peer, kind, rest) or g.player
     elseif kind == "NEW" then g.new = true
-    elseif kind == "START" then g.map = tonumber(rest)
+    elseif kind == "OWN" then -- the host took this player's own save: its things are the ones read before joining
+      g.player = own.things
+      g.new = g.player == nil
+      g.own = own.slot ~= nil and own.things ~= nil
+    elseif kind == "START" then
+      -- "town" or "town map_no": the town's number, and (Chronicle Two) the map to start in
+      local town, map_no = rest:match("^(%d+) ?(%d*)$")
+      g.map = tonumber(town)
+      g.map_no = tonumber(map_no)
+      if g.map_no and g.map_no >= 10000 then g.map_no = nil end
     elseif kind == "REFUSE" then
       if S.rejoin and rest:find("already in the room", 1, true) then
         -- the host hasn't seen this game's old connection go yet: the next try may do it
@@ -1923,11 +2730,14 @@ local function pump()
       S.me_peer = e.peer
       say_name("all")
       if S.role == "host" then
+        heroes.apply()
+        shared.watch()
         toast("Co-op room " .. tostring(e.code) .. ": friends join with this code from the title screen")
       else
         -- the mods this game plays, then "HELLO id name": the player id first, then the name, which may hold spaces
         local mine = rm.loaded()
         if mine then send_pieces(0, "MODS", rm.encode_list(mine)) end
+        if own.slot then send(0, "OWN", tostring(own.progress)) end -- before hello: the save this player brings
         send(0, S.rejoin and "BACK" or "HELLO", me.id .. " " .. (my_name() or ""))
         if not S.rejoin then S.status = "Joined " .. tostring(e.code) .. "; the host is sending their world..." end
         if S.rejoin then S.rejoin.linked = S.frame end
@@ -1969,8 +2779,11 @@ local function pump()
     elseif e.kind == "closed" then
       if S.role == "host" then
         S.status = "The room closed: " .. tostring(e.reason)
+        -- (guests who bring a save of their own, Chronicle Two's, leave nothing in the host's to keep)
+        local keeps = not DC2
+        for _, p in pairs(S.players) do if p.id and not p.own then keeps = true end end
         stop(S.closing and "you closed the room" or
-             ("the room closed (" .. tostring(e.reason) .. "); save your game to keep your guests' things"))
+             ("the room closed (" .. tostring(e.reason) .. ")" .. (keeps and "; save your game to keep your guests' things" or "")))
       else
         link.closed(e.reason)
       end
@@ -1997,7 +2810,10 @@ moonmod.on("game.tick", function(e)
       return
     end
   end
-  if S.role == "host" and S.code and S.frame % CHECK_EVERY == 0 then link.host_check() end
+  -- (Chronicle Two: both games say their floor, since either may run it)
+  if (S.role == "host" or (DC2 and S.role == "guest" and S.guest and S.guest.visiting)) and S.code and S.frame % CHECK_EVERY == 0 then
+    link.host_check()
+  end
   -- a host that never answers a join
   if S.role == "guest" and S.guest and not S.guest.started and S.joined_at and S.frame - S.joined_at > 1800 then
     S.status = "The host didn't send their world; try again."
@@ -2009,7 +2825,7 @@ moonmod.on("game.tick", function(e)
     send_position()
     show_others()
   end
-  if S.role and S.code then mon.tick() end
+  if S.role and S.code then mon.tick(); S.shots.send() end
   if S.role then together.tick(); together.retry() end
   if S.role and S.code and S.frame % 10 == 0 then door.step() end
   if S.role == "host" and S.code and S.frame % CLOCK_EVERY == 0 then send_clock() end
@@ -2036,7 +2852,14 @@ moonmod.on("game.session.started", function(e)
   if type(e) == "table" and e.kind == "visit" and e.owner == "moonmod.coop" and S.guest then
     S.guest.visiting = true
     S.kept_at = S.frame
-    toast("Co-op: you are in the host's world. Your own saves stay as they are.")
+    shared.watch() -- from here on: the world this visit began with is what the two games share
+    if shared.on then shared.take_held() end -- and what the host changed while it began
+    toast(own.slot and ("Co-op: you are in the host's world. Your things are saved to File " .. (own.slot + 1) ..
+                        " as you play; its story stays your own.") or
+          own.unused and ("Co-op: you are in the host's world. The host's game didn't take your save, so File " ..
+                          own.unused .. " stays as it is; your things here are kept by the host.") or
+          "Co-op: you are in the host's world. Your own saves stay as they are.")
+    own.unused = nil
   end
 end)
 
@@ -2071,12 +2894,12 @@ end)
 local function leave()
   if S.role == "guest" and S.guest and S.guest.visiting then
     if S.rejoin then
-      stop("you left while out of the room; your things were last kept " .. kept_ago()) -- the visit ends with it
+      stop("you left while out of the room" .. things_at_end()) -- the visit ends with it
       return
     end
     send(0, "LEAVING")
     send_things()
-    toast("Co-op: your things went to the host; leaving...")
+    toast(own.slot and "Co-op: your things are in your save; leaving..." or "Co-op: your things went to the host; leaving...")
     try(game.session.finish)
   elseif S.role == "host" then
     link.close_room()
@@ -2087,16 +2910,29 @@ end
 
 -- Mod Manager actions and keys --------------------------------------------------------------------------------------
 
+-- Chronicle Two with saves of their own (save.slots_list): a joiner's things go into their save, and the host's save
+-- keeps no one's, so the buttons about kept guests are not there; a floor is resynced with whoever runs it.
+local OWN_SAVES = DC2 and type(game.save) == "table" and type(game.save.slots_list) == "function"
 for _, a in ipairs({
   {"host", "Host a co-op room", "Open a room for friends to join with its code (F8)"},
-  {"leave", "Leave or close co-op", "A guest's things go to the host first (F10)"},
-  {"guests", "Guests this save keeps", "The friends whose things this save keeps, by name"},
+  OWN_SAVES and {"leave", "Leave or close co-op", "A joiner's things go into their own save first (F10)"}
+             or {"leave", "Leave or close co-op", "A guest's things go to the host first (F10)"},
+  not OWN_SAVES and {"guests", "Guests this save keeps", "The friends whose things this save keeps, by name"} or false,
   {"give", "Give to a player", "Give another player in the room Gilda or items from your bag (F7)"},
   {"follow", "Join a player", "Go to where another player in the room is now"},
-  {"resync", "Resync with the host", "A guest asks the host again for the floor's open doors and the time"},
-  {"forget", "Forget guests not here", "Press twice: this save stops keeping the things of guests not in the room now"},
+  DC2 and {"resync", "Resync the floor", "Ask the other player again for this floor's open doors"}
+       or {"resync", "Resync with the host", "A guest asks the host again for the floor's open doors and the time"},
+  not OWN_SAVES and {"forget", "Forget guests not here", "Press twice: this save stops keeping the things of guests not in the room now"} or false,
   {"needed", "Mods needed to join", "The mods a room asked this game to enable, update or turn off, still to do"},
-}) do try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end
+}) do if a then try(game.ui.register, {id = a[1], label = a[2], description = a[3]}) end end
+if DC2 then
+  try(game.ui.register, {id = "swap", label = "Ask to swap heroes", description = "Ask the other player to trade Max and Monica with you (F9)"})
+  try(game.input.bind, {id = "swap_key", keys = {"F9"}})
+  moonmod.on("game.tick", function()
+    local k = try(game.input.consume, {id = "swap_key"})
+    if k and k.pressed then heroes.ask() end
+  end)
+end
 
 -- The host's guests: listed, and forgotten (all but those in the room) on a second press within five seconds.
 local forget_armed = -1000
@@ -2137,6 +2973,7 @@ moonmod.on("ui.action", function(a)
   elseif a.id == "guests" then list_guests() elseif a.id == "forget" then forget_guests()
   elseif a.id == "give" then together.give() elseif a.id == "follow" then together.follow_menu()
   elseif a.id == "resync" then link.resync()
+  elseif a.id == "swap" then heroes.ask()
   elseif a.id == "needed" then
     local left, room = rm.needed()
     if not left then toast("Co-op: no room has asked this game for mods")
@@ -2147,7 +2984,7 @@ end)
 try(game.input.bind, {id = "host_key", keys = {"F8"}})
 try(game.input.bind, {id = "leave_key", keys = {"F10"}})
 try(game.input.bind, {id = "give_key", keys = {"F7"}})
-try(game.input.bind, {id = "revive", keys = {"R", "Gamepad:rightstick"}})
+try(game.input.bind, {id = "revive", keys = fall.KEYS})
 moonmod.on("game.tick", function()
   local g = try(game.input.consume, {id = "give_key"})
   if g and g.pressed then together.give() end
@@ -2166,13 +3003,23 @@ local function page()
   for i = 1, 5 do
     entries[#entries + 1] = {id = "c" .. i, label = "Letter " .. i .. ":  " .. code:sub(i, i)}
   end
-  entries[#entries + 1] = {id = "join", label = "Join room " .. code, enabled = not S.role}
+  -- Chronicle Two: the save this player brings, one of theirs past the gate
+  local saves = own.saves()
+  local pick = saves and own.picked(saves)
+  entries[#entries + 1] = {id = "join", label = "Join room " .. code, enabled = not S.role and (saves == nil or pick ~= nil)}
   entries[#entries + 1] = {id = "clear", label = "Clear the code"}
+  if saves then
+    entries[#entries + 1] = {id = "save", label = pick and ("Your save: " .. own.label(pick)) or "Your save: none yet",
+                             enabled = not S.role and #saves > 1}
+  end
   local lines = {
     "Join a friend's world with their room's five letters.",
     "Type the letters, or Cross on one steps it on, Square back.",
     S.status or ("You are " .. (my_name() or "nameless (set a name in the mod's settings)") .. "."),
   }
+  if saves then
+    lines[#lines + 1] = pick and "Your things come from your save and go back into it." or own.CLOSED
+  end
   -- which server: the public relay, or the private one the settings name (its host only)
   local server = setting("server", "")
   lines[#lines + 1] = server == "" and "Server: the public relay." or
@@ -2188,7 +3035,11 @@ local function page()
   elseif left then
     lines[#lines + 1] = "The mods the room needed are all in place: join again."
   end
-  return {title = "ONLINE CO-OP", subtitle = "Visit a friend's Dark Cloud", root = true, hint = "", lines = lines,
+  if DC2 then -- Chronicle Two's page takes eight lines of 96 bytes, and refuses the whole page past that
+    while #lines > 8 do table.remove(lines) end
+    for i = 1, #lines do lines[i] = cut(lines[i], 96) end
+  end
+  return {title = "ONLINE CO-OP", subtitle = "Visit a friend's " .. GAME_NAME, root = true, hint = "", lines = lines,
           entries = entries}
 end
 
@@ -2269,6 +3120,9 @@ moonmod.on("game.title.selected", function(e)
     moonmod.storage.set("code", code)
     typing.at = 1
     show(0)
+  elseif entry == "save" then
+    own.pick_next()
+    show(7)
   end
 end)
 -- While waiting on the title page, the status line follows the join.
@@ -2361,6 +3215,23 @@ if AUTOTEST then
         leave()
       end
     end
+    if AUTOTEST.swap_after and not said.swapped and heroes.set and heroes.other() then
+      said.swap_since = said.swap_since or S.frame
+      if S.frame - said.swap_since >= AUTOTEST.swap_after then
+        said.swapped = true
+        moonmod.log("info", "COOPTEST swap asking")
+        heroes.ask()
+      end
+    end
+    if S.frame % 60 == 0 then
+      local w = try(game.world.get) or {}
+      local p = try(game.player and game.player.get) or {}
+      local hero = tostring(w.room_hero) .. "/" .. tostring(p.town_character or p.character)
+      if hero ~= said.hero then
+        said.hero = hero
+        moonmod.log("info", "COOPTEST hero " .. hero .. " frame=" .. S.frame)
+      end
+    end
     if S.role or said.started then return end
     if AUTOTEST.role == "host" and S.frame >= (AUTOTEST.at or 120) then
       local w = try(game.world.get) or {}
@@ -2395,4 +3266,6 @@ if AUTOTEST then
 end
 
 -- For the tests: the state, and the pieces' size.
-return {state = S, me = me, piece = PIECE, mods = rm, link = link, fall = fall, together = together, door = door}
+return {state = S, me = me, piece = PIECE, mods = rm, link = link, fall = fall, together = together, door = door, own = own,
+        heroes = heroes, shared = shared,
+        game = GAME, town_tag = TOWN_TAG, dungeons = DUNGEONS, towns = TOWN_NAMES}
