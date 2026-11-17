@@ -309,7 +309,8 @@ local function show_others()
                                   tint = peer ~= 0 and not DC2 and GUEST_TINT or nil,
                                   -- (with no name of their own, Chronicle Two's say whose hero it is, as the game would)
                                   name = o.name or (DC2 and S.HERO_NAMES[st.character]) or (peer == 0 and "Host" or ("Player " .. peer)),
-                                  down = o.down ~= nil and o.down ~= "up" or nil})
+                                  down = o.down ~= nil and o.down ~= "up" or nil,
+                                  away = DC2 and o.away or nil})
       o.slot = slot
     elseif o.slot then
       try(game.world and game.world.avatar_clear, {slot = o.slot})
@@ -460,11 +461,35 @@ local function hear_outfit(peer, rest)
   if form and item(form) then o.form = item(form) - 1 end
 end
 
+-- The story's scenes (Chronicle Two): a game whose player watches one says so ("SC 1", and "SC 0" when it is over),
+-- and to a player who joins while it plays; the others fade that player's hero from sight where it stands and back in
+-- where it is after (world.avatar_set's away), as the game's own scenes keep their cast to themselves. (A scene this
+-- game plays hides the others' heroes from it by itself.) A game that says nothing of scenes is never away.
+S.in_scene = false
+local function say_scene(to)
+  if S.in_scene then send(to, "SC", "1") end
+end
+local function note_scene(w)
+  local now = DC2 and type(w) == "table" and w.story_scene == true or false
+  if now == S.in_scene then return end
+  S.in_scene = now
+  send("all", "SC", now and "1" or "0")
+end
+local function hear_scene(peer, rest)
+  local o = others[peer]
+  if not o or (rest ~= "1" and rest ~= "0") then return end
+  local away = rest == "1" or nil
+  if o.away == away then return end
+  o.away = away
+  if DC2 then show_others() end
+end
+
 -- Names: each game says its player's name ("N name") on joining, and the others answer with theirs.
 local function say_name(to)
   send(to, "N", cut(my_name() or ("Player " .. tostring(S.me_peer or "?")), 24))
   say_place(to)
   say_outfit(to)
+  say_scene(to)
 end
 
 local function hear_name(peer, rest)
@@ -519,6 +544,7 @@ local function send_position()
   my_scene = settled_scene(w)
   if S.place_step then S.place_step() end -- (the monsters' section, below: who runs this floor)
   note_place(my_scene, w)
+  note_scene(w)
   local text = "-"
   if my_scene then
     local p = try(game.player and game.player.get)
@@ -931,6 +957,12 @@ function together.tick()
     together.open, together.held = nil, nil
     try(game.ui.choice_close, {})
     autotest_answer(p)
+  end
+  -- A question gone stale is taken back: it may wait out a whole scene before it is asked (the engine holds it while
+  -- the player is in one), and the friend may have moved on by then, or while it stood open.
+  if together.open and not together.held and together.open.still and not together.open.still() then
+    together.open = nil
+    try(game.ui.choice_close, {})
   end
   if together.open or not together.queue[1] then return end
   local p = table.remove(together.queue, 1)
@@ -2787,6 +2819,7 @@ local function message(peer, data)
   if kind == "N" then hear_name(peer, rest) return end
   if kind == "W" then hear_place(rest) return end
   if kind == "O" then hear_outfit(peer, rest) return end
+  if kind == "SC" then hear_scene(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
   if kind == "V" then together.hear(peer, rest) return end
   if kind == "SW" then heroes.hear(peer, rest) return end

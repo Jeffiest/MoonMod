@@ -62,7 +62,8 @@ local function make_game(name, opts)
     } or nil,
     ui = {notify = function(n) S.toasts[#S.toasts + 1] = n.message end,
           register = function(a) S.actions = S.actions or {}; S.actions[a.id] = a; return true end,
-          choice_open = function(a) if S.panel then return nil, {message = "a panel is open"} end; S.panel = a; return {} end},
+          choice_open = function(a) if S.panel then return nil, {message = "a panel is open"} end; S.panel = a; return {} end,
+          choice_close = function() local was = S.panel ~= nil; S.panel = nil; S.panels_closed = (S.panels_closed or 0) + (was and 1 or 0); return {closed = was} end},
     render = {layer_register = function(l) S.layers[l.id] = l.text end, layer_remove = function(l) S.layers[l.id] = nil end},
     input = {bind = function(a) S.binds = S.binds or {}; S.binds[a.id] = a.keys; return true end, consume = function(a) local p = S.keys[a.id]; S.keys[a.id] = nil; return {pressed = p} end,
              state = function(a) return {down = S.keys[a.id] == true} end},
@@ -1406,6 +1407,12 @@ do
   check(g.panel and g.panel.title:find("Zelmite Mine, floor 9", 1, true) ~= nil, "a follow offer names the Zelmite Mine floor by the game's own number", g.panel and g.panel.title)
   check(g.panel and g.panel.style == "yes_no" and g.panel.subtitle == "Join them there?", "and asks it yes or no in the game's own window",
         g.panel and g.panel.style)
+  -- the friend moves on before it is answered (the question may have waited out a scene first): it is taken back
+  local closed_before = g.panels_closed or 0
+  h.map = {context = "dungeon", dungeon_id = 6, floor_id = 10, floor_seed = 2, map_no = 40}
+  both(h, g, 12)
+  check(not (g.panel and g.panel.title:find("floor 9", 1, true)) and (g.panels_closed or 0) == closed_before + 1,
+        "a follow offer for a floor the friend has left is taken back", g.panel and g.panel.title)
   -- the host walks into a house in another town: no question is asked (Dark Cloud 2 asks only at a dungeon floor),
   -- but the Mod Manager's "Join a player" names the house as the host's game does, and the way there is the town's map
   if g.panel then g.choose(nil) end
@@ -1560,6 +1567,21 @@ do
   both(h, g, 12)
   check(g.avatars[1] and g.avatars[1].form == nil and g.avatars[1].ridepod == nil and g.avatars[1].outfit.head == 311,
         "back on foot, Max is drawn in his own clothes again", g.avatars[1] and g.avatars[1].form)
+  -- the host watches one of the story's scenes: its hero is away on the joiner's screen until the scene is over
+  g.map = {}
+  for k, v in pairs(h.map) do g.map[k] = v end
+  check(g.avatars[1] and g.avatars[1].away == nil, "a player in no scene is not away")
+  h.map.story_scene = true
+  both(h, g, 6)
+  check(g.avatars[1] and g.avatars[1].away == true, "a player watching a story scene is away on the other screens",
+        g.avatars[1] and tostring(g.avatars[1].away))
+  check(h.avatars[1] and h.avatars[1].away == nil, "and the one watching it is not told the other is away")
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].away == true, "away while the scene plays, report after report")
+  h.map.story_scene = false
+  both(h, g, 6)
+  check(g.avatars[1] and g.avatars[1].away == nil, "back when the scene is over", g.avatars[1] and tostring(g.avatars[1].away))
+  g.map = h.map
   -- the joiner asks; the host is asked on a panel and says no
   g.emit("ui.action", {id = "swap"})
   both(h, g, 4)
