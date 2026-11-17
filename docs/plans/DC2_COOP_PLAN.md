@@ -736,6 +736,19 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   the editor (the "#n" hold is in the mod's tests), undo after a rebuild, and two in one editor by hand.
   On the way: a mod description over 1,024 characters makes the engine refuse the whole mod without a word in the
   log; the mod's tests now check its length.
+- The other hero heard (2026-11-17, mod 0.12.3). Each player's own hero sounds went unheard in the other game,
+  since a drawn shot or trail carries no sound. Now a sound the hero's actions play (`_SE_PLAY` in an action script,
+  `actscript.cpp`: swings, shots, cries, steps) is kept with its bank's name as effect kind 9 and sent as the shots
+  are. The other game plays it from the avatar, quieter and to one side by distance (`sndGetVolPan`, as an effect
+  script plays a sound at a place). Each avatar loads the bank it is told of onto a sound port of its own: game ports
+  12 to 14, driver ports 4 to 6, which nothing used. The bank goes into one arena block per avatar slot and is loaded
+  again only when the name changes (Max's bank changes with his gun, `CH_000` to `CH_002` and on; Monica's is
+  `CH_020`). A bank that will not load leaves the avatar silent, as before. Live: `hurt` 11/11 and `floor` 15/15,
+  the guest playing the host's sounds from `CH_000` (992 bytes of tables), `CH_002` and `CH_020`, and refusing a
+  bank that does not exist. A drawn shot's own effect script plays through its owner's bank, which is the avatar's
+  once loaded (not checked on its own). Not carried yet: looping sounds (`_SE_LOOP_PLAY`) and the monster form's
+  sounds (it has no bank of its own); the ridepod's bank is named by its arm but has not been seen live.
+  Not heard by ear: the headless games have no audio out, so the volumes and panning are untested by a person.
 
 ## 7. Risks
 

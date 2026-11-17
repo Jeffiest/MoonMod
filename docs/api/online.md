@@ -102,10 +102,14 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   z`, 2 put away), 5 Monica's magic or her magic sword's charge (`value`
   the effect's number, `amount` its tint, `target` the monster's scene slot it was aimed at), 6 the blade's trail
   (`frame0` and `frame1` the weapon's frames it runs between, `value` its length, `amount` the steps it fades over,
-  `target` the steps it holds first). Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
+  `target` the steps it holds first), 9 a sound the hero's own actions played (`value` its number in the hero's sound
+  bank, `frame0` and `frame1` that bank's name, such as `CH_000` for Max or `CH_020` for Monica; a monster form has
+  none). Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
   (`game.write`) draws another player's from their avatar: the same effect, flying the same way, striking nothing in
   this game (it makes no attack, and an effect's own script makes none either). `{shown = false}` when that avatar is
-  not on this floor or the effect can't be made; an effect this game hasn't loaded is loaded on first use.
+  not on this floor or the effect can't be made; an effect this game hasn't loaded is loaded on first use. A sound
+  is heard from where the avatar stands, quieter and to one side as it is further off; each avatar loads the bank it
+  names into a sound port of its own (game ports 12 to 14) the first time, and again only when the name changes.
 
 - Down, not out (co-op). `player.down_rule_set({enabled})` (`game.write`): while it is on, a party knocked out on a
   dungeon floor (no one left to switch to, and no Revival Powder: the powder still works first) doesn't get the game

@@ -2965,10 +2965,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..d0e2cacd
+index 00000000..146790c8
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,337 @@
+@@ -0,0 +1,341 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3101,6 +3101,8 @@ index 00000000..d0e2cacd
 +                    // it fades over, target: the steps it holds first); pos and dir are not used
 +    Rocket = 7,     // the ridepod's launcher (value 0) or a missile (value 1, scattered here as the game scatters it)
 +    Throw = 8,      // an item held up to throw (amount 0), thrown to pos (1) or put away (2); value: its item_no
++    Sound = 9,      // a sound of the hero's (its action script's _SE_PLAY): value, its number in the hero's sound bank,
++                    // frame0, that bank by name (CH_000: snd2/chara/CH_000.sound.json); played from the avatar
 +};
 +struct HeroEffect {
 +    int   kind = 0; // HeroShot
@@ -3116,6 +3118,8 @@ index 00000000..d0e2cacd
 +                                  float amount = 0.0f, int target = -1);
 +// actionchara.cpp: a character's blade began a trail (CActionChara::StepEffect); kept when it is this game's hero.
 +void                    HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold);
++// actscript.cpp: a character's action script played one of its sounds (_SE_PLAY); kept when it is this game's hero.
++void                    HeroSounded(const void *chara, int sound);
 +std::vector<HeroEffect> TakeHeroEffects();
 +// Draws another player's shot from avatar slot (0-2). False when the avatar is not on this floor or the effect can't
 +// be made here.
@@ -4640,6 +4644,18 @@ index 7fe59ead..1d3812a0 100644
  };
  
  /**
+diff --git a/port/include/snd_mngr.hpp b/port/include/snd_mngr.hpp
+index 25e1115d..5c36c7bd 100644
+--- a/port/include/snd_mngr.hpp
++++ b/port/include/snd_mngr.hpp
+@@ -68,6 +68,7 @@ enum sndPORT {
+     SND_PORT_MENU = 8, /**< Sound effects of menus. */
+     SND_PORT_BATTLE = 9,
+     SND_PORT_BGM2 = 11, /**< Second background music port, sharing the first's sequence handling. */
++    SND_PORT_COOP = 12, /**< MoonMod co-op: the other players' heroes' sounds, one port each (12 to 14). */
+     SND_PORT_NUM = 16,  /**< Number of game sound ports. */
+ };
+ 
 diff --git a/port/include/stubs/dng_object.hpp b/port/include/stubs/dng_object.hpp
 new file mode 100644
 index 00000000..f32a6175
@@ -4889,6 +4905,55 @@ index 00000000..41ac8c0a
 +    }
 +}
 +
+diff --git a/port/src/audio/snd_mngr.cpp b/port/src/audio/snd_mngr.cpp
+index a5b1a3c0..db98684e 100644
+--- a/port/src/audio/snd_mngr.cpp
++++ b/port/src/audio/snd_mngr.cpp
+@@ -899,6 +899,14 @@ static int GetCSndPortNo(int port_no, int *port, int *sq_port, int *vol) {
+             *sq_port = -1;
+             *vol = 0x100;
+             break;
++        case SND_PORT_COOP:
++        case SND_PORT_COOP + 1:
++        case SND_PORT_COOP + 2:
++            // MoonMod co-op: another player's hero, on a driver port of its own (4-6, unused by the game)
++            *port = 4 + (port_no - SND_PORT_COOP);
++            *sq_port = -1;
++            *vol = 0x100;
++            break;
+         default:
+             return 0;
+     }
+@@ -1936,6 +1944,14 @@ int HostGetDriverPort(int port_no, int *port, int *sq_port, int *vol) {
+             *sq_port = -1;
+             *vol = 0x100;
+             break;
++        case SND_PORT_COOP:
++        case SND_PORT_COOP + 1:
++        case SND_PORT_COOP + 2:
++            // MoonMod co-op: another player's hero, on a driver port of its own (4-6, unused by the game)
++            *port = 4 + (port_no - SND_PORT_COOP);
++            *sq_port = -1;
++            *vol = 0x100;
++            break;
+         default:
+             return 0;
+     }
+diff --git a/port/src/audio/sound.cpp b/port/src/audio/sound.cpp
+index 453f01c4..4b7b9a57 100644
+--- a/port/src/audio/sound.cpp
++++ b/port/src/audio/sound.cpp
+@@ -73,6 +73,10 @@ constexpr PortLayout kLayout[] = {
+     {.port = 1,  .linked_port = -1, .ezmidi_param = 0x3032, .dependents = kDependentsOf1 },
+     {.port = 2,  .linked_port = 14, .ezmidi_param = 0x3039, .dependents = {}             },
+     {.port = 3,  .linked_port = -1, .ezmidi_param = 0x3040, .dependents = {}             },
++    // MoonMod co-op: the other players' heroes (game ports 12-14), mixed as the hero's own port 9 is
++    {.port = 4,  .linked_port = -1, .ezmidi_param = 0x3038, .dependents = {}             },
++    {.port = 5,  .linked_port = -1, .ezmidi_param = 0x3038, .dependents = {}             },
++    {.port = 6,  .linked_port = -1, .ezmidi_param = 0x3038, .dependents = {}             },
+     {.port = 7,  .linked_port = -1, .ezmidi_param = 0x3010, .dependents = {}             },
+     {.port = 8,  .linked_port = -1, .ezmidi_param = 0x3035, .dependents = kDependentsOf8 },
+     {.port = 9,  .linked_port = -1, .ezmidi_param = 0x3038, .dependents = {}             },
 diff --git a/port/src/config_loaders.cpp b/port/src/config_loaders.cpp
 index 2d2c3593..956ca0d9 100644
 --- a/port/src/config_loaders.cpp
@@ -5238,7 +5303,7 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..6362652a
+index 00000000..5095a7bd
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,538 @@
@@ -5275,7 +5340,7 @@ index 00000000..6362652a
 +    {"player.down_rule_set", "player", "down_rule_set", "any", "game.write", "Co-op: {enabled}: while on, a hero whose life runs out on a floor goes down (player.get().down) and lies there instead of the game's death (change hero, or game over)."},
 +    {"player.revive", "player", "revive", "simulation", "game.write", "Co-op: stand a hero who is down back up with {hp}, where they lie or at {x, y, z}."},
 +    {"player.give_up", "player", "give_up", "simulation", "game.write", "Co-op: a hero who is down gives up: the game's own death runs."},
-+    {"player.effects_take", "player", "effects_take", "any", "game.read", "Co-op: the shots and spells this game's hero fired on the floor since the last call ({effects = {kind, x, y, z, dx, dy, dz, value, amount, target}...}), for world.avatar_effect on the other games."},
++    {"player.effects_take", "player", "effects_take", "any", "game.read", "Co-op: the shots, spells, sword trails, thrown items and sounds this game's hero made on the floor since the last call ({effects = {kind, x, y, z, dx, dy, dz, value, amount, target, frame0, frame1}...}), for world.avatar_effect on the other games."},
 +    {"party.room_hero_set", "party", "room_hero_set", "any", "game.write", "Co-op: this game plays one hero, {hero = 'max' or 'monica'}, whatever the story's party says, until room_hero_clear; the other hero cannot be changed to, and nothing is written into the save."},
 +    {"party.room_hero_clear", "party", "room_hero_clear", "any", "game.write", "Co-op: the party is the story's again."},
 +    {"party.town_active", "party", "town_active", "simulation", "game.read", "Read Chronicle's selected playable body for the active town scene."},
@@ -5464,7 +5529,7 @@ index 00000000..6362652a
 +    {"dungeons.enter_floor", "dungeons", "enter_floor", "simulation", "game.write", "Enter floor floor_id of the current dungeon (or, from a town, of dungeon_id), built again from the start."},
 +    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
-+    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell (an entry of their player.effects_take, with slot 1-3) as it flew in their game, striking nothing here."},
++    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here."},
 +    {"world.enter_map", "world", "enter_map", "simulation", "game.write", "Co-op: walk into a town or one of its maps by map number (world.get().map_no), from a town or a dungeon floor."},
 +    {"world.watch_set", "world", "watch_set", "any", "game.read", "Co-op: {enabled}: tell this mod (game.world.changed) of each change this game makes to the save's shared world: story flags and counters, the story's progress, the story's party, joinable townsfolk, dungeon floor records, Georama parts in stock, items the story's scripts give (gift), and that a town's Georama changed (as it is built, part by part)."},
 +    {"world.change_apply", "world", "change_apply", "any", "game.write", "Co-op: write another game's change {kind, id, value} (as game.world.changed gives it) into this game's save without telling it back; a floor's record is merged."},
@@ -15007,7 +15072,7 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..de45f430
+index 00000000..82d4d337
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
 @@ -0,0 +1,1105 @@
@@ -15459,7 +15524,7 @@ index 00000000..de45f430
 +// world.avatar_effect: another player's shot, drawn from their avatar.
 +ApiCallResult AvatarEffectCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, kind = 1-8, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil} (player.effects_take's entries)";
++        "expected {slot = 1-3, kind = 1-9, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil} (player.effects_take's entries)";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
@@ -15468,7 +15533,7 @@ index 00000000..de45f430
 +    }
 +    int        slot = 0;
 +    HeroEffect e;
-+    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 8, e.kind)) return Invalid(kUsage);
++    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 9, e.kind)) return Invalid(kUsage);
 +    for (const char *key : {"frame0", "frame1"}) {
 +        if (!request.contains(key) || request[key].is_null()) continue;
 +        if (!request[key].is_string() || request[key].get<std::string>().size() > 31) return Invalid(kUsage);
@@ -18575,10 +18640,10 @@ index 00000000..a37531e1
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..55f90984
+index 00000000..9f52f10e
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1322 @@
+@@ -0,0 +1,1419 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -18621,6 +18686,9 @@ index 00000000..55f90984
 +#include "scenesnd.hpp"
 +#include "scenevillager.hpp"
 +#include "userdata.hpp"
++#include "audio/sound_runtime.hpp"
++#include "snd_mngr.hpp"
++#include "platform/arena.hpp"
 +
 +namespace moonmod::coop {
 +
@@ -18789,6 +18857,11 @@ index 00000000..55f90984
 +    std::vector<unsigned char>  arena;
 +    mgCMemory                   memory;
 +    mgCMemory                   stacks[CHARA_MEM_STACK_NUM];
++    // Its hero's sounds: a bank of the game's (snd2/chara/<sound_name>.sound.json) on a sound port of its own
++    // (SND_PORT_COOP + its index), so its shots, swings and voice are heard, and the effects it owns play theirs.
++    std::string                 sound_name;
++    unsigned int                se_bank = 0xFFFFFFFFu;
++    mgCMemory                   sound_memory;
 +};
 +
 +std::array<Avatar, kAvatars> g_avatars;
@@ -18811,6 +18884,9 @@ index 00000000..55f90984
 +        FxScriptMan->ClearEffectFromChrid(a.slot);
 +    }
 +    a.held_effect = -1;
++    if (a.se_bank != 0xFFFFFFFFu) sndDeletePort(SND_PORT_COOP + index);
++    a.se_bank = 0xFFFFFFFFu;
++    a.sound_name.clear();
 +    if (a.scene != nullptr && a.slot >= 0 && a.scene->GetCharacter(a.slot) == a.body.get()) {
 +        a.scene->ResetActive(SCENE_DATA_CHARA, a.slot);
 +    }
@@ -18828,6 +18904,54 @@ index 00000000..55f90984
 +
 +unsigned char *Aligned(unsigned char *raw) {
 +    return reinterpret_cast<unsigned char *>((reinterpret_cast<std::uintptr_t>(raw) + 63) & ~std::uintptr_t{63});
++}
++
++// A hero's sound bank by name, as snd2/chara names them (CH_000) and a message carries it: letters, digits, _ only.
++bool SoundNameOk(const std::string &name) {
++    return !name.empty() && name.size() < 32 &&
++           std::ranges::all_of(name, [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
++}
++
++// The memory a hero's sound bank's tables take (the sounds themselves go to the sound driver): one block per avatar,
++// made the first time and used again for every bank after (as item_icon3d keeps one block for its models).
++constexpr int kSoundQuadwords = 16 * 1024; // 256 KiB
++char          g_sound_arena_keys[kAvatars];
++
++// Loads the bank an avatar's sounds come from onto its own port, unless it is the one there. The avatar's body (and so
++// every effect it owns) plays from it. False when the bank can't be loaded: the avatar is then silent, as before.
++bool LoadAvatarSound(Avatar &a, int index, const std::string &name) {
++    // (a bank that would not load is not tried again at every sound: only when another is asked for)
++    if (a.sound_name == name) return a.se_bank != 0xFFFFFFFFu;
++    if (!SoundNameOk(name)) return false;
++    const int port = SND_PORT_COOP + index;
++    sndDeletePort(port);
++    a.se_bank = 0xFFFFFFFFu;
++    a.sound_name = name;
++    a.sound_memory.stSetBuffer(reinterpret_cast<u_long128 *>(ArenaBlock(&g_sound_arena_keys[index],
++                                                                         std::size_t{kSoundQuadwords} * sizeof(u_long128))),
++                               kSoundQuadwords);
++    const std::string path = "snd2/chara/" + name + ".sound.json";
++    const unsigned    bank = SoundLoadBundlePath(port, path, &a.sound_memory);
++    if (bank == static_cast<unsigned>(-1)) {
++        std::fprintf(stderr, "co-op: avatar %d's sounds (%s) did not load\n", index + 1, path.c_str());
++        sndDeletePort(port);
++        if (a.body) a.body->sound_info.se_bank = 0xFFFFFFFFu;
++        return false;
++    }
++    a.se_bank = bank;
++    if (a.body) a.body->sound_info.se_bank = bank;
++    std::fprintf(stderr, "co-op: avatar %d's sounds are %s (%d bytes of tables)\n", index + 1, name.c_str(),
++                 a.sound_memory.stack_used * static_cast<int>(sizeof(u_long128)));
++    return true;
++}
++
++// The bank a hero's sounds come from, by name, as the game picks it (dc2::character::SoundAssetPath): Max's by his
++// gun, Monica's own, the ridepod's by its arm. Empty for a monster form, which has none.
++std::string HeroSoundName(CUserDataManager *user, int unit) {
++    const std::string path = dc2::character::SoundAssetPath(user, unit);
++    static constexpr std::string_view kDir = "snd2/chara/", kExt = ".sound.json";
++    if (path.size() <= kDir.size() + kExt.size() || !path.starts_with(kDir) || !path.ends_with(kExt)) return {};
++    return path.substr(kDir.size(), path.size() - kDir.size() - kExt.size());
 +}
 +
 +// What an avatar is drawn as, all in one row: when any of it changes the body is loaded again in its place.
@@ -19002,7 +19126,18 @@ index 00000000..55f90984
 +    scene->ResetStatus(SCENE_DATA_CHARA, slot, SCENE_CHARA_HIDE | SCENE_CHARA_NO_MODEL);
 +    scene->SetActive(SCENE_DATA_CHARA, slot);
 +    body->SetPosition(a.target.x, a.target.y, a.target.z);
++    body->sound_info.se_bank = 0xFFFFFFFFu; // (none until its bank is loaded: an effect it owns plays nothing)
 +    a.body = std::move(body);
++    if (town == 0 && wanted == Shape::Hero) {
++        const int   gun = a.target.sub;
++        std::string name = "CH_020";
++        if (a.target.character == USER_CHARA_MAX) {
++            char text[16];
++            std::snprintf(text, sizeof(text), "CH_%03d", gun >= 0x16 && gun <= 0x28 ? gun - 0x16 : 0);
++            name = text;
++        }
++        LoadAvatarSound(a, index, name);
++    }
 +    a.loaded_character = a.target.character;
 +    a.loaded_town = town;
 +    a.loaded_look = LookOf(a.target);
@@ -19348,6 +19483,21 @@ index 00000000..55f90984
 +           std::ranges::all_of(name, [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
 +}
 +
++void HeroSounded(const void *chara, int sound) {
++    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || DngUserData == nullptr || sound < 0 || sound > 255) return;
++    HeroEffect e;
++    e.kind = static_cast<int>(HeroShot::Sound);
++    e.frame0 = HeroSoundName(DngUserData, DngUserData->active_chr_no);
++    if (!SoundNameOk(e.frame0)) return;
++    e.frame1 = e.frame0;
++    e.value = sound;
++    float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    MainChara__2->GetPosition(at);
++    for (int axis = 0; axis < 3; ++axis) e.pos[axis] = at[axis];
++    if (g_hero_effects.size() >= kHeroEffectsKept) g_hero_effects.erase(g_hero_effects.begin());
++    g_hero_effects.push_back(e);
++}
++
 +void HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold) {
 +    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || frame0 == nullptr || frame1 == nullptr) return;
 +    HeroEffect e;
@@ -19375,6 +19525,18 @@ index 00000000..55f90984
 +    float pos[4] = {e.pos[0], e.pos[1], e.pos[2], 1.0f};
 +    float dir[4] = {e.dir[0], e.dir[1], e.dir[2], 0.0f};
 +    switch (static_cast<HeroShot>(e.kind)) {
++        case HeroShot::Sound: {
++            // played from where the avatar stands, as an effect plays a sound at a place (_SE_PLAY of effscript.cpp)
++            Avatar &a = g_avatars[static_cast<std::size_t>(slot)];
++            if (!a.body || e.value < 0 || e.value > 255 || !LoadAvatarSound(a, slot, e.frame0)) return false;
++            float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++            a.body->GetPosition(at);
++            at[3] = 1.0f;
++            float volume = 0.0f, pan = 0.0f;
++            sndGetVolPan(&volume, &pan, at, 160.0f, 1200.0f);
++            sndSePlayVPf(a.se_bank, e.value, volume, pan, 0);
++            return true;
++        }
 +        case HeroShot::Gun: {
 +            if (!MakeEffect(fx, kBullet, pos)) return false;
 +            float flight[4];
@@ -33245,7 +33407,7 @@ index 0e0d3789..48d69d3a 100644
  /**
   * Writes the current town save and optional spawn or the recorded dungeon floor-entry save, preserving the
 diff --git a/port/src/script/actscript.cpp b/port/src/script/actscript.cpp
-index a0105f01..fa51cc78 100644
+index a0105f01..41251f56 100644
 --- a/port/src/script/actscript.cpp
 +++ b/port/src/script/actscript.cpp
 @@ -35,6 +35,7 @@
@@ -33256,7 +33418,15 @@ index a0105f01..fa51cc78 100644
  #include "object.hpp"
  #include "padcontrol.hpp"
  #include "runscript.hpp"
-@@ -1760,6 +1761,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+@@ -572,6 +573,7 @@ int _SE_PLAY(dc2::script::RunArguments stack, int argc) {
+     }
+ 
+     sndSePlay(bank, sound, 0);
++    moonmod::coop::HeroSounded(action_info.chara, sound); // co-op: heard from this hero's avatar in the other games
+     return true;
+ }
+ 
+@@ -1760,6 +1762,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
      action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
      float tint = (float) effect_power / 255.0f;
      tint *= 1.5f;
@@ -33265,7 +33435,7 @@ index a0105f01..fa51cc78 100644
      action_info.chara->effect_man->SetValue(0, tint, -1, -1);
      action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
      CColPrim *prim = ColPrimMan.GetPrim();
-@@ -1782,6 +1785,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+@@ -1782,6 +1786,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
   *
   */
  void ShotNormalGun(float *position, float *direction) {
@@ -33273,7 +33443,7 @@ index a0105f01..fa51cc78 100644
      action_info.chara->effect_man->CreateEffSpt("\x8F"
                                                  "e\x92"
                                                  "e",
-@@ -1814,6 +1818,7 @@ void ShotNormalGun(float *position, float *direction) {
+@@ -1814,6 +1819,7 @@ void ShotNormalGun(float *position, float *direction) {
   *
   */
  void ShotMachineGun(float *position, float *direction, char *damage_name, float damage) {
@@ -33281,7 +33451,7 @@ index a0105f01..fa51cc78 100644
      MachineGun.Set(position, direction);
      CColPrim *prim = ColPrimMan.GetPrim();
      int       col_prim_id = -1;
-@@ -1845,6 +1850,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
+@@ -1845,6 +1851,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
   *
   */
  void ShotGrenadGun(float *position, float *direction) {
@@ -33290,7 +33460,7 @@ index a0105f01..fa51cc78 100644
      float muzzle[4];
      sceVu0ScaleVector(muzzle, direction, 500.0f);
      sceVu0AddVector(muzzle, position, muzzle);
-@@ -1885,6 +1892,7 @@ void ShotGrenadGun(float *position, float *direction) {
+@@ -1885,6 +1893,7 @@ void ShotGrenadGun(float *position, float *direction) {
   *
   */
  void ShotLaserGun(float *position, float *direction, int type) {
@@ -33298,7 +33468,7 @@ index a0105f01..fa51cc78 100644
      float muzzle[4];
      float target[4];
      sceVu0ScaleVector(muzzle, direction, 20.0f);
-@@ -2125,6 +2133,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2125,6 +2134,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
      action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
      action_info.chara->effect_man->SetValue(0, 0.0f, -1, -1);
      action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
@@ -33308,7 +33478,7 @@ index a0105f01..fa51cc78 100644
      CColPrim *prim = ColPrimMan.GetPrim();
  
      if (prim != nullptr) {
-@@ -2224,6 +2235,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2224,6 +2236,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
  
      if (whp[0] > 0) {
          if (attack_type == WEAPON_ATTACK_LAUNCHER) {
@@ -33317,7 +33487,7 @@ index a0105f01..fa51cc78 100644
              sceVu0ScaleVector(rocket_target, direction, 500.0f);
              sceVu0AddVector(rocket_target, position, rocket_target);
              CRocketLauncher *launcher = RocketLauncher.Get();
-@@ -2266,6 +2279,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2266,6 +2280,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
          }
  
          if (attack_type == WEAPON_ATTACK_MISSILE) {
@@ -33327,7 +33497,7 @@ index a0105f01..fa51cc78 100644
              sceVu0ScaleVector(missile_target, direction, 500.0f);
              sceVu0AddVector(missile_target, position, missile_target);
              direction[0] += direction[2] * (fRand(1.0f) - 0.5f);
-@@ -2297,6 +2313,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2297,6 +2314,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
              sceVu0AddVector(laser_target, position, laser_target);
              sceVu0SubVector(direction, target_pos, position);
              sceVu0Normalize(direction, direction);
@@ -33336,7 +33506,7 @@ index a0105f01..fa51cc78 100644
              CLaserGun *laser = LaserGun.Get();
  
              if (laser != nullptr) {
-@@ -2334,6 +2352,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2334,6 +2353,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
              sceVu0AddVector(beam_target, position, beam_target);
              sceVu0ScaleVector(beam_offset, direction, 20.0f);
              sceVu0AddVector(position, position, beam_offset);
@@ -39464,10 +39634,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..cb7e74ed
+index 00000000..5fc50053
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,857 @@
+@@ -0,0 +1,863 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -39664,8 +39834,14 @@ index 00000000..cb7e74ed
 +    const ApiCallResult drawn = api.Call("world.avatar_effect", shot);
 +    ASSERT_EQ(drawn.status, ApiCallStatus::Ok) << drawn.message;
 +    EXPECT_FALSE(drawn.value.at("shown").get<bool>());
-+    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 9}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 10}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
 +                                                            {"dy", 0.0}, {"dz", 1.0}}})).status, ApiCallStatus::InvalidArgument);
++    // a sound of the other hero's (kind 9) names its bank; off a floor it is not heard
++    const ApiCallResult heard = api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 9}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0},
++                                                                              {"dx", 0.0}, {"dy", 0.0}, {"dz", 0.0}, {"value", 17},
++                                                                              {"frame0", "CH_005"}, {"frame1", "CH_005"}}}));
++    ASSERT_EQ(heard.status, ApiCallStatus::Ok);
++    EXPECT_FALSE(heard.value.at("shown").get<bool>());
 +    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 1}, {"x", 0.0}}})).status, ApiCallStatus::InvalidArgument);
 +    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 1}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
 +                                                            {"dy", 0.0}, {"dz", 1.0}, {"damage", 5}}})).status, ApiCallStatus::InvalidArgument);

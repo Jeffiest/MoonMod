@@ -318,6 +318,15 @@ moonmod.on("game.tick", function(e)
                                              amount = 8, target = 2, frame0 = "sword_hand", frame1 = "wr"})
         end
         log(string.format("shot frame=%d kind=6 shown=%s", frame, tostring(type(t) == "table" and t.shown)))
+        -- and a sound of the host's hero (kind 9): from Max's bank (CH_000), then a bank that is not there
+        local s = try(game.world.avatar_effect, {slot = 1, kind = 9, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 1,
+                                                 frame0 = "CH_000", frame1 = "CH_000"})
+        log(string.format("shot frame=%d kind=9 shown=%s", frame, tostring(type(s) == "table" and s.shown)))
+        if turn % 5 == 0 then
+          local n = try(game.world.avatar_effect, {slot = 1, kind = 9, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 1,
+                                                   frame0 = "CH_999", frame1 = "CH_999"})
+          log(string.format("shot frame=%d kind=9.missing shown=%s", frame, tostring(type(n) == "table" and n.shown)))
+        end
       end
     end
   end
