@@ -1567,6 +1567,21 @@ do
   both(h, g, 12)
   check(g.avatars[1] and g.avatars[1].form == nil and g.avatars[1].ridepod == nil and g.avatars[1].outfit.head == 311,
         "back on foot, Max is drawn in his own clothes again", g.avatars[1] and g.avatars[1].form)
+  -- the host watches one of the story's scenes: its hero is away on the joiner's screen until the scene is over
+  g.map = {}
+  for k, v in pairs(h.map) do g.map[k] = v end
+  check(g.avatars[1] and g.avatars[1].away == nil, "a player in no scene is not away")
+  h.map.story_scene = true
+  both(h, g, 6)
+  check(g.avatars[1] and g.avatars[1].away == true, "a player watching a story scene is away on the other screens",
+        g.avatars[1] and tostring(g.avatars[1].away))
+  check(h.avatars[1] and h.avatars[1].away == nil, "and the one watching it is not told the other is away")
+  both(h, g, 12)
+  check(g.avatars[1] and g.avatars[1].away == true, "away while the scene plays, report after report")
+  h.map.story_scene = false
+  both(h, g, 6)
+  check(g.avatars[1] and g.avatars[1].away == nil, "back when the scene is over", g.avatars[1] and tostring(g.avatars[1].away))
+  g.map = h.map
   -- the joiner asks; the host is asked on a panel and says no
   g.emit("ui.action", {id = "swap"})
   both(h, g, 4)

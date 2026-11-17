@@ -842,7 +842,21 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   only (`shown_only`) and has no collision primitive, but its effect script still asked after one every frame. Each
   question was logged as an illegal function call (ext 210-213): 2113 in one `down` run and 1178 in a `look` run, all
   on the follower, costing it frame time. `effscript.cpp` now answers them as a primitive that hits nothing. Live
-  `floor` 15/15 and `hurt` 11/11 with none logged on either side.
+  `floor` 15/15 and `hurt` 11/11 with none logged on either side; `down` 15/15 and `look` 3/3 with none on the
+  follower (the host's `look` still logs 3 of an unrelated ext 35, as it did 27 before).
+- A scene holds only the game it plays in (2026-11-17, the rest of 5.9's first point). The other player's hero stood
+  in this game's story scenes, in the shots of the game's own cast; and a player watching a scene in their game was
+  moved about by it on the other screens, a stand-in acting out a scene nobody else saw. Now the engine tells a story
+  scene by the skip the game offers in one (`EdEventInfo.skip_state`, set by the script's `_INIT_DRAMA_SCENE`; never
+  in a talk) while the place's event has the game, from the scene's start until the player is free again (the game
+  can leave the skip offered after a scene, and a talk then is still no scene): `StoryScenePlaying`,
+  `world.get().story_scene`. While one plays here the other heroes fade out where they stand, and back in after,
+  their names with them. The mod tells the others (`SC 1` / `SC 0`, a new message kind, so protocol 10 stands and an
+  older game just keeps showing the hero). Their copy of the hero is then `away`: faded out and nobody their
+  monsters go for, until the scene is over. Co-op 0.13.1. Engine test
+  `AStoryScenePlayingIsToldAndAPlayerWatchingOneIsAwayOnTheOtherScreens`; mod tests "a player watching a story
+  scene is away on the other screens" and on. Live runs skip story scenes (`--skip-events`), so this is unit-tested
+  only.
 
 ## 7. Risks
 

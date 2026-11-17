@@ -248,6 +248,13 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   (a menu, the Georama editor, while a question is asked) waits for a floor or a town, ten seconds at most; one that
   comes during a scene or a talk, a photo, a door or a map loading waits it out however long it lasts (those ten
   seconds count only while the player walks free), as the game never tells anything over its own scenes.
+- The story's scenes keep their cast to themselves. `world.get()` always says `story_scene`: true while one plays
+  in this game, in the town or on the floor (a drama scene, the kind Start skips; not a talk, a menu or a door).
+  While one plays here the other players' heroes fade from sight where they stand, and back in after. Their names
+  fade with them. `world.avatar_set`'s `away = true` says that player watches one in their own game: their hero
+  fades from sight here and is nobody this game's monsters go for, until it is set without `away` (it fades back in
+  where it is). The co-op mod tells the others when its player's scene starts and ends (`SC 1`, `SC 0`, and to a
+  player who joins during one). A game that says nothing of scenes is never away.
 - `world.avatar_set` shows `"max"` or `"monica"`, tinted through the ambient light if `tint` is given, in the `outfit` given (`{head,
   clothes, feet, sub}`, each left out at will: then as this game's own hero has it) with the hat or hair piece and
   the weapons on the body; no name over the head yet. It takes `"ridepod"` and `"monster"` too (what `player.get`

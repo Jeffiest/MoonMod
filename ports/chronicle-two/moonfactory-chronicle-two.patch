@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..cfa919e6
+index 00000000..df41a68b
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,362 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -884,7 +884,12 @@ index 00000000..cfa919e6
 +- `port/include/moonmod/coop.hpp`, `coop_save.hpp`: the declarations.
 +- `port/src/moonmod/coop_api_moonmod.cpp`: the operations (dispatched before the adapter's own in
 +  `chronicle_two_adapter.cpp`'s `Call`), `player.get`/`world.get`'s extra fields.
-+- `coop_world_moonmod.cpp`: avatars, puppets, nearest-player targeting, shared events, the floor seed.
++- `coop_world_moonmod.cpp`: avatars, puppets, nearest-player targeting, shared events, the floor seed. An avatar
++  fades from sight where it stands while one of the story's scenes plays in this game (`StoryScenePlaying`, in
++  `coop_avatar_names_moonmod.cpp`: from the scene's start, `DramaSceneStarted`, while the game offers its skip,
++  `EdEventInfo.skip_state`, and the place's event has the game, until the player is free again;
++  `world.get().story_scene`) or while its player watches one in theirs (`world.avatar_set`'s `away`: then no monster
++  here goes for it either), and fades back in after; its name fades with it.
 +- `coop_ui_moonmod.cpp`: the choice panel (`ui.choice_open` / `ui.choice_close` / `ui.choice_made`), title modes (`title.mode_*`,
 +  `game.title.opened/selected`), visits (`session.*`, `game.session.started/ended/failed`). A question and a notice
 +  wait while the player is not free (`PlayerFree`, in `coop_avatar_names_moonmod.cpp`: a floor's field with no
@@ -893,7 +898,7 @@ index 00000000..cfa919e6
 +  and it is asked 8 frames after the player is free again.
 +- `coop_save_moonmod.cpp`: `DCW2`/`DCP2`/`DCT2` records and the accounts.
 +- Hooks in game units, one line each: `main.cpp` (`FrameStep`), `automap.cpp` (`FloorSeed`), `dng_event.cpp`
-+  (`FloorBuildBegin`), `event_func.cpp` (`FloorPlacing`, `FloorPlaced` around the floor's chests and monsters),
++  (`FloorBuildBegin`), `event_func.cpp` (`FloorPlacing`, `FloorPlaced` around the floor's chests and monsters; `DramaSceneStarted`),
 +  `dng_main.cpp` (`MapEventStarted`, `Draw2D`), `editloop.cpp` (`Draw2D`), `monster.cpp` (`MonsterThinkBegin/End`,
 +  `MonsterDamaged`), `save_slots.cpp` (no writes during a visit), `title.cpp` (the mod rows, the page, the visit),
 +  `effscript.cpp` (another player's shot or spell is drawn only, `shown_only`: it makes no collision primitive, and
@@ -2984,10 +2989,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..3bd8a0bb
+index 00000000..6a7f9f0c
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,405 @@
+@@ -0,0 +1,418 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3090,6 +3095,9 @@ index 00000000..3bd8a0bb
 +    float       tint[3] = {-1.0f, -1.0f, -1.0f}; // ambient 0-128 each, or negative for none
 +    std::string name;
 +    bool        down = false; // that player is down: this game's monsters neither go for the hero nor strike it
++    // That player watches one of the story's scenes in their game: their hero fades from sight where it stands, and is
++    // nobody this game's monsters go for, until it is over (then it fades in where it is).
++    bool        away = false;
 +    // That player rides the ridepod (character is then USER_CHARA_MAX) or wears a monster's form (USER_CHARA_MONICA).
 +    // The avatar is drawn as the ridepod or the monster when the parts or the form below are known and load; else
 +    // their hero's own body stands in for it, where they are and facing as they face, running while they move (their
@@ -3111,6 +3119,8 @@ index 00000000..3bd8a0bb
 +// (UTF-8). Each drawing is given once. False for an avatar the scene has not drawn since (none, hidden, elsewhere,
 +// behind the camera) or one with no name.
 +bool AvatarNameOnScreen(int slot, float head[2], float feet[2], std::string &name);
++// How far an avatar is in sight, 0 to 1, as it fades in and out (its name fades with it); 0 for none.
++float AvatarSeen(int slot);
 +// A mod's notice (ui.notify) in the game's own field message window, as an item found or a key taken is told, on a
 +// dungeon floor (MsgTaskMan); one that comes off a floor waits for one, a while. The text is the game's own from the
 +// mod's UTF-8: broken into lines and into windows the way the game's messages are. GameNoticeText is that text.
@@ -3131,6 +3141,14 @@ index 00000000..3bd8a0bb
 +// in a town's Georama editor. Not in a scene or a talk, a menu, a photo, a door, a minigame, or a map loading: co-op's
 +// questions and notices wait those out, as the game's own never break into them.
 +bool PlayerFree();
++// Whether this game plays one of the story's scenes now, in the town or on the floor it plays in: a drama scene, the
++// kind the game lets the player skip with Start, from its start (event_func.cpp's InitDramaScene) while its skip is
++// offered and the place's event has the game. Not a talk, a menu or a door. The other players' heroes fade from sight while one plays here, as the game's
++// scenes keep their cast to themselves, and world.get says so (story_scene) so the others hide this player's hero.
++bool StoryScenePlaying();
++// Every frame (WorldStep): a scene the player has been free since is over for good, its skip left offered or not.
++void StoryScenesStep();
++void StoryScenesReset();
 +
 +// ---- What a hero fires: shots and spells seen on the other screens (coop_world_moonmod.cpp) -------------------------
 +// actscript.cpp tells each shot this game's own hero fires (HeroFired); player.effects_take gives them to the mod,
@@ -3629,10 +3647,10 @@ index 00000000..9968f797
 +} // namespace moonmod::coop
 diff --git a/port/include/moonmod/coop_story.hpp b/port/include/moonmod/coop_story.hpp
 new file mode 100644
-index 00000000..a6fcb89c
+index 00000000..86313206
 --- /dev/null
 +++ b/port/include/moonmod/coop_story.hpp
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,18 @@
 +#pragma once
 +
 +// What the story's scripts do that two games in a room share, as the game's own units tell it
@@ -3646,6 +3664,9 @@ index 00000000..a6fcb89c
 +void StoryGave(int item_no, int count);
 +// A dungeon's system script began (a chest opens, the floor is cleared, the hero died, a guide speaks).
 +void SystemScriptBegan();
++// One of the story's scenes began (the script's _INIT_DRAMA_SCENE: the game offers its skip). StoryScenePlaying
++// counts it until the player is free again.
++void DramaSceneStarted();
 +
 +} // namespace moonmod::coop
 diff --git a/port/include/moonmod/dng_event_moonmod.hpp b/port/include/moonmod/dng_event_moonmod.hpp
@@ -5429,7 +5450,7 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..a45dcccf
+index 00000000..e3acb82a
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,538 @@
@@ -5653,7 +5674,7 @@ index 00000000..a45dcccf
 +    {"combat.strike_player", "combat", "strike_player", "simulation", "game.write", "Lay a native hit on the player at a point (a mod's own attack, co-op's blow from the host's monster): taken and shown as a monster's own blow is, guard, stun, stagger and specials as its damage row has them."},
 +    {"dungeons.set_seed", "dungeons", "set_seed", "simulation", "game.write", "Build the next new floor from this seed, once (world.get().floor_seed reports a floor's seed); {} lets it pick its own."},
 +    {"dungeons.enter_floor", "dungeons", "enter_floor", "simulation", "game.write", "Enter floor floor_id of the current dungeon (or, from a town, of dungeon_id), built again from the start."},
-+    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are; with an age, shown a little behind on that player's clock, its motion played as theirs (motion_flags, motion_step)."},
++    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are; with an age, shown a little behind on that player's clock, its motion played as theirs (motion_flags, motion_step); away = true while that player watches a scene: the hero fades from sight until it is over."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
 +    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; with an age, in step with their hero."},
 +    {"world.enter_map", "world", "enter_map", "simulation", "game.write", "Co-op: walk into a town or one of its maps by map number (world.get().map_no), from a town or a dungeon floor."},
@@ -15198,10 +15219,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..6f84f886
+index 00000000..9ac3f22c
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1473 @@
+@@ -0,0 +1,1478 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -15869,12 +15890,12 @@ index 00000000..6f84f886
 +
 +ApiCallResult AvatarSetCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, ridepod = {leg, arm, body, pack} item_nos or nil, form = monster_id or nil, x, y, z, heading, motion, motion_flags = 0-7 or nil, motion_step = 0-16 or nil, age = 0-3600 frames or nil, tint = {r, g, b} or nil, name = text or nil, down = true or nil}";
++        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, ridepod = {leg, arm, body, pack} item_nos or nil, form = monster_id or nil, x, y, z, heading, motion, motion_flags = 0-7 or nil, motion_step = 0-16 or nil, age = 0-3600 frames or nil, tint = {r, g, b} or nil, name = text or nil, down = true or nil, away = true or nil}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
 +    if (!OnlyFields(request, {"slot", "character", "weapon", "outfit", "ridepod", "form", "x", "y", "z", "heading", "motion", "motion_flags",
-+                              "motion_step", "age", "tint", "name", "down"}, unknown)) {
++                              "motion_step", "age", "tint", "name", "down", "away"}, unknown)) {
 +        return Invalid("unknown field: " + unknown);
 +    }
 +    int slot = 0;
@@ -15951,6 +15972,10 @@ index 00000000..6f84f886
 +    if (request.contains("down") && !request["down"].is_null()) {
 +        if (!request["down"].is_boolean()) return Invalid("down must be true or left out");
 +        state.down = request["down"].get<bool>();
++    }
++    if (request.contains("away") && !request["away"].is_null()) {
++        if (!request["away"].is_boolean()) return Invalid("away must be true or left out");
++        state.away = request["away"].get<bool>();
 +    }
 +    if (!AvatarSet(slot - 1, state)) return Failed("that character can't be shown");
 +    return Ok({{"slot", slot}, {"shown", AvatarShown(slot - 1)}});
@@ -16378,6 +16403,7 @@ index 00000000..6f84f886
 +
 +void ExtendWorld(Json &world) {
 +    const int loop = GetNowLoopNo();
++    world["story_scene"] = StoryScenePlaying(); // (one of the story's scenes plays here: the others hide this hero)
 +    CSaveData *save = GetSaveData();
 +    if (save == nullptr) return;
 +    world["map_no"] = save->map_no;
@@ -16677,10 +16703,10 @@ index 00000000..6f84f886
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_avatar_names_moonmod.cpp b/port/src/moonmod/coop_avatar_names_moonmod.cpp
 new file mode 100644
-index 00000000..0b93536c
+index 00000000..ae414334
 --- /dev/null
 +++ b/port/src/moonmod/coop_avatar_names_moonmod.cpp
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,144 @@
 +// Co-op's names over the other players' heroes (moonmod/coop.hpp): each avatar a scene draws carries its player's name
 +// just over its head, in the game's own font, in towns and on dungeon floors. The place is measured as the scene draws
 +// the body, with the camera it draws with (AvatarBody::DrawDirect: the point over the head goes through the camera's
@@ -16698,9 +16724,12 @@ index 00000000..0b93536c
 +#include "dng_main.hpp"
 +#include "editctrl.hpp"
 +#include "editloop.hpp"
++#include "event.hpp"
++#include "event_func.hpp"
 +#include "font.hpp"
 +#include "gfx/gfx.hpp"
 +#include "mainloop.hpp"
++#include "moonmod/coop_story.hpp"
 +#include "photo.hpp"
 +#include "platform/game_loop_state.hpp"
 +#include "object/world/town_control.hpp"
@@ -16730,6 +16759,10 @@ index 00000000..0b93536c
 +};
 +std::array<NameTrack, kAvatars> g_tracks;
 +std::uint64_t                   g_next_generation = 0;
++
++// One of the story's scenes has begun and the player has not been free since. (The game can leave a scene's skip
++// offered after it, until the next one's start or the next map: a talk or a door then is no scene.)
++bool g_drama = false;
 +
 +// Whether the game shows the field now: no event scene, no photo, no menu over a floor, and (in a town) the player
 +// walking, not building.
@@ -16761,6 +16794,29 @@ index 00000000..0b93536c
 +    return false;
 +}
 +
++void DramaSceneStarted() { g_drama = true; }
++
++void StoryScenesStep() {
++    if (EdEventInfo.skip_state == EVENT_SKIP_NONE || PlayerFree()) g_drama = false;
++}
++
++void StoryScenesReset() { g_drama = false; }
++
++bool StoryScenePlaying() {
++    if (!g_drama || EdEventInfo.skip_state == EVENT_SKIP_NONE) return false;
++    // (and while the place's event has the game: the frames between the scene's end and the next step)
++    const int loop = GetNowLoopNo();
++    if (loop == LOOP_DUNGEON) {
++        return DngMainScene != nullptr && (DngStatus.mode == DNG_STATUS_EVENT || DngMainScene->event_run != 0 ||
++                                           (BattleAreaScene != nullptr && BattleAreaScene->script.running != 0));
++    }
++    if (loop == LOOP_EDIT) {
++        CScene *scene = GetMainScene();
++        return IsEditMode() == 0 && (PortTownControlMode == EDIT_CONTROL_EVENT || (scene != nullptr && scene->event_run != 0));
++    }
++    return false;
++}
++
 +void DrawAvatarNames() {
 +    const bool shown = FieldShown();
 +    for (int slot = 0; slot < kAvatars; ++slot) {
@@ -16770,7 +16826,9 @@ index 00000000..0b93536c
 +        if (!AvatarNameOnScreen(slot, head, feet, name) || !shown) continue;
 +        const float tall = std::fabs(feet[1] - head[1]);
 +        if (tall < kHiddenBelow) continue;
-+        const float opacity = std::clamp((tall - kHiddenBelow) / (kFullFrom - kHiddenBelow), 0.0f, 1.0f);
++        // (and as the hero fades in and out of sight, so the name never stands over nothing)
++        const float opacity = std::clamp((tall - kHiddenBelow) / (kFullFrom - kHiddenBelow), 0.0f, 1.0f) * AvatarSeen(slot);
++        if (opacity <= 0.0f) continue;
 +
 +        std::string text = legacy_encoding::GameText(name);
 +        if (text.empty()) continue;
@@ -19338,10 +19396,10 @@ index 00000000..ab5344b5
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..01896db7
+index 00000000..373347f6
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1845 @@
+@@ -0,0 +1,1856 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -19551,7 +19609,10 @@ index 00000000..01896db7
 +                }
 +            }
 +        }
-+        fade = std::clamp(fade + (leaving ? -0.05f : 0.05f), 0.0f, 1.0f);
++        // (out of sight where it stands while its player watches a scene in their game, or this game plays one of
++        // its own: the story's scenes keep their cast to themselves; back in where it is after)
++        const bool out = leaving || target.away || StoryScenePlaying();
++        fade = std::clamp(fade + (out ? -0.05f : 0.05f), 0.0f, 1.0f);
 +        alpha = fade;
 +        for (const std::shared_ptr<CCharacter2> &part : parts) part->alpha = fade;
 +        CCharacter2::Step();
@@ -19974,8 +20035,9 @@ index 00000000..01896db7
 +int AvatarsHere(std::array<std::array<float, 3>, kAvatars> &at, std::array<bool, kAvatars> &here) {
 +    int count = 0;
 +    for (int i = 0; i < kAvatars; ++i) {
-+        // (a player who is down is nobody a monster goes for)
-+        here[static_cast<std::size_t>(i)] = !g_avatars[static_cast<std::size_t>(i)].target.down && AvatarAt(i, at[static_cast<std::size_t>(i)].data());
++        // (a player who is down, or watching a scene in their game, is nobody a monster goes for)
++        const AvatarState &target = g_avatars[static_cast<std::size_t>(i)].target;
++        here[static_cast<std::size_t>(i)] = !target.down && !target.away && AvatarAt(i, at[static_cast<std::size_t>(i)].data());
 +        count += here[static_cast<std::size_t>(i)] ? 1 : 0;
 +    }
 +    return count;
@@ -20210,6 +20272,11 @@ index 00000000..01896db7
 +    std::copy(a.body->label_feet, a.body->label_feet + 2, feet);
 +    name = a.target.name;
 +    return true;
++}
++
++float AvatarSeen(int slot) {
++    if (!AvatarShown(slot)) return 0.0f;
++    return g_avatars[static_cast<std::size_t>(slot)].body->fade;
 +}
 +
 +void AvatarsStep() {
@@ -21152,6 +21219,7 @@ index 00000000..01896db7
 +
 +void WorldStep() {
 +    ++g_clock;
++    StoryScenesStep();
 +    NoticesStep();
 +    AvatarsStep();
 +    AvatarEffectsDue();
@@ -21162,6 +21230,7 @@ index 00000000..01896db7
 +}
 +
 +void WorldReset() {
++    StoryScenesReset();
 +    for (int i = 0; i < kAvatars; ++i) {
 +        g_avatars[static_cast<std::size_t>(i)].wanted = false;
 +        g_avatars[static_cast<std::size_t>(i)].pending.clear();
@@ -31864,7 +31933,7 @@ index 5f6bad63..fab33b8a 100644
  
  int EventDoorLoop(int frame, int use_scene_se) {
 diff --git a/port/src/object/event/event_func.cpp b/port/src/object/event/event_func.cpp
-index 622ec7bd..4e01980b 100644
+index 622ec7bd..ff8ddc6a 100644
 --- a/port/src/object/event/event_func.cpp
 +++ b/port/src/object/event/event_func.cpp
 @@ -3,6 +3,10 @@
@@ -31878,7 +31947,15 @@ index 622ec7bd..4e01980b 100644
  #include <array>
  #include <cmath>
  #include <cstddef>
-@@ -4576,7 +4580,9 @@ static int _ADD_ITEM(dc2::script::RunArguments stack, int argc) {
+@@ -3434,6 +3438,7 @@ void InitDramaScene() {
+     EdEventInfo.skip_button = PAD_BTN_START;
+     EdEventInfo.skip_fade_color[2] = 0;
+     EdEventInfo.skip_fade_color[3] = 0;
++    moonmod::coop::DramaSceneStarted(); // co-op: the other players' heroes leave the scene's shots
+ }
+ 
+ void CancelDramaScene() {
+@@ -4576,7 +4581,9 @@ static int _ADD_ITEM(dc2::script::RunArguments stack, int argc) {
          return false;
      }
  
@@ -31889,7 +31966,7 @@ index 622ec7bd..4e01980b 100644
  }
  
  /**
-@@ -5218,6 +5224,7 @@ static int _DNG_SET_FLOOR_ID(dc2::script::RunArguments stack) {
+@@ -5218,6 +5225,7 @@ static int _DNG_SET_FLOOR_ID(dc2::script::RunArguments stack) {
          return false;
      }
  
@@ -31897,7 +31974,7 @@ index 622ec7bd..4e01980b 100644
      dungeon->SetFloorID(floor_id);
      return true;
  }
-@@ -5498,7 +5505,9 @@ static int _AUTO_SET_TREASURE_BOX(dc2::script::RunArguments stack, int argc) {
+@@ -5498,7 +5506,9 @@ static int _AUTO_SET_TREASURE_BOX(dc2::script::RunArguments stack, int argc) {
      float pos[4];
  
      if (argc < 2) {
@@ -31907,7 +31984,7 @@ index 622ec7bd..4e01980b 100644
      } else {
          int item_no = dc2::script::RunInteger(stack++);
          pos[0] = dc2::script::RunFloat(stack++);
-@@ -5527,7 +5536,9 @@ static int _AUTO_SET_MONSTER(dc2::script::RunArguments stack, int argc) {
+@@ -5527,7 +5537,9 @@ static int _AUTO_SET_MONSTER(dc2::script::RunArguments stack, int argc) {
      }
  
      if (argc < 2) {
@@ -31917,7 +31994,7 @@ index 622ec7bd..4e01980b 100644
          return true;
      }
  
-@@ -17200,12 +17211,22 @@ static int _SET_FLOOR_INFO(dc2::script::RunArguments stack) {
+@@ -17200,12 +17212,22 @@ static int _SET_FLOOR_INFO(dc2::script::RunArguments stack) {
          case 3:
              info->unk_a = dc2::script::RunInteger(stack);
              break;
@@ -31943,7 +32020,7 @@ index 622ec7bd..4e01980b 100644
          case 6:
              info->kill_count = dc2::script::RunInteger(stack);
              break;
-@@ -18211,6 +18232,7 @@ static int _JOIN_PARTY_MEMBER(dc2::script::RunArguments stack, int argc) {
+@@ -18211,6 +18233,7 @@ static int _JOIN_PARTY_MEMBER(dc2::script::RunArguments stack, int argc) {
  
              break;
          case RS_PTR: {
@@ -40899,10 +40976,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..29b5a5a6
+index 00000000..97a6c6de
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,1030 @@
+@@ -0,0 +1,1068 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -40916,6 +40993,8 @@ index 00000000..29b5a5a6
 +
 +#include "colprim.hpp"
 +#include "dng_main.hpp"
++#include "event.hpp"
++#include "event_func.hpp"
 +#include "gamedata.hpp"
 +#include "mainloop.hpp"
 +#include "monster.hpp"
@@ -41902,6 +41981,42 @@ index 00000000..29b5a5a6
 +    GamePad__2.previous_pad[0].button = 0;
 +    moonmod::coop::ResetForTests();
 +    EXPECT_FALSE(moonmod::coop::PanelHoldsPad());
++}
++
++TEST(MoonModCoopApi, AStoryScenePlayingIsToldAndAPlayerWatchingOneIsAwayOnTheOtherScreens) {
++    FloorFixture floor;
++    Api          api;
++    const int    saved_skip = EdEventInfo.skip_state, saved_button = EdEventInfo.skip_button;
++    auto story = [&] { return api.Call("world.get").value.at("story_scene").get<bool>(); };
++    EXPECT_FALSE(moonmod::coop::StoryScenePlaying());
++    EXPECT_FALSE(story());
++    DngStatus.mode = DNG_STATUS_EVENT; // a talk or a door has the floor: no scene offers its skip
++    EXPECT_FALSE(moonmod::coop::StoryScenePlaying()) << "a talk is not one of the story's scenes";
++    InitDramaScene(); // one of the story's scenes begins: the game offers its skip
++    EXPECT_TRUE(moonmod::coop::StoryScenePlaying());
++    EXPECT_TRUE(story());
++    moonmod::coop::StoryScenesStep();
++    EXPECT_TRUE(moonmod::coop::StoryScenePlaying()) << "the scene goes on";
++    DngStatus.mode = DNG_STATUS_FIELD;
++    BattleAreaScene->script.running = 1; // (a floor's own scene script)
++    EXPECT_TRUE(moonmod::coop::StoryScenePlaying());
++    BattleAreaScene->script.running = 0; // over, its skip left offered: the field is no scene
++    EXPECT_FALSE(moonmod::coop::StoryScenePlaying());
++    EXPECT_FALSE(story());
++    moonmod::coop::StoryScenesStep(); // (the player walks free: that scene is over for good)
++    DngStatus.mode = DNG_STATUS_EVENT; // a talk after it, the skip still offered
++    EXPECT_FALSE(moonmod::coop::StoryScenePlaying()) << "a skip a scene left offered does not make a talk one";
++    DngStatus.mode = DNG_STATUS_FIELD;
++    EdEventInfo.skip_state = saved_skip;
++    EdEventInfo.skip_button = saved_button;
++    // Another player watching one in their game: their avatar is away (a flag; nothing is drawn without a disc).
++    const Json away = Json::array({{{"slot", 1}, {"character", "max"}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"heading", 0.0}, {"away", true}}});
++    EXPECT_EQ(api.Call("world.avatar_set", away).status, ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::coop::AvatarSeen(0), 0.0f);
++    EXPECT_EQ(moonmod::coop::AvatarSeen(9), 0.0f);
++    EXPECT_EQ(api.Call("world.avatar_set", Json::array({{{"slot", 1}, {"character", "max"}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"heading", 0.0},
++                                                         {"away", "yes"}}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_clear").status, ApiCallStatus::Ok);
 +}
 +
 +TEST(MoonModCoopApi, StrikesAndFloorsAndMapsAreRefusedOffTheFloorWithReasons) {
