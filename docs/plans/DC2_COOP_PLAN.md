@@ -809,12 +809,24 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   notices at the foot of a town's screen as the floor's are, and on the floor the damage numbers over Monica, her red
   flash and the life bar's CAUTION. Without `--slow`, three at once fell under the 7.5 frames a second the harness
   allows and `floor`'s host was stopped (all its checks passed).
-  Found on the way, not fixed: a joiner's parts that reach the host while the host's Georama editor is still opening
-  (Select pressed, the editor not yet taking towns) can be lost in both games: in `build_edit` with the joiner
-  building at its frame 900, both towns ended with 2 of the 4 new parts (17 where 19 stood). Both towns were taken
-  as on foot, not in the editor, and the host's own game then sent the town as if it had changed it. `build_edit`
-  now has the joiner build at frame 1500, once the editor is open, as it was meant to test; the opening race needs a
-  scenario and a fix of its own (logs kept in `~/dc2-coop/live-sight/build_edit-fail`).
+  Found on the way: a joiner's parts that reached the host before the host first opened its Georama editor could be
+  lost in both games: in `build_edit` with the joiner building at its frame 900, both towns ended with 2 of the 4
+  new parts (17 where 19 stood). Fixed the same day (below).
+- Georama, a town standing ahead of its record (2026-11-17). The cause of the lost parts: the game writes a town
+  into its record only as its player leaves the editor or the town (`EditDataSave`). The host's Sindain stood with
+  15 parts while its record still held the town as loaded, and that record was what went: in the world the joiner
+  started from (its Sindain showed 13), and as the town the joiner's change was "from". The host found its record
+  untouched since then, took the joiner's town whole, and built its own map again from it, losing the 2 parts that
+  only stood. It passed only when the host opened its editor first, which writes the record. Now the town a player
+  walks in is written into its record whenever they walk free, as the editor's is while they build
+  (`TownLiveSync`), and at once before a town or world is sent and before a town is merged into the one on screen
+  (`TownRecordFromLiveMap`), unless a town taken from the other game is still waiting to be built there. A part both
+  games put up in one spot since the agreed town stands once after a merge (the town's own parts written into both
+  records), and a whole world imported while a town is on screen builds that town again. Live (release build, four
+  at a time, `--slow 2.2`): `build_edit_opening_450`, `_600`, `_750` and `_1050` (the joiner building at those
+  frames, so that one of them lands while the host's editor opens) 11/11 each, every part standing in both games
+  (19 of 19; 450 and 600 failed before); `build_edit` 13/13, `build` 12/12, `towns` 9/9 (its check now reads a
+  joiner's numbered "sent #n").
 
 ## 7. Risks
 

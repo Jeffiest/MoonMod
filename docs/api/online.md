@@ -311,7 +311,13 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   is the area; `world.get().georama_town` gives the number when the town on screen is one of the five (Palm
   Brinks has no Georama).
 - A town as it is built: while the world is watched, a town in its editor is written into its record as its
-  player builds, so `town` is told at each part placed, moved or taken away, not only on leaving the editor.
+  player builds, so `town` is told at each part placed, moved or taken away, not only on leaving the editor. The
+  town a player walks in is written into its record too, whenever they walk free: the game itself writes a town only
+  as its player leaves it or its editor, so a town loaded and changed since (by the story, or loaded before the game
+  first saved it) stood ahead of its record. `georama.town_export`, `save.world_export` and a `georama.town_import`
+  with `base` into the town on screen take the town as it stands, never an older record (except while a town taken
+  from another game waits to be built here, when the record is the newer). A part both games put up in the same spot
+  since the `base` stands once after the merge.
   `georama.town_import` into a town this game's player stands in answers `reloaded = false, rebuilding = true`:
   nobody is walked back to the entrance; the town on screen is built again from its record where the player
   stands, as soon as they walk free (after a scene or a menu, or on coming out of a house). A player in that town's

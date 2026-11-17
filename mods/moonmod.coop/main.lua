@@ -1364,6 +1364,7 @@ local function town_from(peer, payload)
       return
     end
     local took = take_town(data, peer, base)
+    if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %s from %s #%s took=%s", tostring(town), tostring(peer), tostring(n), tostring(took))) end
     if not took and town and waiting_towns[town] and waiting_towns[town].from == peer then
       -- busy: the number goes with the newest town waiting, and is said when it is taken
       if n and n > (waiting_towns[town].seq or 0) then waiting_towns[town].seq = n end
@@ -1374,10 +1375,12 @@ local function town_from(peer, payload)
   elseif peer == 0 then
     if town and n and n < (tn.seq[town] or 0) then
       tn.held[town] = {data = data, since = tn.held[town] and tn.held[town].since or S.frame}
+      if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %d from the host #%d held (sent #%d)", town, n, tn.seq[town])) end
       return
     end
     tn.held[town or -1] = nil
-    take_town(data, 0)
+    local took = take_town(data, 0)
+    if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %s from the host #%s took=%s", tostring(town), tostring(n), tostring(took))) end
   end
 end
 
@@ -1443,7 +1446,9 @@ end
 -- A town that came while its player was busy is tried again (the host sent it on when it first came).
 local function retry_towns()
   for town, w in pairs(waiting_towns) do
-    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then
+    local took = take_town(w.data, w.from, w.base)
+    if AUTOTEST and took then moonmod.log("info", string.format("COOPTEST town %d waited and was taken (#%s)", town, tostring(w.seq))) end
+    if took and S.role == "host" and w.base then
       tn.took(w.from, town, w.seq)
       send_merged(town)
     end
@@ -1452,6 +1457,7 @@ local function retry_towns()
   for town, h in pairs(tn.held) do
     if S.frame - h.since >= tn.HOLD then
       tn.held[town] = nil
+      if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %d held too long: the host's word stands", town)) end
       take_town(h.data, 0)
     end
   end
@@ -1852,7 +1858,7 @@ function S.town_changed(town)
     tn.seq[town] = (tn.seq[town] or 0) + 1
     send_pieces(0, "TOWN", tn.numbered(tn.seq[town], now .. "\n" .. base))
   end
-  if AUTOTEST then moonmod.log("info", "COOPTEST town " .. town .. " sent") end
+  if AUTOTEST then moonmod.log("info", "COOPTEST town " .. town .. " sent" .. (S.role == "host" and "" or " #" .. tostring(tn.seq[town]))) end
 end
 
 -- Two games changing one flag or counter in the same moment would each take the other's value and end crossed: the

@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..15ce82a5
+index 00000000..fad580e3
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,351 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -1024,6 +1024,19 @@ index 00000000..15ce82a5
 +  `TownFingerprint` and of the "nobody here changed it" comparison.
 +- **Built parts are the world's.** `build_parts_num` is shared as `stock`, so a part one player builds can be
 +  placed by the other.
++- **The town on screen goes as it stands** (2026-11-17). A town often stands ahead of its record outside the editor
++  too: one loaded before the game first saved it, or one the story changed, is written only when its player leaves
++  it. The record is what the other game gets (in the world a visit starts from, and as the town a joiner's change was
++  made from), so a host whose Sindain stood with 15 parts over an older record took a joiner's first part as a town
++  "nobody here changed", took it whole and built its own map again from it, losing the 2 parts that only stood
++  (`build_edit_opening_450` and `_600`: 17 parts where 19 should stand, in both games). `TownLiveSync` now writes the
++  town on screen into its record while its player walks free as well as in the editor, and
++  `TownRecordFromLiveMap` does it at once before `georama.town_export`, `save.world_export` and a merging
++  `georama.town_import` into the town on screen; neither writes while a rebuild from the record is pending. A part
++  both games put up in one spot since the agreed town stands once after `MergeTown`
++  (`MoonModCoopSave.APartBothGamesPutUpInOneSpotStandsOnce`), and `save.world_import` while a town is on screen
++  asks for its rebuild. The engine logs `co-op: town N taken (...)`, `built again from its record (N parts)` and
++  `is written from its live map (N parts; its record N)` as it goes.
 +
 +Since 2026-11-15:
 +
@@ -2965,10 +2978,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..84057923
+index 00000000..80fdd11f
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,395 @@
+@@ -0,0 +1,401 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3281,7 +3294,12 @@ index 00000000..84057923
 +// the scene or menu is over or the player comes out of a house, and at the latest before the game next writes that
 +// live map into the record (TownBeforeSave, from EditDataSave).
 +bool TownOnScreen(int town); // the town loop runs that town (its own map or a house's inside)
++// The town on screen is written into its record as it stands: in its editor, and while its player walks free (a town
++// often stands ahead of its record outside the editor too: the record is written only when the player leaves).
 +void TownLiveSync();
++// The same at once, whatever the player is doing (a town about to be sent or merged into): the record is what the
++// other game starts from and what its change is merged into, so a part only standing here would be lost in both.
++void TownRecordFromLiveMap();
 +// Whether this town's live map may be written over its record: not while a rebuild from the record is pending for it
 +// (the map lacks the other player's change, and writing it would take that change away).
 +bool TownRecordWritable(int town);
@@ -3293,6 +3311,7 @@ index 00000000..84057923
 +// with the player still in the editor.
 +bool TownEditorReady();
 +void TownBeforeSave();
++int  TownRecordParts(int town); // the parts a town's record holds (its layout), or -1 when there is no record
 +int  TownLiveParts(); // the parts standing in the town on screen (its live map), or -1 when no town's own map is
 +void TownReset();
 +void RegisterOwnerUnloaded(std::string_view owner);
@@ -15169,10 +15188,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..6aa52d6c
+index 00000000..6f84f886
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1459 @@
+@@ -0,0 +1,1473 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -15749,7 +15768,10 @@ index 00000000..6aa52d6c
 +    if (!ReadBoundedInt(args[0], "town_id", 0, SAVE_EDIT_DATA_MAX - 1, town)) return Invalid("town_id must be 0-" + std::to_string(SAVE_EDIT_DATA_MAX - 1));
 +    CSaveData *save = GetSaveData();
 +    if (save == nullptr) return Failed("the game has no save data yet");
-+    if (!importing) return Ok({{"town_id", town}, {"data", ExportTown(*save, town)}});
++    if (!importing) {
++        TownRecordFromLiveMap(); // the town on screen goes as it stands
++        return Ok({{"town_id", town}, {"data", ExportTown(*save, town)}});
++    }
 +    if (!args[0].contains("data") || !args[0]["data"].is_string()) return Invalid("data must be georama.town_export text");
 +    // A Georama town is its map: maps 0-4 are the five towns, each with the edit data of its own number
 +    // (CSaveData::GetEditData). The town is on screen when the town loop runs that map.
@@ -15762,6 +15784,8 @@ index 00000000..6aa52d6c
 +    if (editing) {
 +        TownRebuildStep(); // a change taken earlier, in a menu, is built first, so the live map is not behind
 +        TownLiveSync();
++    } else if (here) {
++        TownRecordFromLiveMap(); // what stands is what the other game's change is merged into (not if behind it)
 +    }
 +    const std::string &data = args[0]["data"].get_ref<const std::string &>();
 +    const bool         merging = args[0].contains("base") && !args[0]["base"].is_null();
@@ -15770,6 +15794,9 @@ index 00000000..6aa52d6c
 +    if (merging ? !MergeTown(args[0]["base"].get_ref<const std::string &>(), data, town, *save, error) : !ImportTown(data, town, *save, error)) {
 +        return Invalid(error);
 +    }
++    std::fprintf(stderr, "co-op: town %d taken (%s%s): its record %d parts, %d standing\n", town, merging ? "merged" : "whole",
++                 editing ? ", in its editor" : here ? ", on screen" : ", elsewhere",
++                 TownRecordParts(town), TownLiveParts());
 +    RegisterTownAgreed(town); // what came from another game is not this game's change
 +    // The town on screen is the old one: its live map is built from the record again where the player stands, as
 +    // soon as they walk free (TownRebuildStep). Nobody is walked back to the entrance.
@@ -16403,6 +16430,7 @@ index 00000000..6aa52d6c
 +        if (!args.is_array() || !args.empty()) return Invalid(std::string(path) + " takes no arguments");
 +        CSaveData *save = GetSaveData();
 +        if (save == nullptr) return Failed("the game has no save data yet");
++        if (path == "save.world_export") TownRecordFromLiveMap(); // the town on screen goes as it stands
 +        return Ok({{"data", path == "save.world_export" ? ExportWorld(*save) : ExportPlayerText(*save)}});
 +    }
 +    if (path == "save.world_import" || path == "save.player_import") {
@@ -16417,7 +16445,12 @@ index 00000000..6aa52d6c
 +        const std::string &data = args[0]["data"].get_ref<const std::string &>();
 +        const bool ok = path == "save.world_import" ? ImportWorld(data, *save, error) : ImportPlayerText(data, *save, error);
 +        if (!ok) return Invalid(error);
-+        if (path == "save.world_import") RegisterRebase(); // a whole world is where the games begin again, not a change
++        if (path == "save.world_import") {
++            RegisterRebase(); // a whole world is where the games begin again, not a change
++            for (int town = 0; town < SAVE_EDIT_DATA_MAX; ++town) {
++                if (TownOnScreen(town)) TownRebuildWanted(town); // the town on screen is the old one: built again
++            }
++        }
 +        return Ok({{"imported", true}});
 +    }
 +    if (path == "world.watch_set") {
@@ -17372,10 +17405,10 @@ index 00000000..859675bb
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_save_moonmod.cpp b/port/src/moonmod/coop_save_moonmod.cpp
 new file mode 100644
-index 00000000..7b091ae2
+index 00000000..1ea3d8a2
 --- /dev/null
 +++ b/port/src/moonmod/coop_save_moonmod.cpp
-@@ -0,0 +1,1007 @@
+@@ -0,0 +1,1023 @@
 +// Co-op's split of a save into the host's world and a player's own things (moonmod/coop_save.hpp).
 +
 +#include "moonmod/coop_save.hpp"
@@ -18050,6 +18083,22 @@ index 00000000..7b091ae2
 +            ++it;
 +        }
 +    }
++    // A part both games put up since, the same part in the same spot (a town's own parts first written into both
++    // games' records as they stood, or two players' identical work): one stands, not two in one place.
++    std::vector<TownPart> mine_new = Placed(layout);
++    for (const TownPart &had : Placed(before->layout)) {
++        const auto same = std::ranges::find_if(mine_new, [&](const TownPart &part) { return SamePart(part, had); });
++        if (same != mine_new.end()) mine_new.erase(same);
++    }
++    for (auto it = added.begin(); it != added.end();) {
++        const auto same = std::ranges::find_if(mine_new, [&](const TownPart &part) { return SamePart(part, it->first); });
++        if (same == mine_new.end()) {
++            ++it;
++            continue;
++        }
++        mine_new.erase(same);
++        it = added.erase(it);
++    }
 +    // The merged parts: this game's, less what they took away, then what they added. Each keeps where it came from,
 +    // so the placement log can follow it.
 +    std::vector<TownPart> merged;
@@ -18385,10 +18434,10 @@ index 00000000..7b091ae2
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_town_moonmod.cpp b/port/src/moonmod/coop_town_moonmod.cpp
 new file mode 100644
-index 00000000..a9e3610e
+index 00000000..4f710a78
 --- /dev/null
 +++ b/port/src/moonmod/coop_town_moonmod.cpp
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,196 @@
 +// Co-op's towns as they are built (moonmod/coop.hpp, "A town as it is built").
 +//
 +// A town's Georama is two things in a running game: its record in the save, and, while the town is on screen, the
@@ -18396,7 +18445,10 @@ index 00000000..a9e3610e
 +// map from the record when the town is walked into. Two games sharing a town need both sooner:
 +//
 +// - The builder's game writes its live map into the record as it is built (TownLiveSync), so the record follows each
-+//   part placed, moved or taken away, and the register tells the mod the town changed.
++//   part placed, moved or taken away, and the register tells the mod the town changed. Outside the editor too, while
++//   the player walks free: a town loaded and changed without its record written (by the story, or a town loaded
++//   before the game first saved it) stands ahead of its record, and the record is what the other game starts from
++//   and what its change is merged into (TownRecordFromLiveMap, as a town is sent or taken).
 +// - A game that takes a town its player stands in builds its live map from the record again where it stands
 +//   (TownRebuildWanted, TownRebuildStep), with the steps of the game's own load of a town (EditDataLoad, as its
 +//   debug menu uses it): no walk back to the entrance, the part is simply there.
@@ -18418,6 +18470,7 @@ index 00000000..a9e3610e
 +#include "mapjump.hpp"
 +#include "mapselect.hpp"
 +#include "platform/game_loop_state.hpp"
++#include "save_json.hpp"
 +#include "savedata.hpp"
 +#include "scenesnd.hpp"
 +
@@ -18485,6 +18538,8 @@ index 00000000..a9e3610e
 +        stood[3] = 1.0f;
 +        stood_free = CheckEditWalkSpot(shown, stood, ground) != 0;
 +    }
++    std::fprintf(stderr, "co-op: town %d built again from its record (%d parts)%s\n", town, TownRecordParts(town),
++                 IsEditMode() != 0 ? " in its editor" : "");
 +    map->ClearAllParts();
 +    map->LoadData(record);
 +    map->InitialPlaceParts(record);
@@ -18504,12 +18559,18 @@ index 00000000..a9e3610e
 +}
 +
 +void TownLiveSync() {
-+    if (GetNowLoopNo() != LOOP_EDIT || IsEditMode() == 0) return;
-+    int       town = -1;
-+    CEditMap *map = TownMap(town);
++    if (GetNowLoopNo() != LOOP_EDIT) return;
++    if (IsEditMode() == 0 && !PortTownFieldControl()) return; // a scene, a menu, a house: when the player walks free
++    TownRecordFromLiveMap();
++}
++
++// What the game itself does as its player leaves the editor or the town (EditDataSave), without the analysis: the
++// town that worked out what it fulfils sends that with the record.
++void TownRecordFromLiveMap() {
++    int        town = -1;
++    CEditMap  *map = TownMap(town);
 +    CSaveData *save = GetSaveData();
-+    if (map == nullptr || save == nullptr) return;
-+    if (!TownRecordWritable(town)) return;
++    if (map == nullptr || save == nullptr || !TownRecordWritable(town)) return;
 +    if (CEditData *record = save->GetEditData(town); record != nullptr) map->SaveData(record);
 +}
 +
@@ -18536,10 +18597,26 @@ index 00000000..a9e3610e
 +bool TownEditorReady() { return IsEditModeTool() != 0 && EditModeBetweenActions() != 0; }
 +
 +void TownBeforeSave() {
++    if (int shown = -1; TownMap(shown) != nullptr) {
++        std::fprintf(stderr, "co-op: town %d is written from its live map (%d parts; its record %d)%s\n", shown, TownLiveParts(),
++                     TownRecordParts(shown), g_rebuild_town == shown ? ", built again from the record first" : "");
++    }
 +    if (g_rebuild_town < 0) return;
 +    int town = -1;
 +    if (TownMap(town) == nullptr || town != g_rebuild_town) return;
 +    RebuildNow(); // the game is about to write its live map over the record: bring the map up to the record first
++}
++
++int TownRecordParts(int town) {
++    CSaveData *save = GetSaveData();
++    if (save == nullptr || town < 0 || town >= SAVE_EDIT_DATA_MAX) return -1;
++    const TownLayout *layout = PortFindTownLayout(save->edit_data[town]);
++    if (layout == nullptr) return -1;
++    int count = 0;
++    for (const TownPart &part : layout->parts) {
++        if (part.id != 0) ++count;
++    }
++    return count;
 +}
 +
 +int TownLiveParts() {
@@ -41685,10 +41762,10 @@ index 00000000..1e5a210a
 +} // namespace
 diff --git a/port/src/tests/moonmod_coop_save_test.cpp b/port/src/tests/moonmod_coop_save_test.cpp
 new file mode 100644
-index 00000000..8bf2d172
+index 00000000..ebd986be
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_save_test.cpp
-@@ -0,0 +1,528 @@
+@@ -0,0 +1,569 @@
 +// Co-op's split of a Chronicle Two save (moonmod/coop_save.hpp): the world and a player's own things go across whole,
 +// each without the other; a town carries its record and its layout; a damaged or foreign one changes nothing; and the
 +// host's guests are kept beside the saves.
@@ -41974,6 +42051,47 @@ index 00000000..8bf2d172
 +    EXPECT_EQ(merged->houses[0].npc_no, 99);
 +    EXPECT_EQ(merged->grids[0].cells, (std::vector<u8>{1, 1, 1, 1})); // the host's grid stays
 +    EXPECT_FALSE(moonmod::coop::MergeTown(base, ExportTown(scratch.save(), 1), 2, host.save(), error)); // another town's
++}
++
++// A part both games put up since the town they agreed on (the same part in the same spot: the town's own parts first
++// written into both records as they stood there, or two players' identical work) stands once, and the rest of each
++// game's work is kept.
++TEST(MoonModCoopSave, APartBothGamesPutUpInOneSpotStandsOnce) {
++    Save host(15), scratch(16);
++    std::string error;
++    const TownLayout start = SampleLayout(0); // parts 10, 11, 12
++    PortTownLayout(host.save().edit_data[2]) = start;
++    const std::string base = ExportTown(host.save(), 2);
++    TownPart gate;
++    gate.id = 21;
++    gate.state = 1;
++    gate.pos = {40, 0, 8};
++    TownPart shop = gate, well = gate;
++    shop.id = 20;
++    well.id = 30;
++    TownLayout hosts = start; // the host: the gate and a shop
++    hosts.parts.push_back(gate);
++    hosts.parts.push_back(shop);
++    PortTownLayout(host.save().edit_data[2]) = hosts;
++    TownLayout guests = start; // the guest: the same gate in the same spot, and a well
++    guests.parts.push_back(gate);
++    guests.parts.push_back(well);
++    PortTownLayout(scratch.save().edit_data[2]) = guests;
++    ASSERT_TRUE(moonmod::coop::MergeTown(base, ExportTown(scratch.save(), 2), 2, host.save(), error)) << error;
++    const TownLayout *merged = PortFindTownLayout(host.save().edit_data[2]);
++    ASSERT_NE(merged, nullptr);
++    std::vector<int> ids;
++    for (const TownPart &part : merged->parts) ids.push_back(part.id);
++    EXPECT_EQ(ids, (std::vector<int>{10, 11, 12, 21, 20, 30}));
++    // Two gates in one spot from each side stay two (a part may stand twice): only what both put up pairs off.
++    TownLayout twice = guests;
++    twice.parts.push_back(gate);
++    PortTownLayout(host.save().edit_data[2]) = hosts;
++    PortTownLayout(scratch.save().edit_data[2]) = twice;
++    ASSERT_TRUE(moonmod::coop::MergeTown(base, ExportTown(scratch.save(), 2), 2, host.save(), error)) << error;
++    ids.clear();
++    for (const TownPart &part : PortFindTownLayout(host.save().edit_data[2])->parts) ids.push_back(part.id);
++    EXPECT_EQ(ids, (std::vector<int>{10, 11, 12, 21, 20, 30, 21}));
 +}
 +
 +TEST(MoonModCoopSave, ATownBuiltPartByPartByOneIsTakenWholeEachTime) {
