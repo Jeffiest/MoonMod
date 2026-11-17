@@ -265,10 +265,11 @@ local function hear_position(peer, rest)
 end
 
 -- Shots and spells (Chronicle Two): what a player's hero fires on a floor (Max's guns, Monica's magic, her magic
--- sword's charge) and the trails of their blade's swings are sent as they happen ("F scene kind x y z dx dy dz value
--- amount target frames", player.effects_take's entries), and the others draw them from that player's hero
--- (world.avatar_effect): the same shot flying the same way, striking nothing there, since its hits are the firing
--- game's and reach the monsters as that game's other hits do.
+-- sword's charge), the trails of their blade's swings and the sounds their hero makes are sent as they happen ("F
+-- scene kind x y z dx dy dz value amount target frames", player.effects_take's entries), and the others draw them from
+-- that player's hero (world.avatar_effect): the same shot flying the same way, striking nothing there, since its hits
+-- are the firing game's and reach the monsters as that game's other hits do. A sound (kind 9) names its bank in
+-- frames ("CH_000,CH_000"), as a trail names its two frames.
 S.shots = {MOST = 8} -- shots sent in one frame at most (a machine gun fires one a frame)
 function S.shots.send()
   if not (game.player and game.player.effects_take) then return end

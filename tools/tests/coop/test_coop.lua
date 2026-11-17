@@ -403,6 +403,12 @@ do
   check(#g.shots_drawn == 2 and swing.kind == 6 and swing.frame0 == "sw_00" and swing.frame1 == "sw01" and swing.value == 12,
         "and the trail of the host's blade, between the same two frames")
   table.remove(g.shots_drawn)
+  h.shots_out = {{kind = 9, x = 300, y = 0, z = 200, dx = 0, dy = 0, dz = 0, value = 17, amount = 0, target = -1, frame0 = "CH_005", frame1 = "CH_005"}}
+  both(h, g, 4)
+  local sound = g.shots_drawn[2]
+  check(#g.shots_drawn == 2 and sound.kind == 9 and sound.value == 17 and sound.frame0 == "CH_005",
+        "and a sound of the host's hero, from its own bank, heard from the host's hero")
+  table.remove(g.shots_drawn)
   -- the guest goes down a floor: each is out of the other's sight
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 99}
   both(h, g, 48)
