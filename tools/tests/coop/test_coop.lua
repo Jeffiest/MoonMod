@@ -1010,7 +1010,7 @@ do
   for name in (settings or ""):gmatch('"name": "(.-)"') do if #name > 96 then long[#long + 1] = name:sub(1, 30) end end
   check(settings and #long == 0, "every setting's name fits the engine's 96 bytes (else the game refuses the whole mod)",
         table.concat(long, " / "))
-  local description = text:match('"description": "(.-)",\n')
+  local description = text:match('"description": "(.-)",\r?\n')
   check(description and #description <= 1024, "the mod's description fits the engine's 1024 bytes (else the game refuses the whole mod)",
         description and #description)
 end
