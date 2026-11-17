@@ -827,6 +827,22 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   frames, so that one of them lands while the host's editor opens) 11/11 each, every part standing in both games
   (19 of 19; 450 and 600 failed before); `build_edit` 13/13, `build` 12/12, `towns` 9/9 (its check now reads a
   joiner's numbered "sent #n").
+- Nothing breaks into a scene (2026-11-17, the first part of 5.9 and K8). A co-op question ("Join them there?",
+  "Swap heroes?") opened over whatever the player was doing. In a talk or a story scene its Yes/No window lay over
+  the scene's own and took the buttons, so the scene could not go on until it was answered. It ignored the floor's
+  menu the same way, and a town notice printed over a scene. Now the engine's `PlayerFree` decides when the player
+  may be asked or told something: walking a floor or a town, or between actions in the Georama editor. Not in a
+  scene or a talk, a menu, a photo, a door, a minigame or a map loading. Until then a question waits unseen, with
+  the buttons the game's. It is asked after an 8-frame grace (the press that ended the scene's last line does not
+  answer it). Notices wait too, not growing old meanwhile, and the names over the other hero hide during a town
+  scene as they do on a floor. The mod takes back a question gone stale while it waited (the friend left the floor
+  it asks about). Engine test `AQuestionWaitsOutASceneAndTheMenuAndIsAskedAfter`, mod test "a follow offer for a
+  floor the friend has left is taken back".
+- The other player's spells ask nothing illegal (2026-11-17). A shot or spell drawn for the other player is drawn
+  only (`shown_only`) and has no collision primitive, but its effect script still asked after one every frame. Each
+  question was logged as an illegal function call (ext 210-213): 2113 in one `down` run and 1178 in a `look` run, all
+  on the follower, costing it frame time. `effscript.cpp` now answers them as a primitive that hits nothing. Live
+  `floor` 15/15 and `hurt` 11/11 with none logged on either side.
 
 ## 7. Risks
 

@@ -932,6 +932,12 @@ function together.tick()
     try(game.ui.choice_close, {})
     autotest_answer(p)
   end
+  -- A question gone stale is taken back: it may wait out a whole scene before it is asked (the engine holds it while
+  -- the player is in one), and the friend may have moved on by then, or while it stood open.
+  if together.open and not together.held and together.open.still and not together.open.still() then
+    together.open = nil
+    try(game.ui.choice_close, {})
+  end
   if together.open or not together.queue[1] then return end
   local p = table.remove(together.queue, 1)
   if p.still and not p.still() then return end -- stale (they moved on, or we're there already)

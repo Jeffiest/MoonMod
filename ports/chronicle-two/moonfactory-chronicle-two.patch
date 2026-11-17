@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..fad580e3
+index 00000000..cfa919e6
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,351 @@
+@@ -0,0 +1,357 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -886,12 +886,18 @@ index 00000000..fad580e3
 +  `chronicle_two_adapter.cpp`'s `Call`), `player.get`/`world.get`'s extra fields.
 +- `coop_world_moonmod.cpp`: avatars, puppets, nearest-player targeting, shared events, the floor seed.
 +- `coop_ui_moonmod.cpp`: the choice panel (`ui.choice_open` / `ui.choice_close` / `ui.choice_made`), title modes (`title.mode_*`,
-+  `game.title.opened/selected`), visits (`session.*`, `game.session.started/ended/failed`).
++  `game.title.opened/selected`), visits (`session.*`, `game.session.started/ended/failed`). A question and a notice
++  wait while the player is not free (`PlayerFree`, in `coop_avatar_names_moonmod.cpp`: a floor's field with no
++  event script, or a town walked with the town's own control, or the Georama editor between actions; never a scene,
++  a talk, a menu, a photo, a door, a minigame or a load). Meanwhile the panel is not drawn and does not hold the pad,
++  and it is asked 8 frames after the player is free again.
 +- `coop_save_moonmod.cpp`: `DCW2`/`DCP2`/`DCT2` records and the accounts.
 +- Hooks in game units, one line each: `main.cpp` (`FrameStep`), `automap.cpp` (`FloorSeed`), `dng_event.cpp`
 +  (`FloorBuildBegin`), `event_func.cpp` (`FloorPlacing`, `FloorPlaced` around the floor's chests and monsters),
 +  `dng_main.cpp` (`MapEventStarted`, `Draw2D`), `editloop.cpp` (`Draw2D`), `monster.cpp` (`MonsterThinkBegin/End`,
-+  `MonsterDamaged`), `save_slots.cpp` (no writes during a visit), `title.cpp` (the mod rows, the page, the visit).
++  `MonsterDamaged`), `save_slots.cpp` (no writes during a visit), `title.cpp` (the mod rows, the page, the visit),
++  `effscript.cpp` (another player's shot or spell is drawn only, `shown_only`: it makes no collision primitive, and
++  its script's questions after one are answered as a primitive that hits nothing, never logged as illegal calls).
 +
 +## What the real game changed (2026-11-14)
 +
@@ -2978,10 +2984,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..80fdd11f
+index 00000000..3bd8a0bb
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,401 @@
+@@ -0,0 +1,405 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3121,6 +3127,10 @@ index 00000000..80fdd11f
 +// font in the 2D pass after the scene, with its camera: the choice panel's Draw2D calls it first, so a panel lies
 +// over them.
 +void DrawAvatarNames();
++// Whether this game's player is free to be asked or told something: walking a floor or a town, or between actions
++// in a town's Georama editor. Not in a scene or a talk, a menu, a photo, a door, a minigame, or a map loading: co-op's
++// questions and notices wait those out, as the game's own never break into them.
++bool PlayerFree();
 +
 +// ---- What a hero fires: shots and spells seen on the other screens (coop_world_moonmod.cpp) -------------------------
 +// actscript.cpp tells each shot this game's own hero fires (HeroFired); player.effects_take gives them to the mod,
@@ -16667,10 +16677,10 @@ index 00000000..6f84f886
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_avatar_names_moonmod.cpp b/port/src/moonmod/coop_avatar_names_moonmod.cpp
 new file mode 100644
-index 00000000..8ad0dbcf
+index 00000000..0b93536c
 --- /dev/null
 +++ b/port/src/moonmod/coop_avatar_names_moonmod.cpp
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,112 @@
 +// Co-op's names over the other players' heroes (moonmod/coop.hpp): each avatar a scene draws carries its player's name
 +// just over its head, in the game's own font, in towns and on dungeon floors. The place is measured as the scene draws
 +// the body, with the camera it draws with (AvatarBody::DrawDirect: the point over the head goes through the camera's
@@ -16692,6 +16702,8 @@ index 00000000..8ad0dbcf
 +#include "gfx/gfx.hpp"
 +#include "mainloop.hpp"
 +#include "photo.hpp"
++#include "platform/game_loop_state.hpp"
++#include "object/world/town_control.hpp"
 +#include "platform/legacy_encoding.hpp"
 +#include "scenesnd.hpp"
 +#include "screen_overlay_anchor.hpp"
@@ -16728,14 +16740,26 @@ index 00000000..8ad0dbcf
 +        if (DngMainScene == nullptr || BattleAreaScene == nullptr || DngStatus.mode != DNG_STATUS_FIELD) return false;
 +        return DngMainScene->event_run == 0 && BattleAreaScene->script.running == 0;
 +    }
-+    if (loop == LOOP_EDIT) {
++    if (loop == LOOP_EDIT) { // (a scene or a talk takes the town's control: ControlMode is the event's then)
 +        CScene *scene = GetMainScene();
-+        return scene != nullptr && scene->event_run == 0 && IsWalkMode() != 0 && IsEditMode() == 0;
++        return scene != nullptr && scene->event_run == 0 && IsWalkMode() != 0 && IsEditMode() == 0 &&
++               PortTownControlMode == EDIT_CONTROL_PLAYER;
 +    }
 +    return false;
 +}
 +
 +} // namespace
++
++bool PlayerFree() {
++    if (NowTakePhoto() != 0) return false;
++    const int loop = GetNowLoopNo();
++    if (loop == LOOP_DUNGEON) {
++        return DngMainScene != nullptr && BattleAreaScene != nullptr && DngStatus.mode == DNG_STATUS_FIELD &&
++               DngMainScene->event_run == 0 && BattleAreaScene->script.running == 0;
++    }
++    if (loop == LOOP_EDIT) return IsEditMode() != 0 ? TownEditorReady() : PortTownFieldControl();
++    return false;
++}
 +
 +void DrawAvatarNames() {
 +    const bool shown = FieldShown();
@@ -18636,10 +18660,10 @@ index 00000000..4f710a78
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_ui_moonmod.cpp b/port/src/moonmod/coop_ui_moonmod.cpp
 new file mode 100644
-index 00000000..b09f669c
+index 00000000..ab5344b5
 --- /dev/null
 +++ b/port/src/moonmod/coop_ui_moonmod.cpp
-@@ -0,0 +1,652 @@
+@@ -0,0 +1,672 @@
 +// Co-op's screens (moonmod/coop.hpp): the choice panel over the game, a mod's title mode page, and a visit's start
 +// and end.
 +
@@ -18727,6 +18751,9 @@ index 00000000..b09f669c
 +std::optional<Choice> g_choice;
 +int                   g_choice_grace = 0; // frames before the panel takes a press (the one that opened it isn't its)
 +bool                  g_choice_reads = false; // the panel is reading the pad now (PanelHoldsPad lets it through)
++// The player is in a scene or a talk, a menu, a photo, a door or a map loading (PlayerFree): the question waits, unseen,
++// and the buttons are the game's, so the scene goes on; it is asked once the player walks free again.
++bool                  g_choice_waiting = false;
 +// The game's own message window a yes-or-no choice is asked in (Choice::yes_no), built when it is first drawn: its
 +// frame and letters are the system message's, which every floor and town loads (dng_main.cpp, editloop.cpp).
 +ClsMes g_ask;
@@ -18795,6 +18822,7 @@ index 00000000..b09f669c
 +    if (!g_choice) return;
 +    const Choice choice = *g_choice;
 +    g_choice.reset();
++    g_choice_waiting = false;
 +    SharedRuntime().PublishToMod(choice.owner, "ui.choice_made",
 +                                 {{"id", choice.id}, {"index", cancelled ? Json(nullptr) : Json(index + 1)},
 +                                  {"cancelled", cancelled}, {"frame", SharedRuntime().Frame()}});
@@ -18912,10 +18940,13 @@ index 00000000..b09f669c
 +bool ChoiceOpen(Choice choice) {
 +    if (g_choice || choice.options.empty() || choice.options.size() > 6) return false;
 +    choice.cursor = std::min(choice.cursor, choice.options.size() - 1);
++    // (at the title, which has no message window of the game's, it is the panel; asked in a menu or while a map
++    // loads, it waits, and is asked on the floor or in the town the player comes to, where the window is)
 +    const int loop = GetNowLoopNo();
-+    if (choice.options.size() != 2 || (loop != LOOP_DUNGEON && loop != LOOP_EDIT)) choice.yes_no = false;
++    if (choice.options.size() != 2 || loop == LOOP_TITLE) choice.yes_no = false;
 +    g_choice = std::move(choice);
 +    g_choice_grace = 8;
++    g_choice_waiting = loop != LOOP_TITLE && !PlayerFree();
 +    g_ask_built = false;
 +    return true;
 +}
@@ -18924,19 +18955,28 @@ index 00000000..b09f669c
 +    if (!g_choice || g_choice->owner != owner) return false;
 +    g_choice.reset();
 +    g_choice_grace = 0;
++    g_choice_waiting = false;
 +    return true;
 +}
 +
 +bool ChoiceIsOpen() { return g_choice.has_value(); }
-+bool PanelHoldsPad() { return g_choice.has_value() && !g_choice_reads; }
++bool PanelHoldsPad() { return g_choice.has_value() && !g_choice_reads && !g_choice_waiting; }
 +const Choice *OpenChoice() { return g_choice ? &*g_choice : nullptr; }
 +
 +void ChoiceStep() {
 +    if (!g_choice) return;
++    // A question waits out whatever holds the player (a scene or a talk, a menu, a photo, a door, a map loading), as
++    // the game's own questions never break into a scene, and opening the game's menu no longer answers it "no". Once
++    // the player is free it is asked, after the grace, so the press that ended the scene's last line does not answer it.
 +    const int loop = GetNowLoopNo();
-+    if (loop != LOOP_DUNGEON && loop != LOOP_EDIT && loop != LOOP_TITLE) {
-+        ChoiceClose(true, 0);
++    if (loop != LOOP_TITLE && !PlayerFree()) {
++        g_choice_waiting = true;
 +        return;
++    }
++    if (g_choice_waiting) {
++        g_choice_waiting = false;
++        g_choice_grace = 8;
++        g_ask_built = false; // (a floor or a town since: the window is built again with its frame and letters)
 +    }
 +    if (g_choice_grace > 0) {
 +        --g_choice_grace;
@@ -18969,7 +19009,7 @@ index 00000000..b09f669c
 +    }
 +}
 +
-+bool TownNoticesOpen() { return WalkingInTown() && !g_choice; }
++bool TownNoticesOpen() { return WalkingInTown() && PlayerFree() && !g_choice; }
 +
 +void TownNoticePrint(const std::string &window, int frames) {
 +    if (!g_town_ready) {
@@ -18993,7 +19033,7 @@ index 00000000..b09f669c
 +void Draw2D() {
 +    DrawAvatarNames(); // the other players' names, under the panel
 +    TownNoticesDraw();
-+    if (!g_choice) return;
++    if (!g_choice || g_choice_waiting) return;
 +    const Choice &choice = *g_choice;
 +    if (choice.yes_no) {
 +        if (!g_ask_built) AskBuild(choice);
@@ -19277,13 +19317,17 @@ index 00000000..b09f669c
 +        if (open != nullptr && open->owner == owner) CloseTitlePage();
 +    }
 +    std::erase_if(g_title_modes, [owner](const TitleMode &mode) { return mode.owner == owner; });
-+    if (g_choice && g_choice->owner == owner) g_choice.reset();
++    if (g_choice && g_choice->owner == owner) {
++        g_choice.reset();
++        g_choice_waiting = false;
++    }
 +    if (g_visit_request && g_visit_request->owner == owner) g_visit_request.reset();
 +}
 +
 +void UiReset() {
 +    g_choice.reset();
 +    g_choice_grace = 0;
++    g_choice_waiting = false;
 +    g_title_modes.clear();
 +    g_open_mode.reset();
 +    g_ignored_backs = 0;
@@ -19294,10 +19338,10 @@ index 00000000..b09f669c
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..13cd43c6
+index 00000000..01896db7
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1841 @@
+@@ -0,0 +1,1845 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -21050,6 +21094,10 @@ index 00000000..13cd43c6
 +// The notices waiting, into the floor's message window when the player is on one, playing (as the game's own are).
 +static void NoticesStep() {
 +    if (g_notices.empty()) return;
++    if (!PlayerFree()) { // a scene, a talk, a menu, a map loading: the notices wait it out, and do not grow old
++        for (Notice &n : g_notices) ++n.until;
++        return;
++    }
 +    std::erase_if(g_notices, [](const Notice &n) { return n.until < g_clock; });
 +    if (TownNoticesOpen()) { // (in a town, the window co-op keeps there)
 +        for (Notice &n : g_notices) TownNoticePrint(n.text, n.frames);
@@ -34647,20 +34695,106 @@ index a0105f01..0f85c503 100644
  
              if (laser != nullptr) {
 diff --git a/port/src/script/effscript.cpp b/port/src/script/effscript.cpp
-index 7adb508e..d1bcceaf 100644
+index 7adb508e..772be8f6 100644
 --- a/port/src/script/effscript.cpp
 +++ b/port/src/script/effscript.cpp
-@@ -4696,6 +4696,9 @@ int _COLPRIM_CREATE(dc2::script::RunArguments args) {
+@@ -4687,6 +4687,14 @@ int _DMG_SET_DAMAGE(dc2::script::RunArguments, int) {
+     return 0;
+ }
+ 
++// MoonMod co-op: another player's shot or spell is only drawn here (it strikes in its own game), so it has no
++// collision primitive. Its script still asks after one every frame; it is answered as a primitive that never hits:
++// the calls succeed, a count or a place is 0, and nothing is logged as an illegal call (which, two thousand times a
++// run, cost the follower's frame time).
++static bool ShownOnlyWithoutPrim() {
++    return now_script != nullptr && now_script->shown_only && now_script->colprim == nullptr;
++}
++
+ /**
+  *
+  * Creates a collision primitive for the current effect script.
+@@ -4696,6 +4704,9 @@ int _COLPRIM_CREATE(dc2::script::RunArguments args) {
      if (now_script == nullptr || args.Remaining() < 1 || args.Remaining() > 2) {
          return 0;
      }
 +    if (now_script->shown_only) { // MoonMod co-op: another player's shot is only drawn here; it strikes in its own game
-+        return 0;
++        return 1;
 +    }
      char *damage_name = dc2::script::RunCString(args++);
      int   owner = args.Remaining() > 0 ? dc2::script::RunInteger(args) : now_script->user_id;
      if (now_script->colprim != nullptr) {
-@@ -4967,6 +4970,17 @@ int _ES_CREATE(dc2::script::RunArguments args) {
+@@ -4724,6 +4735,9 @@ int _COLPRIM_SET_COORD(dc2::script::RunArguments args) {
+     mgCFrame *root = {};
+     mgCFrame *frame = {};
+ 
++    if (ShownOnlyWithoutPrim()) {
++        return 1;
++    }
+     if (now_script == nullptr || now_script->colprim == nullptr) {
+         return 0;
+     }
+@@ -4814,7 +4828,7 @@ int _COLPRIM_DELETE(dc2::script::RunArguments stack, int argc) {
+     colprim = now_script->colprim;
+ 
+     if (colprim == nullptr) {
+-        return 0;
++        return ShownOnlyWithoutPrim() ? 1 : 0;
+     }
+ 
+     colprim->Delete(-1);
+@@ -4841,7 +4855,9 @@ int _COLPRIM_GET_HITCNT(dc2::script::RunArguments stack, int argc) {
+     colprim = now_script->colprim;
+ 
+     if (colprim == nullptr) {
+-        return 0;
++        if (!ShownOnlyWithoutPrim()) return 0;
++        SetStack(stack, 0); // (it hits nothing here)
++        return 1;
+     }
+ 
+     SetStack(stack, colprim->hit_num);
+@@ -4870,7 +4886,7 @@ int _COLPRIM_GET_GIFT(dc2::script::RunArguments stack, int argc) {
+     auto next_slot = stack + 1;
+ 
+     if (now_script->colprim == nullptr) {
+-        return 0;
++        return ShownOnlyWithoutPrim() ? 1 : 0;
+     }
+ 
+     item_id = GetStackInt(stack);
+@@ -4900,7 +4916,10 @@ int _COLPRIM_GET_REVCNT(dc2::script::RunArguments stack, int argc) {
+     }
+ 
+     if (now_script->colprim == nullptr) {
+-        return 0;
++        if (!ShownOnlyWithoutPrim()) return 0;
++        SetStack(stack++, 0);
++        for (int i = 1; i < argc; ++i) SetStack(stack++, 0.0f);
++        return 1;
+     }
+ 
+     SetStack(stack++, now_script->colprim->reversed);
+@@ -4925,7 +4944,7 @@ int _COLPRIM_SET_DAMAGE(dc2::script::RunArguments stack, int argc) {
+     }
+     ValidateEffectOutputs(stack);
+     if (now_script->colprim == nullptr) {
+-        return 0;
++        return ShownOnlyWithoutPrim() ? 1 : 0;
+     }
+ 
+     now_script->colprim->damage = GetStackInt(stack);
+@@ -4947,7 +4966,9 @@ int _COLPRIM_GET_HIT_POS(dc2::script::RunArguments stack, int argc) {
+     }
+ 
+     if (now_script->colprim == nullptr) {
+-        return 0;
++        if (!ShownOnlyWithoutPrim()) return 0;
++        for (int i = 0; i < 3; ++i) SetStack(stack++, 0.0f);
++        return 1;
+     }
+ 
+     SetStack(stack++, now_script->colprim->hit_pos[0]);
+@@ -4967,6 +4988,17 @@ int _ES_CREATE(dc2::script::RunArguments args) {
      }
      int   handle = -1;
      char *name = dc2::script::RunCString(args++);
@@ -40765,10 +40899,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..1e5a210a
+index 00000000..29b5a5a6
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,991 @@
+@@ -0,0 +1,1030 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -41729,6 +41863,45 @@ index 00000000..1e5a210a
 +    ASSERT_EQ(api.Call("ui.choice_open", ask).status, ApiCallStatus::Ok);
 +    EXPECT_FALSE(moonmod::coop::OpenChoice()->yes_no) << "the title has no message window of the game's: the panel";
 +    moonmod::coop::ResetForTests();
++}
++
++// A question waits out a scene, as the game's own never break into one: unseen, the buttons the game's (the scene's
++// lines go on), and opening the game's menu no longer answers it. Once the player walks free it is asked, after a
++// grace, so the press that ended the scene does not answer it.
++TEST(MoonModCoopApi, AQuestionWaitsOutASceneAndTheMenuAndIsAskedAfter) {
++    FloorFixture floor;
++    Api          api;
++    const Json ask = Json::array({{{"id", "follow"}, {"title", "Max went to Palm Brinks"}, {"subtitle", "Join them there?"},
++                                   {"style", "yes_no"}, {"options", Json::array({{{"title", "Join Max"}}, {{"title", "Stay here"}}})}}});
++    BattleAreaScene->script.running = 1; // a floor's scene runs
++    ASSERT_EQ(api.Call("ui.choice_open", ask).status, ApiCallStatus::Ok);
++    EXPECT_TRUE(moonmod::coop::OpenChoice()->yes_no);
++    EXPECT_FALSE(moonmod::coop::PanelHoldsPad()) << "in a scene the buttons are the game's";
++    GamePad__2.pad[0].button = PAD_CIRCLE;
++    GamePad__2.previous_pad[0].button = 0;
++    EXPECT_NE(GamePad__2.On(PAD_CIRCLE), 0);
++    for (int i = 0; i < 30; ++i) moonmod::coop::ChoiceStep();
++    ASSERT_TRUE(moonmod::coop::ChoiceIsOpen()) << "a press in the scene answers nothing";
++    DngStatus.mode = DNG_STATUS_MENU; // the floor's menu opened: still waiting, not answered
++    for (int i = 0; i < 30; ++i) moonmod::coop::ChoiceStep();
++    ASSERT_TRUE(moonmod::coop::ChoiceIsOpen()) << "opening the menu does not answer it";
++    EXPECT_FALSE(moonmod::coop::PanelHoldsPad());
++    DngStatus.mode = DNG_STATUS_FIELD;
++    BattleAreaScene->script.running = 0; // the scene is over; the press that ended it is still down
++    moonmod::coop::ChoiceStep();
++    EXPECT_TRUE(moonmod::coop::PanelHoldsPad()) << "free again: the question is asked and has the buttons";
++    for (int i = 0; i < 7; ++i) moonmod::coop::ChoiceStep();
++    EXPECT_TRUE(moonmod::coop::ChoiceIsOpen()) << "within the grace no press answers it";
++    GamePad__2.pad[0].button = 0;
++    GamePad__2.previous_pad[0].button = 0;
++    moonmod::coop::ChoiceStep();
++    GamePad__2.pad[0].button = PAD_RIGHT;
++    moonmod::coop::ChoiceStep();
++    EXPECT_EQ(moonmod::coop::OpenChoice()->cursor, 1u) << "then left and right choose";
++    GamePad__2.pad[0].button = 0;
++    GamePad__2.previous_pad[0].button = 0;
++    moonmod::coop::ResetForTests();
++    EXPECT_FALSE(moonmod::coop::PanelHoldsPad());
 +}
 +
 +TEST(MoonModCoopApi, StrikesAndFloorsAndMapsAreRefusedOffTheFloorWithReasons) {

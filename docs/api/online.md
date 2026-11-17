@@ -245,7 +245,9 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   item found is told: in lines of about forty letters, three to a window, a letter outside ASCII as the game writes
   one (`[UNIxxxx]`), a bracket as a parenthesis. Walking in a town it shows in a window of the same kind (a town has
   none of the floor's, so the engine keeps one, made as the floor makes its own). A notice that comes anywhere else
-  (a menu, the Georama editor, while a question is asked) waits for a floor or a town, ten seconds at most.
+  (a menu, the Georama editor, while a question is asked) waits for a floor or a town, ten seconds at most; one that
+  comes during a scene or a talk, a photo, a door or a map loading waits it out however long it lasts (those ten
+  seconds count only while the player walks free), as the game never tells anything over its own scenes.
 - `world.avatar_set` shows `"max"` or `"monica"`, tinted through the ambient light if `tint` is given, in the `outfit` given (`{head,
   clothes, feet, sub}`, each left out at will: then as this game's own hero has it) with the hat or hair piece and
   the weapons on the body; no name over the head yet. It takes `"ridepod"` and `"monster"` too (what `player.get`
@@ -277,6 +279,11 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   options: yes, then no) asks the question in the game's own message window instead, on a floor or in a town: the
   title and subtitle are its text (at most four lines), the game's Yes and No are chosen with left and right, and the
   cursor, the pick and backing out make the menus' own sounds. Elsewhere (the title page) it is the panel.
+  A question waits out whatever holds the player: a scene or a talk, the floor's menu, a photo, a door, a minigame, a
+  map loading, the Georama editor mid-action. Meanwhile it is not drawn and the buttons stay the game's, so the scene
+  goes on. It is asked once the player walks free, after a moment's grace, so the press that ended the scene's last
+  line does not answer it. Asked during a map load, a `yes_no` is asked in the game's window on the floor or in the
+  town the player comes to.
 - A player's own saves: `save.slots_list()` gives this game's numbered saves and how far each one's story is,
   `{slots = {{slot, ready, progress, chapter, play_time}}}`. `save.slot_player_export({slot})` reads a player's
   things (`save.player_export` text) out of one without loading it: `{slot, data, progress, chapter}`.
@@ -340,8 +347,8 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   `world.enter_map`), and the floor's clear as the game decides it: `monsters_counted` (the monsters still counted
   against the clear), `mimic_chests` and `floor_cleared`; in a Georama town, `georama_live_parts`, how many parts
   stand in the town as it is on screen.
-- A panel from `ui.choice_open` stays until the player picks or backs out, or the game leaves a town or a floor (a
-  load), which closes it as backed out (`ui.choice_made` with `cancelled`). `ui.choice_close {}` closes the calling
+- A panel from `ui.choice_open` stays until the player picks or backs out (a load or a scene between, it waits, as
+  above). `ui.choice_close {}` closes the calling
   mod's own panel quietly, with no `ui.choice_made`, and answers `{closed}`; another mod's panel stays open.
 - On a follower's floor a monster the leader gains after the floor was built (a late spawn) is made in the same
   slot here, from the floor's loaded kinds, a mod enemy or the game's own refer; a kind this game cannot make is
