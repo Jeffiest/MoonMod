@@ -104,12 +104,16 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   (`frame0` and `frame1` the weapon's frames it runs between, `value` its length, `amount` the steps it fades over,
   `target` the steps it holds first), 9 a sound the hero's own actions played (`value` its number in the hero's sound
   bank, `frame0` and `frame1` that bank's name, such as `CH_000` for Max or `CH_020` for Monica; a monster form has
-  none). Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
+  none), 10 a looped sound (a charge, an engine: `_SE_LOOP_PLAY`; `value` and the frames as a sound's, `amount` the
+  frames it goes on after this word, 0 to stop it), given again every 8 frames at most while the hero keeps it going.
+  Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
   (`game.write`) draws another player's from their avatar: the same effect, flying the same way, striking nothing in
   this game (it makes no attack, and an effect's own script makes none either). `{shown = false}` when that avatar is
   not on this floor or the effect can't be made; an effect this game hasn't loaded is loaded on first use. A sound
   is heard from where the avatar stands, quieter and to one side as it is further off; each avatar loads the bank it
-  names into a sound port of its own (game ports 12 to 14) the first time, and again only when the name changes.
+  names into a sound port of its own (game ports 12 to 14) the first time, and again only when the name changes. A
+  looped sound goes on from the avatar, following it as it moves, until `amount` frames (plus the 8 between words)
+  pass with no word for it, as the game's own loops are kept; up to four at once per avatar, stopped off the field.
 
 - Down, not out (co-op). `player.down_rule_set({enabled})` (`game.write`): while it is on, a party knocked out on a
   dungeon floor (no one left to switch to, and no Revival Powder: the powder still works first) doesn't get the game
@@ -221,16 +225,58 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
 - `dungeons.enter_floor {dungeon_id, floor_id}` lands on the floor itself (the dungeon's floor load event), not on
   its floor list. `x`, `y` and `teleport` are accepted and not used: the way in is the floor's own.
 - `player.get` adds `heading`, `motion`, the melee `weapon`, `outfit` (`{head, clothes, feet, sub}`, the item
-  numbers of what the hero wears and of the second weapon) and, in a town, `town_character` and the position.
-- `world.avatar_set` shows `"max"` or `"monica"`, tinted through the ambient light, in the `outfit` given (`{head,
+  numbers of what the hero wears and of the second weapon) and, in a town, `town_character` and the position. With
+  `motion` come `motion_flags` (how the game plays it: 0 loops, as a run, a walk or a stand does; 2 stops on its last
+  frame, as a swing or a fall does) and `motion_step` (how fast: frames a step; a walk's follows the stick).
+  `monsters.mirror_get`'s monsters carry the same two.
+- `world.avatar_set` takes `motion_flags` and `motion_step` as `player.get` gives them, and plays the motion so; left
+  out, the motion loops at its own pace. It takes `age` too: how many frames ago the report was made, on the
+  reporting game's clock as this game reckons it (the frames since its message came, plus how much slower it came
+  than the quickest of that game's recent ones). An avatar given ages is shown 8 frames behind on that clock, eased
+  between the reports it has kept, so a report that comes late or early still takes its own place. Without an age it
+  eases toward each report as it comes. `world.avatar_effect`'s `age` is the same for a shot, spell, trail or sound:
+  it is drawn when the avatar comes to that moment (`shown` then says it was kept for it), so a swing's trail and its
+  sound come with the swing. `monsters.puppet_set({monsters, age})` takes the leader's report's age, and each
+  monster's `motion_flags` and `motion_step`: the copies are shown the same way, behind and eased.
+- On a floor whose monsters are copies, their own thinking rests but the floor's effects go on (torches, a door's
+  sparkle, the other player's shots: they had stood frozen); what a copy's motion starts is drawn only and strikes no
+  one (the leader's monster strikes).
+- `ui.notify` (any mod's) shows the notice in the game's own field message window too, on a dungeon floor, as an
+  item found is told: in lines of about forty letters, three to a window, a letter outside ASCII as the game writes
+  one (`[UNIxxxx]`), a bracket as a parenthesis. Walking in a town it shows in a window of the same kind (a town has
+  none of the floor's, so the engine keeps one, made as the floor makes its own). A notice that comes anywhere else
+  (a menu, the Georama editor, while a question is asked) waits for a floor or a town, ten seconds at most.
+- `world.avatar_set` shows `"max"` or `"monica"`, tinted through the ambient light if `tint` is given, in the `outfit` given (`{head,
   clothes, feet, sub}`, each left out at will: then as this game's own hero has it) with the hat or hair piece and
   the weapons on the body; no name over the head yet. It takes `"ridepod"` and `"monster"` too (what `player.get`
   says of a player in the ridepod or a monster's form), drawn as Max or Monica standing in for them.
 - `monsters.mirror_get`'s `hits` are the blows the host's monsters landed on other players' heroes:
-  `{avatar, monster, damage, kind, flags}`, `damage` the blow's strength and `kind` 2 (a flinch) or 3 (a knock-down).
-  `combat.strike_player`'s `damage` is that strength: the struck hero's own defence comes off it.
+  `{avatar, monster, damage, kind, flags, stun, stagger, guard_rate, status, at = {x, y, z}, toward = {x, z}}`,
+  `damage` the blow's strength, `kind` 2 (a flinch) or 3 (a knock-down), and the rest the monster's damage row as the
+  game keeps it (`flags`: 1 stuns, 2 knocks down, 4 never staggers, 8 goes through a guard; `guard_rate` the share in
+  hundredths a guard lets through; `status` the blow's specials, poison and the rest), where it struck from the hero's
+  feet and which way it drove. The game it lands on shows a spark and plays the floor's hit sound there.
+- `combat.strike_player`'s `damage` is that strength: the struck hero's own defence comes off it. It takes `flags`,
+  `stun`, `stagger`, `guard_rate`, `status` and `toward = {x, z}` as those give them, and takes the blow as a monster's
+  own blow on the hero is taken: a guard lets `guard_rate` of it through and rings, a knock-down knocks the hero the
+  way it drove, a flinch comes once the stagger builds, poison, goo, stone, stop, curse and thirst take as they do
+  (amulets ward them off), and a Resurrection Powder held brings the hero back. It looks, sounds and feels so: the red
+  flash, the shake, the pad's rumble, the hero's cry, a spark at `x, y, z` and the damage over the head. It returns
+  `{hit, damage, hp, kind, guarded}`, or `{hit = false, reason}` (`busy`, `away`, or `grace` while the hero can't be
+  hit). Without `stagger` every blow makes the hero flinch, as before.
+- `monsters.puppet_set`'s `hits` say how each blow on a copy landed: `{slot, damage, kind, element, flags, stagger,
+  stun, guard, at = {x, y, z}}` (`kind` the damage row's, the weapon's: 0 Max's blade, 1 his gun, 4 Monica's blade, 5
+  her magic and so on; `element` -1 or 0-3; `at` from the monster's feet). A blow that took nothing (the monster
+  guarded, or can't be hurt by it) is listed too, with `damage` 0. `monsters.mirror_hit` takes them all and lands the
+  blow as this game's own hero's would: the monster flashes in the element's colour, shakes, is knocked back a little
+  by a blade or a fist, the weapon's hit sound plays, a spark and the damage show where it struck, and it flinches,
+  falls, guards or sees stars as its stagger and the blow's flags say. `damage` 0 needs `kind`: it rings off as a
+  guard or as no damage.
 - `ui.choice_open` does not pause the game; while the panel is open the pad's buttons are the panel's (the press
-  that picks an option does not also act in the game) and the sticks stay the game's.
+  that picks an option does not also act in the game) and the sticks stay the game's. `style = "yes_no"` (two
+  options: yes, then no) asks the question in the game's own message window instead, on a floor or in a town: the
+  title and subtitle are its text (at most four lines), the game's Yes and No are chosen with left and right, and the
+  cursor, the pick and backing out make the menus' own sounds. Elsewhere (the title page) it is the panel.
 - A player's own saves: `save.slots_list()` gives this game's numbered saves and how far each one's story is,
   `{slots = {{slot, ready, progress, chapter, play_time}}}`. `save.slot_player_export({slot})` reads a player's
   things (`save.player_export` text) out of one without loading it: `{slot, data, progress, chapter}`.

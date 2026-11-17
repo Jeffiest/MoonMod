@@ -746,9 +746,75 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   `CH_020`). A bank that will not load leaves the avatar silent, as before. Live: `hurt` 11/11 and `floor` 15/15,
   the guest playing the host's sounds from `CH_000` (992 bytes of tables), `CH_002` and `CH_020`, and refusing a
   bank that does not exist. A drawn shot's own effect script plays through its owner's bank, which is the avatar's
-  once loaded (not checked on its own). Not carried yet: looping sounds (`_SE_LOOP_PLAY`) and the monster form's
+  once loaded (not checked on its own). Not carried yet: looping sounds (`_SE_LOOP_PLAY`; carried since 0.13.0) and the monster form's
   sounds (it has no bank of its own); the ridepod's bank is named by its arm but has not been seen live.
   Not heard by ear: the headless games have no audio out, so the volumes and panning are untested by a person.
+- Looking and playing like the game (2026-11-17, mod 0.13.0, protocol 10). A pass over what still looked or felt
+  like a mod rather than the game:
+  - Motions. An avatar and a copied monster held every motion on its last frame (`SetMotion(..., HOLD)`), so a run
+    or a stand froze after one cycle. Now each plays its motion as the other game does: `player.get` and
+    `monsters.mirror_get` give `motion_flags` (loop or hold) and `motion_step` (its pace: a walk follows the stick),
+    and the avatar and the copy play them so.
+  - One clock. Reports came at irregular times and each was eased toward on arrival, so a hero sped up and slowed
+    down with the network. Each message now carries the frame it was sent on; the mod keeps, per player, the least
+    of (its frame minus theirs) over the last 32 messages, and tells the engine each report's age. The engine keeps
+    the reports and shows the hero (and the copies) 8 frames behind on that clock, between the two reports either
+    side of that moment; a shot, spell, trail or sound is kept until the hero comes to its moment, so a swing's trail
+    and its sound come with the swing.
+  - The floor's effects ran frozen on a follower (the monsters' pause stopped all level-3 effect scripts: torches,
+    a door's sparkle, the other player's shots). They run now; what a copy's motion starts is drawn only.
+  - A notice (`ui.notify`) in Chronicle Two went only to the Mod Manager's footer, never the play screen. On a floor
+    it now shows in the game's own message window, as an item found is told (`MsgTaskMan`, slot 8); walking in a
+    town, where the game has no such window, in one co-op keeps there, made as the floor makes its own. The room line
+    on the HUD shows only for a while after someone comes or goes, or while the link is in trouble.
+  - The other hero is no longer tinted and carries their hero's name ("Max", "Monica") when the player gave none.
+  - Blows, both ways. A monster's blow on the other player arrived as bare damage: the hero lost life and flinched,
+    with no flash, sound, spark or number, and a guard did nothing. Now the leader's game sends how the blow was
+    dealt (its damage row's flags, stun, stagger, guard share and specials, where it struck and which way it drove),
+    and `combat.strike_player` takes it as `CActionChara::CheckDamage` takes a monster's own blow: the guard, the
+    stun, the stagger building to a flinch, a knock-down the way it drove, poison, goo, stone, stop, curse and
+    thirst (amulets ward them off), a Resurrection Powder, and the red flash, shake, rumble, cry, spark and damage
+    over the head. On the leader's screen the blow sparks on the avatar with the floor's hit sound. The other way, a
+    follower's blow on a copy reached the leader's monster as a number taken off its life and a flinch. Now it
+    carries the weapon's damage kind, element, flags, stagger, stun, whether the copy guarded and where it struck,
+    and `monsters.mirror_hit` lands it as `CMonsterMan::CheckDamage` lands the leader's own: the element's flash, the
+    shake, a little knock-back from a blade or a fist, the weapon's hit sound, the spark and the damage, and the
+    flinch, fall, guard or stars. A blow that took nothing is sent too and rings off as "Guard" or "No damage".
+    Either way the blow carries the frame it was dealt on and is kept until the swing that dealt it comes to that
+    moment on the receiving screen (the other game is shown 8 frames behind its clock), so it no longer lands before
+    the swing connects (`S.at_moment` in the mod).
+  - Questions of yes or no. Co-op asked "join them there?", "swap heroes?" and "walk in again?" on its own panel, a
+    list of two cards. On a floor, in a town or in the Georama editor it now asks them in the game's own message
+    window (`ClsMes` in `MES_WIN_YESNO`, the frame and letters of the system message every floor loads), with the
+    game's Yes and No under the question, chosen with left and right; the cursor, the pick and backing out make the
+    menus' own sounds (`ui.choice_open` `style = "yes_no"`). The panel keeps lists (whom to join, what to give) and
+    its own sounds now too. Before "walk in again?" the reason the floors differ is told in a notice.
+  - Looped sounds. A hero's looped sounds (`_SE_LOOP_PLAY`: a charge, the ridepod's engine), which its script keeps
+    up every frame and the game's `CLoopSeMngr` stops once that stops, went unheard in the other game. Now the word is
+    kept as effect kind 10 (the sound, its bank and how long it goes on after), told at most every 8 frames for one
+    sound, and the avatar keeps the loop the same way on its own port, following where it stands, ending once no word
+    came for its time plus those 8 frames; a word with no time stops it at once.
+  - A revive plays the Resurrection Powder's blue flash, its light and the recover sound.
+  - The other hero fades in where they first stand or land after a warp, and fades out where they stood when they
+    go, at the rate the game's monsters come and go (a twentieth a frame); fading out, they are nobody a monster
+    goes for and carry no name.
+  - Tooling: `--screenshot-every N` writes a picture every N frames (`tools/coop/live.py --shots-every`).
+  - Tooling, also: `tools/coop/live.py --slow X` gives the games X times the wall time, and the `floor` scenario holds
+    the follow question open 300 frames (`AUTOTEST.offer_hold`) so a screenshot shows it.
+  Live (release builds, three scenarios at a time, screenshots every 150-300 frames): with everything above, floor
+  15/15, hurt 11/11, towns 9/9, build 12/12, build_edit 13/13 (`--slow 1.6`); on the build before the Yes/No window,
+  the looped sounds and the town notices, down 15/15, meet 7/7, heroes 12/12, look 3/3. The question's wider line
+  (52 letters, so "floor 2" is not broken from its name) came after and is checked by the unit tests only. Seen in the
+  pictures: the follow question in the game's own window with its hand cursor and YES / NO (in Palm Brinks), the
+  notices at the foot of a town's screen as the floor's are, and on the floor the damage numbers over Monica, her red
+  flash and the life bar's CAUTION. Without `--slow`, three at once fell under the 7.5 frames a second the harness
+  allows and `floor`'s host was stopped (all its checks passed).
+  Found on the way, not fixed: a joiner's parts that reach the host while the host's Georama editor is still opening
+  (Select pressed, the editor not yet taking towns) can be lost in both games: in `build_edit` with the joiner
+  building at its frame 900, both towns ended with 2 of the 4 new parts (17 where 19 stood). Both towns were taken
+  as on foot, not in the editor, and the host's own game then sent the town as if it had changed it. `build_edit`
+  now has the joiner build at frame 1500, once the editor is open, as it was meant to test; the opening race needs a
+  scenario and a fix of its own (logs kept in `~/dc2-coop/live-sight/build_edit-fail`).
 
 ## 7. Risks
 

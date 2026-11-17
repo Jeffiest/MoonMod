@@ -110,6 +110,7 @@ local function make_game(name, opts)
       end,
       puppet_set = function(a)
         S.puppets = a.monsters
+        S.puppet_age = a.age
         local hits = S.puppet_hits or {}
         S.puppet_hits = {}
         return {followed = {}, refused = S.refused or {}, hits = hits}
@@ -397,6 +398,8 @@ do
   check(#g.shots_drawn == 1 and shot.slot == 1 and shot.kind == 5 and shot.x == 300 and shot.dz == 1 and shot.value == 41 and
         math.abs(shot.amount - 0.75) < 0.001 and shot.target == 25 and #h.shots_drawn == 0,
         "a shot the host fires is drawn on the guest's floor from the host's hero, once")
+  check(type(shot.age) == "number" and shot.age >= 0 and shot.age < 30,
+        "and at its moment on the host's clock (the age the guest reckons for it)", tostring(shot.age))
   h.shots_out = {{kind = 6, x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, value = 12, amount = 8, target = 2, frame0 = "sw_00", frame1 = "sw01"}}
   both(h, g, 4)
   local swing = g.shots_drawn[2]
@@ -408,6 +411,12 @@ do
   local sound = g.shots_drawn[2]
   check(#g.shots_drawn == 2 and sound.kind == 9 and sound.value == 17 and sound.frame0 == "CH_005",
         "and a sound of the host's hero, from its own bank, heard from the host's hero")
+  table.remove(g.shots_drawn)
+  h.shots_out = {{kind = 10, x = 300, y = 0, z = 200, dx = 0, dy = 0, dz = 0, value = 21, amount = 6, target = -1, frame0 = "CH_020", frame1 = "CH_020"}}
+  both(h, g, 4)
+  local loop = g.shots_drawn[2]
+  check(#g.shots_drawn == 2 and loop.kind == 10 and loop.value == 21 and loop.amount == 6 and loop.frame0 == "CH_020",
+        "and a looped one (kind 10, two digits on the wire), kept going as long", loop and loop.kind)
   table.remove(g.shots_drawn)
   -- the guest goes down a floor: each is out of the other's sight
   g.map = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 99}
@@ -490,6 +499,8 @@ do
   h.avatar_hits = {{avatar = 1, slot = 4, damage = 5, kind = 2, flags = 0}} -- a shot
   both(h, g, 6)
   check(g.strikes[2] and g.strikes[2].kind == "light" and g.strikes[2].damage == 5, "a small hit (a shot) flinches")
+  check(g.strikes[2].flags == nil and g.strikes[2].stun == nil and g.strikes[2].toward == nil,
+        "Chronicle's blows say only how much (its strike_player takes no more)")
   -- the host pauses (its game sends nothing): the copies hold
   for _ = 1, 120 do g.tick() end
   check(g.puppets ~= nil, "while the host is paused the guest's monsters stay held as the host's")
@@ -694,6 +705,7 @@ do
   both(h, g, 48)
   check(g.panel and g.panel.title == "Toan went to Divine Beast Cave, floor 3", "the guest is asked to join the host on the floor it went to",
         g.panel and g.panel.title)
+  check(g.panel and g.panel.style == nil, "(Chronicle asks on the panel: its message window is not offered)", g.panel and g.panel.style)
   -- the guest is in a talk when it says yes: it goes once it's free
   g.busy = true
   g.choose(1)
@@ -1384,6 +1396,7 @@ do
   check(h.towns[1] == "DCT21:a windmill" and h.last_base == "DCT21:start", "the guest's edit of Balance Valley reaches the host, merged over the town as it was",
         tostring(h.towns[1]))
   check(find_toast(h, "changed Balance Valley"), "and the host is told by the town's name")
+  check(not find_toast(h, "^Co%-op: ") and #h.toasts > 0, "Chronicle Two's notices speak as the game does (no \"Co-op:\" before them)", h.toasts[1])
   -- the follow offer names Dark Cloud 2's places (the offer for the host's earlier move is answered first)
   g.settings.follow_offers = true
   if g.panel then g.choose(nil) end
@@ -1391,6 +1404,8 @@ do
   h.player = {character = "max", weapon = {item_no = 300}, position = {x = 10, y = 0, z = 20}, heading = 0.5, motion = 1}
   both(h, g, 48) -- a new place is offered once it has settled (the floor's number and seed held for a moment)
   check(g.panel and g.panel.title:find("Zelmite Mine, floor 9", 1, true) ~= nil, "a follow offer names the Zelmite Mine floor by the game's own number", g.panel and g.panel.title)
+  check(g.panel and g.panel.style == "yes_no" and g.panel.subtitle == "Join them there?", "and asks it yes or no in the game's own window",
+        g.panel and g.panel.style)
   -- the host walks into a house in another town: no question is asked (Dark Cloud 2 asks only at a dungeon floor),
   -- but the Mod Manager's "Join a player" names the house as the host's game does, and the way there is the town's map
   if g.panel then g.choose(nil) end
@@ -1548,8 +1563,8 @@ do
   -- the joiner asks; the host is asked on a panel and says no
   g.emit("ui.action", {id = "swap"})
   both(h, g, 4)
-  check(h.panel and h.panel.title == "April wants to swap heroes" and h.panel.subtitle == "You would play Monica.",
-        "the other player is asked on a panel", h.panel and h.panel.title)
+  check(h.panel and h.panel.title == "April wants to swap heroes" and h.panel.subtitle == "Swap, and play Monica?" and h.panel.style == "yes_no",
+        "the other player is asked yes or no in the game's own window", h.panel and h.panel.subtitle)
   h.choose(2)
   both(h, g, 4)
   check(h.room_hero == "max" and g.room_hero == "monica" and find_toast(g, "would rather not swap"), "a no changes nothing, and the asker is told")
@@ -1566,7 +1581,7 @@ do
   both(h, g, 300)
   h.emit("ui.action", {id = "swap"})
   both(h, g, 4)
-  check(g.panel and g.panel.title == "Jeffie wants to swap heroes" and g.panel.subtitle == "You would play Monica.", "either player can ask",
+  check(g.panel and g.panel.title == "Jeffie wants to swap heroes" and g.panel.subtitle == "Swap, and play Monica?", "either player can ask",
         g.panel and g.panel.title)
   g.choose(1)
   both(h, g, 4)
@@ -1787,10 +1802,12 @@ do
   local FLOOR = {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 91, map_no = 0, walking = true}
   local function rat(hp) return {slot = 0, kind = 3, state = 2, hp = hp, max_hp = 60, x = 10, y = 0, z = 0, heading = 0, motion = 0} end
   h.player = {character = "max", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
-  g.player = {character = "monica", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "monica", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 3, motion_flags = 2, motion_step = 0.45}
   -- the joiner goes into the dungeon alone: the floor's monsters are its own
   g.map = FLOOR
-  g.monsters = {rat(25)} -- one of two already struck down, the other hurt
+  local hurt = rat(25)
+  hurt.motion_flags, hurt.motion_step = 2, 1.5 -- (a swing, held on its last frame, played fast)
+  g.monsters = {hurt} -- one of two already struck down, the other hurt
   both(h, g, 60)
   check(g.puppets == nil and h.puppets == nil, "a joiner alone on a floor runs its monsters itself")
   -- the host follows: the floor is still the joiner's to run, and the host's monsters copy the joiner's
@@ -1799,16 +1816,51 @@ do
   both(h, g, 60)
   check(h.puppets and #h.puppets == 1 and h.puppets[1].hp == 25, "the host, coming second, copies the joiner's monsters as they stand",
         h.puppets and #h.puppets)
+  local copy = h.puppets and h.puppets[1] or {}
+  check(copy.motion_flags == 2 and copy.motion_step == 1.5 and type(h.puppet_age) == "number" and h.puppet_age >= 0 and h.puppet_age < 60,
+        "each copy plays its motion as the leader's monster does (held, at its pace), on the leader's clock",
+        tostring(copy.motion_flags) .. " " .. tostring(copy.motion_step) .. " " .. tostring(h.puppet_age))
+  local joiner = h.avatars[1] or {}
+  check(joiner.character == "monica" and joiner.motion == 3 and joiner.motion_flags == 2 and joiner.motion_step == 0.45 and
+        type(joiner.age) == "number" and joiner.age >= 0 and joiner.age < 60 and joiner.tint == nil,
+        "the joiner's Monica plays her motion as her game does, on its clock, in her own colours",
+        string.format("%s %s %s %s %s", tostring(joiner.motion), tostring(joiner.motion_flags), tostring(joiner.motion_step),
+                      tostring(joiner.age), tostring(joiner.tint)))
+  both(h, g, 400)
+  check(h.layers.coop == nil and h.layers.coop_who == nil and g.layers.coop == nil,
+        "with everyone in and the link sound, Chronicle Two's screen carries no room line",
+        tostring(h.layers.coop) .. " / " .. tostring(h.layers.coop_who) .. " / " .. tostring(h.mod.state.hud_until) .. " at " .. tostring(h.mod.state.frame))
   check(g.puppets == nil, "and the joiner's stay its own")
   -- the host's blow on a copy lands on the joiner's monster; the joiner's monster strikes the host
   h.puppet_hits = {{slot = 0, damage = 11}}
-  both(h, g, 8)
+  both(h, g, 6)
+  check(#g.mirror_hits == 0, "the host's blow waits for its moment: the host's swing is shown a little behind", #g.mirror_hits)
+  both(h, g, 12)
   check(g.mirror_hits[1] and g.mirror_hits[1].slot == 0 and g.mirror_hits[1].damage == 11, "the host's blow lands on the joiner's monster",
         #g.mirror_hits)
   check(#h.mirror_hits == 0, "not on its own")
+  -- a blow that took nothing goes too, with how it landed, so the joiner's game shows the guard as its own
+  h.puppet_hits = {{slot = 0, damage = 0, kind = 4, element = 1, flags = 1, stagger = 1, stun = 12, guard = true, at = {x = 1, y = 9, z = 0}}}
+  both(h, g, 18)
+  local told = g.mirror_hits[2]
+  check(told and told.damage == 0 and told.kind == 4 and told.element == 1 and told.flags == 1 and told.stagger == 1 and told.stun == 12 and
+        told.guard == true and told.at and told.at.y == 9, "a guarded blow goes with how it landed",
+        told and string.format("%s %s %s %s", tostring(told.kind), tostring(told.guard), tostring(told.stun), tostring(told.at and told.at.y)))
   g.avatar_hits = {{avatar = 1, slot = 0, damage = 9, kind = 3, flags = 0}}
-  both(h, g, 8)
+  both(h, g, 6)
+  check(#h.strikes == 0, "a monster's blow waits for its moment too", #h.strikes)
+  both(h, g, 12)
   check(h.strikes[1] and h.strikes[1].damage == 9, "the joiner's monster strikes the host's hero", #h.strikes)
+  -- and a blow says how it was dealt and where it struck, for the host's game to take it as one of its own
+  local p = h.player.position
+  g.avatar_hits = {{avatar = 1, slot = 0, damage = 9, kind = 3, flags = 2, stun = 8, stagger = 1, guard_rate = 30, status = 4,
+                    at = {x = 2, y = 14, z = -40}, toward = {x = 0.6, z = -0.8}}}
+  both(h, g, 60) -- (past the first blow's grace)
+  local s = h.strikes[#h.strikes]
+  check(#h.strikes == 2 and s.flags == 2 and s.stun == 8 and s.stagger == 1 and s.guard_rate == 30 and s.status == 4 and
+        s.toward and math.abs(s.toward.x - 0.6) < 0.01 and math.abs(s.x - (p.x + 2)) < 0.01 and math.abs(s.y - (p.y + 14)) < 0.01 and
+        math.abs(s.z - (p.z - 10)) < 0.01, "a blow on the host's hero says how it was dealt and where (kept near the hero)",
+        s and string.format("%d %s %s %s %s,%s,%s", #h.strikes, tostring(s.flags), tostring(s.stun), tostring(s.guard_rate), tostring(s.x), tostring(s.y), tostring(s.z)))
   -- the joiner leaves the floor: the host runs it from where the monsters stand
   g.map = {context = "town", scene_map = 10, map_no = 10, town_map = 1, walking = true}
   both(h, g, 60)
@@ -1820,7 +1872,7 @@ do
   check(g.puppets and #g.puppets == 1 and g.puppets[1].hp == 7, "the joiner, back on the floor, copies the host's", g.puppets and #g.puppets)
   check(h.puppets == nil, "and the host's stay its own")
   g.puppet_hits = {{slot = 0, damage = 4}}
-  both(h, g, 8)
+  both(h, g, 18)
   check(h.mirror_hits[1] and h.mirror_hits[1].damage == 4, "its blows go to the host's monsters now", #h.mirror_hits)
   -- both take a floor in the same moment: the host's stands
   local NEXT = {context = "dungeon", dungeon_id = 0, floor_id = 4, floor_seed = 92, map_no = 0, walking = true}
@@ -2106,7 +2158,9 @@ do
   both(h, g, 400)
   check(h.panel and h.panel.title == "Out of step with Monica", "the host following the joiner's floor is offered to walk in again beside her",
         h.panel and h.panel.title)
-  check(h.panel and h.panel.subtitle:find("of Monica's monsters", 1, true), "and told whose monsters are missing", h.panel and h.panel.subtitle)
+  check(find_toast(h, "of Monica's monsters"), "and told whose monsters are missing", h.toasts[#h.toasts])
+  check(h.panel and h.panel.subtitle == "Walk in again beside Monica?" and h.panel.style == "yes_no", "then asked yes or no in the game's window",
+        h.panel and h.panel.subtitle)
   h.choose(2)
   h.refused = nil
   -- the host resyncs with the joiner: the floor's doors come again

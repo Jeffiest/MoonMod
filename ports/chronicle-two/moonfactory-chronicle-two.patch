@@ -2965,10 +2965,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..146790c8
+index 00000000..84057923
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,395 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -2997,6 +2997,8 @@ index 00000000..146790c8
 +struct CSceneEventData;
 +struct MENU_INIT_ARG;
 +class CCharacter2;
++
++class CColPrim;
 +
 +namespace moonmod::coop {
 +
@@ -3057,6 +3059,15 @@ index 00000000..146790c8
 +    int         head = -1, clothes = -1, feet = -1, sub = -1;
 +    float       x = 0.0f, y = 0.0f, z = 0.0f, heading = 0.0f;
 +    int         motion = 0;
++    // How the motion plays, as that player's game plays it (CharaMotionFlag: 0 loops, CHARA_MOTION_HOLD stops on its
++    // last frame), and how fast (frames a step; negative: the motion's own pace).
++    int         motion_flags = 0;
++    float       motion_step = -1.0f;
++    // How many frames ago the report was made, on that player's game's clock as this game reckons it. The avatar is
++    // then shown on that clock a little behind, eased between the reports kept, and the shots and sounds told with an
++    // age come at their own moments on it: moves, swings, trails and sounds keep their order and spacing. Negative:
++    // shown as it comes, eased toward.
++    int         age = -1;
 +    float       tint[3] = {-1.0f, -1.0f, -1.0f}; // ambient 0-128 each, or negative for none
 +    std::string name;
 +    bool        down = false; // that player is down: this game's monsters neither go for the hero nor strike it
@@ -3081,6 +3092,18 @@ index 00000000..146790c8
 +// (UTF-8). Each drawing is given once. False for an avatar the scene has not drawn since (none, hidden, elsewhere,
 +// behind the camera) or one with no name.
 +bool AvatarNameOnScreen(int slot, float head[2], float feet[2], std::string &name);
++// A mod's notice (ui.notify) in the game's own field message window, as an item found or a key taken is told, on a
++// dungeon floor (MsgTaskMan); one that comes off a floor waits for one, a while. The text is the game's own from the
++// mod's UTF-8: broken into lines and into windows the way the game's messages are. GameNoticeText is that text.
++void                     FieldNotice(const std::string &utf8, int frames);
++// coop_ui: a town has no message window of the floor's (MsgTaskMan), so co-op keeps one of its own, made as the floor
++// makes its own: TownNoticesOpen says whether the player walks a town now (not in the editor, no question open), and
++// TownNoticePrint queues one window of text (GameNoticeText's) in it for so many frames.
++bool                     TownNoticesOpen();
++void                     TownNoticePrint(const std::string &window, int frames);
++// (line_letters: about how many letters to a line; a question's window is wider than a notice's)
++std::vector<std::string> GameNoticeText(const std::string &utf8, std::size_t line_letters = 40);
++
 +// The other players' names over their heroes' heads (coop_avatar_names_moonmod.cpp), drawn with the game's own
 +// font in the 2D pass after the scene, with its camera: the choice panel's Draw2D calls it first, so a panel lies
 +// over them.
@@ -3103,6 +3126,8 @@ index 00000000..146790c8
 +    Throw = 8,      // an item held up to throw (amount 0), thrown to pos (1) or put away (2); value: its item_no
 +    Sound = 9,      // a sound of the hero's (its action script's _SE_PLAY): value, its number in the hero's sound bank,
 +                    // frame0, that bank by name (CH_000: snd2/chara/CH_000.sound.json); played from the avatar
++    SoundLoop = 10, // a looped sound of the hero's (_SE_LOOP_PLAY: a charge, an engine): value and frame0 as Sound's,
++                    // amount the frames it goes on after its last word; told again while the hero keeps it going
 +};
 +struct HeroEffect {
 +    int   kind = 0; // HeroShot
@@ -3120,33 +3145,58 @@ index 00000000..146790c8
 +void                    HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold);
 +// actscript.cpp: a character's action script played one of its sounds (_SE_PLAY); kept when it is this game's hero.
 +void                    HeroSounded(const void *chara, int sound);
++// actscript.cpp: a character's action script started or kept up a looped sound (_SE_LOOP_PLAY), to go on `keep` frames
++// after; kept when it is this game's hero, at most every few frames for one sound.
++void                    HeroLoopSounded(const void *chara, int sound, int keep);
++// How many looped sounds an avatar has going (0-4), for tests.
++int                     AvatarLoopsGoing(int slot);
 +std::vector<HeroEffect> TakeHeroEffects();
 +// Draws another player's shot from avatar slot (0-2). False when the avatar is not on this floor or the effect can't
-+// be made here.
-+bool                    AvatarEffect(int slot, const HeroEffect &effect);
++// be made here. With an age (frames since it was fired, on that player's clock as AvatarState::age reckons it) it is
++// drawn when the avatar, shown a little behind, comes to that moment: true then means it is kept for it.
++bool                    AvatarEffect(int slot, const HeroEffect &effect, int age = -1);
 +
 +// ---- Monsters: the host's (coop_world_moonmod.cpp) -----------------------------------------------------------------
 +
 +struct Puppet {
 +    int   kind = -1, state = -1, hp = -1, max_hp = 0, motion = -1;
 +    float x = 0.0f, y = 0.0f, z = 0.0f, heading = 0.0f;
++    int   motion_flags = 0;    // as AvatarState's: how the leader's monster plays its motion
++    float motion_step = -1.0f; // and how fast
++    int   age = -1;            // frames since the leader's report, on its clock: shown behind and eased, as avatars are
 +};
++// A blow on a copy, as this game's CMonsterMan::CheckDamage took it, for the leader's game to show and take as its
++// own: the damage row's kind and flags, the strongest element (-1 none), stagger and stun, whether the monster guarded,
++// and where it landed from the monster's feet.
 +struct PuppetHit {
-+    int slot = -1, damage = 0;
++    int   slot = -1, damage = 0;
++    int   kind = -1, element = -1, flags = 0, stagger = 0, stun = 0;
++    bool  guard = false;
++    float at[3] = {0.0f, 0.0f, 0.0f};
 +};
++// A monster's blow on another player's hero, as the leader's game saw it land: the damage row's flags, stun, stagger
++// and the share of it a guard lets through (critical_rate), its special status bits (poison and the rest), where it
++// landed from the hero's feet and which way it drove.
 +struct AvatarHit {
-+    int avatar = 0, monster = -1, damage = 0, kind = 0, flags = 0;
++    int   avatar = 0, monster = -1, damage = 0, kind = 0, flags = 0;
++    int   stun = 0, stagger = 0, guard_rate = 0;
++    long long status = 0;
++    float at[3] = {0.0f, 0.0f, 0.0f}, toward[3] = {0.0f, 0.0f, 0.0f};
 +};
 +bool                   PuppetSet(int slot, const Puppet &puppet);
 +bool                   IsPuppet(int slot);
++// This floor's monsters are copies of another game's: their own thinking rests (DNG_PAUSE_MONSTER_AI), while the
++// floor's effects go on (dng_main.cpp asks).
++bool                   MonstersMirrored();
 +void                   PuppetsClear();
 +std::vector<PuppetHit> TakePuppetHits();
 +std::vector<AvatarHit> TakeAvatarHits();
 +// Host: during a monster's turn the player stands at the nearest player (its own or an avatar).
 +void MonsterThinkBegin(int slot);
 +void MonsterThinkEnd();
-+// monster.cpp: a blow took this much of a monster's life; on a guest's copy it goes to the host instead.
-+void MonsterDamaged(int slot, int damage);
++// monster.cpp: a blow took this much of a monster's life; on a guest's copy it goes to the host instead, with how it
++// landed (prim, the strongest element, whether the monster guarded) so the host's game shows it as its own.
++void MonsterDamaged(int slot, int damage, const CColPrim *prim = nullptr, int element = -1, bool guard = false);
 +
 +// ---- Shared events: doors and gates (coop_world_moonmod.cpp) -------------------------------------------------------
 +
@@ -3258,6 +3308,10 @@ index 00000000..146790c8
 +    bool                      cancel = true;
 +    std::vector<ChoiceOption> options;
 +    std::size_t               cursor = 0;
++    // Asked as the game asks "Go to the next floor?": the title and subtitle in its own message window, with its Yes
++    // (the first option) and No (the second) under them, chosen left and right (ui.choice_open's style "yes_no", two
++    // options, on a floor or in a town; at the title it is the panel).
++    bool                      yes_no = false;
 +};
 +bool          ChoiceOpen(Choice choice);
 +// Closes the panel if this mod opened it, with no ui.choice_made (the mod closed it, so it knows); another mod's panel
@@ -4481,10 +4535,18 @@ index 2cfeee1c..86588fbb 100644
   *
   * Reads the current language's NPC configuration script and fills the party character table from it.
 diff --git a/port/include/render/renderer.hpp b/port/include/render/renderer.hpp
-index 892e67d4..925006aa 100644
+index 892e67d4..e4ec4d18 100644
 --- a/port/include/render/renderer.hpp
 +++ b/port/include/render/renderer.hpp
-@@ -186,6 +186,28 @@ private:
+@@ -34,6 +34,7 @@ void mgPortExitAfterFrames(int frames, const std::filesystem::path &screenshot);
+ struct mgPortScreenshotOptions {
+     int  display_frames = 0;
+     bool fps = false;
++    int  every = 0; // also write every Nth frame before the last, as PATH-frame-F.png beside PATH
+ };
+ 
+ // Applies to the screenshot of mgPortExitAfterFrames; set it before that call.
+@@ -186,6 +187,28 @@ private:
      std::unique_ptr<State> state; /**< Complete native drawing state saved at entry. */
  };
  
@@ -4513,7 +4575,7 @@ index 892e67d4..925006aa 100644
  /**
   * Returns the host texel scale of a registered image or animation target.
   */
-@@ -236,6 +258,20 @@ inline constexpr float kMgPortFrameTeleportDistance = 200.0f;
+@@ -236,6 +259,20 @@ inline constexpr float kMgPortFrameTeleportDistance = 200.0f;
  // Tags the mesh draws made during its lifetime with `object` (the mgCFrame they are drawn under, or
  // the visual's own record outside a frame) so a display frame matches them with the previous tick's;
  // puts back the key it replaced.
@@ -5034,7 +5096,7 @@ index af05afb0..6afe69f1 100644
      });
      if (prefix == kScriptPrefixes.end()) {
 diff --git a/port/src/main.cpp b/port/src/main.cpp
-index a3e586e2..761f5503 100644
+index a3e586e2..f6f74456 100644
 --- a/port/src/main.cpp
 +++ b/port/src/main.cpp
 @@ -30,6 +30,8 @@
@@ -5073,16 +5135,24 @@ index a3e586e2..761f5503 100644
      const char           *log_level = nullptr;
      bool                  fast_load = false;
      int                   perf_seconds = 0;
-@@ -89,7 +101,7 @@ Options g_options;
+@@ -80,6 +92,7 @@ struct Options {
+     bool                  log_fps = false;
+     int                   screenshot_display = 0;
+     bool                  screenshot_fps = false;
++    int                   screenshot_every = 0;
+     std::filesystem::path screenshot;
+     std::filesystem::path input;
+     const char           *crash_test = nullptr; // hidden: --crash-test MODE[:early] (DC2_CRASH_TEST)
+@@ -89,7 +102,7 @@ Options g_options;
  
  [[noreturn]] void Usage(const char *program) {
      CT_LOG_ERROR(Main,
 -                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --perf-ack-halloween-preamble  test-only: acknowledge the first fully shown Halloween tutorial before measurement\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
-+                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --pickup ITEM      test-only: spawn one native dungeon item pickup on arrival\n  --georama-stock TOWN:MOD:PIECE:COUNT  test-only stock for a registered Georama piece\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --perf-ack-halloween-preamble  test-only: acknowledge the first fully shown Halloween tutorial before measurement\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
++                 "usage: {} [--data DIR] [--run-dir DIR] [--save DIR] [--window WxH] [--headless] [--offscreen]\n          [--frames N] [--screenshot PATH] [--input SCRIPT] [--display-per-tick N]\n          [--show-fps] [--log-fps] [--screenshot-display N] [--screenshot-fps] [--screenshot-every N]\n          [--log-level SPEC]\n  --jump MODE[:ARG]  start in town:<map>, georama:<0-4>, dungeon:<n>[:<floor>], event:<id>, title, opening, menu (DC2_JUMP)\n  --fast-load        shorten loading-screen holds (DC2_FAST_LOAD=1)\n  --give ITEM,...    give missing items and weapons on arrival (DC2_GIVE)\n  --pickup ITEM      test-only: spawn one native dungeon item pickup on arrival\n  --georama-stock TOWN:MOD:PIECE:COUNT  test-only stock for a registered Georama piece\n  --skip-events      enter a jumped dungeon floor directly; skip skippable dungeon scenes (DC2_SKIP_EVENTS=1)\n  --invincible       the dungeon character takes no hits (DC2_INVINCIBLE=1)\n  --seed N           reseed the random generator with N as each dungeon floor is built (DC2_SEED)\n  --perf-seconds N   once the scene has control and a second has passed, log N one-second windows of presented\n                     frames and tick times, then exit (DC2_PERF_ZONES=1 adds per-zone times)\n  --perf-ack-halloween-preamble  test-only: acknowledge the first fully shown Halloween tutorial before measurement\n  --run-dir DIR      game root containing data.zip and saves/\n                     (default: the per-user chronicletwo app data directory)\n  --data DIR         override the extracted data/ subdirectory (DC2_DATA)\n  --save DIR         override the saves/ subdirectory (DC2_SAVE)\n  --headless         render offscreen (SDL offscreen driver, VK_EXT_headless_surface)\n  --offscreen        --headless without a Vulkan surface: render to an image only\n  --frames N         exit after frame N of the game's main loop (N a positive integer)\n  --screenshot PATH  with --frames: write the last frame to PATH as a PNG on exit\n  --screenshot-display N  with --screenshot: also write N interpolated display frames of that frame\n                     beside PATH, as PATH-display-K.png for K = 0..N-1\n  --screenshot-fps   with --screenshot: draw the FPS counter and menu pointer into the written image\n  --screenshot-every N  with --screenshot: also write every Nth frame before the last beside PATH, as\n                     PATH-frame-F.png (F the frame's number)\n  --input SCRIPT     drive the pads from an input script; live input is ignored\n  --window WxH       window size in pixels (default: config.json, then the monitor's)\n  --display-per-tick N  headless: also render N interpolated display frames per tick (discarded)\n  --show-fps         draw the FPS counter on presented frames, headless too\n  --log-fps          print the FPS counter's text on stderr every second\n  --log-level SPEC   trace, debug, info, warning, error, critical or off, and/or CATEGORY=LEVEL,\n                     comma-separated (DC2_LOG; default: config.json's log.level)",
                   program);
      LogFlush();
      std::exit(kExitUsage);
-@@ -142,6 +154,10 @@ Options ParseOptions(int argc, const char **argv) {
+@@ -142,6 +155,10 @@ Options ParseOptions(int argc, const char **argv) {
              options.jump = OptionValue(argc, argv, i);
          } else if (arg == "--give") {
              options.give = OptionValue(argc, argv, i);
@@ -5093,7 +5163,25 @@ index a3e586e2..761f5503 100644
          } else if (arg == "--log-level") {
              options.log_level = OptionValue(argc, argv, i);
              if (!LogSpecValid(options.log_level)) {
-@@ -262,6 +278,17 @@ PresentSettings PresentSettingsFor(const Config &config, const Options &options)
+@@ -183,6 +200,8 @@ Options ParseOptions(int argc, const char **argv) {
+             options.screenshot_display = ParsePositive(OptionValue(argc, argv, i), argv[0]);
+         } else if (arg == "--screenshot-fps") {
+             options.screenshot_fps = true;
++        } else if (arg == "--screenshot-every") {
++            options.screenshot_every = ParsePositive(OptionValue(argc, argv, i), argv[0]);
+         } else if (arg == "--crash-test") {
+             options.crash_test = OptionValue(argc, argv, i);
+         } else if (arg == "--input") {
+@@ -197,7 +216,7 @@ Options ParseOptions(int argc, const char **argv) {
+     if (!options.screenshot.empty() && options.frames == 0) {
+         Usage(argv[0]);
+     }
+-    if ((options.screenshot_display > 0 || options.screenshot_fps) && options.screenshot.empty()) {
++    if ((options.screenshot_display > 0 || options.screenshot_fps || options.screenshot_every > 0) && options.screenshot.empty()) {
+         Usage(argv[0]);
+     }
+     return options;
+@@ -262,6 +281,17 @@ PresentSettings PresentSettingsFor(const Config &config, const Options &options)
          settings.show_fps = false;
      }
      settings = dc2::presentation::SwitchPresentationSettings(settings);
@@ -5111,7 +5199,7 @@ index a3e586e2..761f5503 100644
  #endif
      return settings;
  }
-@@ -305,12 +332,48 @@ void ShutdownWindow() {
+@@ -305,12 +335,48 @@ void ShutdownWindow() {
      }
  }
  
@@ -5160,7 +5248,7 @@ index a3e586e2..761f5503 100644
      InputPoll();
      InputScriptApply(mgPortFrameCount());
  
-@@ -373,6 +436,8 @@ void LogSessionHeader() {
+@@ -373,6 +439,8 @@ void LogSessionHeader() {
      constexpr std::string_view os = "Windows";
  #elifdef __SWITCH__
      constexpr std::string_view os = "Nintendo Switch";
@@ -5169,7 +5257,7 @@ index a3e586e2..761f5503 100644
  #elifdef __APPLE__
      constexpr std::string_view os = "macOS";
  #else
-@@ -402,7 +467,9 @@ int Run(int argc, const char **argv) {
+@@ -402,7 +470,9 @@ int Run(int argc, const char **argv) {
      const char *jump = options.jump ? options.jump : SettingsEnv("JUMP");
      const char *give = options.give ? options.give : SettingsEnv("GIVE");
      if ((jump && (options.jump || *jump) && !GameSetJump(jump)) ||
@@ -5180,7 +5268,7 @@ index a3e586e2..761f5503 100644
          Usage(argv[0]);
      }
      PortAutosave = !options.headless && !GameHasJump() && options.input.empty();
-@@ -504,6 +571,10 @@ int Run(int argc, const char **argv) {
+@@ -504,6 +574,10 @@ int Run(int argc, const char **argv) {
      if (options.headless || !options.screenshot.empty()) {
          renderer.render_thread = gfx::RenderThreadMode::Off;
      }
@@ -5191,7 +5279,7 @@ index a3e586e2..761f5503 100644
  #ifdef __SWITCH__
      SwitchConfigureRenderer(renderer);
  #endif
-@@ -528,8 +599,13 @@ int Run(int argc, const char **argv) {
+@@ -528,15 +602,21 @@ int Run(int argc, const char **argv) {
      std::atexit(AudioShutdown);
  
      ClockSetTickRate(kConfigTickRateDefault);
@@ -5206,7 +5294,16 @@ index a3e586e2..761f5503 100644
      ClockSetTickCallback(dc2::timing::OnVerticalBlank);
      ConfigSetChangeHook(ApplyConfigChange);
  
-@@ -545,7 +621,9 @@ int Run(int argc, const char **argv) {
+     MainThreadPriority = 10;
+     KzThreadsSetMainPriority(MainThreadPriority);
+     if (options.frames > 0) {
+-        mgPortSetScreenshotOptions({.display_frames = options.screenshot_display, .fps = options.screenshot_fps});
++        mgPortSetScreenshotOptions({.display_frames = options.screenshot_display, .fps = options.screenshot_fps,
++                                    .every = options.screenshot_every});
+         mgPortExitAfterFrames(options.frames, options.screenshot);
+     }
+     if (crash_test) {
+@@ -545,7 +625,9 @@ int Run(int argc, const char **argv) {
      CT_PROFILE_THREAD("Game / host");
      MainLoop();
  
@@ -5216,7 +5313,7 @@ index a3e586e2..761f5503 100644
      ConfigSetChangeHook(nullptr);
      ShutdownInput();
      AudioShutdown();
-@@ -595,6 +673,24 @@ int main(int argc, const char **argv) {
+@@ -595,6 +677,24 @@ int main(int argc, const char **argv) {
      return SDL_RunApp(argc, const_cast<char **>(argv), IosMain, nullptr);
  #elifdef __SWITCH__
      return SwitchMain(argc, argv, Run);
@@ -5303,7 +5400,7 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..5095a7bd
+index 00000000..a45dcccf
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,538 @@
@@ -5322,7 +5419,7 @@ index 00000000..5095a7bd
 +    {"events.list", "events", "list", "any", "", "List stable runtime and game events available to this port."},
 +    {"events.subscribe", "events", "subscribe", "any", "", "Subscribe to a documented lifecycle or simulation event."},
 +    {"events.unsubscribe", "events", "unsubscribe", "any", "", "Remove an event subscription owned by this mod."},
-+    {"player.get", "player", "get", "any", "game.read", "Read the active player and controlled character state."},
++    {"player.get", "player", "get", "any", "game.read", "Read the active player and controlled character state (with the motion, how it plays: motion_flags, motion_step)."},
 +    {"player.set", "player", "set", "simulation", "game.write", "Set current HP or Chronicle maximum HP, or Chronicle water, within the selected character's native bounds."},
 +    {"player.heal", "player", "heal", "simulation", "game.write", "Apply bounded healing to the active player character through native game state."},
 +    {"player.damage", "player", "damage", "simulation", "game.write", "Apply bounded health damage to the active player character through native game state."},
@@ -5505,7 +5602,7 @@ index 00000000..5095a7bd
 +    {"render.town_camera_set", "render", "town_camera_set", "simulation", "game.write", "Enable or disable an owner-scoped overhead camera during safe town walking."},
 +    {"ui.register", "ui", "register", "content", "content.register", "Register an owned button in the in-game MoonFactory manager."},
 +    {"ui.remove", "ui", "remove", "content", "content.register", "Remove an owned MoonFactory manager button."},
-+    {"ui.notify", "ui", "notify", "any", "game.write", "Show a bounded notice in the mod manager."},
++    {"ui.notify", "ui", "notify", "any", "game.write", "Show a bounded notice in the mod manager, and on a dungeon floor in the game's own message window."},
 +    {"physics.query", "physics", "query", "simulation", "game.read", "Find live monster actor origins inside a sphere; this does not test collision geometry."},
 +    {"physics.velocity_get", "physics", "velocity_get", "simulation", "game.read", "Read velocity from a stable entity handle."},
 +    {"physics.velocity_set", "physics", "velocity_set", "simulation", "game.write", "Set velocity through the simulation adapter."},
@@ -5524,25 +5621,25 @@ index 00000000..5095a7bd
 +    {"debug.inspect", "debug", "inspect", "any", "debug.inspect", "Read a bounded snapshot of the current native scene context."},
 +    {"debug.profile", "debug", "profile", "any", "debug.inspect", "Read bounded per-mod resource and registration counters."},
 +    {"debug.overlay_register", "debug", "overlay_register", "render", "debug.inspect", "Register or update an owner-scoped one-line diagnostic overlay."},
-+    {"combat.strike_player", "combat", "strike_player", "simulation", "game.write", "Lay a native hit on the player at a point (a mod's own attack, co-op's blow from the host's monster)."},
++    {"combat.strike_player", "combat", "strike_player", "simulation", "game.write", "Lay a native hit on the player at a point (a mod's own attack, co-op's blow from the host's monster): taken and shown as a monster's own blow is, guard, stun, stagger and specials as its damage row has them."},
 +    {"dungeons.set_seed", "dungeons", "set_seed", "simulation", "game.write", "Build the next new floor from this seed, once (world.get().floor_seed reports a floor's seed); {} lets it pick its own."},
 +    {"dungeons.enter_floor", "dungeons", "enter_floor", "simulation", "game.write", "Enter floor floor_id of the current dungeon (or, from a town, of dungeon_id), built again from the start."},
-+    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are."},
++    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are; with an age, shown a little behind on that player's clock, its motion played as theirs (motion_flags, motion_step)."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
-+    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here."},
++    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; with an age, in step with their hero."},
 +    {"world.enter_map", "world", "enter_map", "simulation", "game.write", "Co-op: walk into a town or one of its maps by map number (world.get().map_no), from a town or a dungeon floor."},
 +    {"world.watch_set", "world", "watch_set", "any", "game.read", "Co-op: {enabled}: tell this mod (game.world.changed) of each change this game makes to the save's shared world: story flags and counters, the story's progress, the story's party, joinable townsfolk, dungeon floor records, Georama parts in stock, items the story's scripts give (gift), and that a town's Georama changed (as it is built, part by part)."},
 +    {"world.change_apply", "world", "change_apply", "any", "game.write", "Co-op: write another game's change {kind, id, value} (as game.world.changed gives it) into this game's save without telling it back; a floor's record is merged."},
 +    {"georama.town_export", "georama", "town_export", "any", "game.read", "Co-op: one town's Georama (its record and layout) as text."},
 +    {"georama.town_import", "georama", "town_import", "any", "game.write", "Co-op: take a town's Georama from georama.town_export; a player walking in it sees it change where they stand."},
-+    {"monsters.mirror_get", "monsters", "mirror_get", "simulation", "game.read", "Co-op host: the floor's monsters (slot, kind, state, life, place, motion) and the blows that landed on other players since the last call."},
-+    {"monsters.puppet_set", "monsters", "puppet_set", "simulation", "game.write", "Co-op guest: make this floor's monsters copies of the host's, by slot; a slot left out is gone on the host."},
++    {"monsters.mirror_get", "monsters", "mirror_get", "simulation", "game.read", "Co-op host: the floor's monsters (slot, kind, state, life, place, motion and how it plays) and the blows that landed on other players since the last call, with how each was dealt and where it struck."},
++    {"monsters.puppet_set", "monsters", "puppet_set", "simulation", "game.write", "Co-op guest: make this floor's monsters copies of the host's, by slot (with an age, on the host's clock); a slot left out is gone on the host. Returns this game's blows on them, with how each landed."},
 +    {"monsters.puppet_clear", "monsters", "puppet_clear", "simulation", "game.write", "Co-op guest: give the floor's monsters their own thoughts back."},
-+    {"monsters.mirror_hit", "monsters", "mirror_hit", "simulation", "game.write", "Co-op host: another player's blow on a monster, by slot; a kill dies here."},
++    {"monsters.mirror_hit", "monsters", "mirror_hit", "simulation", "game.write", "Co-op host: another player's blow on a monster, by slot; told how it landed, taken and shown as this game's own hero's blow; a kill dies here."},
 +    {"dungeons.shared_events_get", "dungeons", "shared_events_get", "simulation", "game.read", "Co-op: the map events this player started since the last call that change the floor (a door, a gate, a switch), to run for the other players."},
 +    {"dungeons.shared_event_run", "dungeons", "shared_event_run", "simulation", "game.write", "Co-op: run another player's floor-changing event here, at its place, once the player is free; the key it asks for is taken as given."},
 +    {"items.owned", "items", "owned", "any", "game.read", "The items the player carries (the bag and the active slots), each with its id, name and count."},
-+    {"ui.choice_open", "ui", "choice_open", "simulation", "game.write", "Open a panel of 1-6 options over the game until the player picks one or backs out (ui.choice_made)."},
++    {"ui.choice_open", "ui", "choice_open", "simulation", "game.write", "Open a panel of 1-6 options over the game until the player picks one or backs out (ui.choice_made); style \"yes_no\" asks a two-option question (yes, then no) in the game's own message window with its Yes and No on a floor or in a town (the panel elsewhere)."},
 +    {"ui.choice_close", "ui", "choice_close", "simulation", "game.write", "Close this mod's own open choice panel without a ui.choice_made; answers {closed}. Another mod's panel stays."},
 +    {"net.host", "net", "host", "any", "net.session", "Open an online room through the co-op relay; net.receive's connected event names its code."},
 +    {"net.join", "net", "join", "any", "net.session", "Join another player's online room by its five-letter code."},
@@ -15072,10 +15169,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..82d4d337
+index 00000000..6aa52d6c
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1105 @@
+@@ -0,0 +1,1459 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -15110,6 +15207,17 @@ index 00000000..82d4d337
 +#include "mapjump.hpp"
 +#include "menucommon.hpp"
 +#include "platform/legacy_encoding.hpp"
++#include "actionchara.hpp"
++#include "colprim.hpp"
++#include "dng_effect.hpp"
++#include "dng_hud.hpp"
++#include "snd_mngr.hpp"
++#include "userdata.hpp"
++
++// actionchara.cpp's: the hero's own guard flash, and its amulet and held-item checks (CActionChara::CheckDamage).
++void GuardEffectSet(CScene *scene, float *point);
++int  CheckAmuletAvoid(int item_no);
++int  CheckEquipSetItem(int item_no);
 +
 +namespace moonmod::coop {
 +
@@ -15401,17 +15509,49 @@ index 00000000..82d4d337
 +    return Ok({{"dungeon_id", dungeon}, {"floor_id", floor}, {"queued", true}, {"teleport", false}});
 +}
 +
++// A direction along the floor, made one long (none stays none).
++void FlatUnit(float *v) {
++    v[1] = 0.0f;
++    const float length = std::sqrt(v[0] * v[0] + v[2] * v[2]);
++    if (length > 1.0e-6f) {
++        v[0] /= length;
++        v[2] /= length;
++    }
++    v[3] = 1.0f;
++}
++
 +ApiCallResult StrikePlayer(const Json &args) {
-+    static constexpr const char *kUsage = "expected {x, y, z, radius = 1-200, damage = 1-9999, kind = \"light\" or \"heavy\"}";
++    static constexpr const char *kUsage =
++        "expected {x, y, z, radius = 1-200, damage = 1-9999, kind = \"light\" or \"heavy\", flags = 0-255, stagger = 0-16, stun = 0-255, "
++        "guard_rate = 0-100, status = 0-2097151, toward = {x, y, z}}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
-+    if (!OnlyFields(request, {"x", "y", "z", "radius", "damage", "kind"}, unknown)) return Invalid("unknown field: " + unknown);
-+    float at[3] = {0.0f, 0.0f, 0.0f}, radius = 12.0f;
-+    int   damage = 0;
++    if (!OnlyFields(request, {"x", "y", "z", "radius", "damage", "kind", "flags", "stagger", "stun", "guard_rate", "status", "toward"}, unknown)) {
++        return Invalid("unknown field: " + unknown);
++    }
++    float at[4] = {0.0f, 0.0f, 0.0f, 1.0f}, radius = 12.0f;
++    int   damage = 0, flags = 0, stagger = 2, stun = 15, guard_rate = 25, status = 0;
 +    if (!ReadNumber(request, "x", at[0], true) || !ReadNumber(request, "y", at[1], true) || !ReadNumber(request, "z", at[2], true) ||
 +        !ReadNumber(request, "radius", radius, false) || radius < 1.0f || radius > 200.0f || !ReadBoundedInt(request, "damage", 1, 9999, damage)) {
 +        return Invalid(kUsage);
++    }
++    // How the blow was dealt, as the monster's damage row has it (DAMAGE_PARAM); without them, a blow that always
++    // makes the hero flinch, as it did before they were sent.
++    if ((request.contains("flags") && !ReadBoundedInt(request, "flags", 0, 255, flags)) ||
++        (request.contains("stagger") && !ReadBoundedInt(request, "stagger", 0, 16, stagger)) ||
++        (request.contains("stun") && !ReadBoundedInt(request, "stun", 0, 255, stun)) ||
++        (request.contains("guard_rate") && !ReadBoundedInt(request, "guard_rate", 0, 100, guard_rate)) ||
++        (request.contains("status") && !ReadBoundedInt(request, "status", 0, 0x1FFFFF, status))) {
++        return Invalid(kUsage);
++    }
++    float toward[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    if (request.contains("toward")) {
++        const Json &t = request["toward"];
++        if (!t.is_object() || !ReadNumber(t, "x", toward[0], true) || !ReadNumber(t, "z", toward[2], true) || std::fabs(toward[0]) > 10.0f ||
++            std::fabs(toward[2]) > 10.0f) {
++            return Invalid(kUsage);
++        }
 +    }
 +    std::string kind = "light";
 +    if (request.contains("kind")) {
@@ -15419,24 +15559,163 @@ index 00000000..82d4d337
 +        kind = request["kind"].get<std::string>();
 +        if (kind != "light" && kind != "heavy") return Invalid(kUsage);
 +    }
++    if (kind == "heavy") flags |= DAMAGE_HIT_KNOCKDOWN;
 +    if (GetNowLoopNo() != LOOP_DUNGEON || MainChara__2 == nullptr || GetBattleCharaInfo() == nullptr) return Failed("the player isn't on a dungeon floor");
 +    if (DngStatus.mode != DNG_STATUS_FIELD) return Ok({{"hit", false}, {"damage", 0}, {"reason", "busy"}});
++    CActionChara     *hero = MainChara__2;
 +    CBattleCharaInfo *info = GetBattleCharaInfo();
 +    float             player[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-+    MainChara__2->GetPosition(player);
++    hero->GetPosition(player);
 +    const float dx = player[0] - at[0], dz = player[2] - at[2];
 +    if (std::sqrt(dx * dx + dz * dz) > radius + 10.0f || std::fabs(player[1] - at[1]) > 40.0f) return Ok({{"hit", false}, {"damage", 0}, {"reason", "away"}});
-+    if (MainChara__2->muteki_time > 0 || info->GetNowHp_i() <= 0) return Ok({{"hit", false}, {"damage", 0}, {"reason", "guarded"}});
-+    // damage is the blow's strength, as the monster dealt it in another game: this hero's own defence comes off
-+    // it, as it does off a monster's blow here (CActionChara::CheckDamage), and a blow always costs a little.
-+    float strength = static_cast<float>(damage) * (1.0f + fRand(0.15f)) - static_cast<float>(info->GetDefenceVol());
-+    if (strength < 0.0f) strength = 0.0f;
-+    damage = std::max(1, static_cast<int>(strength + 1.0f + fRand(2.0f)));
-+    const int dealt = std::min(damage, info->GetNowHp_i());
-+    info->AddHp_Point(-static_cast<float>(dealt), 0.0f);
-+    MainChara__2->damage_req = kind == "heavy" ? ACTION_DAMAGE_REQ_LARGE : ACTION_DAMAGE_REQ_SMALL;
-+    MainChara__2->muteki_time = 45; // about the game's own grace after a blow
-+    return Ok({{"hit", true}, {"damage", dealt}, {"hp", info->GetNowHp_i()}, {"kind", kind}});
++    if (hero->muteki_time > 0 || hero->damage_time > 0 || info->GetNowHp_i() <= 0) return Ok({{"hit", false}, {"damage", 0}, {"reason", "grace"}});
++
++    // The blow as CActionChara::CheckDamage takes one: damage is its strength as the monster dealt it in the other
++    // game; this hero's defence comes off it, a guard lets the row's share through, and its specials (poison, goo,
++    // stone, stop, curse, thirst) take as they do, amulets and all.
++    CScene   *scene = DngMainScene;
++    const u32 battle_sound = scene != nullptr ? static_cast<u32>(scene->se_battle_id) : static_cast<u32>(-1);
++    const u32 chara_sound = hero->sound_info.se_bank;
++    const u32 attributes = static_cast<u32>(info->GetAttr());
++    bool      immobilized = (attributes & (CHARA_STATUS_STOP | CHARA_STATUS_STONE)) != 0;
++    const int max_hp = info->GetMaxHp_i(), now_hp = info->GetNowHp_i();
++    float     strength = static_cast<float>(damage) * (1.0f + fRand(0.15f)) - static_cast<float>(info->GetDefenceVol());
++    if (strength <= 0.0f) strength = 0.0f;
++    strength += 1.0f + fRand(2.0f);
++    if ((status & WEAPON_SPECIAL_RATIO_DAMAGE) != 0) {
++        strength = static_cast<float>(static_cast<int>(static_cast<float>(max_hp) * (0.01f * static_cast<float>(damage))));
++        if (static_cast<float>(now_hp) - strength < 0.0f) strength = static_cast<float>(now_hp) - 1.0f;
++    }
++    if ((status & WEAPON_SPECIAL_HALF_HP) != 0) strength = std::max(1.0f, static_cast<float>(now_hp / 2));
++    if (static_cast<int>(strength) <= 0) strength = 0.0f;
++    bool guarded = hero->guard_flag != 0;
++    if (guarded) strength *= 0.01f * static_cast<float>(guard_rate);
++    if ((flags & DAMAGE_HIT_IGNORE_GUARD) != 0) {
++        hero->guard_flag = false;
++        guarded = false;
++    }
++    if (strength >= 0.0f) strength = static_cast<float>(GetDispVolumeForFloat(strength));
++    info->AddHp_Point(-strength, 0.0f);
++    const int points = static_cast<int>(strength);
++    if (points > 0 && scene != nullptr) {
++        const bool rain = scene->battle_area.weather == DNG_WEATHER_RAIN;
++        if ((status & WEAPON_SPECIAL_POISON) != 0 && iRand(100) < 30 && (attributes & CHARA_STATUS_POISON) == 0 && CheckAmuletAvoid(ITEM_ID_ANTIDOTE_AMULET) == 0) {
++            info->SetAttr(CHARA_STATUS_POISON, 0);
++            sndSePlay(battle_sound, 0x18, 0);
++        }
++        if ((status & WEAPON_SPECIAL_SLOW) != 0 && !rain && iRand(100) < 30 && (attributes & CHARA_STATUS_SLOW) == 0 && CheckAmuletAvoid(ITEM_ID_ANTI_GOO_AMULET) == 0) {
++            info->SetAttrVol(CHARA_STATUS_SLOW, 3600);
++            sndSePlay(battle_sound, 0x52, 0);
++        }
++        if ((status & WEAPON_SPECIAL_STONE) != 0 && iRand(100) < 50 && (attributes & CHARA_STATUS_STONE) == 0 && CheckAmuletAvoid(ITEM_ID_ANTI_PETRIFY_AMULET) == 0) {
++            info->SetAttrVol(CHARA_STATUS_STONE, 900);
++            immobilized = true;
++            sndSePlay(battle_sound, 0x53, 0);
++        }
++        if ((status & WEAPON_SPECIAL_STOP) != 0 && iRand(100) < 50 && (attributes & CHARA_STATUS_STOP) == 0 && CheckAmuletAvoid(ITEM_ID_NON_STOP_AMULET) == 0) {
++            info->SetAttrVol(CHARA_STATUS_STOP, 300);
++            immobilized = true;
++            sndSePlay(battle_sound, 0x54, 0);
++        }
++        if ((status & WEAPON_SPECIAL_CURSE) != 0 && iRand(100) < 50 && (attributes & CHARA_STATUS_CURSE) == 0 && CheckAmuletAvoid(ITEM_ID_ANTI_CURSE_AMULET) == 0) {
++            info->SetAttr(CHARA_STATUS_CURSE, 0);
++            sndSePlay(battle_sound, 0x55, 0);
++        }
++        if ((status & WEAPON_SPECIAL_DRY) != 0 && iRand(100) < 50) {
++            info->SetAttr(CHARA_STATUS_DRY, 0);
++            sndSePlay(battle_sound, 0x52, 0);
++        }
++    }
++    int reaction = ACTION_REACTION_STAGGER;
++    if ((flags & DAMAGE_HIT_KNOCKDOWN) != 0) reaction = ACTION_REACTION_KNOCKDOWN;
++    if ((flags & DAMAGE_HIT_NO_STAGGER) != 0) reaction = ACTION_REACTION_NONE;
++    if (guarded) reaction = ACTION_REACTION_GUARD;
++    if (immobilized) reaction = ACTION_REACTION_HOLD;
++    if (info->GetNowHp_i() <= 0) {
++        // (a Resurrection Powder held brings the hero back, as from any blow; without one, the room's rule)
++        if (CheckEquipSetItem(ITEM_ID_RESURRECTION_POWDER) == 0) {
++            reaction = ACTION_REACTION_DEAD;
++        } else {
++            info->SetHpRate(0.5f);
++            hero->pallet[0].SetAnim(96, 180, 255, 1, 45, 0);
++            if (hero->effect_man != nullptr) {
++                hero->effect_man->CreateEffSpt(const_cast<char *>("\x92\xCA\x8F\xED\x89\xF1\x95\x9C"), 0, 0);
++                hero->effect_man->SetScriptTargetId(0, -1, -1);
++                hero->effect_man->SetValue(0, 0, 0, -1);
++            }
++            sndSePlay(SystemSND_ID, SYSTEM_SE_RECOVER, 0);
++        }
++    }
++    // Knocked the way the blow drove, as far as a monster's own blow knocks the hero.
++    if (toward[0] == 0.0f && toward[2] == 0.0f) {
++        toward[0] = player[0] - at[0];
++        toward[2] = player[2] - at[2];
++    }
++    FlatUnit(toward);
++    for (int k = 0; k < 4; ++k) hero->blow_vec[k] = toward[k];
++    hero->blow_speed = 4.0f;
++    hero->blow_rate = 1.0f;
++    hero->blow_decel = 0.0f;
++    hero->blow_time = 5;
++    // And it looks, sounds and feels as one does: a red flash, a shake, the pad's rumble, the hero's cry, a spark where
++    // it struck and the damage over the hero's head; a guard rings and flashes instead.
++    if (guarded) {
++        sndSePlay(battle_sound, 0x21, 0);
++        if (!immobilized) sndSePlay(chara_sound, 0x1D, 0);
++        if (scene != nullptr) GuardEffectSet(scene, at);
++        if (strength > 0.0f) {
++            if (scene != nullptr) HitEffectSet(scene, at, flags);
++            hero->pallet[0].SetAnim(255, 128, 128, 1, 45, 0);
++            hero->shake.time = 6;
++            DamageScore2.SetValue(0, points, 0.0f);
++            hero->damage_time = stun * 2;
++            GamePad__2.SetVibration(0, 96, 6);
++        } else {
++            GamePad__2.SetVibration(0, 72, 6);
++        }
++    } else {
++        if (reaction == ACTION_REACTION_KNOCKDOWN) {
++            hero->damage_time = stun * 7;
++            hero->pallet[0].SetAnim(255, 128, 128, 1, 90, 0);
++            hero->shake.time = 8;
++            GamePad__2.SetVibration(1, 180, 30);
++        } else {
++            hero->damage_time = stun * 3;
++            hero->pallet[0].SetAnim(255, 128, 128, 1, 30, 0);
++            hero->shake.time = 8;
++            GamePad__2.SetVibration(1, 128, 20);
++        }
++        if (!immobilized) sndSePlay(chara_sound, 0x24, 0);
++        sndSePlay(battle_sound, 0x16, 0);
++        if (scene != nullptr) HitEffectSet(scene, at, flags);
++        DamageScore2.SetValue(0, points, hero->body_height);
++    }
++    // The hero reacts as to a monster's own blow: a flinch once the stagger builds (or at once while standing idle),
++    // a fall from a knock-down, held still while stopped or stone.
++    bool handled = false;
++    switch (reaction) {
++        case ACTION_REACTION_HOLD:
++            handled = true;
++            hero->damage_req = ACTION_DAMAGE_REQ_HOLD;
++            break;
++        case ACTION_REACTION_STAGGER:
++            hero->stagger = static_cast<s8>(std::min(127, hero->stagger + stagger));
++            hero->stagger_time = 60;
++            if (hero->stagger >= 2 || (hero->menu_flag != 0 && hero->stand_flag != 0)) hero->damage_req = ACTION_DAMAGE_REQ_SMALL;
++            handled = true;
++            break;
++        case ACTION_REACTION_KNOCKDOWN:
++            handled = true;
++            hero->damage_req = ACTION_DAMAGE_REQ_LARGE;
++            break;
++        case ACTION_REACTION_DEAD:
++            handled = true;
++            break;
++        default:
++            break;
++    }
++    if (handled) hero->menu_flag = 0;
++    return Ok({{"hit", true}, {"damage", points}, {"hp", info->GetNowHp_i()}, {"kind", kind}, {"guarded", guarded}});
 +}
 +
 +// ---- Things ---------------------------------------------------------------------------------------------------------------
@@ -15524,16 +15803,16 @@ index 00000000..82d4d337
 +// world.avatar_effect: another player's shot, drawn from their avatar.
 +ApiCallResult AvatarEffectCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, kind = 1-9, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil} (player.effects_take's entries)";
++        "expected {slot = 1-3, kind = 1-10, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil, age = frames since it was fired (0-3600) or nil} (player.effects_take's entries)";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
-+    if (!OnlyFields(request, {"slot", "kind", "x", "y", "z", "dx", "dy", "dz", "value", "amount", "target", "frame0", "frame1"}, unknown)) {
++    if (!OnlyFields(request, {"slot", "kind", "x", "y", "z", "dx", "dy", "dz", "value", "amount", "target", "frame0", "frame1", "age"}, unknown)) {
 +        return Invalid("unknown field: " + unknown);
 +    }
 +    int        slot = 0;
 +    HeroEffect e;
-+    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 9, e.kind)) return Invalid(kUsage);
++    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 10, e.kind)) return Invalid(kUsage);
 +    for (const char *key : {"frame0", "frame1"}) {
 +        if (!request.contains(key) || request[key].is_null()) continue;
 +        if (!request[key].is_string() || request[key].get<std::string>().size() > 31) return Invalid(kUsage);
@@ -15546,16 +15825,19 @@ index 00000000..82d4d337
 +    }
 +    if (request.contains("value") && !request["value"].is_null() && !ReadBoundedInt(request, "value", -1, 65535, e.value)) return Invalid(kUsage);
 +    if (request.contains("target") && !request["target"].is_null() && !ReadBoundedInt(request, "target", -1, 255, e.target)) return Invalid(kUsage);
-+    return Ok({{"shown", AvatarEffect(slot - 1, e)}});
++    int age = -1;
++    if (request.contains("age") && !request["age"].is_null() && !ReadBoundedInt(request, "age", 0, 3600, age)) return Invalid(kUsage);
++    return Ok({{"shown", AvatarEffect(slot - 1, e, age)}});
 +}
 +
 +ApiCallResult AvatarSetCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, ridepod = {leg, arm, body, pack} item_nos or nil, form = monster_id or nil, x, y, z, heading, motion, tint = {r, g, b} or nil, name = text or nil, down = true or nil}";
++        "expected {slot = 1-3, character = \"max\", \"monica\", \"ridepod\" or \"monster\", weapon = item_no or nil, outfit = {head, clothes, feet, sub} item_nos or nil, ridepod = {leg, arm, body, pack} item_nos or nil, form = monster_id or nil, x, y, z, heading, motion, motion_flags = 0-7 or nil, motion_step = 0-16 or nil, age = 0-3600 frames or nil, tint = {r, g, b} or nil, name = text or nil, down = true or nil}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
-+    if (!OnlyFields(request, {"slot", "character", "weapon", "outfit", "ridepod", "form", "x", "y", "z", "heading", "motion", "tint", "name", "down"}, unknown)) {
++    if (!OnlyFields(request, {"slot", "character", "weapon", "outfit", "ridepod", "form", "x", "y", "z", "heading", "motion", "motion_flags",
++                              "motion_step", "age", "tint", "name", "down"}, unknown)) {
 +        return Invalid("unknown field: " + unknown);
 +    }
 +    int slot = 0;
@@ -15606,6 +15888,14 @@ index 00000000..82d4d337
 +        return Invalid(kUsage);
 +    }
 +    if (request.contains("motion") && !ReadBoundedInt(request, "motion", 0, 1023, state.motion)) return Invalid("motion must be 0-1023");
++    if (request.contains("motion_flags") && !request["motion_flags"].is_null() && !ReadBoundedInt(request, "motion_flags", 0, 7, state.motion_flags)) {
++        return Invalid("motion_flags must be 0-7");
++    }
++    if (request.contains("motion_step") && !request["motion_step"].is_null() &&
++        (!ReadNumber(request, "motion_step", state.motion_step, true) || state.motion_step < 0.0f || state.motion_step > 16.0f)) {
++        return Invalid("motion_step must be 0-16");
++    }
++    if (request.contains("age") && !request["age"].is_null() && !ReadBoundedInt(request, "age", 0, 3600, state.age)) return Invalid("age must be 0-3600 frames");
 +    if (request.contains("tint") && !request["tint"].is_null()) {
 +        const Json &tint = request["tint"];
 +        if (!tint.is_array() || tint.size() != 3) return Invalid("tint must be {r, g, b}, each 0-128");
@@ -15643,24 +15933,31 @@ index 00000000..82d4d337
 +            monsters.push_back({{"slot", slot}, {"kind", m->monster_id}, {"state", m->state}, {"hp", m->life}, {"max_hp", m->max_life},
 +                                {"x", round(at[0])}, {"y", round(at[1])}, {"z", round(at[2])},
 +                                {"heading", std::round(rotation[1] * 1000.0f) / 1000.0f}, {"motion", MotionNumberOf(*m)},
++                                {"motion_flags", m->now_flags & 7}, {"motion_step", std::round(m->step * 100.0f) / 100.0f},
 +                                // (drawn in this game: in sight of its hero, or fading in or out)
 +                                {"seen", m->view_state != MONSTER_VIEW_OUT && m->view_state != MONSTER_VIEW_INIT && m->view_alpha > 0.0f}});
 +        }
 +    }
 +    Json hits = Json::array();
 +    for (const AvatarHit &hit : TakeAvatarHits()) {
-+        hits.push_back({{"avatar", hit.avatar}, {"slot", hit.monster}, {"damage", hit.damage}, {"kind", hit.kind}, {"flags", hit.flags}});
++        const auto round = [](float v) { return std::round(v * 100.0f) / 100.0f; };
++        hits.push_back({{"avatar", hit.avatar}, {"slot", hit.monster}, {"damage", hit.damage}, {"kind", hit.kind}, {"flags", hit.flags},
++                        {"stun", hit.stun}, {"stagger", hit.stagger}, {"guard_rate", hit.guard_rate}, {"status", hit.status},
++                        {"at", {{"x", round(hit.at[0])}, {"y", round(hit.at[1])}, {"z", round(hit.at[2])}}},
++                        {"toward", {{"x", round(hit.toward[0])}, {"z", round(hit.toward[2])}}}});
 +    }
 +    return Ok({{"monsters", std::move(monsters)}, {"hits", std::move(hits)}});
 +}
 +
 +ApiCallResult PuppetSetCall(const Json &args) {
-+    static constexpr const char *kUsage = "expected {monsters = {{slot, kind, state, hp, max_hp, x, y, z, heading, motion}, ...}}";
++    static constexpr const char *kUsage = "expected {monsters = {{slot, kind, state, hp, max_hp, x, y, z, heading, motion, motion_flags, motion_step}, ...}, age = frames or nil}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("monsters") ||
 +        !(args[0]["monsters"].is_array() || (args[0]["monsters"].is_object() && args[0]["monsters"].empty()))) {
 +        return Invalid(kUsage);
 +    }
 +    if (GetNowLoopNo() != LOOP_DUNGEON || ActiveMonster == nullptr) return Failed("not on a dungeon floor");
++    int age = -1;
++    if (args[0].contains("age") && !args[0]["age"].is_null() && !ReadBoundedInt(args[0], "age", 0, 3600, age)) return Invalid(kUsage);
 +    std::vector<bool> named(static_cast<std::size_t>(MONSTER_ACTIVE_MAX), false);
 +    Json              followed = Json::array(), refused = Json::array();
 +    for (const Json &entry : args[0]["monsters"]) {
@@ -15672,6 +15969,11 @@ index 00000000..82d4d337
 +        }
 +        if (entry.contains("max_hp") && !ReadBoundedInt(entry, "max_hp", 0, 1000000, puppet.max_hp)) return Invalid(kUsage);
 +        if (entry.contains("motion") && !ReadBoundedInt(entry, "motion", -1, 1023, puppet.motion)) return Invalid(kUsage);
++        if (entry.contains("motion_flags") && !ReadBoundedInt(entry, "motion_flags", 0, 7, puppet.motion_flags)) return Invalid(kUsage);
++        if (entry.contains("motion_step") && (!ReadNumber(entry, "motion_step", puppet.motion_step, true) || puppet.motion_step > 16.0f)) {
++            return Invalid(kUsage);
++        }
++        puppet.age = age;
 +        if (!ReadNumber(entry, "x", puppet.x, false) || !ReadNumber(entry, "y", puppet.y, false) || !ReadNumber(entry, "z", puppet.z, false) ||
 +            !ReadNumber(entry, "heading", puppet.heading, false)) {
 +            return Invalid(kUsage);
@@ -15689,27 +15991,162 @@ index 00000000..82d4d337
 +        if (IsPuppet(slot) || here) PuppetSet(slot, Puppet{});
 +    }
 +    Json hits = Json::array();
-+    for (const PuppetHit &hit : TakePuppetHits()) hits.push_back({{"slot", hit.slot}, {"damage", hit.damage}});
++    for (const PuppetHit &hit : TakePuppetHits()) {
++        Json one = {{"slot", hit.slot}, {"damage", hit.damage}};
++        if (hit.kind >= 0) {
++            const auto round = [](float v) { return std::round(v * 10.0f) / 10.0f; };
++            one["kind"] = hit.kind;
++            one["element"] = hit.element;
++            one["flags"] = hit.flags;
++            one["stagger"] = hit.stagger;
++            one["stun"] = hit.stun;
++            one["guard"] = hit.guard;
++            one["at"] = {{"x", round(hit.at[0])}, {"y", round(hit.at[1])}, {"z", round(hit.at[2])}};
++        }
++        hits.push_back(std::move(one));
++    }
 +    return Ok({{"followed", std::move(followed)}, {"refused", std::move(refused)}, {"hits", std::move(hits)}});
 +}
 +
 +ApiCallResult MirrorHit(const Json &args) {
-+    int slot = 0, damage = 0;
-+    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !ReadBoundedInt(args[0], "slot", 0, MONSTER_ACTIVE_MAX - 1, slot) ||
-+        !ReadBoundedInt(args[0], "damage", 1, 1000000, damage)) {
-+        return Invalid("expected {slot, damage}");
++    static constexpr const char *kUsage =
++        "expected {slot, damage = 0-1000000, kind, element = -1-3, flags = 0-255, stagger = 0-16, stun = 0-255, guard, at = {x, y, z}}";
++    int slot = 0, damage = 0, kind = -1, element = -1, flags = 0, stagger = -1, stun = 0;
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
++    const Json &request = args[0];
++    std::string unknown;
++    if (!OnlyFields(request, {"slot", "damage", "kind", "element", "flags", "stagger", "stun", "guard", "at"}, unknown)) return Invalid("unknown field: " + unknown);
++    if (!ReadBoundedInt(request, "slot", 0, MONSTER_ACTIVE_MAX - 1, slot) || !ReadBoundedInt(request, "damage", 0, 1000000, damage) ||
++        (request.contains("kind") && !ReadBoundedInt(request, "kind", -1, 31, kind)) ||
++        (request.contains("element") && !ReadBoundedInt(request, "element", -1, 3, element)) ||
++        (request.contains("flags") && !ReadBoundedInt(request, "flags", 0, 255, flags)) ||
++        (request.contains("stagger") && !ReadBoundedInt(request, "stagger", 0, 16, stagger)) ||
++        (request.contains("stun") && !ReadBoundedInt(request, "stun", 0, 255, stun)) ||
++        (request.contains("guard") && !request["guard"].is_boolean())) {
++        return Invalid(kUsage);
 +    }
++    const bool guard = request.contains("guard") && request["guard"].get<bool>();
++    float      offset[3] = {0.0f, 0.0f, 0.0f};
++    bool       placed = false;
++    if (request.contains("at")) {
++        const Json &a = request["at"];
++        if (!a.is_object() || !ReadNumber(a, "x", offset[0], true) || !ReadNumber(a, "y", offset[1], true) || !ReadNumber(a, "z", offset[2], true) ||
++            std::fabs(offset[0]) > 200.0f || std::fabs(offset[1]) > 200.0f || std::fabs(offset[2]) > 200.0f) {
++            return Invalid(kUsage);
++        }
++        placed = true;
++    }
++    if (damage == 0 && !request.contains("kind")) return Invalid(kUsage); // (a blow that took nothing says how it landed)
 +    if (GetNowLoopNo() != LOOP_DUNGEON || ActiveMonster == nullptr) return Failed("not on a dungeon floor");
 +    CActiveMonster *monster = ActiveMonster->GetActiveMonster(slot);
 +    if (monster == nullptr || monster->state != ACTIVE_MONSTER_LIVE || monster->life <= 0) return Ok({{"slot", slot}, {"damage", 0}, {"killed", false}});
++    // Where it struck: on the monster where the other game saw it land, else at its middle.
++    float hit_pos[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    monster->GetPosition(hit_pos);
++    if (placed) {
++        for (int k = 0; k < 3; ++k) hit_pos[k] += offset[k];
++    } else {
++        for (int k = 0; k < 3; ++k) hit_pos[k] = monster->center_pos[k];
++    }
++    CScene   *scene = DngMainScene;
++    const u32 se_id = scene != nullptr ? static_cast<u32>(scene->se_battle_id) : static_cast<u32>(-1);
++    const bool shown = scene != nullptr && kind >= 0; // (a blow told only by its damage, as before: no look)
++    // A blow that took nothing rings off it, as the game shows one (CMonsterMan::CheckDamage).
++    if (damage == 0) {
++        if (shown) {
++            GuardEffectSet(scene, hit_pos, 0);
++            sndSePlay(se_id, 0x26, 0);
++            HitScoreSet(hit_pos, guard ? HIT_SCORE_GUARD : HIT_SCORE_NO_DAMAGE, 0);
++        }
++        if (guard) monster->req_prog = MONSTER_PROG_GUARD;
++        return Ok({{"slot", slot}, {"damage", 0}, {"killed", false}});
++    }
 +    // Another player's blow, as their game measured it: the life goes, and a kill dies here.
 +    const int dealt = std::min(damage, monster->life);
 +    monster->life -= dealt;
++    if (shown) {
++        // It looks and sounds as this game's own hero's blow would: knocked back a little by a blade or a fist, a flash in
++        // the element's colour, a shake, the weapon's hit sound, a spark and the damage over it.
++        const BASE_MONSTER_TBL *tbl = monster->tbl;
++        const bool contact = kind == DAMAGE_KIND_MAX_MELEE || kind == DAMAGE_KIND_MONICA_MELEE || kind == DAMAGE_KIND_ITEM ||
++                             kind == DAMAGE_KIND_RIDEPOD_PUNCH || kind == DAMAGE_KIND_RIDEPOD_SWORD || kind == DAMAGE_KIND_RIDEPOD_OTHER ||
++                             kind == DAMAGE_KIND_RIDEPOD_GUN || kind == DAMAGE_KIND_MONSTER || kind == DAMAGE_KIND_MONSTER_OTHER;
++        if ((monster->attrib & MONSTER_ATTRIB_NO_BLOW) == 0 && contact) {
++            float feet[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++            monster->GetPosition(feet);
++            for (int k = 0; k < 3; ++k) monster->blow_vec[k] = feet[k] - hit_pos[k];
++            FlatUnit(monster->blow_vec);
++            monster->blow_speed = 2.0f;
++            monster->blow_rate = 1.0f;
++            monster->blow_decel = 0.0f;
++            monster->blow_time = 3;
++        }
++        monster->damage_time = stun;
++        switch (element) {
++            case WEAPON_ELEMENT_THUNDER: monster->pallet[0].SetAnim(0xB4, 0xB4, 0, 4, 0x18, 0); break;
++            case WEAPON_ELEMENT_FIRE: monster->pallet[0].SetAnim(0xFF, 0x60, 0, 1, 0x18, 0); break;
++            case WEAPON_ELEMENT_WIND: monster->pallet[0].SetAnim(0x60, 0xA0, 0x60, 1, 0x18, 0); break;
++            case WEAPON_ELEMENT_COLD: monster->pallet[0].SetAnim(0, 0xB4, 0xFF, 1, 0x18, 0); break;
++            default: monster->pallet[0].SetAnim(0xFF, 0xB4, 0x80, 2, 0xA, 0); break;
++        }
++        monster->shake.time = 4;
++        int se_no = -1;
++        switch (kind) {
++            case DAMAGE_KIND_MONSTER:
++            case DAMAGE_KIND_MONSTER_OTHER:
++            case DAMAGE_KIND_ITEM:
++            case DAMAGE_KIND_MAX_MELEE: se_no = 0x1C; break;
++            case DAMAGE_KIND_MAX_GUN: se_no = 0x1A; break;
++            case DAMAGE_KIND_MONICA_MELEE:
++            case DAMAGE_KIND_RIDEPOD_SWORD: se_no = 0x1B; break;
++            case DAMAGE_KIND_RIDEPOD_PUNCH: se_no = 0x19; break;
++            default: break;
++        }
++        if (se_no >= 0) sndSePlay(se_id, se_no, 0);
++        HitEffectSet(scene, hit_pos, flags);
++        HitScoreSet(hit_pos, HIT_SCORE_DAMAGE, dealt);
++        // And it reacts as to this game's own: a flinch once its stagger builds, a fall from a knock-down, held while
++        // stopped or stone, a guard if it guarded, stars from a stunning blow.
++        if (monster->life > 0) {
++            if ((monster->status.attr & (MONSTER_STATUS_STOP | MONSTER_STATUS_STONE)) != 0) {
++                monster->req_prog = MONSTER_PROG_STATUS;
++                sndSePlay(monster->sound_info.se_bank, 0xB, 0);
++            } else if ((flags & DAMAGE_HIT_KNOCKDOWN) != 0) {
++                if (tbl == nullptr || (tbl->flags & MONSTER_TBL_FLAG_NO_KNOCK) == 0) {
++                    monster->req_prog = MONSTER_PROG_KNOCK;
++                    monster->piyori.Reset();
++                    monster->stagger = 0;
++                    monster->stagger_time = 0;
++                }
++            } else if ((flags & DAMAGE_HIT_NO_STAGGER) == 0) {
++                if (guard) {
++                    monster->req_prog = MONSTER_PROG_GUARD;
++                } else if (tbl != nullptr && ((tbl->flags & MONSTER_TBL_FLAG_NO_STAGGER) != 0 || monster->piyori_time > 0)) {
++                    // (it shrugs it off)
++                } else if (tbl != nullptr && tbl->stagger > 0 && stagger >= 0) {
++                    monster->stagger = static_cast<decltype(monster->stagger)>(monster->stagger + stagger);
++                    monster->stagger_time = 60;
++                    if (monster->stagger >= tbl->stagger) {
++                        monster->req_prog = MONSTER_PROG_DAMAGE;
++                        sndSePlay(monster->sound_info.se_bank, 0xB, 0);
++                    }
++                } else {
++                    monster->req_prog = MONSTER_PROG_DAMAGE;
++                    sndSePlay(monster->sound_info.se_bank, 0xB, 0);
++                }
++            }
++            if ((monster->req_prog == MONSTER_PROG_DAMAGE || monster->req_prog == MONSTER_PROG_KNOCK) && (flags & DAMAGE_HIT_STUN) != 0) {
++                monster->req_prog = MONSTER_PROG_PIYORI;
++                monster->piyori_time = 120;
++            }
++        }
++    } else if (monster->life > 0) {
++        monster->req_prog = MONSTER_PROG_DAMAGE;
++    }
 +    if (monster->life == 0) {
++        if (kind >= 0) monster->last_hit_kind = kind;
 +        monster->damage_req = ACTION_DAMAGE_REQ_DEAD;
 +        ChronicleTwoEnemyDefeated(monster, "coop");
-+    } else {
-+        monster->req_prog = MONSTER_PROG_DAMAGE;
 +    }
 +    return Ok({{"slot", slot}, {"damage", dealt}, {"killed", monster->life == 0}});
 +}
@@ -15785,11 +16222,22 @@ index 00000000..82d4d337
 +}
 +
 +ApiCallResult ChoiceOpenCall(std::string_view mod_id, const Json &args) {
-+    static constexpr const char *kUsage = "expected {id, title, subtitle?, cancel?, town?, options = {{title, subtitle?}, ...} (1-6)}";
++    static constexpr const char *kUsage =
++        "expected {id, title, subtitle?, cancel?, town?, style = \"panel\" or \"yes_no\", options = {{title, subtitle?}, ...} (1-6; yes_no: 2)}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
-+    if (!OnlyFields(request, {"id", "title", "subtitle", "cancel", "town", "options"}, unknown)) return Invalid("ui.choice_open received an unsupported field: " + unknown);
++    if (!OnlyFields(request, {"id", "title", "subtitle", "cancel", "town", "style", "options"}, unknown)) return Invalid("ui.choice_open received an unsupported field: " + unknown);
++    bool yes_no = false;
++    if (request.contains("style")) {
++        if (!request["style"].is_string()) return Invalid(kUsage);
++        const std::string &style = request["style"].get_ref<const std::string &>();
++        if (style != "panel" && style != "yes_no") return Invalid(kUsage);
++        yes_no = style == "yes_no";
++        if (yes_no && (!request.contains("options") || !request["options"].is_array() || request["options"].size() != 2)) {
++            return Invalid("a yes_no choice has two options: yes, then no");
++        }
++    }
 +    if (!request.contains("id") || !request["id"].is_string() || request["id"].get_ref<const std::string &>().empty() ||
 +        request["id"].get_ref<const std::string &>().size() > 64) {
 +        return Invalid("id must be 1-64 bytes of text");
@@ -15797,6 +16245,7 @@ index 00000000..82d4d337
 +    if (!request.contains("title") || !request["title"].is_string() || request["title"].get_ref<const std::string &>().size() > 64) return Invalid("title must be at most 64 bytes of text");
 +    if (!request.contains("options") || !request["options"].is_array() || request["options"].empty() || request["options"].size() > 6) return Invalid(kUsage);
 +    Choice choice;
++    choice.yes_no = yes_no;
 +    choice.owner = std::string(mod_id);
 +    choice.id = std::string(mod_id) + ":" + request["id"].get<std::string>();
 +    choice.title = request["title"].get<std::string>();
@@ -15863,6 +16312,8 @@ index 00000000..82d4d337
 +    if (std::isfinite(rotation[1])) player["heading"] = rotation[1]; // the way the hero faces, as the game turns it about Y
 +    if (loop == LOOP_DUNGEON) player["down"] = HeroIsDown();          // lying under the room's rule, waiting to be revived
 +    player["motion"] = std::max(0, MotionNumberOf(*hero));            // the motion the hero plays (the avatars play it on other screens)
++    player["motion_flags"] = hero->now_flags & 7;                      // how: 0 loops, 2 stops on its last frame (CharaMotionFlag)
++    player["motion_step"] = std::round(hero->step * 100.0f) / 100.0f;  // and how fast: frames a step (a walk's follows the stick)
 +    if (CUserDataManager *user = GetUserDataMan(); user != nullptr) {
 +        const int character = user->GetActiveChrNo();
 +        if (character == USER_CHARA_ROBO) {
@@ -16287,10 +16738,10 @@ index 00000000..8ad0dbcf
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_down_moonmod.cpp b/port/src/moonmod/coop_down_moonmod.cpp
 new file mode 100644
-index 00000000..798f66f0
+index 00000000..25405fe9
 --- /dev/null
 +++ b/port/src/moonmod/coop_down_moonmod.cpp
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,127 @@
 +// Co-op's "down, not out" (moonmod/coop.hpp, "Down, not out").
 +//
 +// Alone, a hero whose life runs out dies: the game runs the hero's death and raises its death event, which changes
@@ -16308,8 +16759,10 @@ index 00000000..798f66f0
 +
 +#include "actionchara.hpp"
 +#include "dng_main.hpp"
++#include "effscript.hpp"
 +#include "mainloop.hpp"
 +#include "scenesnd.hpp"
++#include "snd_mngr.hpp"
 +#include "userdata.hpp"
 +
 +namespace moonmod::coop {
@@ -16365,6 +16818,15 @@ index 00000000..798f66f0
 +    MainChara__2->damage_req = ACTION_DAMAGE_REQ_NONE;
 +    MainChara__2->prog_no = ACTION_PROG_MAIN; // the hero's normal script takes them from the ground
 +    MainChara__2->muteki_time = 120;          // two seconds to find their feet
++    // Brought back as a Resurrection Powder brings a hero back (CActionChara::CheckDamage): the blue flash, the
++    // recovery's light about them and its sound.
++    MainChara__2->pallet[0].SetAnim(96, 180, 255, 1, 45, 0);
++    if (MainChara__2->effect_man != nullptr) {
++        MainChara__2->effect_man->CreateEffSpt(const_cast<char *>("\x92\xCA\x8F\xED\x89\xF1\x95\x9C"), 0, 0);
++        MainChara__2->effect_man->SetScriptTargetId(0, -1, -1);
++        MainChara__2->effect_man->SetValue(0, 0, 0, -1);
++    }
++    sndSePlay(SystemSND_ID, SYSTEM_SE_RECOVER, 0);
 +    return true;
 +}
 +
@@ -18097,10 +18559,10 @@ index 00000000..a9e3610e
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_ui_moonmod.cpp b/port/src/moonmod/coop_ui_moonmod.cpp
 new file mode 100644
-index 00000000..a37531e1
+index 00000000..b09f669c
 --- /dev/null
 +++ b/port/src/moonmod/coop_ui_moonmod.cpp
-@@ -0,0 +1,537 @@
+@@ -0,0 +1,652 @@
 +// Co-op's screens (moonmod/coop.hpp): the choice panel over the game, a mod's title mode page, and a visit's start
 +// and end.
 +
@@ -18114,6 +18576,8 @@ index 00000000..a37531e1
 +#include <string>
 +#include <vector>
 +
++#include "dng_event.hpp"
++#include "editloop.hpp"
 +#include "font.hpp"
 +#include "gamepad.hpp"
 +#include "mainloop.hpp"
@@ -18121,7 +18585,11 @@ index 00000000..a37531e1
 +#include "menudraw.hpp"
 +#include "menumain.hpp"
 +#include "menusys.hpp"
++#include "menucommon.hpp"
 +#include "mglib.hpp"
++#include "nd_meswin.hpp"
++#include "snd_mngr.hpp"
++#include "sysmes.hpp"
 +#include "moonmod/mapselect_moonmod.hpp"
 +#include "savedata.hpp"
 +#include "userdata.hpp"
@@ -18182,6 +18650,69 @@ index 00000000..a37531e1
 +std::optional<Choice> g_choice;
 +int                   g_choice_grace = 0; // frames before the panel takes a press (the one that opened it isn't its)
 +bool                  g_choice_reads = false; // the panel is reading the pad now (PanelHoldsPad lets it through)
++// The game's own message window a yes-or-no choice is asked in (Choice::yes_no), built when it is first drawn: its
++// frame and letters are the system message's, which every floor and town loads (dng_main.cpp, editloop.cpp).
++ClsMes g_ask;
++bool   g_ask_built = false;
++
++// A town's notices: a message window and its queue of co-op's own, made as dng_main.cpp makes the floor's (DngMess,
++// MsgTaskMan) with the system message's frame and letters, the first time a notice comes in a town.
++ClsMes             g_town_mes;
++MessageTaskManager g_town_tasks;
++bool               g_town_ready = false;
++
++bool WalkingInTown() { return GetNowLoopNo() == LOOP_EDIT && GetMainScene() != nullptr && IsEditMode() == 0; }
++
++void TownNoticesDraw() {
++    if (!g_town_ready || g_town_tasks.top == nullptr) return;
++    if (GetNowLoopNo() != LOOP_EDIT || GetMainScene() == nullptr) {
++        // (out of the town: what was left goes, and the window closes)
++        g_town_tasks.Initialize();
++        g_town_tasks.mes = &g_town_mes;
++        g_town_mes.open = 0;
++        g_town_mes.fade = 0.0f;
++        return;
++    }
++    if (g_choice || IsEditMode() != 0) return; // (it waits while the window is a question's, or the editor is open)
++    g_town_tasks.Step();
++    g_town_tasks.Draw();
++}
++
++// The window's text: the title, then the subtitle, each broken into lines as the game's messages are (at most four).
++std::string AskText(const Choice &choice) {
++    std::string text;
++    int         lines = 0;
++    for (const std::string *part : {&choice.title, &choice.subtitle}) {
++        for (const std::string &window : GameNoticeText(*part, 52)) { // (a question's window takes a longer line)
++            std::size_t start = 0;
++            while (start <= window.size() && lines < 4) {
++                const std::size_t end = window.find('\n', start);
++                const std::string line = window.substr(start, end == std::string::npos ? std::string::npos : end - start);
++                if (!line.empty()) {
++                    if (!text.empty()) text += '\n';
++                    text += line;
++                    ++lines;
++                }
++                if (end == std::string::npos) break;
++                start = end + 1;
++            }
++        }
++    }
++    return text;
++}
++
++void AskBuild(const Choice &choice) {
++    const ClsMes *system = GetSystemMessage();
++    g_ask.Init();
++    g_ask.Preset(MES_PRESET_WINDOW);
++    g_ask.texture_block = system != nullptr ? system->texture_block : 0;
++    g_ask.SetWindowMode(MES_WIN_YESNO);
++    g_ask.fuchi = FUCHI_SHADOW_BLACK_WIDE;
++    const std::string text = AskText(choice);
++    g_ask.MakeMesWin(text.c_str(), 1, 1);
++    g_ask.cursor_time = 0;
++    g_ask_built = true;
++}
 +
 +void ChoiceClose(bool cancelled, std::size_t index) {
 +    if (!g_choice) return;
@@ -18304,8 +18835,11 @@ index 00000000..a37531e1
 +bool ChoiceOpen(Choice choice) {
 +    if (g_choice || choice.options.empty() || choice.options.size() > 6) return false;
 +    choice.cursor = std::min(choice.cursor, choice.options.size() - 1);
++    const int loop = GetNowLoopNo();
++    if (choice.options.size() != 2 || (loop != LOOP_DUNGEON && loop != LOOP_EDIT)) choice.yes_no = false;
 +    g_choice = std::move(choice);
 +    g_choice_grace = 8;
++    g_ask_built = false;
 +    return true;
 +}
 +
@@ -18335,21 +18869,64 @@ index 00000000..a37531e1
 +    // The buttons are the panel's while it is open (PanelHoldsPad): only its own reads see them.
 +    g_choice_reads = true;
 +    const bool up = GamePad__2.Down(PAD_UP) != 0, down = GamePad__2.Down(PAD_DOWN) != 0;
++    const bool left = GamePad__2.Down(PAD_LEFT) != 0, right = GamePad__2.Down(PAD_RIGHT) != 0;
 +    const int  push = ConvertCheckPushButton(MenuCheckPushButton());
 +    g_choice_reads = false;
-+    if (up) choice.cursor = (choice.cursor + choice.options.size() - 1) % choice.options.size();
-+    if (down) choice.cursor = (choice.cursor + 1) % choice.options.size();
++    const std::size_t before = choice.cursor;
++    if (choice.yes_no) {
++        // Yes on the left, No on the right, as the game's own (CDC2Mes::YesNoCursor): left and right choose.
++        if (left) choice.cursor = 0;
++        if (right) choice.cursor = 1;
++    } else {
++        if (up) choice.cursor = (choice.cursor + choice.options.size() - 1) % choice.options.size();
++        if (down) choice.cursor = (choice.cursor + 1) % choice.options.size();
++    }
++    // And it sounds as the game's menus do: the cursor's tick, the pick's chime, the back-out's.
++    if (choice.cursor != before) MenuSePlay(SYSTEM_SE_CURSOR);
 +    if (push & MENU_PUSH_BUTTON_DECIDE) {
++        MenuSePlay(SYSTEM_SE_DECIDE);
 +        ChoiceClose(false, choice.cursor);
 +    } else if ((push & MENU_PUSH_BUTTON_CANCEL) && choice.cancel) {
++        MenuSePlay(SYSTEM_SE_CANCEL);
 +        ChoiceClose(true, 0);
 +    }
 +}
 +
++bool TownNoticesOpen() { return WalkingInTown() && !g_choice; }
++
++void TownNoticePrint(const std::string &window, int frames) {
++    if (!g_town_ready) {
++        const ClsMes *system = GetSystemMessage();
++        g_town_mes.Init();
++        g_town_mes.Preset(MES_PRESET_WINDOW);
++        g_town_mes.SetWindowMode(7);
++        g_town_mes.push_button = 0;
++        g_town_mes.draw_speed_def = 0;
++        g_town_mes.draw_speed = 0;
++        g_town_mes.texture_block = system != nullptr ? system->texture_block : 0;
++        if (LanguageCode > LANG_JAPANESE && LanguageCode < LANG_CHINESE) g_town_mes.value_half = 1;
++        g_town_tasks.Initialize();
++        g_town_tasks.mes = &g_town_mes;
++        g_town_ready = true;
++    }
++    std::string text = window;
++    g_town_tasks.Print(text.data(), frames, 8, 0);
++}
++
 +void Draw2D() {
 +    DrawAvatarNames(); // the other players' names, under the panel
++    TownNoticesDraw();
 +    if (!g_choice) return;
 +    const Choice &choice = *g_choice;
++    if (choice.yes_no) {
++        if (!g_ask_built) AskBuild(choice);
++        if (g_ask.select < 0) g_ask.cursor_time = 0;
++        g_ask.select = static_cast<int>(choice.cursor);
++        g_ask.fukidashi_pos = 5; // (the middle of the screen, as the port's own yes-or-no asks)
++        g_ask.Step();
++        g_ask.DrawMesWin();
++        return;
++    }
 +    const int rows = static_cast<int>(choice.options.size());
 +    const int height = 64 + rows * 40 + (choice.subtitle.empty() ? 0 : 20);
 +    const int top = std::max(20, (448 - height) / 2);
@@ -18640,10 +19217,10 @@ index 00000000..a37531e1
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..9f52f10e
+index 00000000..13cd43c6
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1419 @@
+@@ -0,0 +1,1841 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -18713,6 +19290,61 @@ index 00000000..9f52f10e
 +
 +// Past this from where it stands, an avatar jumps instead of easing (a warp, the stairs, a new floor).
 +constexpr float kJump = 160.0f;
++
++// The others are shown this many frames behind their own game's clock (as the reports' ages give it): a report every
++// four frames and room for the network's unevenness, so there is nearly always a next report to ease toward.
++constexpr int kDelay = 8;
++constexpr int kMaxAge = 600;
++// This game's frames, counted by WorldStep: the clock the reports' ages are taken on.
++int g_clock = 0;
++
++// One report from another game: where its hero (or monster) stood and what it played, on this game's clock.
++struct Sample {
++    int   t = 0;
++    float x = 0.0f, y = 0.0f, z = 0.0f, heading = 0.0f;
++    int   motion = -1, flags = 0;
++    float step = -1.0f;
++};
++
++// Keeps a report, in its time's order. One older than a report kept, or the same as the last, is let go; one far
++// from the last (a warp, the stairs) starts the trail over; one after a long quiet (standing still) starts from the
++// last as of one report before it, so a walk starts when it did and is not drawn out over the quiet.
++void TrailHeard(std::vector<Sample> &trail, const Sample &n) {
++    if (!trail.empty()) {
++        const Sample &last = trail.back();
++        if (n.t <= last.t) return;
++        if (n.x == last.x && n.y == last.y && n.z == last.z && n.heading == last.heading && n.motion == last.motion &&
++            n.flags == last.flags && n.step == last.step) {
++            return;
++        }
++        if (std::hypot(n.x - last.x, n.z - last.z) > kJump) {
++            trail.clear();
++        } else if (n.t - last.t > 2 * kDelay) {
++            Sample held = last;
++            held.t = n.t - kDelay / 2;
++            trail.push_back(held);
++        }
++    }
++    trail.push_back(n);
++    if (trail.size() > 32) trail.erase(trail.begin());
++}
++
++// The trail as it stood kDelay frames ago: eased between the two reports around that moment, playing the motion
++// reported last before it. (A trail that has run out stands at its last report.)
++Sample TrailAt(std::vector<Sample> &trail) {
++    const int render = g_clock - kDelay;
++    while (trail.size() >= 2 && trail[1].t <= render) trail.erase(trail.begin());
++    const Sample &a = trail.front();
++    if (trail.size() == 1 || render <= a.t) return a;
++    const Sample &b = trail[1];
++    const float   u = static_cast<float>(render - a.t) / static_cast<float>(b.t - a.t);
++    Sample        s = a;
++    s.x = Ease(a.x, b.x, u);
++    s.y = Ease(a.y, b.y, u);
++    s.z = Ease(a.z, b.z, u);
++    s.heading = TurnToward(a.heading, b.heading, u);
++    return s;
++}
 +// The scene slots an avatar takes: the dungeon's last event slots, a town's last talk slots (the game fills them
 +// from the first), and texture blocks past the ones the town's and dungeon's setup use.
 +constexpr int kDungeonSlotBase = DNG_CHARA_SLOT_EVENT + DNG_CHARA_EVENT_NUM - kAvatars;
@@ -18720,8 +19352,8 @@ index 00000000..9f52f10e
 +constexpr int kTextureBlockBase = 0x70;
 +constexpr int kFileBytes = 6 * 1024 * 1024;
 +
-+// One hero's body in a scene slot: the scene steps and draws it; the step eases to the last report and the draw
-+// tints the ambient light (a guest in blue).
++// One hero's body in a scene slot: the scene steps and draws it; the step follows the reports kDelay frames behind
++// (At), playing each motion as that player's game plays it, and the draw may tint the ambient light.
 +class AvatarBody final : public CCharacter2 {
 +public:
 +    AvatarState target;
@@ -18734,45 +19366,73 @@ index 00000000..9f52f10e
 +    // ridepod's parts play them too, as the game's own CActionChara::SetMotion has every part of the chain do.
 +    bool        shaped = false;
 +    bool        parts_move = false;
-+    int         motion = -1;
++    int         motion = -1, flags = -1;
++    std::vector<Sample> trail; // the reports kept, oldest first (TrailHeard, TrailAt); empty: the target, eased toward
 +    int         stand_in_gait = -1, stand_in_shown = -1; // a stand-in: 1 running, 0 standing
 +    int         town = 0;
++    // In and out of sight as the game's own monsters come and go (view_alpha, a twentieth a frame): from nothing where
++    // it first stands or lands after a jump, and to nothing where it stands when the player goes (world.avatar_clear
++    // with both in one place), then gone.
++    float       fade = 0.0f;
++    bool        leaving = false;
 +
 +    void Step() override {
-+        const float to[3] = {target.x, target.y, target.z};
-+        const float far = std::hypot(to[0] - at[0], to[2] - at[2]);
++        const Sample now = trail.empty() ? Sample{g_clock, target.x, target.y, target.z, target.heading, target.motion,
++                                                  target.motion_flags, target.motion_step}
++                                         : TrailAt(trail);
++        const float  to[3] = {now.x, now.y, now.z};
++        const float  far = std::hypot(to[0] - at[0], to[2] - at[2]);
++        float        pace = far; // how far it goes this frame
 +        if (!placed || far > kJump) {
 +            std::copy(to, to + 3, at);
-+            heading = target.heading;
++            heading = now.heading;
 +            placed = true;
-+        } else {
-+            // About a fifth of the way each frame: a report every six frames lands just as the next one comes.
++            pace = 0.0f;
++            if (!leaving) fade = 0.0f;
++        } else if (trail.empty()) {
++            // (reports with no time: about a fifth of the way each frame)
 +            for (int axis = 0; axis < 3; ++axis) at[axis] = Ease(at[axis], to[axis], 0.2f);
-+            heading = TurnToward(heading, target.heading, 0.3f);
++            heading = TurnToward(heading, now.heading, 0.3f);
++            pace = far * 0.2f;
++        } else {
++            std::copy(to, to + 3, at);
++            heading = now.heading;
 +        }
 +        SetPosition(at[0], at[1], at[2]);
 +        SetRotation(0.0f, heading, 0.0f);
 +        if (target.stand_in && !shaped) {
 +            // The hero standing in for a ridepod or a monster's form: their motion numbers are not the hero's, so
 +            // the hero runs while the reports move and stands when they stop (the names every hero's body has).
-+            if (far > 2.0f) stand_in_gait = 1;
-+            else if (far < 0.5f || stand_in_gait < 0) stand_in_gait = 0;
++            if (pace > 0.4f) stand_in_gait = 1;
++            else if (pace < 0.1f || stand_in_gait < 0) stand_in_gait = 0;
 +            if (stand_in_gait != stand_in_shown) {
 +                stand_in_shown = stand_in_gait;
 +                char run[] = "\x91\x96\x82\xE8", stand[] = "\x97\xA7\x82\xBF";
 +                SetMotion(stand_in_gait != 0 ? run : stand, 0);
-+                motion = -1;
++                motion = flags = -1;
 +            }
 +        } else {
 +            stand_in_gait = stand_in_shown = -1;
-+            if (target.motion != motion) {
-+                motion = target.motion;
-+                SetMotion(std::max(0, motion), 2);
++            // As that player's game plays it: a run, a walk or a stand loops, a swing or a fall stops on its last
++            // frame, and a walk goes at the stick's pace (actionchara.cpp sets each so).
++            if (now.motion != motion || now.flags != flags) {
++                motion = now.motion;
++                flags = now.flags;
++                SetMotion(std::max(0, motion), flags);
 +                if (parts_move) {
-+                    for (const std::shared_ptr<CCharacter2> &part : parts) part->SetMotion(std::max(0, motion), 2);
++                    for (const std::shared_ptr<CCharacter2> &part : parts) part->SetMotion(std::max(0, motion), flags);
++                }
++            }
++            if (now.step >= 0.0f) {
++                SetStep(now.step);
++                if (parts_move) {
++                    for (const std::shared_ptr<CCharacter2> &part : parts) part->SetStep(now.step);
 +                }
 +            }
 +        }
++        fade = std::clamp(fade + (leaving ? -0.05f : 0.05f), 0.0f, 1.0f);
++        alpha = fade;
++        for (const std::shared_ptr<CCharacter2> &part : parts) part->alpha = fade;
 +        CCharacter2::Step();
 +        for (const std::shared_ptr<CCharacter2> &part : parts) part->Step();
 +    }
@@ -18852,6 +19512,8 @@ index 00000000..9f52f10e
 +    CScene                     *scene = nullptr;
 +    int                         loop = -1;
 +    int                         held_effect = -1; // the effect of an item it holds up to throw (its slot under the avatar's), or -1
++    // Shots, spells and sounds told with an age, kept for the moment the avatar comes to them: (that frame, the effect).
++    std::vector<std::pair<int, HeroEffect>> pending;
 +    // Its own memory: the file it reads and the stacks its model, motions and images live in.
 +    std::vector<unsigned char>  file;
 +    std::vector<unsigned char>  arena;
@@ -18862,9 +19524,26 @@ index 00000000..9f52f10e
 +    std::string                 sound_name;
 +    unsigned int                se_bank = 0xFFFFFFFFu;
 +    mgCMemory                   sound_memory;
++    // Its looped sounds, kept up as the game's own CLoopSeMngr keeps a hero's: each goes on until `keep` frames pass
++    // with no word that it still goes (count, the frames since the last), then stops.
++    struct LoopSound {
++        int sound = -1;
++        int keep = 0;
++        int count = 0;
++    };
++    std::array<LoopSound, 4> loops{};
 +};
 +
 +std::array<Avatar, kAvatars> g_avatars;
++constexpr int                kLoopVoice = 13; // the voice the game's hero plays its loops on (_SE_LOOP_PLAY); ours are on a port of their own
++
++// Stops an avatar's looped sounds (it goes, or its bank does).
++void AvatarLoopsStop(Avatar &a) {
++    for (Avatar::LoopSound &l : a.loops) {
++        if (l.sound >= 0 && a.se_bank != 0xFFFFFFFFu) sndSeStop(a.se_bank, l.sound, kLoopVoice);
++        l = Avatar::LoopSound{};
++    }
++}
 +
 +bool InDungeon() { return GetNowLoopNo() == LOOP_DUNGEON && DngMainScene != nullptr && MainChara__2 != nullptr; }
 +// A floor's monsters and map events need its scene, not the player's body.
@@ -18884,6 +19563,8 @@ index 00000000..9f52f10e
 +        FxScriptMan->ClearEffectFromChrid(a.slot);
 +    }
 +    a.held_effect = -1;
++    a.pending.clear();
++    AvatarLoopsStop(a);
 +    if (a.se_bank != 0xFFFFFFFFu) sndDeletePort(SND_PORT_COOP + index);
 +    a.se_bank = 0xFFFFFFFFu;
 +    a.sound_name.clear();
@@ -18924,6 +19605,7 @@ index 00000000..9f52f10e
 +    if (a.sound_name == name) return a.se_bank != 0xFFFFFFFFu;
 +    if (!SoundNameOk(name)) return false;
 +    const int port = SND_PORT_COOP + index;
++    AvatarLoopsStop(a);
 +    sndDeletePort(port);
 +    a.se_bank = 0xFFFFFFFFu;
 +    a.sound_name = name;
@@ -19152,7 +19834,8 @@ index 00000000..9f52f10e
 +struct PuppetSlot {
 +    bool   used = false;
 +    Puppet host;
-+    int    motion = -1;
++    int    motion = -1, flags = -1;
++    std::vector<Sample> trail; // the leader's reports kept (TrailHeard, TrailAt)
 +};
 +std::vector<PuppetSlot>  g_puppets(static_cast<std::size_t>(MONSTER_ACTIVE_MAX));
 +std::vector<PuppetHit>   g_puppet_hits;
@@ -19225,6 +19908,12 @@ index 00000000..9f52f10e
 +        if (std::ranges::any_of(g_puppets, &PuppetSlot::used)) PuppetsClear();
 +        return;
 +    }
++    // What the copies' own motions start (a motion's entry effects) is drawn only: the leader's monsters strike, not
++    // these copies (and their effects are no longer held frozen with the copies' thinking, dng_main.cpp).
++    std::vector<const _EFF_SCRIPT *> before;
++    if (FxScriptMan != nullptr && std::ranges::any_of(g_puppets, &PuppetSlot::used)) {
++        for (const _EFF_SCRIPT *s = FxScriptMan->head; s != nullptr; s = s->next) before.push_back(s);
++    }
 +    bool any = false;
 +    for (int slot = 0; slot < MONSTER_ACTIVE_MAX; ++slot) {
 +        PuppetSlot &p = g_puppets[static_cast<std::size_t>(slot)];
@@ -19236,15 +19925,27 @@ index 00000000..9f52f10e
 +        }
 +        any = true;
 +        if (p.host.state <= 0 || p.host.hp == 0) continue;
-+        monster->SetPosition(p.host.x, p.host.y, p.host.z);
-+        monster->SetRotation(0.0f, p.host.heading, 0.0f);
-+        if (p.host.motion >= 0 && p.host.motion != p.motion) {
-+            p.motion = p.host.motion;
-+            monster->SetMotion(p.host.motion, 2);
++        // (on the leader's clock a little behind, eased between its reports, as the other players' heroes are; each
++        // motion played as the leader's monster plays it, looping or held on its last frame)
++        const Sample now = p.trail.empty() ? Sample{g_clock, p.host.x, p.host.y, p.host.z, p.host.heading, p.host.motion,
++                                                    p.host.motion_flags, p.host.motion_step}
++                                           : TrailAt(p.trail);
++        monster->SetPosition(now.x, now.y, now.z);
++        monster->SetRotation(0.0f, now.heading, 0.0f);
++        if (now.motion >= 0 && (now.motion != p.motion || now.flags != p.flags)) {
++            p.motion = now.motion;
++            p.flags = now.flags;
++            monster->SetMotion(now.motion, now.flags);
 +        }
++        if (now.step >= 0.0f) monster->SetStep(now.step);
 +        // Its own thoughts are paused with every monster's: the copy still animates, and comes into sight here.
 +        monster->Step();
 +        PuppetSight(monster);
++    }
++    if (FxScriptMan != nullptr && any) {
++        for (_EFF_SCRIPT *s = FxScriptMan->head; s != nullptr; s = s->next) {
++            if (std::ranges::find(before, s) == before.end()) s->shown_only = true;
++        }
 +    }
 +    // A guest's floor is the host's: the monsters' own scripts rest while any copy stands.
 +    if (any && !g_puppets_pause) {
@@ -19335,14 +20036,31 @@ index 00000000..9f52f10e
 +    Avatar &a = g_avatars[static_cast<std::size_t>(slot)];
 +    a.target = state;
 +    a.wanted = true;
-+    if (a.body) a.body->target = state;
++    if (a.body) {
++        a.body->leaving = false; // (back before it was gone: it comes back into sight where it is)
++        a.body->target = state;
++        if (state.age >= 0) {
++            TrailHeard(a.body->trail, {g_clock - std::min(state.age, kMaxAge), state.x, state.y, state.z, state.heading, state.motion,
++                                  state.motion_flags, state.motion_step});
++        } else {
++            a.body->trail.clear();
++        }
++    }
 +    return true;
 +}
 +
 +void AvatarClear(int slot) {
 +    for (int i = 0; i < kAvatars; ++i) {
 +        if (slot >= 0 && slot != i) continue;
-+        g_avatars[static_cast<std::size_t>(i)].wanted = false;
++        Avatar &a = g_avatars[static_cast<std::size_t>(i)];
++        a.wanted = false;
++        // Seen here, in this place: the hero goes from sight where it stands (AvatarsStep lets it go at nothing). It is
++        // nobody a monster goes for or strikes, and carries no name, from now.
++        if (a.body && a.scene != nullptr && a.scene == PlaceScene() && a.slot >= 0 && a.scene->GetCharacter(a.slot) == a.body.get() &&
++            a.body->fade > 0.0f) {
++            a.body->leaving = true;
++            continue;
++        }
 +        Unload(i);
 +    }
 +}
@@ -19385,10 +20103,13 @@ index 00000000..9f52f10e
 +                FxScriptMan->ClearEffectFromChrid(a.slot); // (the same floor, its slot given to another: our effects go)
 +            }
 +            a.held_effect = -1; // (on another floor, the floor's effects went with it)
++            a.pending.clear();
++            AvatarLoopsStop(a);
 +            a.loaded_character = -1;
 +            a.slot = -1;
 +            a.scene = nullptr;
 +        }
++        if (!a.wanted && a.body && a.body->leaving && a.body->fade <= 0.0f) Unload(i); // (gone from sight: gone)
 +        if (!a.wanted || scene == nullptr) continue;
 +        const int town = InTown() ? 1 : 0;
 +        // (the other player changed hero, what they wear, or climbed into the ridepod or took a form)
@@ -19498,6 +20219,43 @@ index 00000000..9f52f10e
 +    g_hero_effects.push_back(e);
 +}
 +
++// A looped sound is kept up every frame the hero's script says so; it is told at most every kLoopTellEvery frames for
++// one sound (the avatar's side keeps it that much longer), and again at once when it starts afresh.
++constexpr int kLoopTellEvery = 8;
++static std::array<std::pair<int, int>, 8> g_loops_told{}; // (sound + 1, the frame it was last told), 0 for none
++
++void HeroLoopSounded(const void *chara, int sound, int keep) {
++    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || DngUserData == nullptr || sound < 0 || sound > 255) return;
++    keep = std::clamp(keep, 0, 600);
++    std::pair<int, int> *told = &g_loops_told[0];
++    for (std::pair<int, int> &t : g_loops_told) {
++        if (t.first == sound + 1) {
++            told = &t;
++            break;
++        }
++        if (t.second < told->second) told = &t; // (else the one told longest ago makes room)
++    }
++    const bool known = told->first == sound + 1;
++    if (keep == 0) {
++        if (!known) return; // (a stop, as the game takes no time to keep it: for a loop never told, nothing)
++    } else if (known && g_clock - told->second >= 0 && g_clock - told->second < kLoopTellEvery) {
++        return;
++    }
++    HeroEffect e;
++    e.kind = static_cast<int>(HeroShot::SoundLoop);
++    e.frame0 = HeroSoundName(DngUserData, DngUserData->active_chr_no);
++    if (!SoundNameOk(e.frame0)) return;
++    *told = keep == 0 ? std::pair{0, 0} : std::pair{sound + 1, g_clock};
++    e.frame1 = e.frame0;
++    e.value = sound;
++    e.amount = static_cast<float>(keep);
++    float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    MainChara__2->GetPosition(at);
++    for (int axis = 0; axis < 3; ++axis) e.pos[axis] = at[axis];
++    if (g_hero_effects.size() >= kHeroEffectsKept) g_hero_effects.erase(g_hero_effects.begin());
++    g_hero_effects.push_back(e);
++}
++
 +void HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold) {
 +    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || frame0 == nullptr || frame1 == nullptr) return;
 +    HeroEffect e;
@@ -19516,7 +20274,7 @@ index 00000000..9f52f10e
 +
 +// As the firing game's own actscript.cpp draws each shot (ShotNormalGun and the others), less the attack: no collision
 +// primitive, so it strikes nothing here (the firing game's hits are what count).
-+bool AvatarEffect(int slot, const HeroEffect &e) {
++static bool AvatarEffectNow(int slot, const HeroEffect &e) {
 +    if (!AvatarShown(slot) || !InDungeon() || FxScriptMan == nullptr || DngStatus.mode != DNG_STATUS_FIELD) return false;
 +    for (int axis = 0; axis < 3; ++axis) {
 +        if (!std::isfinite(e.pos[axis]) || !std::isfinite(e.dir[axis])) return false;
@@ -19535,6 +20293,31 @@ index 00000000..9f52f10e
 +            float volume = 0.0f, pan = 0.0f;
 +            sndGetVolPan(&volume, &pan, at, 160.0f, 1200.0f);
 +            sndSePlayVPf(a.se_bank, e.value, volume, pan, 0);
++            return true;
++        }
++        case HeroShot::SoundLoop: {
++            // begun, or kept going, as CLoopSeMngr::SeLoopPlayStop does; AvatarLoopsStep plays it from the avatar
++            Avatar &a = g_avatars[static_cast<std::size_t>(slot)];
++            if (!a.body || e.value < 0 || e.value > 255 || !LoadAvatarSound(a, slot, e.frame0)) return false;
++            Avatar::LoopSound *loop = nullptr;
++            for (Avatar::LoopSound &l : a.loops) {
++                if (l.sound == e.value) {
++                    loop = &l;
++                    break;
++                }
++                if (loop == nullptr && l.sound < 0) loop = &l;
++            }
++            if (loop == nullptr) return false; // (four going at once: a fifth is not heard)
++            const bool going = loop->sound == e.value;
++            if (!(e.amount > 0.0f)) { // (kept no frames: stopped now)
++                if (going) sndSeStop(a.se_bank, loop->sound, kLoopVoice);
++                if (going) *loop = Avatar::LoopSound{};
++                return true;
++            }
++            loop->sound = e.value;
++            // (told every few frames, not every one: it goes on that much longer between words)
++            loop->keep = std::clamp(static_cast<int>(e.amount), 1, 600) + kLoopTellEvery;
++            loop->count = going ? 1 : 0;
 +            return true;
 +        }
 +        case HeroShot::Gun: {
@@ -19766,6 +20549,12 @@ index 00000000..9f52f10e
 +    }
 +    p.used = true;
 +    p.host = puppet;
++    if (puppet.age >= 0) {
++        TrailHeard(p.trail, {g_clock - std::min(puppet.age, kMaxAge), puppet.x, puppet.y, puppet.z, puppet.heading, puppet.motion,
++                        puppet.motion_flags, puppet.motion_step});
++    } else {
++        p.trail.clear();
++    }
 +    monster->life = std::clamp(puppet.hp, 0, 1000000);
 +    if (puppet.max_hp > 0) monster->max_life = puppet.max_hp;
 +    if (puppet.state == ACTIVE_MONSTER_DEAD && monster->state == ACTIVE_MONSTER_LIVE) {
@@ -19776,6 +20565,8 @@ index 00000000..9f52f10e
 +}
 +
 +bool IsPuppet(int slot) { return slot >= 0 && slot < MONSTER_ACTIVE_MAX && g_puppets[static_cast<std::size_t>(slot)].used; }
++
++bool MonstersMirrored() { return g_puppets_pause; }
 +
 +void PuppetsClear() {
 +    for (PuppetSlot &p : g_puppets) p = PuppetSlot{};
@@ -19795,11 +20586,26 @@ index 00000000..9f52f10e
 +    return out;
 +}
 +
-+void MonsterDamaged(int slot, int damage) {
-+    if (!IsPuppet(slot) || damage <= 0) return;
-+    // The copy keeps the host's life: the blow goes to the host's monster.
-+    if (CActiveMonster *monster = Monster(slot); monster != nullptr) monster->life = std::max(0, g_puppets[static_cast<std::size_t>(slot)].host.hp);
-+    if (g_puppet_hits.size() < 64) g_puppet_hits.push_back({slot, damage});
++void MonsterDamaged(int slot, int damage, const CColPrim *prim, int element, bool guard) {
++    if (!IsPuppet(slot)) return;
++    // The copy keeps the host's life: the blow goes to the host's monster. One that took nothing (a guard, a monster
++    // it can't hurt) goes too, for the host's game to show it so.
++    CActiveMonster *monster = Monster(slot);
++    if (monster != nullptr) monster->life = std::max(0, g_puppets[static_cast<std::size_t>(slot)].host.hp);
++    if (damage < 0 || (damage == 0 && prim == nullptr) || g_puppet_hits.size() >= 64) return;
++    PuppetHit hit{slot, damage};
++    if (prim != nullptr && prim->param != nullptr) {
++        hit.kind = prim->param->kind;
++        hit.flags = prim->param->hit_flags;
++        hit.stagger = prim->param->stagger;
++        hit.stun = prim->param->stun_time;
++        hit.element = element;
++        hit.guard = guard;
++        float feet[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++        if (monster != nullptr) monster->GetPosition(feet);
++        for (int k = 0; k < 3; ++k) hit.at[k] = prim->hit_pos[k] - feet[k];
++    }
++    g_puppet_hits.push_back(hit);
 +}
 +
 +void MonsterThinkBegin(int slot) {
@@ -20016,7 +20822,7 @@ index 00000000..9f52f10e
 +        const Avatar &a = g_avatars[static_cast<std::size_t>(i)];
 +        int          &grace = g_avatar_grace[static_cast<std::size_t>(i)];
 +        if (grace > 0) --grace;
-+        if (!a.body || a.scene != DngMainScene || a.slot < 0 || a.target.down) continue;
++        if (!a.wanted || !a.body || a.scene != DngMainScene || a.slot < 0 || a.target.down) continue;
 +        for (CColPrim &prim : ColPrimMan.prim) {
 +            if (!prim.active || prim.param == nullptr || (prim.target & DAMAGE_TARGET_PLAYER) == 0) continue;
 +            if (!prim.IsHit(DngMainScene, a.slot)) continue; // (a blow that lands marks the avatar as struck by it)
@@ -20025,15 +20831,206 @@ index 00000000..9f52f10e
 +            // kind as the mod reads it: 2 a small hit (a flinch), 3 a blow that knocks down
 +            const int kind = (prim.param->hit_flags & DAMAGE_HIT_KNOCKDOWN) != 0 ? 3 : 2;
 +            if (g_avatar_hits.size() < 64) {
-+                g_avatar_hits.push_back({i + 1, prim.attacker, std::max(1, static_cast<int>(prim.damage)), kind, static_cast<int>(prim.param->hit_flags)});
++                AvatarHit hit{i + 1, prim.attacker, std::max(1, static_cast<int>(prim.damage)), kind, static_cast<int>(prim.param->hit_flags)};
++                hit.stun = prim.param->stun_time;
++                hit.stagger = prim.param->stagger;
++                hit.guard_rate = prim.param->critical_rate;
++                hit.status = static_cast<long long>(prim.status);
++                float feet[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++                a.body->GetPosition(feet);
++                for (int k = 0; k < 3; ++k) {
++                    hit.at[k] = prim.hit_pos[k] - feet[k];
++                    hit.toward[k] = prim.hit_vec[k];
++                }
++                g_avatar_hits.push_back(hit);
 +            }
++            // Here, it lands as a blow on this game's own hero does: a spark where it struck and the floor's hit
++            // sound (the hero's cry is that player's game's, and comes with its sounds).
++            HitEffectSet(DngMainScene, prim.hit_pos, prim.param->hit_flags);
++            sndSePlay(DngMainScene->se_battle_id, 0x16, 0);
 +            break;
 +        }
 +    }
 +}
 +
++bool AvatarEffect(int slot, const HeroEffect &e, int age) {
++    if (age < 0) return AvatarEffectNow(slot, e);
++    if (!AvatarShown(slot) || !InDungeon() || FxScriptMan == nullptr || DngStatus.mode != DNG_STATUS_FIELD) return false;
++    Avatar &a = g_avatars[static_cast<std::size_t>(slot)];
++    if (a.pending.size() >= 64) a.pending.erase(a.pending.begin()); // (a flood loses its oldest, not the game's memory)
++    a.pending.emplace_back(g_clock - std::min(age, kMaxAge) + kDelay, e);
++    return true;
++}
++
++// The others' shots, spells and sounds whose moment has come on their avatars' clocks (AvatarEffect with an age).
++static void AvatarEffectsDue() {
++    for (int i = 0; i < kAvatars; ++i) {
++        Avatar &a = g_avatars[static_cast<std::size_t>(i)];
++        if (a.pending.empty()) continue;
++        std::vector<HeroEffect> due;
++        for (auto it = a.pending.begin(); it != a.pending.end();) {
++            if (it->first <= g_clock) {
++                due.push_back(std::move(it->second));
++                it = a.pending.erase(it);
++            } else {
++                ++it;
++            }
++        }
++        for (const HeroEffect &e : due) AvatarEffectNow(i, e);
++    }
++}
++
++// ---- Notices on the play screen --------------------------------------------------------------------------------------
++
++namespace {
++struct Notice {
++    std::string text;
++    int         until = 0, frames = 0;
++};
++std::vector<Notice> g_notices;
++constexpr std::size_t kNoticeBytes = 127; // MESSAGE_TASK::text, less its end
++constexpr std::size_t kNoticeLines = 3;   // lines to a window
++} // namespace
++
++std::vector<std::string> GameNoticeText(const std::string &utf8, std::size_t line_letters) {
++    // Words in the game's text: ASCII as it is; any other letter as the game writes one ([UNIxxxx], dung_progtxt_*);
++    // a bracket would open one of the game's codes, so it is a parenthesis.
++    std::vector<std::pair<std::string, std::size_t>> words; // (the word's text, its letters)
++    std::string word;
++    std::size_t letters = 0;
++    const auto  end_word = [&] {
++        if (!word.empty()) words.emplace_back(std::exchange(word, {}), std::exchange(letters, 0));
++    };
++    for (std::size_t i = 0; i < utf8.size();) {
++        const unsigned char c = static_cast<unsigned char>(utf8[i]);
++        if (c < 0x80) {
++            ++i;
++            if (c == ' ' || c < 0x20) {
++                end_word();
++                continue;
++            }
++            word += c == '[' ? '(' : c == ']' ? ')' : static_cast<char>(c);
++            ++letters;
++            continue;
++        }
++        const int    extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
++        unsigned int code = extra == 3 ? c & 0x07u : extra == 2 ? c & 0x0Fu : c & 0x1Fu;
++        std::size_t  j = i + 1;
++        for (int k = 0; k < extra && j < utf8.size(); ++k, ++j) code = (code << 6) | (static_cast<unsigned char>(utf8[j]) & 0x3Fu);
++        i = extra == 0 ? i + 1 : j;
++        char named[16];
++        if (extra == 0 || code > 0xFFFF) {
++            word += '?';
++        } else {
++            std::snprintf(named, sizeof(named), "[UNI%04x]", code);
++            word += named;
++        }
++        ++letters;
++    }
++    end_word();
++    // Lines of about forty letters, broken at spaces (a word longer than a line has one to itself), and windows of
++    // three lines that fit the window's text.
++    std::vector<std::string> lines;
++    std::string              line;
++    std::size_t              line_count = 0;
++    for (auto &[text, count] : words) {
++        if (!line.empty() && line_count + 1 + count > std::max<std::size_t>(line_letters, 8)) {
++            lines.push_back(std::exchange(line, {}));
++            line_count = 0;
++        }
++        if (!line.empty()) {
++            line += ' ';
++            ++line_count;
++        }
++        line += text;
++        line_count += count;
++    }
++    if (!line.empty()) lines.push_back(line);
++    std::vector<std::string> windows;
++    std::string              window;
++    std::size_t              in_window = 0;
++    for (std::string &l : lines) {
++        if (l.size() > kNoticeBytes) l.resize(kNoticeBytes); // (one line past the window's text: cut, as a last resort)
++        if (!window.empty() && (in_window == kNoticeLines || window.size() + 1 + l.size() > kNoticeBytes)) {
++            windows.push_back(std::exchange(window, {}));
++            in_window = 0;
++        }
++        if (!window.empty()) window += '\n';
++        window += l;
++        ++in_window;
++    }
++    if (!window.empty()) windows.push_back(window);
++    return windows;
++}
++
++void FieldNotice(const std::string &utf8, int frames) {
++    for (std::string &text : GameNoticeText(utf8)) {
++        if (g_notices.size() >= 8) g_notices.erase(g_notices.begin());
++        g_notices.push_back({std::move(text), g_clock + 600, std::clamp(frames, 90, 240)});
++    }
++}
++
++// The notices waiting, into the floor's message window when the player is on one, playing (as the game's own are).
++static void NoticesStep() {
++    if (g_notices.empty()) return;
++    std::erase_if(g_notices, [](const Notice &n) { return n.until < g_clock; });
++    if (TownNoticesOpen()) { // (in a town, the window co-op keeps there)
++        for (Notice &n : g_notices) TownNoticePrint(n.text, n.frames);
++        g_notices.clear();
++        return;
++    }
++    if (!InDungeon() || DngStatus.mode != DNG_STATUS_FIELD || MsgTaskMan.mes == nullptr) return;
++    for (Notice &n : g_notices) MsgTaskMan.Print(n.text.data(), n.frames, 8, 0);
++    g_notices.clear();
++}
++
++// The avatars' looped sounds, a frame on, as CLoopSeMngr::Step plays a hero's: begun, then followed where the avatar
++// stands, and stopped once no word came for their time. Off the field (a menu, an event) they stop, and begin again
++// on the next word.
++static void AvatarLoopsStep() {
++    const bool field = InDungeon() && DngStatus.mode == DNG_STATUS_FIELD;
++    for (int i = 0; i < kAvatars; ++i) {
++        Avatar &a = g_avatars[static_cast<std::size_t>(i)];
++        if (std::ranges::none_of(a.loops, [](const Avatar::LoopSound &l) { return l.sound >= 0; })) continue;
++        if (!field || !AvatarShown(i) || a.se_bank == 0xFFFFFFFFu) {
++            AvatarLoopsStop(a);
++            continue;
++        }
++        float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++        a.body->GetPosition(at);
++        at[3] = 1.0f;
++        float volume = 0.0f, pan = 0.0f;
++        sndGetVolPan(&volume, &pan, at, 160.0f, 1200.0f);
++        for (Avatar::LoopSound &l : a.loops) {
++            if (l.sound < 0) continue;
++            if (l.count == 0) {
++                sndSePlayVPf(a.se_bank, l.sound, volume, pan, kLoopVoice);
++            } else {
++                sndSetSeVolf(a.se_bank, l.sound, volume, kLoopVoice);
++                sndSetSePanf(a.se_bank, l.sound, pan, kLoopVoice);
++            }
++            if (l.count >= l.keep) {
++                sndSeStop(a.se_bank, l.sound, kLoopVoice);
++                l = Avatar::LoopSound{};
++                continue;
++            }
++            ++l.count;
++        }
++    }
++}
++
++int AvatarLoopsGoing(int slot) {
++    if (slot < 0 || slot >= kAvatars) return 0;
++    return static_cast<int>(std::ranges::count_if(g_avatars[static_cast<std::size_t>(slot)].loops,
++                                                  [](const Avatar::LoopSound &l) { return l.sound >= 0; }));
++}
++
 +void WorldStep() {
++    ++g_clock;
++    NoticesStep();
 +    AvatarsStep();
++    AvatarEffectsDue();
++    AvatarLoopsStep();
 +    AvatarHitsStep();
 +    PuppetsStep();
 +    SharedEventsStep();
@@ -20042,6 +21039,8 @@ index 00000000..9f52f10e
 +void WorldReset() {
 +    for (int i = 0; i < kAvatars; ++i) {
 +        g_avatars[static_cast<std::size_t>(i)].wanted = false;
++        g_avatars[static_cast<std::size_t>(i)].pending.clear();
++        AvatarLoopsStop(g_avatars[static_cast<std::size_t>(i)]);
 +        g_avatars[static_cast<std::size_t>(i)].body.reset();
 +        g_avatars[static_cast<std::size_t>(i)].loaded_character = -1;
 +        g_avatars[static_cast<std::size_t>(i)].scene = nullptr;
@@ -20588,13 +21587,14 @@ index 00000000..bbe3a011
 +}
 diff --git a/port/src/moonmod/lua_runtime.cpp b/port/src/moonmod/lua_runtime.cpp
 new file mode 100644
-index 00000000..86ffdd32
+index 00000000..3b321d8d
 --- /dev/null
 +++ b/port/src/moonmod/lua_runtime.cpp
-@@ -0,0 +1,3431 @@
+@@ -0,0 +1,3433 @@
 +#include "lua_runtime.hpp"
 +#include "moonmod/symlinks.hpp"
 +#include "moonmod/manager_ui.hpp"
++#include "moonmod/coop.hpp"
 +#include "moonmod/native_resource_overrides.hpp"
 +
 +#include <algorithm>
@@ -21639,6 +22639,7 @@ index 00000000..86ffdd32
 +            duration = static_cast<int>(requested_duration);
 +        }
 +        ShowManagerNotice(message, duration);
++        moonmod::coop::FieldNotice(message, duration); // (and in the game's own message window, on a dungeon floor)
 +        return {ApiCallStatus::Ok,
 +                {{"queued", true}, {"manager_open", ManagerOpen()}, {"duration_frames", duration}},
 +                {}};
@@ -30248,7 +31249,7 @@ index b07b90e2..19823df2 100644
      return true;
  }
 diff --git a/port/src/object/dun/dng_main.cpp b/port/src/object/dun/dng_main.cpp
-index ff2a7551..722f24b5 100644
+index ff2a7551..51ac54c1 100644
 --- a/port/src/object/dun/dng_main.cpp
 +++ b/port/src/object/dun/dng_main.cpp
 @@ -1,3 +1,7 @@
@@ -30300,7 +31301,18 @@ index ff2a7551..722f24b5 100644
  }
  
  void DngStep() {
-@@ -2279,6 +2285,7 @@ void IsEventRun() {
+@@ -2023,7 +2029,9 @@ void DngStep() {
+         ActiveMonster->StepEffectScript();
+     }
+ 
+-    if (BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI) {
++    // (MoonMod co-op: copies of another game's monsters rest their thinking, not the floor's effects, which would
++    // stand frozen: torches, a door's sparkle, the other player's shots)
++    if ((BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI) && !moonmod::coop::MonstersMirrored()) {
+         FxScriptMan->PauseFromLevel(3, 3);
+     }
+ 
+@@ -2279,6 +2287,7 @@ void IsEventRun() {
      CSceneEventData data;
  
      if (DngMainScene->GetMapEvent(pos, button, &data)) {
@@ -30308,7 +31320,7 @@ index ff2a7551..722f24b5 100644
          DngMainScene->RunEvent(data.event.point_no, &data);
          return;
      }
-@@ -2354,6 +2361,7 @@ int EventScriptSetup(SYSTEM_SCRIPT_INFO *script) {
+@@ -2354,6 +2363,7 @@ int EventScriptSetup(SYSTEM_SCRIPT_INFO *script) {
  
      if (RunEvent(script->event_no, DngMainScene)) {
          script->running = true;
@@ -30316,7 +31328,7 @@ index ff2a7551..722f24b5 100644
          dc2::log::PrintGame("RUN SYS_SCRIPT %d\n", script->event_no);
          DngStatus.mode = DNG_STATUS_EVENT;
          DngMainScene->before_camera = 0;
-@@ -2379,6 +2387,10 @@ int IsRunDeadEvent(CActionChara *chara) {
+@@ -2379,6 +2389,10 @@ int IsRunDeadEvent(CActionChara *chara) {
          return false;
      }
  
@@ -30327,7 +31339,7 @@ index ff2a7551..722f24b5 100644
      info = GetBattleCharaInfo();
  
      if (info->chr_no == USER_CHARA_MONSTER) {
-@@ -2449,7 +2461,7 @@ void CheckStatusError() {
+@@ -2449,7 +2463,7 @@ void CheckStatusError() {
          }
      }
  
@@ -30336,7 +31348,7 @@ index ff2a7551..722f24b5 100644
          MainChara__2->damage_req = ACTION_DAMAGE_REQ_DEAD;
      }
  }
-@@ -2908,6 +2920,10 @@ int dc2::dungeon::MainKeyCore() {
+@@ -2908,6 +2922,10 @@ int dc2::dungeon::MainKeyCore() {
          unit = DNG_CHANGE_UNIT_RIDE;
      }
  
@@ -30462,7 +31474,7 @@ index 3a177a37..0bfbd353 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 706fda8f..802bb092 100644
+index 706fda8f..bb3dbfd3 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
 @@ -4,6 +4,8 @@
@@ -30587,7 +31599,7 @@ index 706fda8f..802bb092 100644
              calcWeaponParamWhp(monster, prim);
  
              monster->life -= static_cast<int>(damage);
-+            moonmod::coop::MonsterDamaged(monster->chara_type - DNG_CHARA_SLOT_MONSTER, static_cast<int>(damage)); // co-op: a guest's blow goes to the host
++            moonmod::coop::MonsterDamaged(monster->chara_type - DNG_CHARA_SLOT_MONSTER, static_cast<int>(damage), prim, element, guard); // co-op: a guest's blow goes to the host
  
              if (monster->life <= 0) {
                  monster->life = 0;
@@ -33212,7 +34224,7 @@ index 4b7fbe4e..c03129d2 100644
      int             display_per_tick = 0;
      bool            show_fps = false;
 diff --git a/port/src/render/mglib.cpp b/port/src/render/mglib.cpp
-index cba6ef8c..e377424c 100644
+index cba6ef8c..8f375b8a 100644
 --- a/port/src/render/mglib.cpp
 +++ b/port/src/render/mglib.cpp
 @@ -56,6 +56,10 @@
@@ -33226,7 +34238,29 @@ index cba6ef8c..e377424c 100644
  mgRENDER_INFO     mgRenderInfo;
  mgCTextureManager mgTexManager;
  mgCDrawManager    mgDrawManager;
-@@ -1202,7 +1206,13 @@ gfx::Rect ScaleRectangle(gfx::Rect rect, float scale) {
+@@ -1108,6 +1112,21 @@ bool ReadNow(gfx::TextureHandle target, std::vector<uint8_t> &rgba, uint32_t &wi
+     return gfx::ReadbackTexture(target, rgba, width, height);
+ }
+ 
++// --screenshot-every: frame `frame` (one before the exit frame) beside the exit screenshot, as PATH-frame-F.png.
++void WriteScreenshotEvery(int frame) {
++    std::vector<uint8_t>  rgba;
++    uint32_t              width = 0;
++    uint32_t              height = 0;
++    std::filesystem::path name = screenshot_path.stem();
++    name += "-frame-" + std::to_string(frame) + ".png";
++    const std::filesystem::path path = screenshot_path.parent_path() / name;
++    if (ReadNow(gfx::kMainTarget, rgba, width, height) && gfx::WritePng(path, rgba.data(), width, height)) {
++        CT_LOG_INFO(Gfx, "mglib: frame {} written to {}", frame, PathsDisplay(path));
++    } else {
++        CT_LOG_ERROR(Gfx, "mglib: frame {} could not be written to {}", frame, PathsDisplay(path));
++    }
++}
++
+ bool WriteScreenshotDisplayFrames() {
+     if (PresentGetSettings().interpolation && mgPortPreviousList() == nullptr) {
+         CT_LOG_WARN(Gfx, "mglib: frame {} has no previous list, display frames skipped", frame_count);
+@@ -1202,7 +1221,13 @@ gfx::Rect ScaleRectangle(gfx::Rect rect, float scale) {
  /**
   * Applies the current animation target's physical scale to the draw scissor.
   */
@@ -33240,7 +34274,7 @@ index cba6ef8c..e377424c 100644
      const float scale = TextureScale(current_target);
      auto       &rect = state.scissor_rect;
      rect = {.x = rect.x * scale, .y = rect.y * scale, .w = rect.w * scale, .h = rect.h * scale};
-@@ -1799,6 +1809,30 @@ mgPortRenderStateScope::~mgPortRenderStateScope() {
+@@ -1799,6 +1824,30 @@ mgPortRenderStateScope::~mgPortRenderStateScope() {
      }
  }
  
@@ -33271,7 +34305,7 @@ index cba6ef8c..e377424c 100644
  float mgPortTextureScale(gfx::TextureHandle texture) {
      return TextureScale(texture);
  }
-@@ -1933,11 +1967,26 @@ int mgPortVuProg() {
+@@ -1933,11 +1982,26 @@ int mgPortVuProg() {
  
  // Display lists
  
@@ -33300,7 +34334,19 @@ index cba6ef8c..e377424c 100644
  }
  
  mgPortInterpScope::~mgPortInterpScope() {
-@@ -2375,7 +2424,11 @@ void mgEndFrame(mgCDrawManager *manager) {
+@@ -2350,6 +2414,11 @@ void mgEndFrame(mgCDrawManager *manager) {
+     CT_PROFILE_MAIN_FRAME();
+     CrashFrameEnd(frame_count);
+ 
++    if (screenshot_options.every > 0 && !screenshot_path.empty() && frame_count % screenshot_options.every == 0 &&
++        frame_count != exit_frames) {
++        WriteScreenshotEvery(frame_count);
++    }
++
+     if (exit_frames > 0 && frame_count == exit_frames) {
+         int status = kExitOk;
+ 
+@@ -2375,7 +2444,11 @@ void mgEndFrame(mgCDrawManager *manager) {
              }
          }
  
@@ -33407,7 +34453,7 @@ index 0e0d3789..48d69d3a 100644
  /**
   * Writes the current town save and optional spawn or the recorded dungeon floor-entry save, preserving the
 diff --git a/port/src/script/actscript.cpp b/port/src/script/actscript.cpp
-index a0105f01..41251f56 100644
+index a0105f01..0f85c503 100644
 --- a/port/src/script/actscript.cpp
 +++ b/port/src/script/actscript.cpp
 @@ -35,6 +35,7 @@
@@ -33426,7 +34472,15 @@ index a0105f01..41251f56 100644
      return true;
  }
  
-@@ -1760,6 +1762,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+@@ -606,6 +608,7 @@ int _SE_LOOP_PLAY(dc2::script::RunArguments stack, int argc) {
+ 
+     if (sounds != nullptr) {
+         sounds->SeLoopPlayStop(bank, sound, loop, 13);
++        moonmod::coop::HeroLoopSounded(action_info.chara, sound, loop); // co-op: kept up on this hero's avatar too
+     }
+ 
+     return true;
+@@ -1760,6 +1763,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
      action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
      float tint = (float) effect_power / 255.0f;
      tint *= 1.5f;
@@ -33435,7 +34489,7 @@ index a0105f01..41251f56 100644
      action_info.chara->effect_man->SetValue(0, tint, -1, -1);
      action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
      CColPrim *prim = ColPrimMan.GetPrim();
-@@ -1782,6 +1786,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+@@ -1782,6 +1787,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
   *
   */
  void ShotNormalGun(float *position, float *direction) {
@@ -33443,7 +34497,7 @@ index a0105f01..41251f56 100644
      action_info.chara->effect_man->CreateEffSpt("\x8F"
                                                  "e\x92"
                                                  "e",
-@@ -1814,6 +1819,7 @@ void ShotNormalGun(float *position, float *direction) {
+@@ -1814,6 +1820,7 @@ void ShotNormalGun(float *position, float *direction) {
   *
   */
  void ShotMachineGun(float *position, float *direction, char *damage_name, float damage) {
@@ -33451,7 +34505,7 @@ index a0105f01..41251f56 100644
      MachineGun.Set(position, direction);
      CColPrim *prim = ColPrimMan.GetPrim();
      int       col_prim_id = -1;
-@@ -1845,6 +1851,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
+@@ -1845,6 +1852,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
   *
   */
  void ShotGrenadGun(float *position, float *direction) {
@@ -33460,7 +34514,7 @@ index a0105f01..41251f56 100644
      float muzzle[4];
      sceVu0ScaleVector(muzzle, direction, 500.0f);
      sceVu0AddVector(muzzle, position, muzzle);
-@@ -1885,6 +1893,7 @@ void ShotGrenadGun(float *position, float *direction) {
+@@ -1885,6 +1894,7 @@ void ShotGrenadGun(float *position, float *direction) {
   *
   */
  void ShotLaserGun(float *position, float *direction, int type) {
@@ -33468,7 +34522,7 @@ index a0105f01..41251f56 100644
      float muzzle[4];
      float target[4];
      sceVu0ScaleVector(muzzle, direction, 20.0f);
-@@ -2125,6 +2134,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2125,6 +2135,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
      action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
      action_info.chara->effect_man->SetValue(0, 0.0f, -1, -1);
      action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
@@ -33478,7 +34532,7 @@ index a0105f01..41251f56 100644
      CColPrim *prim = ColPrimMan.GetPrim();
  
      if (prim != nullptr) {
-@@ -2224,6 +2236,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2224,6 +2237,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
  
      if (whp[0] > 0) {
          if (attack_type == WEAPON_ATTACK_LAUNCHER) {
@@ -33487,7 +34541,7 @@ index a0105f01..41251f56 100644
              sceVu0ScaleVector(rocket_target, direction, 500.0f);
              sceVu0AddVector(rocket_target, position, rocket_target);
              CRocketLauncher *launcher = RocketLauncher.Get();
-@@ -2266,6 +2280,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2266,6 +2281,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
          }
  
          if (attack_type == WEAPON_ATTACK_MISSILE) {
@@ -33497,7 +34551,7 @@ index a0105f01..41251f56 100644
              sceVu0ScaleVector(missile_target, direction, 500.0f);
              sceVu0AddVector(missile_target, position, missile_target);
              direction[0] += direction[2] * (fRand(1.0f) - 0.5f);
-@@ -2297,6 +2314,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2297,6 +2315,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
              sceVu0AddVector(laser_target, position, laser_target);
              sceVu0SubVector(direction, target_pos, position);
              sceVu0Normalize(direction, direction);
@@ -33506,7 +34560,7 @@ index a0105f01..41251f56 100644
              CLaserGun *laser = LaserGun.Get();
  
              if (laser != nullptr) {
-@@ -2334,6 +2353,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2334,6 +2354,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
              sceVu0AddVector(beam_target, position, beam_target);
              sceVu0ScaleVector(beam_offset, direction, 20.0f);
              sceVu0AddVector(position, position, beam_offset);
@@ -39634,10 +40688,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..5fc50053
+index 00000000..1e5a210a
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,863 @@
+@@ -0,0 +1,991 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -39649,7 +40703,9 @@ index 00000000..5fc50053
 +#include <string>
 +#include <system_error>
 +
++#include "colprim.hpp"
 +#include "dng_main.hpp"
++#include "gamedata.hpp"
 +#include "mainloop.hpp"
 +#include "monster.hpp"
 +#include "moonmod/chronicle_two_adapter.hpp"
@@ -39834,8 +40890,15 @@ index 00000000..5fc50053
 +    const ApiCallResult drawn = api.Call("world.avatar_effect", shot);
 +    ASSERT_EQ(drawn.status, ApiCallStatus::Ok) << drawn.message;
 +    EXPECT_FALSE(drawn.value.at("shown").get<bool>());
-+    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 10}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 11}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
 +                                                            {"dy", 0.0}, {"dz", 1.0}}})).status, ApiCallStatus::InvalidArgument);
++    // a looped sound (kind 10) too: off a floor it is not heard, and nothing is left going
++    const ApiCallResult looped = api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 10}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0},
++                                                                               {"dx", 0.0}, {"dy", 0.0}, {"dz", 0.0}, {"value", 21}, {"amount", 4.0},
++                                                                               {"frame0", "CH_020"}, {"frame1", "CH_020"}}}));
++    ASSERT_EQ(looped.status, ApiCallStatus::Ok) << looped.message;
++    EXPECT_FALSE(looped.value.at("shown").get<bool>());
++    EXPECT_EQ(moonmod::coop::AvatarLoopsGoing(0), 0);
 +    // a sound of the other hero's (kind 9) names its bank; off a floor it is not heard
 +    const ApiCallResult heard = api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 9}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0},
 +                                                                              {"dx", 0.0}, {"dy", 0.0}, {"dz", 0.0}, {"value", 17},
@@ -39869,6 +40932,38 @@ index 00000000..5fc50053
 +    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "ridepod"}, {"ridepod", {155, 145, 135, 165}}})).status, ApiCallStatus::InvalidArgument);
 +    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "monster"}, {"form", -1}})).status, ApiCallStatus::InvalidArgument);
 +    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "monster"}, {"form", "frog"}})).status, ApiCallStatus::InvalidArgument);
++    // A mod's notice in the game's own words: lines of about forty letters, three to a window, other letters coded.
++    const std::vector<std::string> one = moonmod::coop::GameNoticeText("Monica is down! Stand by her and hold Revive to help her up.");
++    ASSERT_EQ(one.size(), 1u);
++    EXPECT_EQ(one[0], "Monica is down! Stand by her and hold\nRevive to help her up.");
++    const std::vector<std::string> coded = moonmod::coop::GameNoticeText("Jos\xC3\xA9 [left]");
++    ASSERT_EQ(coded.size(), 1u);
++    EXPECT_EQ(coded[0], "Jos[UNI00e9] (left)");
++    const std::vector<std::string> long_one = moonmod::coop::GameNoticeText(std::string(200, 'a') + " b c");
++    ASSERT_FALSE(long_one.empty());
++    for (const std::string &w : long_one) EXPECT_LE(w.size(), 127u);
++    EXPECT_TRUE(moonmod::coop::GameNoticeText("").empty());
++    // a question's window takes a longer line: a place's name is not broken from its floor's number
++    const std::string asked = "Host went to Underground Channel, floor 2";
++    EXPECT_NE(moonmod::coop::GameNoticeText(asked).at(0).find('\n'), std::string::npos);
++    EXPECT_EQ(moonmod::coop::GameNoticeText(asked, 52).at(0), asked);
++    // A motion as that player's game plays it (looping or held, at its pace), and the report's age on its clock.
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "max"}, {"motion", 3}, {"motion_flags", 2}, {"motion_step", 0.5}, {"age", 6}})).status,
++              ApiCallStatus::Ok);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "max"}, {"motion_flags", 8}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "max"}, {"motion_step", 17.0}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "max"}, {"motion_step", -1.0}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "max"}, {"age", -2}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("world.avatar_set", at({{"character", "max"}, {"age", 4000}})).status, ApiCallStatus::InvalidArgument);
++    // A shot told with an age is kept for its moment, but only for an avatar on this floor; a bad age is refused.
++    const Json shot = {{"slot", 1}, {"kind", 1}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0}, {"dy", 0.0}, {"dz", 1.0}};
++    Json       aged = shot;
++    aged["age"] = 3;
++    const ApiCallResult kept = api.Call("world.avatar_effect", Json::array({aged}));
++    ASSERT_EQ(kept.status, ApiCallStatus::Ok) << kept.message;
++    EXPECT_FALSE(kept.value.at("shown").get<bool>());
++    aged["age"] = -1;
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({aged})).status, ApiCallStatus::InvalidArgument);
 +    // Without a disc nothing loads: no body, so no name over a head, and the names' draw has nothing to draw.
 +    float       head[2] = {}, feet[2] = {};
 +    std::string name;
@@ -39910,14 +41005,34 @@ index 00000000..5fc50053
 +    // A guest's blow on the copy goes to the host, and the copy keeps the host's life.
 +    moonmod::coop::MonsterDamaged(0, 20);
 +    EXPECT_EQ((*floor.slots)[0].life, 55);
++    // One the copy guarded goes too, with how it landed, for the host's game to show it so.
++    DAMAGE_PARAM row{};
++    row.kind = DAMAGE_KIND_MONICA_MELEE;
++    row.hit_flags = DAMAGE_HIT_STUN;
++    row.stagger = 1;
++    row.stun_time = 12;
++    CColPrim prim;
++    prim.param = &row;
++    moonmod::coop::MonsterDamaged(0, 0, &prim, 1, true);
++    moonmod::coop::MonsterDamaged(0, 0); // (a blow that took nothing and says nothing of how: not sent)
 +    // The host no longer lists slot 2: it is gone here too.
 +    const ApiCallResult again = api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({slot0, slot1})}}}));
 +    ASSERT_EQ(again.status, ApiCallStatus::Ok);
 +    EXPECT_EQ((*floor.slots)[2].state, ACTIVE_MONSTER_NONE);
 +    EXPECT_FALSE(moonmod::coop::IsPuppet(2));
-+    ASSERT_EQ(again.value.at("hits").size(), 1u);
++    ASSERT_EQ(again.value.at("hits").size(), 2u);
 +    EXPECT_EQ(again.value.at("hits")[0].at("slot"), 0);
 +    EXPECT_EQ(again.value.at("hits")[0].at("damage"), 20);
++    EXPECT_FALSE(again.value.at("hits")[0].contains("kind"));
++    const Json &told = again.value.at("hits")[1];
++    EXPECT_EQ(told.at("damage"), 0);
++    EXPECT_EQ(told.at("kind"), DAMAGE_KIND_MONICA_MELEE);
++    EXPECT_EQ(told.at("element"), 1);
++    EXPECT_EQ(told.at("flags"), DAMAGE_HIT_STUN);
++    EXPECT_EQ(told.at("stagger"), 1);
++    EXPECT_EQ(told.at("stun"), 12);
++    EXPECT_TRUE(told.at("guard").get<bool>());
++    EXPECT_TRUE(told.at("at").contains("y"));
 +    EXPECT_EQ(api.Call("monsters.puppet_clear").status, ApiCallStatus::Ok);
 +    EXPECT_FALSE(moonmod::coop::IsPuppet(0));
 +
@@ -39928,6 +41043,24 @@ index 00000000..5fc50053
 +    EXPECT_FALSE(hit.value.at("killed").get<bool>());
 +    EXPECT_EQ((*floor.slots)[0].life, 35);
 +    EXPECT_EQ(api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 0}}})).status, ApiCallStatus::InvalidArgument);
++    // A blow told with how it landed is taken as this game's own: the life goes, the stun holds it, and a knock-down
++    // knocks it over. One that took nothing and was guarded leaves the life and has it guard.
++    const Json landed = {{"slot", 0}, {"damage", 5}, {"kind", DAMAGE_KIND_MAX_MELEE}, {"element", 0}, {"flags", DAMAGE_HIT_KNOCKDOWN},
++                         {"stagger", 1}, {"stun", 10}, {"at", {{"x", 1.0}, {"y", 8.0}, {"z", 0.0}}}};
++    const ApiCallResult knocked = api.Call("monsters.mirror_hit", Json::array({landed}));
++    ASSERT_EQ(knocked.status, ApiCallStatus::Ok) << knocked.message;
++    EXPECT_EQ(knocked.value.at("damage"), 5);
++    EXPECT_EQ((*floor.slots)[0].life, 30);
++    EXPECT_EQ((*floor.slots)[0].damage_time, 10);
++    EXPECT_EQ((*floor.slots)[0].req_prog, MONSTER_PROG_KNOCK);
++    const ApiCallResult guarded = api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 0}, {"kind", DAMAGE_KIND_MAX_MELEE}, {"guard", true}}}));
++    ASSERT_EQ(guarded.status, ApiCallStatus::Ok) << guarded.message;
++    EXPECT_EQ(guarded.value.at("damage"), 0);
++    EXPECT_EQ((*floor.slots)[0].life, 30);
++    EXPECT_EQ((*floor.slots)[0].req_prog, MONSTER_PROG_GUARD);
++    EXPECT_EQ(api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 5}, {"element", 4}}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 5}, {"at", 3}}})).status, ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 5}, {"why", 1}}})).status, ApiCallStatus::InvalidArgument);
 +}
 +
 +TEST(MoonModCoopApi, AFollowersMonstersTheLeaderNoLongerHasLeaveTheFloorsCountForItsClear) {
@@ -40484,6 +41617,43 @@ index 00000000..5fc50053
 +    GamePad__2.pad[0].button = 0;
 +}
 +
++TEST(MoonModCoopApi, AYesOrNoIsAskedInTheGamesOwnWindowOnAFloorAndChosenLeftAndRight) {
++    FloorFixture floor;
++    Api          api;
++    const Json ask = Json::array({{{"id", "follow"}, {"title", "Monica went to Underground Channel, floor 3"}, {"subtitle", "Join them there?"},
++                                   {"style", "yes_no"}, {"options", Json::array({{{"title", "Join Monica"}}, {{"title", "Stay here"}}})}}});
++    const ApiCallResult opened = api.Call("ui.choice_open", ask);
++    ASSERT_EQ(opened.status, ApiCallStatus::Ok) << opened.message;
++    ASSERT_TRUE(moonmod::coop::ChoiceIsOpen());
++    EXPECT_TRUE(moonmod::coop::OpenChoice()->yes_no);
++    EXPECT_EQ(moonmod::coop::OpenChoice()->cursor, 0u) << "Yes first";
++    // (past the grace that keeps the press that opened it from answering it) right is No, left Yes again
++    GamePad__2.pad[0].button = 0;
++    GamePad__2.previous_pad[0].button = 0;
++    for (int i = 0; i < 9; ++i) moonmod::coop::ChoiceStep();
++    GamePad__2.pad[0].button = PAD_RIGHT;
++    moonmod::coop::ChoiceStep();
++    EXPECT_EQ(moonmod::coop::OpenChoice()->cursor, 1u);
++    GamePad__2.previous_pad[0].button = PAD_RIGHT;
++    GamePad__2.pad[0].button = PAD_LEFT;
++    moonmod::coop::ChoiceStep();
++    EXPECT_EQ(moonmod::coop::OpenChoice()->cursor, 0u);
++    GamePad__2.pad[0].button = 0;
++    GamePad__2.previous_pad[0].button = 0;
++    moonmod::coop::ResetForTests();
++    // Three options, or no style that is known: refused; at the title it is the panel.
++    Json three = ask;
++    three[0]["options"].push_back({{"title", "Later"}});
++    EXPECT_EQ(api.Call("ui.choice_open", three).status, ApiCallStatus::InvalidArgument);
++    Json odd = ask;
++    odd[0]["style"] = "bubble";
++    EXPECT_EQ(api.Call("ui.choice_open", odd).status, ApiCallStatus::InvalidArgument);
++    PortLoopNo = LOOP_TITLE;
++    ASSERT_EQ(api.Call("ui.choice_open", ask).status, ApiCallStatus::Ok);
++    EXPECT_FALSE(moonmod::coop::OpenChoice()->yes_no) << "the title has no message window of the game's: the panel";
++    moonmod::coop::ResetForTests();
++}
++
 +TEST(MoonModCoopApi, StrikesAndFloorsAndMapsAreRefusedOffTheFloorWithReasons) {
 +    FloorFixture floor;
 +    Api          api;
@@ -40491,6 +41661,18 @@ index 00000000..5fc50053
 +    const ApiCallResult strike = api.Call("combat.strike_player", Json::array({{{"x", 0.0}, {"y", 8.0}, {"z", 0.0}, {"radius", 12}, {"damage", 30}, {"kind", "heavy"}}}));
 +    EXPECT_EQ(strike.status, ApiCallStatus::Failed);
 +    EXPECT_EQ(api.Call("combat.strike_player", Json::array({{{"x", 0.0}, {"damage", 30}}})).status, ApiCallStatus::InvalidArgument);
++    // How the blow was dealt (the monster's damage row) is read and checked before the hero is looked for.
++    const Json dealt = {{"x", 0.0}, {"y", 8.0}, {"z", 0.0}, {"damage", 30}, {"flags", DAMAGE_HIT_KNOCKDOWN}, {"stagger", 1}, {"stun", 8},
++                        {"guard_rate", 30}, {"status", WEAPON_SPECIAL_POISON}, {"toward", {{"x", 1.0}, {"z", 0.0}}}};
++    EXPECT_EQ(api.Call("combat.strike_player", Json::array({dealt})).status, ApiCallStatus::Failed);
++    for (const char *bad : {"flags", "stagger", "stun", "guard_rate", "status"}) {
++        Json wrong = dealt;
++        wrong[bad] = 5000000;
++        EXPECT_EQ(api.Call("combat.strike_player", Json::array({wrong})).status, ApiCallStatus::InvalidArgument) << bad;
++    }
++    Json no_way = dealt;
++    no_way["toward"] = 1;
++    EXPECT_EQ(api.Call("combat.strike_player", Json::array({no_way})).status, ApiCallStatus::InvalidArgument);
 +    EXPECT_EQ(api.Call("dungeons.enter_floor", Json::array({{{"floor_id", 200}}})).status, ApiCallStatus::InvalidArgument);
 +    PortLoopNo = LOOP_TITLE;
 +    EXPECT_EQ(api.Call("dungeons.enter_floor", Json::array({{{"dungeon_id", 1}, {"floor_id", 2}}})).status, ApiCallStatus::Failed);
