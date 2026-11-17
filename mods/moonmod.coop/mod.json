@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.coop",
   "name": "Online Co-op",
-  "version": "0.12.3",
+  "version": "0.13.0",
   "author": "Jeffiest",
   "description": "Play Dark Cloud (up to four) or Dark Cloud 2 (two) together online. The host plays their own save and opens a room; friends join it from the title screen's Online Co-op with its code and walk into the host's world: the host's story, towns, Georama and dungeons, with their own weapons, items and Gilda. In Dark Cloud a friend's things are kept in the host's save, and a friend's own save is never touched. In Dark Cloud 2 a friend brings one of their own saves instead (past the talk with Donny): its things come along and go back into it, its story is left alone, the host plays Max and the friend Monica, and they can swap; each sees the other's shots, spells, sword trails and Georama parts as they happen, and hears their hero. A dropped friend gets back in by itself; each player's ping is on the HUD. A player knocked out is down, not out: a friend beside them revives them, and a party that all falls walks back to town with its things. Needs the MoonFactory engine with online play (net.*) and visits.",
   "framework_api": 1,

@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 9
+local PROTOCOL = 10
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -66,7 +66,9 @@ local function setting(id, fallback)
   return value
 end
 local function toast(message)
-  try(game.ui.notify, {message = cut(message, 196), duration_frames = 300})
+  -- (Chronicle Two shows a notice in the game's own message window, where the game speaks for itself: no "Co-op:")
+  local shown = DC2 and (tostring(message):gsub("^Co%-op: ", "", 1)) or message
+  try(game.ui.notify, {message = cut(shown, 196), duration_frames = 300})
   moonmod.log("info", "toast " .. cut(message, 196)) -- in the log too, for bug reports and the live tests
 end
 local function hud(text)
@@ -171,31 +173,94 @@ local function show_room()
   for peer in pairs(S.players) do seen[peer] = true end
   for peer in pairs(S.names) do seen[peer] = true end
   for _ in pairs(seen) do count = count + 1 end
-  if S.rejoin then hud(string.format("CO-OP %s  reconnecting...", S.code or "....")) return end
-  hud(string.format("CO-OP %s  %d of %d", S.code or "....", count, S.ROOM_FOR))
-  -- the others in the room, by name, under it: each with their ping, or "no signal"
-  local names = {}
+  -- the others in the room, by name: each with their ping, or "no signal"
+  local names, troubled = {}, S.rejoin ~= nil
   for peer, name in pairs(S.names) do
     local ms = link.ping[peer]
     names[#names + 1] = link.quiet[peer] and (name .. " (no signal)") or ms and string.format("%s %.0fms", name, ms) or name
+    troubled = troubled or (link.quiet[peer] and true or false) or (ms ~= nil and ms > 250)
   end
   table.sort(names)
+  -- Chronicle Two keeps its screen its own: the room's line shows for a while after someone comes or goes, and while
+  -- the link is in trouble (a reconnect, no signal, a slow ping); the code is in the Mod Manager all along.
+  if DC2 then
+    local who = count .. ":" .. table.concat(names, ","):gsub("%d+ms", "")
+    if who ~= S.hud_who then S.hud_who, S.hud_until = who, S.frame + 360 end
+    if not troubled and S.frame >= (S.hud_until or 0) then
+      hud(nil)
+      try(game.render.layer_remove, {id = "coop_who"})
+      return
+    end
+  end
+  if S.rejoin then hud(string.format("CO-OP %s  reconnecting...", S.code or "....")) return end
+  hud(string.format("CO-OP %s  %d of %d", S.code or "....", count, S.ROOM_FOR))
   if #names > 0 then try(game.render.layer_register, {id = "coop_who", text = cut(table.concat(names, ", "), 48)})
   else try(game.render.layer_remove, {id = "coop_who"}) end
 end
 
 -- Seeing each other ------------------------------------------------------------------------------------------------
--- Ten times a second each game sends where its player is on a dungeon floor ("P scene character weapon x y z heading
--- motion"); each game shows the others on the same floor as heroes of their own (world.avatar_set), the host in its
--- own colours and guests in blue, and takes away one that has gone quiet for three seconds or is elsewhere. Every game
--- builds each floor from a seed made of the room's code, the dungeon and the floor (dungeons.set_seed), so the floors
--- are the same for everyone, whoever comes first.
+-- Fifteen times a second each game sends where its player is ("P scene character weapon x y z heading motion flags step
+-- frame": the motion as its game plays it, looping or held, and how fast, and the sending game's frame); each game
+-- shows the others in the same place as heroes of their own (world.avatar_set), and takes away one that has gone quiet
+-- for three seconds or is elsewhere. In Chronicle the host is in its own colours and guests in blue (they may be the
+-- same hero); Chronicle Two's two heroes are told apart by themselves. Every game builds each floor from a seed made of
+-- the room's code, the dungeon and the floor (dungeons.set_seed), so the floors are the same for everyone, whoever
+-- comes first.
+--
+-- Each game is shown on its own clock: a report, a shot or a monster's move carries the frame it was made on, and
+-- the others show it as many frames behind as the quickest of that game's recent reports took to come (S.age), so its
+-- moves, swings, shots and sounds keep their order and spacing however unevenly the network brings them.
 
-local SEND_EVERY = 6     -- frames between reports
+local SEND_EVERY = 4     -- frames between reports
 local QUIET = 180        -- frames without a report before a player's hero goes
 local GUEST_TINT = {64, 84, 128}
-local others = {}        -- peer -> {scene, state, heard, slot}
+local others = {}        -- peer -> {scene, state, heard, slot, lag}
 local my_scene = nil
+
+-- Chronicle Two's heroes by name, for a player who gave none: the ridepod is Max's, a monster's form Monica's.
+S.HERO_NAMES = {max = "Max", monica = "Monica", ridepod = "Max", monster = "Monica"}
+
+-- How long a peer's messages take: the frames between a message's frame and this game's when it came, the least of
+-- the last thirty-two (the others came slower). A message's age is then how far behind that quickest it is shown.
+function S.clock_heard(peer, sent)
+  sent = tonumber(sent)
+  if not sent then return end
+  local o = others[peer] or {}
+  others[peer] = o
+  o.lag = o.lag or {}
+  o.lag[#o.lag + 1] = S.frame - sent
+  if #o.lag > 32 then table.remove(o.lag, 1) end
+  local least = o.lag[1]
+  for _, v in ipairs(o.lag) do if v < least then least = v end end
+  o.least = least
+end
+function S.age(peer, sent)
+  local o = others[peer]
+  sent = tonumber(sent)
+  if not (o and o.least and sent) then return nil end
+  return math.max(0, math.min(3600, math.floor(S.frame - sent - o.least)))
+end
+-- Chronicle Two shows another game's reports this many frames behind its clock (the engine's kDelay,
+-- coop_world_moonmod.cpp). A blow between the games is kept for that moment too, so it lands as the swing that dealt
+-- it lands on this screen, not before.
+S.SHOWN_BEHIND = 8
+S.later = {}
+function S.at_moment(peer, sent, fn)
+  local age = sent and S.age(peer, sent)
+  local wait = age and S.SHOWN_BEHIND - age or 0
+  if wait <= 0 then fn() return end
+  if #S.later >= 64 then table.remove(S.later, 1) end
+  S.later[#S.later + 1] = {due = S.frame + wait, fn = fn}
+end
+function S.later_step()
+  if #S.later == 0 then return end
+  local due, keep = {}, {}
+  for _, l in ipairs(S.later) do
+    if l.due <= S.frame then due[#due + 1] = l else keep[#keep + 1] = l end
+  end
+  S.later = keep
+  for _, l in ipairs(due) do pcall(l.fn) end
+end
 
 local function scene_of(w)
   if type(w) ~= "table" then return nil end
@@ -238,8 +303,12 @@ local function show_others()
                                   ridepod = st.character == "ridepod" and o.ridepod or nil,
                                   form = st.character == "monster" and o.form or nil,
                                   x = st.x, y = st.y, z = st.z,
-                                  heading = st.heading, motion = st.motion, tint = peer ~= 0 and GUEST_TINT or nil,
-                                  name = o.name or (peer == 0 and "Host" or ("Player " .. peer)),
+                                  heading = st.heading, motion = st.motion,
+                                  motion_flags = DC2 and st.flags or nil, motion_step = DC2 and st.step or nil,
+                                  age = DC2 and S.age(peer, st.sent) or nil,
+                                  tint = peer ~= 0 and not DC2 and GUEST_TINT or nil,
+                                  -- (with no name of their own, Chronicle Two's say whose hero it is, as the game would)
+                                  name = o.name or (DC2 and S.HERO_NAMES[st.character]) or (peer == 0 and "Host" or ("Player " .. peer)),
                                   down = o.down ~= nil and o.down ~= "up" or nil})
       o.slot = slot
     elseif o.slot then
@@ -250,8 +319,8 @@ local function show_others()
 end
 
 local function hear_position(peer, rest)
-  local scene, character, weapon, x, y, z, heading, motion =
-    rest:match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)$")
+  local scene, character, weapon, x, y, z, heading, motion, flags, step, sent =
+    rest:match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%d) (%S+) (%d+)$")
   local o = others[peer] or {}
   others[peer] = o
   o.heard = S.frame
@@ -260,16 +329,22 @@ local function hear_position(peer, rest)
   local moved = o.scene ~= scene
   o.scene = scene
   if moved and S.moved then S.moved(peer, scene) end
+  S.clock_heard(peer, sent)
+  step = S.num(step)
   o.state = {character = character, weapon = tonumber(weapon), x = S.num(x), y = S.num(y),
-             z = S.num(z), heading = S.num(heading), motion = math.floor(S.num(motion))}
+             z = S.num(z), heading = S.num(heading), motion = math.floor(S.num(motion)),
+             flags = math.floor(S.num(flags)) % 8, step = step >= 0 and step <= 16 and step or nil, sent = tonumber(sent)}
+  if DC2 then show_others() end -- (at once, so the avatar has each report on its clock)
 end
 
 -- Shots and spells (Chronicle Two): what a player's hero fires on a floor (Max's guns, Monica's magic, her magic
 -- sword's charge), the trails of their blade's swings and the sounds their hero makes are sent as they happen ("F
--- scene kind x y z dx dy dz value amount target frames", player.effects_take's entries), and the others draw them from
+-- scene kind x y z dx dy dz value amount target frame frames", player.effects_take's entries and the frame they went
+-- on), and the others draw them from
 -- that player's hero (world.avatar_effect): the same shot flying the same way, striking nothing there, since its hits
 -- are the firing game's and reach the monsters as that game's other hits do. A sound (kind 9) names its bank in
--- frames ("CH_000,CH_000"), as a trail names its two frames.
+-- frames ("CH_000,CH_000"), as a trail names its two frames; so does a looped one (kind 10: a charge, an engine),
+-- told again every few frames while the hero keeps it going.
 S.shots = {MOST = 8} -- shots sent in one frame at most (a machine gun fires one a frame)
 function S.shots.send()
   if not (game.player and game.player.effects_take) then return end
@@ -284,25 +359,29 @@ function S.shots.send()
       if type(f.frame0) == "string" and type(f.frame1) == "string" and f.frame0:match("^[%w_]+$") and f.frame1:match("^[%w_]+$") then
         frames = f.frame0 .. "," .. f.frame1
       end
-      send("all", "F", string.format("%s %d %.1f %.1f %.1f %.4f %.4f %.4f %d %.3f %d %s", my_scene, math.floor(S.num(f.kind)),
+      send("all", "F", string.format("%s %d %.1f %.1f %.1f %.4f %.4f %.4f %d %.3f %d %d %s", my_scene, math.floor(S.num(f.kind)),
                                      S.num(f.x), S.num(f.y), S.num(f.z), S.num(f.dx), S.num(f.dy), S.num(f.dz),
-                                     math.floor(S.num(f.value)), S.num(f.amount), math.floor(S.num(f.target or -1)), frames))
+                                     math.floor(S.num(f.value)), S.num(f.amount), math.floor(S.num(f.target or -1)),
+                                     math.floor(S.frame), frames))
     end
   end
 end
 function S.shots.hear(peer, rest)
   if #rest > 200 then return end
-  local scene, kind, x, y, z, dx, dy, dz, value, amount, target, frames =
-    rest:match("^(%S+) (%d) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%S+) (%-?%d+) ?(%S*)$")
+  local scene, kind, x, y, z, dx, dy, dz, value, amount, target, sent, frames =
+    rest:match("^(%S+) (%d%d?) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%S+) (%-?%d+) (%d+) ?(%S*)$")
   local frame0, frame1 = (frames or ""):match("^([%w_]+),([%w_]+)$")
   local o = others[peer]
   -- (a shot on a floor this game is not on, or from a hero not shown here, is not drawn)
   if not scene or not o or not o.slot or scene ~= my_scene or o.scene ~= scene then return end
   value, target = tonumber(value), tonumber(target)
   if not value or value < -1 or value > 65535 or not target or target < -1 or target > 255 then return end
+  S.clock_heard(peer, sent)
+  -- (drawn when the avatar, shown on its game's clock, comes to the moment it was fired)
   try(game.world and game.world.avatar_effect, {slot = o.slot, kind = tonumber(kind), x = S.num(x), y = S.num(y), z = S.num(z),
                                                  dx = S.num(dx), dy = S.num(dy), dz = S.num(dz), value = value,
-                                                 amount = S.num(amount), target = target, frame0 = frame0, frame1 = frame1})
+                                                 amount = S.num(amount), target = target, frame0 = frame0, frame1 = frame1,
+                                                 age = S.age(peer, sent)})
 end
 
 -- Places' names (Chronicle Two, whose maps have names of their own): a game says what the place it stands in is
@@ -445,16 +524,17 @@ local function send_position()
     local p = try(game.player and game.player.get)
     note_outfit(p)
     if p and p.position then
-      text = string.format("%s %s %s %.1f %.1f %.1f %.3f %d", my_scene, p.town_character or p.character,
+      text = string.format("%s %s %s %.1f %.1f %.1f %.3f %d %d %.2f", my_scene, p.town_character or p.character,
                            tostring(p.weapon and p.weapon.item_no or "-"), p.position.x, p.position.y, p.position.z,
-                           p.heading or 0, p.motion or 0)
+                           p.heading or 0, p.motion or 0, math.floor(S.num(p.motion_flags)) % 8,
+                           p.motion_step ~= nil and S.num(p.motion_step) or -1)
     elseif last_sent and last_sent:sub(1, #my_scene + 1) == my_scene .. " " then
       text = last_sent -- in a menu or a talk: still standing there
     end
   end
   if text == "-" and last_sent == "-" then return end -- out of the dungeon it is said once
   last_sent = text
-  send("all", "P", text)
+  send("all", "P", text == "-" and text or (text .. " " .. S.frame)) -- (stamped with this game's frame as it goes)
 end
 
 -- The room's floors: the same seed for a floor in every game in the room.
@@ -474,7 +554,8 @@ end)
 -- The host's game runs a floor's monsters for everyone. There they see every player on the floor and go for the
 -- nearest; a blow, shot or spell that lands on another player comes back from monsters.mirror_get and goes to that player's game
 -- ("D damage kind flags"), which takes it as a monster's blow (combat.strike_player), guard and dodge and all. Fifteen
--- times a second the host sends where its monsters are ("M scene slot,kind,state,hp,max_hp,x,y,z,heading,motion;..."),
+-- times a second the host sends where its monsters are ("M scene frame
+-- slot,kind,state,hp,max_hp,x,y,z,heading,motion,motion_flags,motion_step;..."),
 -- and a guest on that floor makes its own monsters copies of them (monsters.puppet_set): they stand, move and die as
 -- the host's do. A guest's blow on one (puppet_set returns them) goes to the host ("H slot damage"), whose monster
 -- takes it.
@@ -533,17 +614,18 @@ function mon.host_step()
   if type(got) ~= "table" then return end
   local parts = {}
   for _, m in ipairs(got.monsters or {}) do
-    parts[#parts + 1] = string.format("%d,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.3f,%d", m.slot, m.kind, m.state, m.hp, m.max_hp,
-                                      m.x, m.y, m.z, m.heading, m.motion)
+    parts[#parts + 1] = string.format("%d,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.3f,%d,%d,%.2f", m.slot, m.kind, m.state, m.hp, m.max_hp,
+                                      m.x, m.y, m.z, m.heading, m.motion, math.floor(S.num(m.motion_flags)) % 8,
+                                      m.motion_step ~= nil and S.num(m.motion_step) or -1)
   end
-  send("all", "M", my_scene .. " " .. (#parts > 0 and table.concat(parts, ";") or "-"))
+  send("all", "M", my_scene .. " " .. math.floor(S.frame) .. " " .. (#parts > 0 and table.concat(parts, ";") or "-"))
   local alive = 0
   for _, m in ipairs(got.monsters or {}) do if m.hp > 0 then alive = alive + 1 end end
   mon.count = alive -- for the live tests' report
   for _, hit in ipairs(got.hits or {}) do
     local peer = mon.peer_with_avatar(hit.avatar)
     if peer then
-      send(peer, "D", string.format("%d %d %d", hit.damage, hit.kind or 0, hit.flags or 0))
+      send(peer, "D", string.format("%d %d %d", hit.damage, hit.kind or 0, hit.flags or 0) .. mon.blow_told(hit))
       if AUTOTEST then moonmod.log("info", string.format("COOPTEST blow on peer %d strength %d kind %d", peer, hit.damage, hit.kind or 0)) end
     end
   end
@@ -553,6 +635,40 @@ function mon.release()
   if mon.puppets then try(game.monsters and game.monsters.puppet_clear) end
   mon.puppets = false
 end
+
+-- Chronicle Two: how a blow landed goes with it, so the game it lands in takes it as one of its own (the hero's guard,
+-- the stun and stagger, poison and the rest) and shows it so (the flash, the cry, the spark, the damage). On "D":
+-- " stun stagger guard_rate status at_x at_y at_z toward_x toward_z" (where it struck, from the hero's feet); on
+-- "H": " kind element flags stagger stun guard at_x at_y at_z" (from the monster's). Last comes the frame it was
+-- dealt on, and the other game lands it when the swing that dealt it comes to that moment on its screen
+-- (S.at_moment). Chronicle's blows say only how much, at once.
+local function n(v) return math.floor(S.num(v)) end
+local function at_of(v) return type(v) == "table" and v or {} end
+function mon.blow_told(hit)
+  if not DC2 then return "" end
+  local when = " " .. math.floor(S.frame)
+  if hit.stun == nil then return when end
+  local at, toward = at_of(hit.at), at_of(hit.toward)
+  return string.format(" %d %d %d %d %.1f %.1f %.1f %.2f %.2f", n(hit.stun), n(hit.stagger), n(hit.guard_rate), n(hit.status) % 0x200000,
+                       S.num(at.x), S.num(at.y), S.num(at.z), S.num(toward.x), S.num(toward.z)) .. when
+end
+function mon.hit_told(hit)
+  if not DC2 then return "" end
+  local when = " " .. math.floor(S.frame)
+  if hit.kind == nil then return when end
+  local at = at_of(hit.at)
+  return string.format(" %d %d %d %d %d %d %.1f %.1f %.1f", n(hit.kind), n(hit.element), n(hit.flags), n(hit.stagger), n(hit.stun),
+                       hit.guard and 1 or 0, S.num(at.x), S.num(at.y), S.num(at.z)) .. when
+end
+-- The numbers after a message's first ones, or nil when there are not want of them.
+local function numbers(rest, want)
+  local out = {}
+  for v in tostring(rest or ""):gmatch("%S+") do out[#out + 1] = tonumber(v) end
+  if #out ~= want then return nil end
+  for i = 1, want do if out[i] == nil or out[i] ~= out[i] then return nil end end
+  return out
+end
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
 function mon.hear(peer, rest)
   if #rest > 12000 then return end
@@ -567,22 +683,27 @@ function mon.hear(peer, rest)
   elseif S.role ~= "guest" or peer ~= 0 then
     return
   end
-  local scene, list = rest:match("^(%S+) (%S+)$")
+  local scene, sent, list = rest:match("^(%S+) (%d+) (%S+)$")
   if not scene or scene ~= my_scene then mon.release() return end
   mon.from = peer
+  S.clock_heard(peer, sent)
   local monsters = {}
   if list ~= "-" then
     for item in list:gmatch("[^;]+") do
       local f = {}
       for v in item:gmatch("[^,]+") do f[#f + 1] = tonumber(v) end
-      if #f == 10 then
+      if #f == 12 then
+        -- (in Chronicle Two each plays its motion as the leader's does, looping or held, at its pace)
+        local step = f[12] >= 0 and f[12] <= 16 and f[12] or nil
         monsters[#monsters + 1] = {slot = math.floor(f[1]), kind = math.floor(f[2]), state = math.floor(f[3]),
                                    hp = math.floor(f[4]), max_hp = math.floor(f[5]), x = f[6], y = f[7], z = f[8],
-                                   heading = f[9], motion = math.floor(f[10])}
+                                   heading = f[9], motion = math.floor(f[10]),
+                                   motion_flags = DC2 and math.floor(f[11]) % 8 or nil, motion_step = DC2 and step or nil}
       end
     end
   end
-  local got = try(game.monsters and game.monsters.puppet_set, {monsters = monsters})
+  -- (Chronicle Two: shown on the leader's clock, a little behind and eased, as the players' heroes are)
+  local got = try(game.monsters and game.monsters.puppet_set, {monsters = monsters, age = DC2 and S.age(peer, sent) or nil})
   local alive = 0
   for _, m in ipairs(monsters) do if m.hp > 0 then alive = alive + 1 end end
   mon.count = alive -- for the live tests' report
@@ -601,30 +722,55 @@ function mon.hear(peer, rest)
     mon.scene = scene
     -- every blow this guest landed on a copy (a weapon's, a bomb's, a thrown item's) goes to the host's monster
     for _, hit in ipairs(type(got) == "table" and got.hits or {}) do
-      send(DC2 and peer or 0, "H", string.format("%d %d", hit.slot, math.floor(hit.damage)))
+      send(DC2 and peer or 0, "H", string.format("%d %d", hit.slot, math.floor(hit.damage)) .. mon.hit_told(hit))
     end
   end
 end
 
 -- A guest's blow on a copy of the host's monster: the host's takes it.
 function mon.hit_on_host(peer, rest)
-  local o = others[peer]
-  if not (o and o.scene and o.scene == my_scene) then return end
-  local slot, damage = rest:match("^(%d+) (%d+)$")
+  local slot, damage, told = rest:match("^(%d+) (%d+)(.*)$")
   slot, damage = tonumber(slot), tonumber(damage)
-  if slot and damage and slot <= 255 then -- one blow is a blow: never more than the game's most
-    try(game.monsters and game.monsters.mirror_hit, {slot = slot, damage = math.min(9999, damage)})
+  if not (slot and damage and slot <= 255) then return end
+  local hit = {slot = slot, damage = math.min(9999, damage)} -- one blow is a blow: never more than the game's most
+  local f = DC2 and numbers(told, 10)
+  if f then
+    -- (Chronicle Two: taken and shown as this game's own hero's blow would be)
+    hit.kind, hit.element, hit.flags = clamp(math.floor(f[1]), -1, 31), clamp(math.floor(f[2]), -1, 3), clamp(math.floor(f[3]), 0, 255)
+    hit.stagger, hit.stun, hit.guard = clamp(math.floor(f[4]), 0, 16), clamp(math.floor(f[5]), 0, 255), f[6] == 1
+    hit.at = {x = clamp(f[7], -200, 200), y = clamp(f[8], -200, 200), z = clamp(f[9], -200, 200)}
   end
+  local sent = f and f[10] or (DC2 and numbers(told, 1) or {})[1]
+  S.at_moment(peer, sent, function()
+    local o = others[peer]
+    if not (o and o.scene and o.scene == my_scene) then return end
+    try(game.monsters and game.monsters.mirror_hit, hit)
+  end)
 end
 
 -- The host's monster struck this guest.
-function mon.struck(rest)
-  local damage, kind, flags = rest:match("^(%d+) (%-?%d+) (%-?%d+)$")
+function mon.struck(peer, rest)
+  local damage, kind, flags, told = rest:match("^(%d+) (%-?%d+) (%-?%d+)(.*)$")
+  if not damage then return end
+  local f = DC2 and numbers(told, 10)
+  local sent = f and f[10] or (DC2 and numbers(told, 1) or {})[1]
+  S.at_moment(peer, sent, function() mon.struck_now(damage, kind, flags, f) end)
+end
+function mon.struck_now(damage, kind, flags, f)
   local p = try(game.player and game.player.get)
-  if not (damage and my_scene and p and p.position) then return end
+  if not (my_scene and p and p.position) then return end
   -- kind as the host's hit list has it: 2 a small hit (a flinch), 3 or 4 a blow (a knock-back)
-  local took = try(game.combat and game.combat.strike_player, {x = p.position.x, y = p.position.y + 8, z = p.position.z, radius = 12,
-      damage = math.min(9999, tonumber(damage)), kind = tonumber(kind) >= 3 and "heavy" or "light"})
+  local blow = {x = p.position.x, y = p.position.y + 8, z = p.position.z, radius = 12,
+                damage = math.max(1, math.min(9999, tonumber(damage))), kind = tonumber(kind) >= 3 and "heavy" or "light"}
+  if f then
+    -- (Chronicle Two: the monster's damage row, and where on the hero it struck, a little way from the feet)
+    blow.flags = clamp(math.floor(tonumber(flags) or 0), 0, 255)
+    blow.stun, blow.stagger, blow.guard_rate = clamp(math.floor(f[1]), 0, 255), clamp(math.floor(f[2]), 0, 16), clamp(math.floor(f[3]), 0, 100)
+    blow.status = clamp(math.floor(f[4]), 0, 0x1FFFFF)
+    blow.x, blow.y, blow.z = p.position.x + clamp(f[5], -10, 10), p.position.y + clamp(f[6], 0, 30), p.position.z + clamp(f[7], -10, 10)
+    blow.toward = {x = clamp(f[8], -1, 1), z = clamp(f[9], -1, 1)}
+  end
+  local took = try(game.combat and game.combat.strike_player, blow)
   if AUTOTEST and type(took) == "table" then
     moonmod.log("info", string.format("COOPTEST struck hit=%s damage=%s hp=%s%s", tostring(took.hit), tostring(took.damage), tostring(took.hp),
                                       took.reason and (" reason=" .. tostring(took.reason)) or ""))
@@ -632,6 +778,7 @@ function mon.struck(rest)
 end
 
 function mon.tick()
+  S.later_step() -- (blows kept for their moment)
   if (S.role == "host" or (DC2 and S.role)) and S.frame % MIRROR_EVERY == 0 then mon.host_step() end
   -- A host that stops sending (paused, in a menu) leaves its monsters held where they are; a guest who leaves the
   -- floor has its own monsters on the next.
@@ -768,28 +915,46 @@ function together.place(scene)
   return "somewhere"
 end
 
--- One panel at a time, in turn (a follow offer, a step of a gift).
+-- One panel at a time, in turn (a follow offer, a step of a gift). A question of yes or no (yes_no: its first option
+-- is yes, its second no) is asked in Chronicle Two's own message window with the game's Yes and No, its subtitle (or
+-- ask, when the panel's subtitle is no question) the question; elsewhere, and in Chronicle, it is the panel.
 function together.ask(panel) table.insert(together.queue, panel) end
+local function autotest_answer(p)
+  local yes = AUTOTEST.follow ~= false
+  moonmod.log("info", "COOPTEST offer " .. p.title .. (yes and " -> join" or " -> stay"))
+  if yes and p.options[1].pick then p.options[1].pick() end
+end
 function together.tick()
+  -- the live test holds a follow offer open a while (offer_hold, frames) so a screenshot shows it, then answers it
+  if together.open and together.held and S.frame >= together.held then
+    local p = together.open
+    together.open, together.held = nil, nil
+    try(game.ui.choice_close, {})
+    autotest_answer(p)
+  end
   if together.open or not together.queue[1] then return end
   local p = table.remove(together.queue, 1)
   if p.still and not p.still() then return end -- stale (they moved on, or we're there already)
-  if AUTOTEST and p.follow then
-    local yes = AUTOTEST.follow ~= false
-    moonmod.log("info", "COOPTEST offer " .. p.title .. (yes and " -> join" or " -> stay"))
-    if yes and p.options[1].pick then p.options[1].pick() end
-    return
-  end
+  local hold = AUTOTEST and p.follow and tonumber(AUTOTEST.offer_hold)
+  if AUTOTEST and p.follow and not hold then autotest_answer(p) return end
   local cards = {}
   for i, o in ipairs(p.options) do cards[i] = {title = cut(o.title, 48), subtitle = o.subtitle and cut(o.subtitle, 64) or nil} end
-  local ok, err = call(game.ui.choice_open, {id = "coop_together", title = cut(p.title, 64), subtitle = p.subtitle and cut(p.subtitle, 96) or nil,
-                                          cancel = true, town = true, options = cards})
-  if ok then together.open = p else moonmod.log("warn", "co-op panel: " .. errmsg(err)) end
+  local yes_no = DC2 and p.yes_no and #p.options == 2
+  local subtitle = yes_no and (p.ask or p.subtitle) or p.subtitle
+  local ok, err = call(game.ui.choice_open, {id = "coop_together", title = cut(p.title, 64), subtitle = subtitle and cut(subtitle, 96) or nil,
+                                          cancel = true, town = true, style = yes_no and "yes_no" or nil, options = cards})
+  if ok then
+    together.open = p
+    if hold then together.held = S.frame + hold end
+  else
+    moonmod.log("warn", "co-op panel: " .. errmsg(err))
+    if hold then autotest_answer(p) end
+  end
 end
 moonmod.on("ui.choice_made", function(e)
   if type(e) ~= "table" or not tostring(e.id or ""):find("coop_together", 1, true) or not together.open then return end
   local p = together.open
-  together.open = nil
+  together.open, together.held = nil, nil
   local option = not e.cancelled and e.index and p.options[e.index] or nil
   if option and option.pick then option.pick() end
   if not option and p.on_cancel then p.on_cancel() end -- backed out of: a question another player waits on is answered
@@ -869,7 +1034,7 @@ function S.moved(peer, scene)
   end
   local who = together.name(peer)
   together.ask({
-    follow = peer, title = who .. " went to " .. together.place(scene), subtitle = "Join them there?",
+    follow = peer, yes_no = true, title = who .. " went to " .. together.place(scene), subtitle = "Join them there?",
     still = function() local o = others[peer]; return o ~= nil and o.scene == scene and scene ~= my_scene end,
     options = {
       {title = "Join " .. who, subtitle = together.place(scene), pick = function() together.join(peer, scene) end},
@@ -1199,6 +1364,7 @@ local function town_from(peer, payload)
       return
     end
     local took = take_town(data, peer, base)
+    if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %s from %s #%s took=%s", tostring(town), tostring(peer), tostring(n), tostring(took))) end
     if not took and town and waiting_towns[town] and waiting_towns[town].from == peer then
       -- busy: the number goes with the newest town waiting, and is said when it is taken
       if n and n > (waiting_towns[town].seq or 0) then waiting_towns[town].seq = n end
@@ -1209,10 +1375,12 @@ local function town_from(peer, payload)
   elseif peer == 0 then
     if town and n and n < (tn.seq[town] or 0) then
       tn.held[town] = {data = data, since = tn.held[town] and tn.held[town].since or S.frame}
+      if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %d from the host #%d held (sent #%d)", town, n, tn.seq[town])) end
       return
     end
     tn.held[town or -1] = nil
-    take_town(data, 0)
+    local took = take_town(data, 0)
+    if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %s from the host #%s took=%s", tostring(town), tostring(n), tostring(took))) end
   end
 end
 
@@ -1278,7 +1446,9 @@ end
 -- A town that came while its player was busy is tried again (the host sent it on when it first came).
 local function retry_towns()
   for town, w in pairs(waiting_towns) do
-    if take_town(w.data, w.from, w.base) and S.role == "host" and w.base then
+    local took = take_town(w.data, w.from, w.base)
+    if AUTOTEST and took then moonmod.log("info", string.format("COOPTEST town %d waited and was taken (#%s)", town, tostring(w.seq))) end
+    if took and S.role == "host" and w.base then
       tn.took(w.from, town, w.seq)
       send_merged(town)
     end
@@ -1287,6 +1457,7 @@ local function retry_towns()
   for town, h in pairs(tn.held) do
     if S.frame - h.since >= tn.HOLD then
       tn.held[town] = nil
+      if AUTOTEST then moonmod.log("info", string.format("COOPTEST town %d held too long: the host's word stands", town)) end
       take_town(h.data, 0)
     end
   end
@@ -1687,7 +1858,7 @@ function S.town_changed(town)
     tn.seq[town] = (tn.seq[town] or 0) + 1
     send_pieces(0, "TOWN", tn.numbered(tn.seq[town], now .. "\n" .. base))
   end
-  if AUTOTEST then moonmod.log("info", "COOPTEST town " .. town .. " sent") end
+  if AUTOTEST then moonmod.log("info", "COOPTEST town " .. town .. " sent" .. (S.role == "host" and "" or " #" .. tostring(tn.seq[town]))) end
 end
 
 -- Two games changing one flag or counter in the same moment would each take the other's value and end crossed: the
@@ -1862,6 +2033,7 @@ function heroes.hear(peer, rest)
       return
     end
     together.ask({title = together.name(peer) .. " wants to swap heroes", subtitle = "You would play " .. would .. ".",
+                  yes_no = true, ask = "Swap, and play " .. would .. "?",
                   options = {{title = "Swap", subtitle = "Play " .. would, pick = function() answer(true) end},
                              {title = "Not now", pick = function() answer(false) end}},
                   on_cancel = function() answer(false) end})
@@ -2239,7 +2411,9 @@ function link.out_of_step_here(why, peer)
   moonmod.log("warn", "co-op: out of step on " .. my_scene .. ": " .. why)
   if not host_scene or host_scene:sub(1, 1) ~= "D" then toast("Co-op: " .. why) return end
   local who = DC2 and together.name(peer) or "the host"
-  together.ask({title = "Out of step with " .. who, subtitle = why:sub(1, 96), options = {
+  -- (Chronicle Two asks in its own message window, where only the question fits: the why is told on its own first)
+  if DC2 then toast("Co-op: " .. why) end
+  together.ask({title = "Out of step with " .. who, subtitle = why:sub(1, 96), yes_no = true, ask = "Walk in again beside " .. who .. "?", options = {
     {title = "Walk in again beside " .. who, subtitle = together.place(host_scene), pick = function() together.join(peer, host_scene) end},
     {title = "Stay as I am", subtitle = DC2 and "Mod Manager: Resync the floor" or "Mod Manager: Resync with the host"},
   }})
@@ -2623,7 +2797,7 @@ local function message(peer, data)
   if kind == "H" then if mon.leading() then mon.hit_on_host(peer, rest) end return end
   if kind == "D" then
     -- a blow from the game that runs this floor's monsters: the host's, or in Chronicle Two the leader's
-    if DC2 and (mon.puppets and mon.from == peer) or (not DC2 and S.role == "guest" and peer == 0) then mon.struck(rest) end
+    if DC2 and (mon.puppets and mon.from == peer) or (not DC2 and S.role == "guest" and peer == 0) then mon.struck(peer, rest) end
     return
   end
   if kind == "TOWN" then
