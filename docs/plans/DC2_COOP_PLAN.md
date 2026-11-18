@@ -606,7 +606,8 @@ the ridepod or a badge, which the live harness's saves do not.
   hero's view (`ThinkHost` skipped it; a dying monster now passes the view check), and on the follower a puppet
   the leader no longer lists kept counting (`PuppetSet` now frees it). `world.get` on a floor says
   `monsters_counted`, `mimic_chests` and `floor_cleared`. Live scenario `clear`: both games count none and both
-  run 1500. The key a monster carries should drop in each game from that game's copy; not checked live.
+  run 1500. The key a monster carries should drop in each game from that game's copy; not checked live (until
+  2026-11-17 the follower's copy never died the game's way, so it could not; see "A monster dies in both games").
 - A monster that appears after the floor was built (an event's, a summoner's, 2026-11-15): the follower makes it
   in the leader's slot (`SetActiveMonster`'s wanted slot, `ChronicleTwoMonsterReferFor`), from the floor's loaded
   kinds, a mod enemy or the game's own refer; a kind it cannot make is refused for that slot only. Live `hurt` and
@@ -857,6 +858,31 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   `AStoryScenePlayingIsToldAndAPlayerWatchingOneIsAwayOnTheOtherScreens`; mod tests "a player watching a story
   scene is away on the other screens" and on. Live runs skip story scenes (`--skip-events`), so this is unit-tested
   only.
+- A monster dies in both games (2026-11-17, answers 8.5). On the follower a monster the leader killed never died the
+  game's way: the copies' thinking is paused (`DNG_PAUSE_MONSTER_AI`, so `CMonsterMan::ThinkHost` never ran), and
+  the copy stood frozen at the leader's report of its death until the leader stopped listing it, then went at once.
+  No death motion, burst or sound, no orbs, so the follower's weapons never gained absorption (ABS) on a shared
+  floor, not even from its own kills (those land in the leader's game); no money, items or a carried key, and no
+  kill in the game's count. Now the copy dies as the game's own once it is shown at that moment (8 frames behind the
+  leader's clock): the monsters think for that frame with every other copy resting (`CopiesDying` in `dng_main.cpp`,
+  `CopyRests` in `monster.cpp`), and the game plays its death. Who dealt it decides which weapon takes the orbs, as
+  the game decides for its own kills: the follower's hero when it struck the copy in the last 3 seconds; otherwise
+  another player (`last_hit_chara` -1), whose kill the game splits between the hero's two weapons. The leader's game
+  treats a kill by the follower's blow the same way (`monsters.mirror_hit`): before, it was booked to a hero 0 with
+  no weapon, so a host playing Max took nothing from it. Each hero gathers the orbs of a death near them in their own
+  game, as one player does. Drops are each game's own (decision 5). A dying copy deals no blow (its damage
+  primitives are dropped each turn), and the game's own events and menus hold it as they hold every monster.
+  Engine tests `ACopyWhoseMonsterDiedThereDiesHereAsTheGamesOwnAndPaysTheHeroWhoKilledIt` and
+  `AMonsterTheOtherPlayerKillsSharesItsAbsorptionAsAKillAnotherDealt`. New live scenario `reward` (the host strikes
+  down two foes beside both heroes): 10/10 twice, both games ran both deaths (`game.enemy_defeated`), the host's
+  weapons went from 0 to 5.6 ABS and the joiner's (Monica) from 0 to 3.0 and to 12.0 (an even split between her two
+  weapons; how much depends on how many orbs reach her). `clear` 13/13 with all 18 of the host's kills dying in the
+  joiner's game too; `floor` 15/15, `hurt` 11/11, `down` 15/15, `look` 3/3, `floor_first` 14/14. That last one's
+  count check had compared the most each game counted, which depends on whether the host comes onto the floor a
+  moment before or after the joiner's strike (it now asks that the host never shows more than the joiner had and that
+  the two agree at the end). Engine `7474553e`. The test driver can log
+  the ABS of the weapons a game owns (`abs_log`, then `abs=` on its state line), strike the nearest monster
+  (`strike_near`, `when = "monster_near"`) and logs each death the game tells mods of.
 
 ## 7. Risks
 
@@ -891,6 +917,7 @@ These are not yours to decide; they are things the code or the game will answer.
 3. Which scripts call native 1263, and whether a joiner's built-up sword can be lost to it.
 4. How the item table marks a story item (for 5.6).
 5. Whether a copy dying on the follower's game gives weapon experience and drops there as a real kill does.
+   Answered 2026-11-17: it did not (its death never ran); now it does (section 6, "A monster dies in both games").
 6. Whether Palm Brinks, houses and the Channel Entrance take avatars (they are not Georama maps).
 7. Whether the split's records are the same size in the browser build and the PC build.
 8. How long the world takes to send at the join, in pieces of 16 KiB.

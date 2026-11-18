@@ -34,6 +34,16 @@ local function monsters()
   return list, alive, hp
 end
 
+-- The living monsters within `radius` of the hero, nearest first (Chronicle Two's physics.query).
+local function near_monsters(radius)
+  local p = try(game.player.get) or {}
+  if not (p.position and game.physics and game.physics.query) then return {} end
+  local got = try(game.physics.query, {shape = "sphere", center = p.position, radius = radius or 80})
+  local list = type(got) == "table" and type(got.matches) == "table" and got.matches or {}
+  table.sort(list, function(a, b) return (a.distance or 0) < (b.distance or 0) end)
+  return list
+end
+
 local function ready(step)
   local when = step.when
   if when == nil then return true end
@@ -53,6 +63,11 @@ local function ready(step)
     if w.context ~= "dungeon" then return false end
     local _, alive = monsters()
     return alive > 0
+  end
+  -- a living monster within the step's `radius` of the hero (Chronicle Two: physics.query)
+  if when == "monster_near" then
+    if w.context ~= "dungeon" then return false end
+    return #near_monsters(step.radius) > 0
   end
   return true
 end
@@ -165,6 +180,14 @@ function OPS.strike(step)
   if not best then return nil, "no monster" end
   return try(game.combat.damage, {entity = best.entity_id or best.id, amount = step.amount or 1000000})
 end
+-- The living monster nearest the hero, within the step's `radius`, takes `amount` (scenario reward: a kill by the
+-- hero's side, where its orbs can be gathered).
+function OPS.strike_near(step)
+  local m = near_monsters(step.radius)[1]
+  if not m then return nil, "no monster near" end
+  log(string.format("striking slot=%s at %.0f", tostring(m.slot), m.distance or -1))
+  return try(game.combat.damage, {entity = m.entity, amount = step.amount or 1000000})
+end
 -- Every living monster on the floor struck down (the live test of a floor cleared for both).
 function OPS.strike_all(step)
   local n = 0
@@ -263,6 +286,41 @@ function OPS.player_log(step)
   return true
 end
 
+-- The absorption (ABS) the player's weapons hold, all told: a kill pays it to the weapons the game gives it to
+-- (scenario reward). The weapons owned are found once, by asking after each the game knows.
+-- (once abs_log has found them, the state line carries the total too)
+local owned_weapons
+local function abs_total()
+  local total, each = 0, {}
+  for _, id in ipairs(owned_weapons or {}) do
+    local a = try(game.weapons.abs_get, {id = id})
+    if a then
+      total = total + (a.abs or 0)
+      each[#each + 1] = string.format("%s:%s/%s", tostring(a.native_item_no), tostring(a.abs), tostring(a.abs_max))
+    end
+  end
+  return total, each
+end
+function OPS.abs_log(step)
+  if not (game.weapons and game.weapons.list and game.weapons.abs_get) then return nil, "no weapons.abs_get" end
+  if not owned_weapons then
+    owned_weapons = {}
+    for _, w in ipairs(try(game.weapons.list) or {}) do
+      if w.id and try(game.weapons.abs_get, {id = w.id}) then owned_weapons[#owned_weapons + 1] = w.id end
+    end
+  end
+  local total, each = abs_total()
+  log(string.format("abs total=%.2f weapons=%s", total, table.concat(each, ",")))
+  return true
+end
+
+-- A monster's death as the game plays it: its death program tells mods (scenario reward: on the visitor's floor, a
+-- copy dies as the game's own).
+moonmod.on("game.enemy_defeated", function(e)
+  e = type(e) == "table" and e or {}
+  log(string.format("defeated slot=%s kind=%s source=%s", tostring(e.slot), tostring(e.native_monster_id), tostring(e.source)))
+end)
+
 moonmod.on("game.tick", function(e)
   frame = e and e.frame or frame + 1
   if frame % 60 == 0 then
@@ -274,7 +332,8 @@ moonmod.on("game.tick", function(e)
     -- (counted, mimics, cleared: the floor's clear as the game itself decides it, where the engine says so)
     log(string.format("state frame=%d session=%s context=%s dungeon=%s floor=%s seed=%s layout=%s walking=%s town=%s map=%s pos=%s monsters=%d hp=%d counted=%s mimics=%s cleared=%s step=%d character=%s",
       frame, tostring(s.kind), tostring(w.context), tostring(w.dungeon_id), tostring(w.floor_id), tostring(w.floor_seed), tostring(w.floor_layout), tostring(w.walking), tostring(w.town_map),
-      tostring(w.map_no), pos, alive, hp, tostring(w.monsters_counted), tostring(w.mimic_chests), tostring(w.floor_cleared), at, tostring(p.character)))
+      tostring(w.map_no), pos, alive, hp, tostring(w.monsters_counted), tostring(w.mimic_chests), tostring(w.floor_cleared), at, tostring(p.character))
+      .. (owned_weapons and string.format(" abs=%.2f", (abs_total())) or ""))
     -- A visiting game's copies near its hero, and how many of them its game draws (monsters.mirror_get's seen). Only
     -- the visitor asks: on the game that runs the monsters the call would take the blows on avatars the co-op mod sends on.
     if s.kind == "visit" and w.context == "dungeon" and p.position then

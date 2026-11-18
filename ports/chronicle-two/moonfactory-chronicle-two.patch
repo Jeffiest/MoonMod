@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..df41a68b
+index 00000000..39414736
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,371 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -889,7 +889,15 @@ index 00000000..df41a68b
 +  `coop_avatar_names_moonmod.cpp`: from the scene's start, `DramaSceneStarted`, while the game offers its skip,
 +  `EdEventInfo.skip_state`, and the place's event has the game, until the player is free again;
 +  `world.get().story_scene`) or while its player watches one in theirs (`world.avatar_set`'s `away`: then no monster
-+  here goes for it either), and fades back in after; its name fades with it.
++  here goes for it either), and fades back in after; its name fades with it. A copy whose monster died in the
++  leader's game dies here as the game's own once it is shown at that moment (8 frames behind the leader's clock):
++  `CMonsterMan::ThinkHost` plays its death, the monsters thinking that frame with every other copy resting
++  (`CopiesDying`, `CopyRests`), so its death motion, burst, orbs, drops, a key it carries and the floor's count are
++  this game's own. The killing blow is this hero's when it struck the copy in the last 3 seconds (its weapon takes
++  the orbs' absorption), else another player's (`last_hit_chara` -1: the game shares it between the hero's
++  weapons, as the leader's game does for a kill by a guest's blow, `monsters.mirror_hit`). A dying copy deals no
++  blow (`MonsterThinkEnd` drops its damage primitives); the game's events and menus hold it as they hold every
++  monster.
 +- `coop_ui_moonmod.cpp`: the choice panel (`ui.choice_open` / `ui.choice_close` / `ui.choice_made`), title modes (`title.mode_*`,
 +  `game.title.opened/selected`), visits (`session.*`, `game.session.started/ended/failed`). A question and a notice
 +  wait while the player is not free (`PlayerFree`, in `coop_avatar_names_moonmod.cpp`: a floor's field with no
@@ -899,8 +907,8 @@ index 00000000..df41a68b
 +- `coop_save_moonmod.cpp`: `DCW2`/`DCP2`/`DCT2` records and the accounts.
 +- Hooks in game units, one line each: `main.cpp` (`FrameStep`), `automap.cpp` (`FloorSeed`), `dng_event.cpp`
 +  (`FloorBuildBegin`), `event_func.cpp` (`FloorPlacing`, `FloorPlaced` around the floor's chests and monsters; `DramaSceneStarted`),
-+  `dng_main.cpp` (`MapEventStarted`, `Draw2D`), `editloop.cpp` (`Draw2D`), `monster.cpp` (`MonsterThinkBegin/End`,
-+  `MonsterDamaged`), `save_slots.cpp` (no writes during a visit), `title.cpp` (the mod rows, the page, the visit),
++  `dng_main.cpp` (`MapEventStarted`, `Draw2D`, `CopiesDying`), `editloop.cpp` (`Draw2D`), `monster.cpp`
++  (`MonsterThinkBegin/End`, `MonsterDamaged`, `CopyRests`), `save_slots.cpp` (no writes during a visit), `title.cpp` (the mod rows, the page, the visit),
 +  `effscript.cpp` (another player's shot or spell is drawn only, `shown_only`: it makes no collision primitive, and
 +  its script's questions after one are answered as a primitive that hits nothing, never logged as illegal calls).
 +
@@ -1165,7 +1173,8 @@ index 00000000..df41a68b
 +  strength, `kind` 2 a flinch or 3 a knock-down). The other game takes it with `combat.strike_player`, where its
 +  own hero's defence comes off the strength as off a monster's blow. Guarding and dodging are not weighed yet: a
 +  blow that reaches the avatar's body lands.
-+- **Puppets** pause every monster script on a guest's floor (`DNG_PAUSE_MONSTER_AI`) and step the copies themselves.
++- **Puppets** pause every monster script on a guest's floor (`DNG_PAUSE_MONSTER_AI`) and step the copies themselves;
++  a copy whose monster died there dies here through the game's own `ThinkHost` (above).
 +- **Avatars** wear and carry what the other player's own hero does (`world.avatar_set {outfit}`, from
 +  `player.get().outfit`): the hat or hair piece and the weapons hang on the body's frames as the hero's own do. A
 +  slot the game is using (an event character in one of the last three event slots) refuses the avatar for that scene.
@@ -2989,10 +2998,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..6a7f9f0c
+index 00000000..95d54d3c
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,418 @@
+@@ -0,0 +1,422 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3229,6 +3238,10 @@ index 00000000..6a7f9f0c
 +// This floor's monsters are copies of another game's: their own thinking rests (DNG_PAUSE_MONSTER_AI), while the
 +// floor's effects go on (dng_main.cpp asks).
 +bool                   MonstersMirrored();
++// A copy whose monster died in the leader's game dies here as the game's own (CMonsterMan::ThinkHost plays its
++// death). dng_main.cpp: some copy is dying, so the monsters think this frame; monster.cpp: every other one rests.
++bool                   CopiesDying();
++bool                   CopyRests(int slot);
 +void                   PuppetsClear();
 +std::vector<PuppetHit> TakePuppetHits();
 +std::vector<AvatarHit> TakeAvatarHits();
@@ -15219,10 +15232,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..9ac3f22c
+index 00000000..52878313
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1478 @@
+@@ -0,0 +1,1483 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -16207,6 +16220,11 @@ index 00000000..9ac3f22c
 +    }
 +    if (monster->life == 0) {
 +        if (kind >= 0) monster->last_hit_kind = kind;
++        // (dealt by another player: the game shares a kill another dealt between this hero's weapons, as for an
++        // attacker of -1 in AddExpWeaponParam; left as it was, Max took nothing from it)
++        monster->last_hit_chara = -1;
++        monster->last_hit_source = DAMAGE_SOURCE_NONE;
++        monster->last_hit_attr = 0;
 +        monster->damage_req = ACTION_DAMAGE_REQ_DEAD;
 +        ChronicleTwoEnemyDefeated(monster, "coop");
 +    }
@@ -19396,10 +19414,10 @@ index 00000000..ab5344b5
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..373347f6
+index 00000000..0bfafd41
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1856 @@
+@@ -0,0 +1,1935 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -20018,6 +20036,12 @@ index 00000000..373347f6
 +    Puppet host;
 +    int    motion = -1, flags = -1;
 +    std::vector<Sample> trail; // the leader's reports kept (TrailHeard, TrailAt)
++    int    dies_at = -1;       // the frame (this clock) the copy comes to the moment the leader's monster died
++    bool   dying = false;      // its death is this game's own now (CopyDies)
++    // This game's hero's last blow on it: when, by whom, from what (CColPrim's attacker, its row's source and kind,
++    // the hit's status bits), for a death it dealt (CopyDies).
++    int    blow_at = -1, blow_by = -1, blow_source = DAMAGE_SOURCE_NONE, blow_kind = -1;
++    u32    blow_attr = 0;
 +};
 +std::vector<PuppetSlot>  g_puppets(static_cast<std::size_t>(MONSTER_ACTIVE_MAX));
 +std::vector<PuppetHit>   g_puppet_hits;
@@ -20025,10 +20049,31 @@ index 00000000..373347f6
 +bool                     g_puppets_pause = false;
 +float                    g_saved_player[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 +bool                     g_player_swapped = false;
++int                      g_thinking = -1; // the monster whose turn it is (MonsterThinkBegin)
 +
 +CActiveMonster *Monster(int slot) {
 +    if (!OnFloor() || ActiveMonster == nullptr || slot < 0 || slot >= MONSTER_ACTIVE_MAX) return nullptr;
 +    return ActiveMonster->GetActiveMonster(slot);
++}
++
++// The leader's monster died, and the copy has come to that moment here: it dies as the game's own monster dies,
++// CMonsterMan::ThinkHost playing it from here (CopiesDying, CopyRests): the death motion, the burst and its sound,
++// the money and things it drops, the absorption (ABS) its orbs give the weapons of the hero who gathers them, a key
++// it carries, the floor's count. The killing blow is this game's hero's when it struck the copy a moment ago (its
++// weapon gains as from its own kill); else it was another player's, and the game shares a kill another dealt
++// between the hero's weapons (AddExpWeaponParam, an attacker of -1).
++constexpr int kOwnBlowFrames = 180;
++
++void CopyDies(CActiveMonster &monster, PuppetSlot &p) {
++    const bool ours = p.blow_at >= 0 && g_clock - p.blow_at <= kOwnBlowFrames;
++    monster.life = 0;
++    monster.damage_req = ACTION_DAMAGE_REQ_DEAD;
++    monster.last_hit_chara = ours ? p.blow_by : -1;
++    monster.last_hit_source = ours ? p.blow_source : DAMAGE_SOURCE_NONE;
++    monster.last_hit_attr = ours ? p.blow_attr : 0;
++    if (ours && p.blow_kind >= 0) monster.last_hit_kind = p.blow_kind;
++    p.dying = true;
++    p.dies_at = -1;
 +}
 +
 +// The avatars on this floor: where each stands.
@@ -20106,8 +20151,21 @@ index 00000000..373347f6
 +            p.used = false;
 +            continue;
 +        }
++        // Dying here: the game's own until its death has played out and the game has emptied the slot.
++        if (p.dying) {
++            if (monster->state == ACTIVE_MONSTER_NONE) {
++                p = PuppetSlot{};
++            } else {
++                any = true;
++            }
++            continue;
++        }
 +        any = true;
-+        if (p.host.state <= 0 || p.host.hp == 0) continue;
++        if (p.dies_at >= 0 && g_clock >= p.dies_at) {
++            CopyDies(*monster, p);
++            continue;
++        }
++        if (p.dies_at < 0 && (p.host.state <= 0 || p.host.hp == 0)) continue;
 +        // (on the leader's clock a little behind, eased between its reports, as the other players' heroes are; each
 +        // motion played as the leader's monster plays it, looping or held on its last frame)
 +        const Sample now = p.trail.empty() ? Sample{g_clock, p.host.x, p.host.y, p.host.z, p.host.heading, p.host.motion,
@@ -20719,6 +20777,15 @@ index 00000000..373347f6
 +    if (!OnFloor() || ActiveMonster == nullptr || slot < 0 || slot >= MONSTER_ACTIVE_MAX) return false;
 +    CActiveMonster *monster = Monster(slot);
 +    PuppetSlot &p = g_puppets[static_cast<std::size_t>(slot)];
++    // A copy dying here is the game's until its death has played out: the leader's monster dying, fading or gone
++    // there changes nothing. A living one in that slot there is another monster (the leader's game used the slot
++    // again first): this one goes, and that one is made.
++    if (p.dying) {
++        const bool another = puppet.state == ACTIVE_MONSTER_LIVE && puppet.hp > 0 && puppet.kind >= 0;
++        if (monster != nullptr && monster->state != ACTIVE_MONSTER_NONE && !another) return true;
++        if (monster != nullptr && monster->state != ACTIVE_MONSTER_NONE) FreeMonsterSlot(slot);
++        p = PuppetSlot{};
++    }
 +    if (puppet.state <= 0 || puppet.kind < 0) {
 +        FreeMonsterSlot(slot);
 +        p = PuppetSlot{};
@@ -20745,9 +20812,10 @@ index 00000000..373347f6
 +    }
 +    monster->life = std::clamp(puppet.hp, 0, 1000000);
 +    if (puppet.max_hp > 0) monster->max_life = puppet.max_hp;
-+    if (puppet.state == ACTIVE_MONSTER_DEAD && monster->state == ACTIVE_MONSTER_LIVE) {
-+        monster->life = 0;
-+        monster->damage_req = ACTION_DAMAGE_REQ_DEAD;
++    // The leader's monster died (its life gone, or dead already): the copy dies too once it is shown at that moment,
++    // 8 frames behind the leader's clock as everything of the leader's is (PuppetsStep, CopyDies).
++    if ((puppet.state == ACTIVE_MONSTER_DEAD || puppet.hp <= 0) && monster->state == ACTIVE_MONSTER_LIVE && p.dies_at < 0) {
++        p.dies_at = puppet.age >= 0 ? g_clock - std::min(puppet.age, kMaxAge) + kDelay : g_clock;
 +    }
 +    return true;
 +}
@@ -20755,6 +20823,15 @@ index 00000000..373347f6
 +bool IsPuppet(int slot) { return slot >= 0 && slot < MONSTER_ACTIVE_MAX && g_puppets[static_cast<std::size_t>(slot)].used; }
 +
 +bool MonstersMirrored() { return g_puppets_pause; }
++
++// (only while the floor plays: the game's own events and menus hold every monster, a dying one too)
++bool CopiesDying() {
++    return g_puppets_pause && DngStatus.mode == DNG_STATUS_FIELD && std::ranges::any_of(g_puppets, &PuppetSlot::dying);
++}
++
++bool CopyRests(int slot) {
++    return g_puppets_pause && !(slot >= 0 && slot < MONSTER_ACTIVE_MAX && g_puppets[static_cast<std::size_t>(slot)].dying);
++}
 +
 +void PuppetsClear() {
 +    for (PuppetSlot &p : g_puppets) p = PuppetSlot{};
@@ -20779,6 +20856,14 @@ index 00000000..373347f6
 +    // The copy keeps the host's life: the blow goes to the host's monster. One that took nothing (a guard, a monster
 +    // it can't hurt) goes too, for the host's game to show it so.
 +    CActiveMonster *monster = Monster(slot);
++    if (prim != nullptr && prim->param != nullptr) {
++        PuppetSlot &p = g_puppets[static_cast<std::size_t>(slot)];
++        p.blow_at = g_clock;
++        p.blow_by = prim->attacker;
++        p.blow_source = prim->param->source_type;
++        p.blow_kind = prim->param->kind;
++        p.blow_attr = prim->status;
++    }
 +    if (monster != nullptr) monster->life = std::max(0, g_puppets[static_cast<std::size_t>(slot)].host.hp);
 +    if (damage < 0 || (damage == 0 && prim == nullptr) || g_puppet_hits.size() >= 64) return;
 +    PuppetHit hit{slot, damage};
@@ -20798,6 +20883,7 @@ index 00000000..373347f6
 +
 +void MonsterThinkBegin(int slot) {
 +    MonsterThinkEnd();
++    g_thinking = slot;
 +    if (!InDungeon()) return;
 +    std::array<std::array<float, 3>, kAvatars> at{};
 +    std::array<bool, kAvatars>                 here{};
@@ -20827,6 +20913,17 @@ index 00000000..373347f6
 +void MonsterThinkEnd() {
 +    if (g_player_swapped && MainChara__2 != nullptr) MainChara__2->SetPosition(g_saved_player[0], g_saved_player[1], g_saved_player[2]);
 +    g_player_swapped = false;
++    // A copy dying here deals no blow: the leader's monster deals its own (a death that strikes about it).
++    if (g_thinking >= 0 && g_puppets_pause) {
++        if (CActiveMonster *monster = Monster(g_thinking); monster != nullptr) {
++            for (ACTION_DAMAGE &damage : monster->damage) {
++                if (damage.prim == nullptr) continue;
++                damage.prim->Delete(-1);
++                damage.prim = nullptr;
++            }
++        }
++    }
++    g_thinking = -1;
 +}
 +
 +// ---- Shared events: the API ----------------------------------------------------------------------------------------
@@ -31443,7 +31540,7 @@ index b07b90e2..19823df2 100644
      return true;
  }
 diff --git a/port/src/object/dun/dng_main.cpp b/port/src/object/dun/dng_main.cpp
-index ff2a7551..51ac54c1 100644
+index ff2a7551..1273823b 100644
 --- a/port/src/object/dun/dng_main.cpp
 +++ b/port/src/object/dun/dng_main.cpp
 @@ -1,3 +1,7 @@
@@ -31495,6 +31592,15 @@ index ff2a7551..51ac54c1 100644
  }
  
  void DngStep() {
+@@ -1980,7 +1986,7 @@ void DngStep() {
+     MainChara__2->GetPosition(player);
+     AutoMapGen.UpdateNaviMap(player, 4);
+ 
+-    if (!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI)) {
++    if (!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI) || moonmod::coop::CopiesDying()) { // co-op: a copy dies here as the game's own
+         ActiveMonster->ThinkHost();
+     }
+ 
 @@ -2023,7 +2029,9 @@ void DngStep() {
          ActiveMonster->StepEffectScript();
      }
@@ -31668,7 +31774,7 @@ index 3a177a37..0bfbd353 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 706fda8f..bb3dbfd3 100644
+index 706fda8f..60ec7496 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
 @@ -4,6 +4,8 @@
@@ -31797,15 +31903,17 @@ index 706fda8f..bb3dbfd3 100644
  
              if (monster->life <= 0) {
                  monster->life = 0;
-@@ -2655,6 +2698,7 @@ void CMonsterMan::ThinkHost() {
+@@ -2654,7 +2697,9 @@ void CMonsterMan::ThinkHost() {
+         if (monster == nullptr || monster->state == ACTIVE_MONSTER_NONE) {
              continue;
          }
++        if (moonmod::coop::CopyRests(i)) continue; // co-op: a copy thinks in the leader's game, all but its death here
          const auto bound_monster = active_views[i];
 +        moonmod::coop::MonsterThinkBegin(i); // co-op host: this turn, the player stands at the nearest player
  
          monster->GetEntryObjectPos(CHARA_ENTRY_GROUP_TARGET, 0, monster->center_pos);
          monster->scoop.ok = false;
-@@ -2738,7 +2782,11 @@ void CMonsterMan::ThinkHost() {
+@@ -2738,7 +2783,11 @@ void CMonsterMan::ThinkHost() {
                  monster->camera_dist = mgDistVector(camera_pos, own_pos);
              }
  
@@ -31818,7 +31926,7 @@ index 706fda8f..bb3dbfd3 100644
                  continue;
              }
          }
-@@ -2943,6 +2991,7 @@ void CMonsterMan::ThinkHost() {
+@@ -2943,6 +2992,7 @@ void CMonsterMan::ThinkHost() {
              monster->Step();
          }
      }
@@ -40976,10 +41084,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..97a6c6de
+index 00000000..a03b0e26
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,1068 @@
+@@ -0,0 +1,1166 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -41380,6 +41488,104 @@ index 00000000..97a6c6de
 +    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array()}}})).status, ApiCallStatus::Ok);
 +    EXPECT_EQ(ActiveMonster->GetMonsterNum(-1.0f), 0);
 +    EXPECT_EQ(api.Call("world.get").value.at("monsters_counted"), 0);
++}
++
++TEST(MoonModCoopApi, ACopyWhoseMonsterDiedThereDiesHereAsTheGamesOwnAndPaysTheHeroWhoKilledIt) {
++    FloorFixture floor;
++    Api          api;
++    // (a hero on the floor: the copies follow the leader only where this game has one)
++    struct Hero {
++        CActionChara  body;
++        CActionChara *previous = MainChara__2;
++        Hero() { MainChara__2 = &body; }
++        ~Hero() { MainChara__2 = previous; }
++    } hero;
++    floor.Live(0, 12, 80);
++    floor.Live(1, 3, 10);
++    const auto report = [&](int hp0, int state0, int hp1, int state1) {
++        Json list = Json::array();
++        if (state0 >= 0) list.push_back({{"slot", 0}, {"kind", 12}, {"state", state0}, {"hp", hp0}, {"x", 0.0}, {"y", 0.0}, {"z", 5.0}, {"heading", 0.0}});
++        if (state1 >= 0) list.push_back({{"slot", 1}, {"kind", 3}, {"state", state1}, {"hp", hp1}, {"x", 10.0}, {"y", 0.0}, {"z", 5.0}, {"heading", 0.0}});
++        return api.Call("monsters.puppet_set", Json::array({{{"monsters", list}, {"age", 0}}}));
++    };
++    ASSERT_EQ(report(80, ACTIVE_MONSTER_LIVE, 10, ACTIVE_MONSTER_LIVE).status, ApiCallStatus::Ok);
++    moonmod::coop::WorldStep();
++    ASSERT_TRUE(moonmod::coop::MonstersMirrored());
++    EXPECT_TRUE(moonmod::coop::CopyRests(0));
++    EXPECT_TRUE(moonmod::coop::CopyRests(1));
++    EXPECT_FALSE(moonmod::coop::CopiesDying());
++
++    // This game's hero strikes the copy in slot 0 (Monica's sword), and the leader's monster dies of it there.
++    DAMAGE_PARAM row{};
++    row.kind = DAMAGE_KIND_MONICA_MELEE;
++    row.source_type = DAMAGE_SOURCE_MAIN_WEAPON;
++    CColPrim prim;
++    prim.param = &row;
++    prim.attacker = 1;
++    prim.status = 0x40;
++    moonmod::coop::MonsterDamaged(0, 80, &prim);
++    ASSERT_EQ(report(0, ACTIVE_MONSTER_LIVE, 10, ACTIVE_MONSTER_LIVE).status, ApiCallStatus::Ok);
++    // It is shown 8 frames behind the leader's clock: it dies when it comes to that moment, not before.
++    for (int frame = 0; frame < 7; ++frame) moonmod::coop::WorldStep();
++    EXPECT_NE((*floor.slots)[0].damage_req, ACTION_DAMAGE_REQ_DEAD);
++    EXPECT_FALSE(moonmod::coop::CopiesDying());
++    moonmod::coop::WorldStep();
++    moonmod::coop::WorldStep();
++    // Now the game's own death plays it (the monsters think this frame, every living copy resting), and its orbs go to
++    // the weapon that dealt the blow.
++    EXPECT_EQ((*floor.slots)[0].damage_req, ACTION_DAMAGE_REQ_DEAD);
++    EXPECT_EQ((*floor.slots)[0].life, 0);
++    EXPECT_EQ((*floor.slots)[0].last_hit_chara, 1);
++    EXPECT_EQ((*floor.slots)[0].last_hit_source, DAMAGE_SOURCE_MAIN_WEAPON);
++    EXPECT_EQ((*floor.slots)[0].last_hit_kind, DAMAGE_KIND_MONICA_MELEE);
++    EXPECT_EQ((*floor.slots)[0].last_hit_attr, 0x40u);
++    EXPECT_TRUE(moonmod::coop::CopiesDying());
++    EXPECT_FALSE(moonmod::coop::CopyRests(0));
++    EXPECT_TRUE(moonmod::coop::CopyRests(1));
++    // Not while the game holds its monsters itself (an event, a menu).
++    DngStatus.mode = DNG_STATUS_EVENT;
++    EXPECT_FALSE(moonmod::coop::CopiesDying());
++    DngStatus.mode = DNG_STATUS_FIELD;
++
++    // The leader's monster fading out there, then gone, changes nothing here: the death plays out here.
++    ASSERT_EQ(report(0, ACTIVE_MONSTER_DEAD, 10, ACTIVE_MONSTER_LIVE).status, ApiCallStatus::Ok);
++    ASSERT_EQ(report(0, -1, 10, ACTIVE_MONSTER_LIVE).status, ApiCallStatus::Ok);
++    moonmod::coop::WorldStep();
++    EXPECT_EQ((*floor.slots)[0].state, ACTIVE_MONSTER_LIVE);
++    EXPECT_TRUE(moonmod::coop::IsPuppet(0));
++    EXPECT_TRUE(moonmod::coop::CopiesDying());
++    // Once the game has emptied its slot (the death played, the fade done) the copy is gone.
++    (*floor.slots)[0].state = ACTIVE_MONSTER_NONE;
++    moonmod::coop::WorldStep();
++    EXPECT_FALSE(moonmod::coop::IsPuppet(0));
++    EXPECT_FALSE(moonmod::coop::CopiesDying());
++
++    // A monster the other player struck down (no blow from this game's hero): the game shares that kill between the
++    // hero's weapons, as for an attacker of -1.
++    ASSERT_EQ(report(0, -1, 0, ACTIVE_MONSTER_LIVE).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 9; ++frame) moonmod::coop::WorldStep();
++    EXPECT_EQ((*floor.slots)[1].damage_req, ACTION_DAMAGE_REQ_DEAD);
++    EXPECT_EQ((*floor.slots)[1].last_hit_chara, -1);
++    EXPECT_EQ((*floor.slots)[1].last_hit_source, DAMAGE_SOURCE_NONE);
++    EXPECT_TRUE(moonmod::coop::CopiesDying());
++    EXPECT_EQ(api.Call("monsters.puppet_clear").status, ApiCallStatus::Ok);
++    EXPECT_FALSE(moonmod::coop::CopiesDying());
++    EXPECT_FALSE(moonmod::coop::CopyRests(1));
++}
++
++TEST(MoonModCoopApi, AMonsterTheOtherPlayerKillsSharesItsAbsorptionAsAKillAnotherDealt) {
++    FloorFixture floor;
++    Api          api;
++    CActiveMonster &monster = floor.Live(2, 7, 30);
++    monster.last_hit_chara = 0;
++    monster.last_hit_source = DAMAGE_SOURCE_MAIN_WEAPON;
++    const ApiCallResult hit = api.Call("monsters.mirror_hit", Json::array({{{"slot", 2}, {"damage", 30}, {"kind", DAMAGE_KIND_MAX_MELEE}}}));
++    ASSERT_EQ(hit.status, ApiCallStatus::Ok) << hit.message;
++    EXPECT_TRUE(hit.value.at("killed").get<bool>());
++    EXPECT_EQ(monster.damage_req, ACTION_DAMAGE_REQ_DEAD);
++    EXPECT_EQ(monster.last_hit_chara, -1);
++    EXPECT_EQ(monster.last_hit_source, DAMAGE_SOURCE_NONE);
++    EXPECT_EQ(monster.last_hit_kind, DAMAGE_KIND_MAX_MELEE);
 +}
 +
 +TEST(MoonModCoopApi, AMonstersTurnLooksAtTheNearestPlayerAndTheSwapIsUndone) {
