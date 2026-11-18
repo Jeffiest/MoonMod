@@ -883,6 +883,17 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   the two agree at the end). Engine `7474553e`. The test driver can log
   the ABS of the weapons a game owns (`abs_log`, then `abs=` on its state line), strike the nearest monster
   (`strike_near`, `when = "monster_near"`) and logs each death the game tells mods of.
+- The other player on the floor's map (2026-11-17). The map showed only this game's hero, so on a floor of rooms and
+  corridors the other player could be anywhere. Now each other player is on it as the game shows its own: on the
+  aerial map their hero's model stands where they are (`AvatarsOnMap`, drawn in `DrawFloorModels` as the hero is), and
+  on the plain map they have the hero's arrow in their player's colour, light blue, orange or white, drawn under this
+  game's own (`DrawSymbol_Chara` given a colour: the arrow is green in its texture, which a colour laid over it cannot
+  change, so theirs is its shape drawn flat on a dark edge, at its size and turned as it). Both fade with the hero and
+  are not drawn on a boss's floor, as the hero's own arrow is not. Engine test: off a floor no other player is on the
+  map. New live scenario `map` (the guest walks off, each player presses Select for the large map; the host plays with
+  the plain map, the guest with the aerial one): 15/15, and its screenshots show the guest's light-blue arrow on the
+  host's map, turned the way the guest walked, and both heroes' models on the guest's aerial map. `floor` 15/15,
+  `clear` 13/13, `reward` 10/10, `look` 3/3. Engine `cd15c708`.
 
 ## 7. Risks
 

@@ -247,6 +247,11 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   weapon of this game's hero if it struck the copy in the last 3 seconds; otherwise the game shares the kill between
   the hero's two weapons, as it does for a kill another dealt. The leader's game does the same for a kill by another
   player's blow (`monsters.mirror_hit`).
+- The other players' heroes are on the floor's map, small or large (Select, as ever). On the aerial map each one's
+  model stands where they are, drawn as this game's hero is; on the plain map each has the hero's arrow, in that
+  player's colour: light blue, orange or white, none of the colours the map uses for its own (the hero's arrow is
+  green). Both fade with the hero (a scene, a player away), and neither is on a boss's floor, where the game shows no
+  hero on the map either.
 - `ui.notify` (any mod's) shows the notice in the game's own field message window too, on a dungeon floor, as an
   item found is told: in lines of about forty letters, three to a window, a letter outside ASCII as the game writes
   one (`[UNIxxxx]`), a bracket as a parenthesis. Walking in a town it shows in a window of the same kind (a town has
