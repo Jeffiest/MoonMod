@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 10
+local PROTOCOL = 11
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -102,11 +102,14 @@ function S.num(v)
   if not v or v ~= v or v > 1000000 or v < -1000000 then return 0 end
   return v
 end
--- A place as scene_of writes it: a town "T2", a house "H14", a dungeon floor "D0:3:seed".
+-- A place as scene_of writes it: a town "T2", a house "H14", a dungeon floor "D0:3:seed", or a boss's room, one of the
+-- game's made maps, by the map's name in place of a seed: "D0:7:d01b01".
 function S.scene_ok(scene)
   if type(scene) ~= "string" or #scene > 32 then return false end
-  return scene:match("^[TH]%d+$") ~= nil or scene:match("^D%d+:%d+:%-?%d+$") ~= nil
+  return scene:match("^[TH]%d+$") ~= nil or scene:match("^D%d+:%d+:%-?%d+$") ~= nil or scene:match("^D%d+:%d+:%a[%w_]*$") ~= nil
 end
+-- A boss's room (Chronicle Two): a floor named by its map.
+function S.boss_scene(scene) return type(scene) == "string" and scene:match("^D%d+:%-?%d+:%a") ~= nil end
 S.greeted = {} -- peer -> true once it has said hello on this connection
 S.ROOM_FOR = DC2 and 2 or 4 -- the players a room holds, the host among them
 S.guest_own = {} -- peer -> the story progress of the save it brings (Chronicle Two), said before its hello
@@ -265,6 +268,11 @@ end
 local function scene_of(w)
   if type(w) ~= "table" then return nil end
   if w.context == "dungeon" and w.dungeon_id then
+    -- Chronicle Two: a boss's room is one of the game's made maps, the same in every game, with no seed: its name
+    if DC2 and w.boss_floor == true and w.floor_id and w.floor_id >= 0 and type(w.floor_map) == "string" and w.floor_map:match("^%a[%w_]*$")
+       and #w.floor_map <= 16 and not w.floor_seed then
+      return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id, w.floor_map)
+    end
     -- in transit (the floor select, a floor not built yet): nowhere yet, so no one is offered to follow there
     if not w.floor_id or w.floor_id < 0 or not w.floor_seed or w.floor_seed == 0 then return nil end
     return string.format("D%d:%d:%s", w.dungeon_id, w.floor_id, tostring(w.floor_seed))
@@ -932,6 +940,10 @@ end
 
 function together.place(scene)
   local d, f = scene:match("^D(%d+):(%-?%d+):")
+  if d and S.boss_scene(scene) then
+    local name = DUNGEONS[tonumber(d)] or "dungeon"
+    return "the boss of " .. (name:match("^Mount ") and "" or "the ") .. name
+  end
   -- Chronicle counts a dungeon's floors from zero; Chronicle Two's own numbers start at one
   if d then return string.format("%s, floor %s", DUNGEONS[tonumber(d)] or "a dungeon", tostring((tonumber(f) or 0) + (DC2 and 0 or 1))) end
   if S.places[scene] then return S.places[scene] end -- Chronicle Two: the name the game there gave it
@@ -1065,6 +1077,23 @@ function S.moved(peer, scene)
     if together.queue[i].follow == peer then table.remove(together.queue, i) end
   end
   local who = together.name(peer)
+  -- A boss's room (Chronicle Two) is entered together: the question says so, and the answer goes to the player there,
+  -- whose fight waits for it (boss, below).
+  if DC2 and S.boss_scene(scene) then
+    together.ask({
+      follow = peer, yes_no = true, title = who .. " faces " .. together.place(scene), subtitle = "Join the fight?",
+      still = function() local o = others[peer]; return o ~= nil and o.scene == scene and scene ~= my_scene end,
+      options = {
+        {title = "Join the fight", subtitle = together.place(scene), pick = function()
+          send(peer, "FA", "1 " .. scene)
+          together.join(peer, scene)
+        end},
+        {title = "Stay here", subtitle = "You can follow later from the Mod Manager", pick = function() send(peer, "FA", "0 " .. scene) end},
+      },
+      on_cancel = function() send(peer, "FA", "0 " .. scene) end,
+    })
+    return
+  end
   together.ask({
     follow = peer, yes_no = true, title = who .. " went to " .. together.place(scene), subtitle = "Join them there?",
     still = function() local o = others[peer]; return o ~= nil and o.scene == scene and scene ~= my_scene end,
@@ -1073,6 +1102,192 @@ function S.moved(peer, scene)
       {title = "Stay here", subtitle = "You can follow later from the Mod Manager"},
     },
   })
+end
+
+-- A boss's room, entered together (Chronicle Two) --------------------------------------------------------------------
+-- The player who walks into a boss's room while the other is elsewhere has the fight wait (monsters.hold: the boss
+-- and this hero stand still) until the other has answered the question S.moved asks and, if they come, has walked
+-- in; at most a minute of play. The waiting player is asked, in the game's window, whether to start without them.
+-- Once a floor's wait is over it is not waited for again on that visit.
+local boss = {wait = nil, done = {}}
+local BOSS_WAIT = 3600 -- frames of play the fight waits at most
+
+function boss.release(say)
+  local w = boss.wait
+  boss.wait = nil
+  if not w then return end
+  try(game.monsters and game.monsters.hold, {frames = 0})
+  if say then toast("Co-op: " .. say) end
+end
+
+function boss.names(peers)
+  local list = {}
+  for peer in pairs(peers) do list[#list + 1] = together.name(peer) end
+  table.sort(list)
+  return table.concat(list, " and ")
+end
+
+function boss.ask_leader(scene)
+  local w = boss.wait
+  if not w or w.asked then return end
+  w.asked = true
+  local who = boss.names(w.peers)
+  -- (a live test's pad presses would answer it: there it is only logged, unless the test asks for it)
+  if AUTOTEST and not AUTOTEST.boss_panel then
+    moonmod.log("info", "COOPTEST boss wait for " .. who)
+    return
+  end
+  together.ask({
+    yes_no = true, title = "Waiting for " .. who, subtitle = "Start the fight without them?",
+    still = function() return boss.wait ~= nil and boss.wait.scene == scene end,
+    options = {
+      {title = "Start without them", pick = function() boss.release("the fight begins") end},
+      {title = "Wait for them", pick = function() if boss.wait then boss.wait.ask_at = S.frame + 600 end end},
+    },
+    on_cancel = function() if boss.wait then boss.wait.ask_at = S.frame + 600 end end,
+  })
+end
+
+function boss.step()
+  if not (DC2 and S.role and S.code) then boss.release() return end -- (out of the room: no one is waited for)
+  local w = boss.wait
+  if w and w.scene ~= my_scene then boss.release() return end -- left the room (or it is no boss's room any more)
+  if not S.boss_scene(my_scene) then
+    if my_scene then boss.done = {} end -- somewhere else (not on the way): the next visit waits again
+    return
+  end
+  if not w then
+    if boss.done[my_scene] then return end
+    boss.done[my_scene] = true
+    -- whoever is in the room and elsewhere is asked (S.moved, in their game): the fight waits for them
+    local peers = {}
+    for peer, o in pairs(others) do
+      if o.named and o.scene ~= my_scene and S.frame - (o.heard or -100000) < QUIET * 10 then peers[peer] = true end
+    end
+    if next(peers) == nil then return end
+    local ok = call(game.monsters and game.monsters.hold, {frames = BOSS_WAIT})
+    if not ok then return end
+    boss.wait = {scene = my_scene, peers = peers, since = S.frame}
+    toast("Co-op: the fight waits for " .. boss.names(peers))
+    boss.ask_leader(my_scene)
+    return
+  end
+  -- each one waited for: here (and past their own way in), or gone from the room
+  for peer in pairs(w.peers) do
+    local o = others[peer]
+    if not o then
+      w.peers[peer] = nil
+    elseif o.scene == my_scene and not o.away then
+      w.peers[peer] = nil
+      toast("Co-op: " .. together.name(peer) .. " joins the fight")
+    end
+  end
+  if next(w.peers) == nil then boss.release() return end
+  -- the engine's hold ran out (a minute of play): the fight begins
+  local world = try(game.world.get)
+  if type(world) == "table" and world.fight_held ~= true and S.frame - w.since > 120 then boss.release("the fight begins") return end
+  if w.ask_at and S.frame >= w.ask_at then
+    w.ask_at, w.asked = nil, false
+    boss.ask_leader(my_scene)
+  end
+end
+
+-- Harder with two (Chronicle Two) ----------------------------------------------------------------------------------
+-- A room plays harder than a game alone, and each part of it is a setting (the Mod Manager's, in the game):
+--   larger_floors, more_monsters  a floor built while another player is in the room has more rooms on more ground and
+--                                 more monsters (dungeons.set_modifiers, read as the floor is built, so the two games
+--                                 build one floor from one seed);
+--   scale_life, scale_blows,      while another player stands on this floor its monsters have more life and hit
+--   scale_bosses                  harder, a boss's life more again (dungeons.set_enemy_scale; monsters out already
+--                                 keep their share of life, and lose it again when the other player leaves).
+-- The host's choices are the room's ("SCALE life blows bosses monsters floors", sent on joining and on a change); alone,
+-- the game is its own again.
+-- (build and enemies: what the game was last given; a mod loaded fresh starts from the game's own)
+local scale = {room = nil, said = nil, build = "0 0", enemies = "-", told = nil}
+scale.IDS = {"scale_life", "scale_blows", "scale_bosses", "more_monsters", "larger_floors"}
+scale.DEFAULT = {scale_life = 60, scale_blows = 25, scale_bosses = 75, more_monsters = 50, larger_floors = 50}
+
+-- A setting's percent: its choice "+60%" (or "Off"), or a number.
+function scale.percent(id)
+  local v = moonmod.settings.get(id)
+  if type(v) == "number" then return math.max(0, math.min(300, math.floor(v))) end
+  if type(v) == "string" then return math.min(300, tonumber(v:match("(%d+)%%")) or 0) end
+  return scale.DEFAULT[id] or 0
+end
+function scale.own()
+  local list = {}
+  for i, id in ipairs(scale.IDS) do list[i] = tostring(scale.percent(id)) end
+  return table.concat(list, " ")
+end
+-- the room's: the host's own, or what the host sent
+function scale.room_text() return S.role == "host" and scale.own() or scale.room end
+function scale.hear(peer, rest)
+  if S.role ~= "guest" or peer ~= 0 or type(rest) ~= "string" or #rest > 40 then return end
+  local list = {}
+  for v in rest:gmatch("%d+") do list[#list + 1] = tostring(math.min(300, tonumber(v) or 0)) end
+  if #list ~= #scale.IDS then return end
+  scale.room = table.concat(list, " ")
+end
+function scale.say(to) if S.role == "host" then send(to, "SCALE", scale.own()) end end
+
+function scale.step()
+  if not DC2 then return end
+  if not (S.role and S.code) then scale.room, scale.said = nil, nil end -- (a room left: the next one says its own)
+  local text = S.role and S.code and next(others) ~= nil and scale.room_text() or nil
+  -- the host says a change of its choices at once
+  if S.role == "host" and S.code then
+    local own = scale.own()
+    if own ~= scale.said then
+      if scale.said ~= nil then send("all", "SCALE", own) end
+      scale.said = own
+    end
+  end
+  local v = {}
+  for n in tostring(text or ""):gmatch("%d+") do v[#v + 1] = tonumber(n) end
+  local life, blows, bosses, monsters, floors = v[1] or 0, v[2] or 0, v[3] or 0, v[4] or 0, v[5] or 0
+  -- floors built from here on
+  local build = string.format("%d %d", floors, monsters)
+  if build ~= scale.build then
+    local ok, err = call(game.dungeons and game.dungeons.set_modifiers, (floors > 0 or monsters > 0) and {rooms = floors, monsters = monsters} or {})
+    if ok then scale.build = build else moonmod.log("warn", "co-op: floors for two: " .. errmsg(err)) scale.build = build end
+  end
+  -- the monsters on this floor: one more player here, the more each
+  local mates = 0
+  if text and on_floor() then
+    for _, o in pairs(others) do
+      if o.scene == my_scene and S.frame - (o.heard or -100000) < QUIET then mates = mates + 1 end
+    end
+  end
+  local want = {}
+  if mates > 0 and (life > 0 or blows > 0 or bosses > 0) then
+    want = {life = 100 + life * mates, blows = 100 + blows * mates, boss_life = 100 + bosses * mates, boss_blows = 100 + blows * mates}
+  end
+  local key = want.life and string.format("%d %d %d %d", want.life, want.blows, want.boss_life, want.boss_blows) or "-"
+  if key ~= scale.enemies then
+    local ok, err = call(game.dungeons and game.dungeons.set_enemy_scale, want)
+    if not ok then moonmod.log("warn", "co-op: monsters for two: " .. errmsg(err)) end
+    scale.enemies = key
+    moonmod.log("info", "co-op: monsters for " .. (mates + 1) .. ": " .. key)
+    -- said once a floor, as the other player comes: the game's own way of saying the floor grew harder
+    if want.life and scale.told ~= my_scene then
+      scale.told = my_scene
+      toast("Co-op: with two of you here, the monsters grow stronger")
+    end
+  end
+end
+
+-- "FA 1|0 scene": a player's answer to the question about this room.
+function boss.hear(peer, rest)
+  local yes, scene = tostring(rest):match("^([01]) (%S+)$")
+  local w = boss.wait
+  if not (yes and w and w.scene == scene and w.peers[peer]) then return end
+  if yes == "1" then
+    toast("Co-op: " .. together.name(peer) .. " is on the way")
+    return
+  end
+  w.peers[peer] = nil
+  toast("Co-op: " .. together.name(peer) .. " stays behind")
+  if next(w.peers) == nil then boss.release("the fight begins") end
 end
 
 -- Joining a player from the Mod Manager: whoever is somewhere else, by name and place.
@@ -2183,6 +2398,7 @@ local function welcome(peer, hello)
   if hello.back then
     S.players[peer].in_visit = true
     if DC2 then send(peer, "SW", heroes.swapped and "is1" or "is0") end -- the heroes as they stand now
+    if DC2 then scale.say(peer) end -- and how hard the room plays
     send(peer, "RESUME")
     toast("Co-op: " .. name .. " is back in (reconnected)")
     show_room()
@@ -2208,6 +2424,7 @@ local function welcome(peer, hello)
   end
   S.players[peer].in_visit = true
   if DC2 then send(peer, "SW", heroes.swapped and "is1" or "is0") end -- before START: the hero the joiner begins as
+  if DC2 then scale.say(peer) end -- and how hard the room plays, before any floor is built
   local arrival = arrival_map()
   send(peer, "START", tostring(arrival_town()) .. (arrival and (" " .. arrival) or ""))
   show_room()
@@ -2820,6 +3037,8 @@ local function message(peer, data)
   if kind == "W" then hear_place(rest) return end
   if kind == "O" then hear_outfit(peer, rest) return end
   if kind == "SC" then hear_scene(peer, rest) return end
+  if kind == "FA" then boss.hear(peer, rest) return end
+  if kind == "SCALE" then scale.hear(peer, rest) return end
   if kind == "B" then hear_builder(peer, rest) return end
   if kind == "V" then together.hear(peer, rest) return end
   if kind == "SW" then heroes.hear(peer, rest) return end
@@ -3034,6 +3253,8 @@ moonmod.on("game.tick", function(e)
   end
   if S.role and S.code then mon.tick(); S.shots.send() end
   if S.role then together.tick(); together.retry() end
+  -- (every half second in a room or out of one: a room closed puts the game back as it was)
+  if S.frame % 30 == 0 then scale.step(); boss.step() end
   if S.role and S.code and S.frame % 10 == 0 then door.step() end
   if S.role == "host" and S.code and S.frame % CLOCK_EVERY == 0 then send_clock() end
   if S.role and S.code and S.frame % 30 == 0 then

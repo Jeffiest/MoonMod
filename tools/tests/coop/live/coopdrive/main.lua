@@ -265,6 +265,16 @@ function OPS.georama_probe(step)
   end
   return true
 end
+-- What world.get says right now, every plain field of it (a probe's look at a place).
+function OPS.world_log(step)
+  local w, err = try(game.world.get)
+  if not w then return nil, err end
+  local keys = {}
+  for k, v in pairs(w) do if type(v) ~= "table" then keys[#keys + 1] = k .. "=" .. tostring(v) end end
+  table.sort(keys)
+  log("world " .. table.concat(keys, " "))
+  return true
+end
 function OPS.leave() return try(game.session.finish) end
 function OPS.mark(step) return true end
 -- The story's progress raised (a debug save from --jump georama:N is before the co-op gate).

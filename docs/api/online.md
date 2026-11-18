@@ -388,6 +388,22 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
   with things of its own keeping (an older host, or one that did not take the save) leaves the save as it is, and
   the joiner is told so. A room closing (the host closing it, the host's game gone) writes the joiner's things
   into their save before the visit ends.
+- A boss's room: `world.get()` on a floor gives `floor_map`, the map the floor loaded (a boss's room is a map of
+  its own, `d01b01` for the Underground Channel's, with no `floor_seed`), and `boss_floor = true` there.
+  `monsters.hold({frames})` (0-36000, 0 ends it; refused off a floor) has the fight wait: the floor's monsters and
+  effects stand still and this hero's script does not run, so a boss's opening does not begin. The frames count only
+  while the floor is played (not in a menu or a scene), and the hold ends by itself when they run out, when the
+  player leaves the floor or a scene starts. `world.get().fight_held` is true meanwhile. The co-op mod asks the other
+  player "Max faces the boss of the Underground Channel: join the fight?" (`FA 1` or `FA 0` back), holds the fight
+  for a minute of play at most, tells its player who it waits for and asks whether to start without them; the other
+  player walking in, staying behind or the room closing starts it.
+- Harder with two: the co-op mod plays a room harder than a game alone, each part a setting in the Mod Manager:
+  `larger_floors` (+50%) and `more_monsters` (+50%) for floors built while another player is in the room
+  (`dungeons.set_modifiers`, so the two games still build one floor from one seed), `scale_life` (+60%),
+  `scale_blows` (+25%) and `scale_bosses` (+75%) for the monsters while another player is on the same floor, each
+  again for each player there (`dungeons.set_enemy_scale`; monsters out already keep their share of life). Any can be
+  `Off`. The host's choices are the room's (`SCALE life blows bosses monsters floors`, sent on joining and when the
+  host changes one); alone, or once the room closes, the game is its own again.
 - A headless game runs unpaced; `DC2_HEADLESS_BOUNDED=1` keeps it at the real tick rate (the live tests).
 
 ## Messages players leave for each other (`messages.*`, Chronicle)

@@ -28,6 +28,8 @@ Every operation named here is listed with its permission and per-game support in
 - [Enemy survival chance (`dungeons.set_enemy_survival`,
   Chronicle)](#enemy-survival-chance-dungeonsset_enemy_survival-chronicle)
 - [Exit gate behaviour (Chronicle)](#exit-gate-behaviour-chronicle)
+- [Larger floors, more and harder monsters (`dungeons.set_modifiers`, `dungeons.set_enemy_scale`, Chronicle
+  Two)](#larger-floors-more-and-harder-monsters-dungeonsset_modifiers-dungeonsset_enemy_scale-chronicle-two)
 - [Spheda (Chronicle Two)](#spheda-chronicle-two)
 
 ## Dungeon floors (`dungeons.register`, Chronicle)
@@ -668,6 +670,32 @@ Using the gate key on a floor's exit shows the native continue/leave window. Two
 patch but are switched off: a "seamless" mode (it never built a room and pushed the player straight onto the next floor)
 and a walk-through exit room built from map pieces (unfinished). `game.dungeons.set_exit_room({enabled = true})` turns
 the exit room on for floors built afterwards, for testing only.
+
+## Larger floors, more and harder monsters (`dungeons.set_modifiers`, `dungeons.set_enemy_scale`, Chronicle Two)
+
+```lua
+-- floors built from now on: half as many rooms again, on ground grown to hold them, and half as many monsters again
+assert(game.dungeons.set_modifiers({rooms = 50, monsters = 50}))
+-- the monsters: 60% more life, blows 25% harder; a boss 75% more life
+assert(game.dungeons.set_enemy_scale({life = 160, blows = 125, boss_life = 175, boss_blows = 125}))
+assert(game.dungeons.set_modifiers({}))   -- this mod's floors back to the game's
+assert(game.dungeons.set_enemy_scale({})) -- and its monsters
+```
+
+`dungeons.set_modifiers` on Chronicle Two takes `rooms` and `monsters` (percent, 0-300); each mod's are added
+together, to 300 at most. A floor built afterwards has that many more rooms than the floor's own count, on a grid
+as much wider (14 squares a side become 21 at +50%, up to the 30 the engine builds on), and
+that many more of the floor's own monsters, placed where the game places them (mimics are not doubled; the limit on
+monsters awake at once is raised meanwhile). `chests` and `chest_value` are refused on Chronicle Two for now. The same
+numbers and the same seed (`dungeons.set_seed`) build the same floor in two games. `world.get()` on a built floor
+gives `floor_rooms`, `floor_grid` (the side of the grid) and `monsters_added`.
+
+`dungeons.set_enemy_scale` takes percents, 10-1000: `life` for a monster's life, `blows` for how hard a monster's
+blow lands on the hero, `boss_life` and `boss_blows` for a boss (a monster its table marks as one; a blow on a boss's
+floor that no monster dealt, a breath or a falling rock, counts as the boss's); a key left out is 100. Each mod's are multiplied together. It acts at once: monsters already out
+are rescaled and keep their share of life (a monster at half its life is at half of its new life). `{}` or every key
+100 takes the calling mod's away, and so does unloading the mod. The co-op mod uses both while two play
+([online.md](online.md#chronicle-twos-co-op-what-differs-from-chronicle)).
 
 ## Spheda (Chronicle Two)
 

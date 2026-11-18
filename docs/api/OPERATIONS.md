@@ -5,8 +5,8 @@
 Every operation in the `game.*` catalog and every event either port lists, read from the catalogs in the
 port patches. The chapters linked from each heading say how to use them; start at the [API overview](../API.md).
 
-- **381 operations** in 43 domains: 362 supported on Chronicle,
-  176 on Chronicle Two, 161 on both.
+- **392 operations** in 43 domains: 362 supported on Chronicle,
+  181 on Chronicle Two, 166 on both.
 - Call one as `game.<domain>.<operation>(arguments)` or `moonmod.api.call("<domain>.<operation>", arguments)`.
 - **Permission** is what the mod's `mod.json` must list under `permissions`. A dash means none.
 - **Phase** is where the call is safe: `any`, `simulation` (during play), `content` (registration) or `ui`.
@@ -23,13 +23,13 @@ build supports. A few operations also depend on the build (`net.*` needs a netwo
 | [`game.animations`](#gameanimations) | 9 | 9 | 3 | [assets.md](assets.md) |
 | [`game.api`](#gameapi) | 3 | 3 | 3 | [runtime.md](runtime.md) |
 | [`game.audio`](#gameaudio) | 8 | 8 | 3 | [assets.md](assets.md) |
-| [`game.characters`](#gamecharacters) | 6 | 6 | 4 | [player.md](player.md) |
+| [`game.characters`](#gamecharacters) | 6 | 6 | 5 | [player.md](player.md) |
 | [`game.combat`](#gamecombat) | 13 | 9 | 4 | [combat.md](combat.md) |
 | [`game.commands`](#gamecommands) | 3 | 3 | 3 | [runtime.md](runtime.md) |
 | [`game.compat`](#gamecompat) | 2 | 2 | 2 | [runtime.md](runtime.md) |
 | [`game.content`](#gamecontent) | 3 | 3 | 3 | [runtime.md](runtime.md) |
 | [`game.debug`](#gamedebug) | 3 | 3 | 3 | [runtime.md](runtime.md) |
-| [`game.dungeons`](#gamedungeons) | 58 | 56 | 10 | [dungeons.md](dungeons.md) |
+| [`game.dungeons`](#gamedungeons) | 59 | 56 | 10 | [dungeons.md](dungeons.md) |
 | [`game.economy`](#gameeconomy) | 3 | 3 | 3 | [player.md](player.md) |
 | [`game.effects`](#gameeffects) | 1 | 1 | 0 | [combat.md](combat.md) |
 | [`game.entities`](#gameentities) | 10 | 10 | 5 | [combat.md](combat.md) |
@@ -43,17 +43,17 @@ build supports. A few operations also depend on the build (`net.*` needs a netwo
 | [`game.locations`](#gamelocations) | 3 | 3 | 3 | [world.md](world.md) |
 | [`game.messages`](#gamemessages) | 4 | 4 | 0 | [online.md](online.md) |
 | [`game.models`](#gamemodels) | 5 | 5 | 5 | [assets.md](assets.md) |
-| [`game.mods`](#gamemods) | 4 | 4 | 0 | [runtime.md](runtime.md) |
-| [`game.monsters`](#gamemonsters) | 6 | 6 | 0 | [combat.md](combat.md) |
+| [`game.mods`](#gamemods) | 4 | 4 | 4 | [runtime.md](runtime.md) |
+| [`game.monsters`](#gamemonsters) | 7 | 6 | 0 | [combat.md](combat.md) |
 | [`game.net`](#gamenet) | 6 | 6 | 0 | [online.md](online.md) |
-| [`game.party`](#gameparty) | 10 | 10 | 4 | [player.md](player.md) |
+| [`game.party`](#gameparty) | 12 | 10 | 4 | [player.md](player.md) |
 | [`game.photos`](#gamephotos) | 3 | 0 | 3 | [world.md](world.md) |
 | [`game.physics`](#gamephysics) | 3 | 3 | 3 | [combat.md](combat.md) |
-| [`game.player`](#gameplayer) | 33 | 29 | 10 | [player.md](player.md) |
+| [`game.player`](#gameplayer) | 34 | 29 | 10 | [player.md](player.md) |
 | [`game.quests`](#gamequests) | 4 | 4 | 4 | [runtime.md](runtime.md) |
 | [`game.render`](#gamerender) | 14 | 14 | 6 | [ui.md](ui.md) |
 | [`game.resources`](#gameresources) | 5 | 5 | 5 | [assets.md](assets.md) |
-| [`game.save`](#gamesave) | 15 | 15 | 4 | [runtime.md](runtime.md) |
+| [`game.save`](#gamesave) | 18 | 15 | 4 | [runtime.md](runtime.md) |
 | [`game.scripts`](#gamescripts) | 7 | 7 | 7 | [runtime.md](runtime.md) |
 | [`game.session`](#gamesession) | 3 | 3 | 0 | [world.md](world.md) |
 | [`game.shops`](#gameshops) | 6 | 6 | 6 | [items-weapons.md](items-weapons.md) |
@@ -62,7 +62,7 @@ build supports. A few operations also depend on the build (`net.*` needs a netwo
 | [`game.title`](#gametitle) | 3 | 3 | 0 | [world.md](world.md) |
 | [`game.ui`](#gameui) | 19 | 19 | 4 | [ui.md](ui.md) |
 | [`game.weapons`](#gameweapons) | 24 | 24 | 16 | [items-weapons.md](items-weapons.md) |
-| [`game.world`](#gameworld) | 18 | 18 | 10 | [world.md](world.md) |
+| [`game.world`](#gameworld) | 21 | 18 | 10 | [world.md](world.md) |
 
 ## Operations
 
@@ -117,7 +117,7 @@ Written up in [player.md](player.md).
 | `characters.get` | `game.read` | any | yes | yes | Read character stats, state, and stable handle. |
 | `characters.register` | `content.register` | content | yes | yes | Register a data-defined enemy or town villager (kind = 'npc'; native = true hooks the town's own resident). |
 | `characters.villager_chat` | `game.write` | simulation | yes | – | Run a hooked town resident's own chat (a native npc of this mod), the next town frame that can. |
-| `characters.register_playable` | `content.register` | content | yes | – | Register a playable character past the game's six (pack, portrait, the character he fights as); never in a save. |
+| `characters.register_playable` | `content.register` | content | yes | yes | Register a playable character past the game's six (pack, portrait, the character he fights as); never in a save. |
 | `characters.spawn` | `game.write` | simulation | yes | yes | Spawn a registered character or enemy. |
 
 ### `game.combat`
@@ -243,6 +243,7 @@ Written up in [dungeons.md](dungeons.md).
 | `dungeons.spheda_spawn` | `game.write` | simulation | – | yes | Reset and activate the active Chronicle Two Spheda course's pin and ball placement. |
 | `dungeons.lighting_get` | `game.read` | any | yes | – | Read the active floor's fog, background and ambient light, front and back side. |
 | `dungeons.lighting_set` | `game.write` | simulation | yes | – | Set the active floor's fog, background or ambient light until the next floor loads. |
+| `dungeons.set_enemy_scale` | `game.write` | simulation | – | – | Make monsters tougher or gentler for this mod: percent of their native life and blows, bosses apart ({life, blows, boss_life, boss_blows}, 10-1000, 100 as the game has them); mods' scales multiply; monsters already out keep their share of life; {} clears this owner. |
 
 ### `game.economy`
 
@@ -423,10 +424,10 @@ Written up in [runtime.md](runtime.md).
 
 | Operation | Permission | Phase | C1 | C2 | What it does |
 | --- | --- | --- | :-: | :-: | --- |
-| `mods.list` | `game.read` | any | yes | – | The mods loaded this session, in load order: id, name, version, author and co-op role (required, host_only or local). |
-| `mods.settings_get` | `game.read` | any | yes | – | A loaded mod's effective setting values; another mod's need mods.settings. |
-| `mods.settings_overlay` | `mods.settings` | any | yes | – | Give a loaded mod setting values for this session only (co-op: the host's): never saved, gone when the session ends. |
-| `mods.settings_overlay_clear` | `mods.settings` | any | yes | – | Drop session-only setting values: one mod's, or every mod's. |
+| `mods.list` | `game.read` | any | yes | yes | The mods loaded this session, in load order: id, name, version, author and co-op role (required, host_only or local). |
+| `mods.settings_get` | `game.read` | any | yes | yes | A loaded mod's effective setting values; another mod's need mods.settings. |
+| `mods.settings_overlay` | `mods.settings` | any | yes | yes | Give a loaded mod setting values for this session only (co-op: the host's): never saved, gone when the session ends. |
+| `mods.settings_overlay_clear` | `mods.settings` | any | yes | yes | Drop session-only setting values: one mod's, or every mod's. |
 
 ### `game.monsters`
 
@@ -440,6 +441,7 @@ Written up in [combat.md](combat.md).
 | `monsters.mirror_hit` | `game.write` | simulation | yes | – | Co-op host: another player's blow on a monster, by slot; a kill dies here. |
 | `monsters.natives` | `game.read` | any | yes | – | List the retail monster AI natives monsters.call can run. |
 | `monsters.call` | `game.write` | simulation | yes | – | Run one retail monster AI native on a live monster, as its own script would. |
+| `monsters.hold` | `game.write` | simulation | – | – | Co-op: the fight waits for another player: for up to {frames} of play on this floor its monsters do not think and this game's hero does not act; {frames = 0} lets them go, as does leaving the floor. |
 
 ### `game.net`
 
@@ -470,6 +472,8 @@ Written up in [player.md](player.md).
 | `party.town_active` | `game.read` | any | yes | – | Read the visible town character in Chronicle. |
 | `party.town_set_active` | `game.write` | simulation | yes | – | Change the visible town character in Chronicle without changing the dungeon party. |
 | `party.recruit` | `game.write` | simulation | yes | yes | Recruit a supported character through the game rules. |
+| `party.room_hero_set` | `game.write` | any | – | – | Co-op: this game plays one hero, {hero = 'max' or 'monica'}, whatever the story's party says, until room_hero_clear; the other hero cannot be changed to, and nothing is written into the save. |
+| `party.room_hero_clear` | `game.write` | any | – | – | Co-op: the party is the story's again. |
 
 ### `game.photos`
 
@@ -530,6 +534,7 @@ Written up in [player.md](player.md).
 | `player.ridepod_set` | `game.write` | simulation | – | yes | Adjust the ridepod's energy, capacity, shield kits, voice state, or fitted parts in Chronicle Two. |
 | `player.transform_get` | `game.read` | any | – | yes | Read Monica's monster badge levels, experience, unlock state, and active form in Chronicle Two. |
 | `player.transform_set` | `game.write` | simulation | – | yes | Adjust a monster badge's level, experience, or unlock state in Chronicle Two. |
+| `player.effects_take` | `game.read` | any | – | – | Co-op: the shots, spells, sword trails, thrown items and sounds this game's hero made on the floor since the last call ({effects = {kind, x, y, z, dx, dy, dz, value, amount, target, frame0, frame1}...}), for world.avatar_effect on the other games. |
 
 ### `game.quests`
 
@@ -596,6 +601,9 @@ Written up in [runtime.md](runtime.md).
 | `save.account_remove` | `game.write` | any | yes | – | Co-op host: forget a guest's things in this save. |
 | `save.migrate` | `game.write` | load | yes | yes | Run an owned save migration at the save-load boundary. |
 | `save.autosave_set` | `game.write` | any | yes | – | Enable or disable Chronicle's guarded native autosave writer. |
+| `save.slots_list` | `game.read` | any | – | – | Co-op: this game's own saves and how far each one's story is, for the page a player picks one on: {slots = {{slot, ready, progress, chapter, play_time}}}. |
+| `save.slot_player_export` | `game.read` | any | – | – | Co-op: a player's things (save.player_export text) out of one of this game's own saves, without loading it. |
+| `save.slot_player_import` | `game.write` | any | – | – | Co-op: during this mod's visit, write the player's things back into one of this game's own saves; its story and world stay as they are, and the file is copied aside before the first write. |
 
 ### `game.scripts`
 
@@ -747,6 +755,9 @@ Written up in [world.md](world.md).
 | `world.avatar_clear` | `game.write` | simulation | yes | – | Co-op: take another player's hero away (one slot, or every one). |
 | `world.dungeon_npc_clear` | `game.write` | simulation | yes | – | Take this mod's figure off the dungeon floor. |
 | `world.set_roads` | `game.write` | simulation | yes | – | Chronicle: {enabled = true} makes walking into a town's gate game.town.road, the mod's to take (world.transition), not the world map. |
+| `world.avatar_effect` | `game.write` | simulation | – | – | Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; with an age, in step with their hero. |
+| `world.watch_set` | `game.read` | any | – | – | Co-op: {enabled}: tell this mod (game.world.changed) of each change this game makes to the save's shared world: story flags and counters, the story's progress, the story's party, joinable townsfolk, dungeon floor records, Georama parts in stock, items the story's scripts give (gift), and that a town's Georama changed (as it is built, part by part). |
+| `world.change_apply` | `game.write` | any | – | – | Co-op: write another game's change {kind, id, value} (as game.world.changed gives it) into this game's save without telling it back; a floor's record is merged. |
 
 ## Events
 
@@ -769,7 +780,7 @@ The events `game.events.list()` reports. Subscribe with `moonmod.on(name, callba
 | `game.dungeon_npc.near` | world | yes | – | The player walked up to this mod's figure on the dungeon floor: id. |
 | `ui.run_menu_action` | ui | yes | – | The player used a row of this mod's run menu: tab and row ids. |
 | `ui.run_menu_shown` | ui | yes | – | This mod's run menu opened or closed: open, tab. |
-| `ui.choice_made` | ui | yes | – | The player picked an option on this mod's choice panel (index from 1), or backed out (cancelled). |
+| `ui.choice_made` | ui | yes | yes | The player picked an option on this mod's choice panel (index from 1), or backed out (cancelled). |
 | `ui.map_choice` | ui | yes | – | The player pressed Cross on a mark of this mod's map screen (mark from 1, x, y); the map has closed. |
 | `ui.map_waypoint` | ui | yes | – | The player put (set = true) or took away the waypoint at x, y on this mod's map screen. |
 | `ui.map_page` | ui | yes | – | The player pressed L2 (way -1) or R2 (way 1) on this mod's map screen opened with pages = true; open another map to turn the page. |
@@ -832,14 +843,16 @@ The events `game.events.list()` reports. Subscribe with `moonmod.on(name, callba
 | `game.georama.river_changed` | georama | yes | yes | A Chronicle Two river cell changed. |
 | `game.georama.piece_placed` | georama | yes | yes | A Georama piece was placed. |
 | `game.georama.piece_removed` | georama | yes | yes | A Georama piece was removed. |
-| `game.npc.talk` | characters | yes | – | The player pressed talk at a town villager the mod registered (characters.register kind = 'npc') that has no native talk event, or at a town resident it hooked (native = true). |
-| `game.title.opened` | title | yes | – | The player opened this mod's title mode screen from the title menu. |
-| `game.title.selected` | title | yes | – | The player confirmed an entry on this mod's title mode screen, or pressed Circle (entry 'back'). |
-| `game.session.started` | session | yes | – | A mod's sandbox session started: a fresh game with no save slot. |
-| `game.session.ended` | session | yes | – | A sandbox session ended: reason 'defeat', 'left_dungeon', 'ended' or 'loaded_save'. |
+| `game.npc.talk` | characters | yes | yes | The player pressed talk at a town villager the mod registered (characters.register kind = 'npc') that has no native talk event, or at a town resident it hooked (native = true). |
+| `game.title.opened` | title | yes | yes | The player opened this mod's title mode screen from the title menu. |
+| `game.title.selected` | title | yes | yes | The player confirmed an entry on this mod's title mode screen, or pressed Circle (entry 'back'). |
+| `game.session.started` | session | yes | yes | A mod's sandbox session started: a fresh game with no save slot. |
+| `game.session.ended` | session | yes | yes | A sandbox session ended: reason 'defeat', 'left_dungeon', 'ended' or 'loaded_save'. |
 | `quests.started` | quests | yes | yes | A registered quest became active. |
 | `quests.objective_advanced` | quests | yes | yes | A quest objective advanced. |
 | `quests.completed` | quests | yes | yes | All objectives in a quest are complete. |
 | `skills.train_requested` | skills | yes | yes | The player requested training a skill in the owning package tree. |
 | `skills.rank_changed` | skills | yes | yes | A skill rank changed. |
 | `skills.unlocked` | skills | yes | yes | A skill's rank first became positive. |
+| `game.world.changed` | world | – | yes | With world.watch_set: this game changed a part of the save two games share; kind (flag, counter, progress, party, recruit, floor, stock, gift, town), id, value. |
+| `game.session.failed` | session | – | yes | A visit could not start; reason says why. |

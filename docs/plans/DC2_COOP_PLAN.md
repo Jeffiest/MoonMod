@@ -894,6 +894,41 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   the plain map, the guest with the aerial one): 15/15, and its screenshots show the guest's light-blue arrow on the
   host's map, turned the way the guest walked, and both heroes' models on the guest's aerial map. `floor` 15/15,
   `clear` 13/13, `reward` 10/10, `look` 3/3. Engine `cd15c708`.
+- A boss's room together (2026-11-18, K8's boss floors; mod 0.14.0, protocol 11). A boss's room is a map of its own
+  (`d01b01` for the Underground Channel), loaded by the floor's event, with no seed: the mod had nothing to call the
+  place, so the other player was never asked and the host went quiet there. `world.get()` now gives `floor_map` and
+  `boss_floor`, true from the moment a `d<dungeon>b<room>` map loads (the game's own mark, `boss_map`, comes only as
+  the boss comes out at the end of the room's scene); a made map clears the last floor's seed. The other player is
+  asked "Max faces the boss of the Underground Channel: join the fight?" in the game's window and answers (`FA 1` /
+  `FA 0`). Meanwhile the fight waits: `monsters.hold {frames}` stops the floor's monsters, its effect scripts and the
+  hero's own script (so the hero does not walk up and start the boss's scene), for at most a minute of play; the
+  waiting player is told who it waits for and asked whether to start without them. The other walking in, staying
+  behind, the minute running out or the room closing starts it. Not covered yet: the boss's own scene and fight in a
+  room (it starts where the hero walks up to the boss, which a headless game does not do), so how the other game
+  sees the scene and the boss copied there are unverified.
+- Harder with two (2026-11-18, Jeffie: "when multiplayer is turned on everything should be harder ... more enemies,
+  harder bosses, larger maps ... options in game to toggle"). Five settings in the Mod Manager, each with `Off`;
+  the host's are the room's (`SCALE`, sent on joining and on a change): `larger_floors` (+50%: more rooms, on a grid
+  as much wider, 14 squares to 21) and `more_monsters` (+50% of the floor's own monsters, placed as the game places
+  them) for floors built while another player is in the room, through `dungeons.set_modifiers`, now on Chronicle Two;
+  both games apply them before the one seed, so they still build one floor. `scale_life` (+60%), `scale_blows`
+  (+25%) and `scale_bosses` (+75%) while another player is on the same floor, through the new
+  `dungeons.set_enemy_scale` (monsters already out keep their share of life; the copies follow the leader's). Alone,
+  or once the room closes, the game is its own. The ground first grew by the square root (17 squares at +50%): a
+  floor asked for 6 rooms came out with 5, as the builder gives up on rooms it cannot fit, so it grows as the rooms
+  do. A crash found on the way: a mod unloading as the game shut down rescaled monsters already gone (the rescale now
+  waits for the floor's next step).
+  Tests: engine `MoonModDungeonScale` 4 (modifiers, enemy scale, boss rooms by name, the unload), co-op 42; mod
+  unit tests 404/0 (boss's room: asked, joined, held, released four ways; harder with two: defaults, the host's
+  choices, Off, alone, room closed). New live scenarios: `boss` (the host's game set past the Underground Channel's
+  entrance scene and sent to its boss's room, the guest following) 15/15: the room is the boss's, with no seed; the
+  joiner is asked and joins; the host's fight waits, its monsters and hero holding still, until it hears the joiner
+  join; both games in `d01b01`, each showing the other, both scaling the room's monsters for two. `scale` 13/13: one
+  floor in both games, 6 rooms or more on 21 squares, as many more monsters in each, 60% more life on the host's
+  monsters and the joiner's copies. With the settings at their defaults: `floor` 15/15, `hurt` 11/11, `down` 15/15,
+  `clear` 13/13, `reward` 10/10, `meet` 7/7, `map` 15/15, `floor_first` 14/14, `gate` 6/6, `gate_host` 4/4, `shove`
+  12/12, `look` 3/3; `ridepod` 3/5 as before (the host does not board, for the debug-mode reason in the K4 note).
+  Engine `8fd6bf1a`.
 
 ## 7. Risks
 

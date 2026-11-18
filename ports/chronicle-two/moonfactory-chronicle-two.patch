@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..f33dbe17
+index 00000000..2975858f
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,427 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -1170,6 +1170,57 @@ index 00000000..f33dbe17
 +so it knows) and answers `{closed = true}`; with no panel of its own open it answers `{closed = false}`, and a
 +panel another mod opened stays open.
 +
++## A boss's room together (2026-11-18)
++
++A boss's room is a map of its own (the Underground Channel's is `d01b01`), loaded by the floor's own event in place
++of a built floor: it has no seed, so the mod had nothing to know it by. `world.get()` on a floor now gives
++`floor_map` (the map loaded, a built floor's too) and `boss_floor`: true on a map named `d<dungeon>b<room>` from the
++moment it loads (`BossRoomMap`), or once the game itself marks the floor (`BattleAreaScene->boss_map`, set only as
++the boss comes out at the end of the room's own scene). A made map clears the last floor's seed
++(`FloorMapLoading`, from `LoadDungeonMapFile`), so a boss's room never reports the floor before it. The mod names
++the place `D<dungeon>:<floor>:<map>` and asks the other player "Max faces the boss of the Underground Channel: join
++the fight?" in the game's window.
++
++`monsters.hold {frames}` (0-36000; 0 ends it) has the fight wait while the other player answers and walks in: the
++floor's monsters do not think (`ThinkHost` is gated, not `DNG_PAUSE_MONSTER_AI`, so a copy dying still dies), the
++floor's effect scripts rest, and this hero's script does not run, so the hero does not walk up to the boss and start
++its scene. The frames count only while the dungeon is in play (not in a menu or a scene); the hold ends by itself
++when they run out, when the player leaves the floor, or when another scene begins. `world.get().fight_held` is true
++meanwhile. The mod holds for at most a minute of play, tells the player who it waits for and asks, in the game's
++window, whether to start without them; the other player arriving, saying "Stay here", or the room closing ends the
++wait.
++
++Live scenario `boss`: the host walks into the Underground Channel's boss's room (story flag 10 set first, so the
++room's way in is its short one: the first visit's hint ends in a message that waits for a button), the joiner is
++asked and joins, the host's fight waits and then goes on, both are in `d01b01`, and both games scale the room's
++monsters for two. Not covered: the boss's own scene and the fight (the scene starts where the hero walks up to the
++boss, and a headless game does not walk there), so how the scene plays in the other game and the boss copied there
++are unverified.
++
++## Harder with two (2026-11-18)
++
++A floor played by two is played harder, and each part is the co-op mod's setting (the host's choice is the room's,
++sent as `SCALE life blows bosses monsters floors`):
++
++- `dungeons.set_modifiers {rooms, monsters}` (0-300 percent, owners added, `{}` clears the caller's) on Chronicle Two:
++  a floor built afterwards has that many more rooms (`RoomGoal`, after the floor's own `DngLayoutRooms`) on a grid
++  as much wider (`BuildArea`: 14 squares become 21 at +50%, up to `DNG_GRID`; grown only by the square root, the
++  random placement gave up on rooms it could not fit), and that many
++  more of the floor's own monsters, placed as the game places them (`AutoSetMonster`'s last step; mimics left out;
++  the active-monster limit raised to `MONSTER_MORE_MAX` meanwhile). Both games apply the same numbers before the
++  same seed, so they still build one floor: `floor_rooms`, `floor_grid` and `monsters_added` in `world.get()` say
++  what was built. `chests` and `chest_value` are refused here (not built yet).
++- `dungeons.set_enemy_scale {life, blows, boss_life, boss_blows}` (percent, 10-1000, owners multiplied, `{}` or all
++  100 clears): a monster made afterwards has `life` percent of its life (`boss_life` for a boss, by its table's
++  `boss`), a monster's blow on the hero lands `blows` percent as hard (`boss_blows` for a boss's, or for a blow no
++  monster dealt on a boss's floor; `Blow`, in `actionchara.cpp` and in an avatar's hit), and the monsters already out
++  are rescaled at once, keeping their share of life. A follower's copies take the leader's life as they stand.
++
++The mod sets the floors' numbers while anyone else is in the room, and the monsters' while another player is on
++this floor (100 + each setting for each other player there); alone, or once the room closes, it sets `{}` and the
++game is its own. Live scenario `scale`: both games build floor 2 larger and fuller and alike, the host's monsters
++have their own life while the host is alone there and 60% more once the joiner stands there too, in both games.
++
 +## What is not finished (reported, never silently passed)
 +
 +- **Blows on avatars** are measured since 2026-11-14: each frame the attack primitives aimed at the player's side
@@ -1201,7 +1252,7 @@ index 00000000..f33dbe17
 +  `MoonModNet.AHostAndAGuestMeetThroughTheRelay` dials the relay; without it the case is skipped.
 +- Two games: `python3 tools/coop/two_games.py --build port/build/pc` starts the relay, runs two headless games on
 +  synthetic data with a fixture mod that hosts and joins, and checks the `COOP_E2E` markers on both sides.
-+- Two games on the disc: `python3 -I tools/coop/live.py --scenario meet|floor|clear|hurt|down|build|shove --keep --out DIR` runs a host and a
++- Two games on the disc: `python3 -I tools/coop/live.py --scenario meet|floor|clear|hurt|down|build|shove|boss|scale --keep --out DIR` runs a host and a
 +  guest on extracted retail data (`--data`, `DC2_DATA` or the gauntlet's cache) with MoonMod's co-op mod and its
 +  test driver (`--moonmod`), and checks what both logged: the visit, each game showing the other in town and on a
 +  floor, the same seed and `floor_layout`, the guest's monsters copying the host's, a kill ending on both. With no
@@ -3013,10 +3064,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..9b252f12
+index 00000000..ae136232
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,436 @@
+@@ -0,0 +1,448 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3311,6 +3362,18 @@ index 00000000..9b252f12
 +void               FloorPlacing(int stage);
 +void               FloorPlaced(int stage);
 +std::optional<int> LastFloorSeed();
++// dng_event.cpp: the floor's map is loading (moonmod/coop_floor.hpp). A made map has no seed: world.get reports its
++// name instead (floor_map), and a seed of the floor before it is not reported as this floor's.
++void               FloorMapLoading(const char *map_name, bool generated);
++// The name of the map the floor is (d01f01 for a built floor of the first dungeon, d01b01 its boss's room); empty
++// off a floor.
++std::string        FloorMapName();
++// A boss's room by its map's name (d01b01: the game's made maps d<dungeon>b<room>).
++bool               BossRoomMap(std::string_view map);
++// monsters.hold: the fight waits for another player. For up to `frames` of play on this floor its monsters do not
++// think and this game's hero does not act (dng_main.cpp asks FightHeld); 0 lets them go, as does leaving the floor.
++void               FightHold(int frames);
++bool               FightHeld();
 +// world.get().floor_layout: a number for the floor as built (cells, chests and what they hold, monsters and where),
 +// the same in two games that built the same floor; none until the floor's monsters are placed.
 +std::optional<std::string> FloorLayoutHash();
@@ -3478,10 +3541,10 @@ index 00000000..1f6a04d0
 +} // namespace moonmod::coop
 diff --git a/port/include/moonmod/coop_floor.hpp b/port/include/moonmod/coop_floor.hpp
 new file mode 100644
-index 00000000..e6f538d4
+index 00000000..9f912344
 --- /dev/null
 +++ b/port/include/moonmod/coop_floor.hpp
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,18 @@
 +#pragma once
 +
 +// Co-op's hooks around the building of a dungeon floor, for the game units that call them. They are declared apart
@@ -3493,6 +3556,11 @@ index 00000000..e6f538d4
 +void FloorBuildBegin();
 +void FloorPlacing(int stage);
 +void FloorPlaced(int stage);
++// dng_event.cpp, LoadDungeonMapFile: the floor's map is loading, built by the generator (`generated`) or one of the
++// game's own made maps (a boss's room).
++void FloorMapLoading(const char *map_name, bool generated);
++// The fight waits (monsters.hold): the floor's monsters and this game's hero stand still (dng_main.cpp asks).
++bool FightHeld();
 +
 +} // namespace moonmod::coop
 diff --git a/port/include/moonmod/coop_pad.hpp b/port/include/moonmod/coop_pad.hpp
@@ -3754,6 +3822,80 @@ index 00000000..b9c0f47c
 +
 +/** Forgets the mod floors of the previous map; called by CDngFloorManager::Initialize. */
 +void ResetMoonModDngFloors();
+diff --git a/port/include/moonmod/dungeon_scale.hpp b/port/include/moonmod/dungeon_scale.hpp
+new file mode 100755
+index 00000000..7f940d56
+--- /dev/null
++++ b/port/include/moonmod/dungeon_scale.hpp
+@@ -0,0 +1,44 @@
++#pragma once
++
++// MoonMod: floors built bigger and fuller, and monsters made tougher, for the mods that ask (co-op's scaling for two
++// players): dungeons.set_modifiers and dungeons.set_enemy_scale on Chronicle Two (dungeon_scale_moonmod.cpp; the
++// operations themselves are in dungeon_scale_api.hpp). This header is the game's side and needs nothing of MoonMod's.
++//
++// The floor's numbers are read as it is built, so both games of a co-op room that ask alike build one floor from one
++// seed. The monsters' are read as a monster is put on the floor and as a blow aimed at the players lands; a change of
++// scale reaches the monsters already out at once, each keeping its share of life.
++
++class CColPrim;
++struct BASE_MONSTER_TBL;
++
++namespace moonmod::scale {
++
++// ---- dungeons.set_modifiers: the owners' bonuses added up, in percent (0 when none asks) ----------------------------
++int RoomBonus();
++int MonsterBonus();
++// A random floor's room goal and grid side with the room bonus (the native numbers when there is none).
++int RoomGoal(int goal);
++int BuildArea(int area);
++// How many more monsters a floor whose list puts `count` on it gets.
++int ExtraMonsters(int count);
++// dng_main.cpp, each step of a floor: what a mod's unloading left to do to the monsters out (their life, rescaled).
++void StepFloor();
++bool RescaleDue();
++// dng_event.cpp: how many more it got, as the last floor was built (world.get().monsters_added).
++void ExtraMonstersPlaced(int count);
++int  ExtraMonstersPlacedLast();
++
++// ---- dungeons.set_enemy_scale: percent of the native numbers (100: as the game has them) -----------------------------
++struct EnemyScale {
++    int life = 100;       // an ordinary monster's life
++    int blows = 100;      // how hard an ordinary monster hits
++    int boss_life = 100;  // a boss's
++    int boss_blows = 100; // and a boss's blows (and any blow on a boss's floor that no monster dealt)
++};
++EnemyScale Enemies();
++// The life a monster of this kind starts with on the floor now.
++int SpawnLife(const BASE_MONSTER_TBL &table);
++// A blow of `damage` aimed at the players' side as it lands now: the hero's own and the other side's are as they are.
++float Blow(float damage, const CColPrim &prim);
++
++} // namespace moonmod::scale
+diff --git a/port/include/moonmod/dungeon_scale_api.hpp b/port/include/moonmod/dungeon_scale_api.hpp
+new file mode 100755
+index 00000000..e129ff9f
+--- /dev/null
++++ b/port/include/moonmod/dungeon_scale_api.hpp
+@@ -0,0 +1,18 @@
++#pragma once
++
++// MoonMod: the operations of moonmod/dungeon_scale.hpp, dungeons.set_modifiers and dungeons.set_enemy_scale.
++
++#include <optional>
++#include <string_view>
++
++#include "moonmod/api.hpp"
++#include "moonmod/runtime.hpp"
++
++namespace moonmod::scale {
++
++std::optional<ApiCallResult> Call(std::string_view mod_id, std::string_view path, const Json &args);
++void                         AddCapabilities(RuntimeConfig &config);
++void                         OwnerUnloaded(std::string_view mod_id);
++void                         ResetForTests();
++
++} // namespace moonmod::scale
 diff --git a/port/include/moonmod/gamedata_moonmod.hpp b/port/include/moonmod/gamedata_moonmod.hpp
 new file mode 100644
 index 00000000..4d171e2a
@@ -5492,10 +5634,10 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..e3acb82a
+index 00000000..56e35654
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
-@@ -0,0 +1,538 @@
+@@ -0,0 +1,540 @@
 +#include "moonmod/api.hpp"
 +
 +#include <array>
@@ -5572,6 +5714,7 @@ index 00000000..e3acb82a
 +    {"ui.open_skills", "ui", "open_skills", "simulation", "content.register", "Open the owning package skill tree in the manager."},
 +    {"dungeons.set_modifiers", "dungeons", "set_modifiers", "simulation", "game.write", "Set owned additive generation bonuses in percent (0..300): rooms, monsters, chests, chest_value; {} clears this owner."},
 +    {"dungeons.set_population", "dungeons", "set_population", "simulation", "game.write", "Scale generated monster and chest targets by realized room count using inclusive per-room min/max ratios; native minimums and engine slot limits still apply; {} clears this owner."},
++    {"dungeons.set_enemy_scale", "dungeons", "set_enemy_scale", "simulation", "game.write", "Make monsters tougher or gentler for this mod: percent of their native life and blows, bosses apart ({life, blows, boss_life, boss_blows}, 10-1000, 100 as the game has them); mods' scales multiply; monsters already out keep their share of life; {} clears this owner."},
 +    {"dungeons.set_enemy_survival", "dungeons", "set_enemy_survival", "simulation", "game.write", "Set this mod's chance for eligible ordinary Chronicle enemies to survive one lethal hit; {} clears this owner."},
 +    {"dungeons.set_layout", "dungeons", "set_layout", "simulation", "game.write", "Set room count, room area and room sizes for floors built after the call; an empty table restores the native layout."},
 +    {"dungeons.set_exit_room", "dungeons", "set_exit_room", "simulation", "game.write", "Turn the walk-through exit room on or off for floors built after the call."},
@@ -5727,6 +5870,7 @@ index 00000000..e3acb82a
 +    {"monsters.mirror_get", "monsters", "mirror_get", "simulation", "game.read", "Co-op host: the floor's monsters (slot, kind, state, life, place, motion and how it plays) and the blows that landed on other players since the last call, with how each was dealt and where it struck."},
 +    {"monsters.puppet_set", "monsters", "puppet_set", "simulation", "game.write", "Co-op guest: make this floor's monsters copies of the host's, by slot (with an age, on the host's clock); a slot left out is gone on the host. Returns this game's blows on them, with how each landed."},
 +    {"monsters.puppet_clear", "monsters", "puppet_clear", "simulation", "game.write", "Co-op guest: give the floor's monsters their own thoughts back."},
++    {"monsters.hold", "monsters", "hold", "simulation", "game.write", "Co-op: the fight waits for another player: for up to {frames} of play on this floor its monsters do not think and this game's hero does not act; {frames = 0} lets them go, as does leaving the floor."},
 +    {"monsters.mirror_hit", "monsters", "mirror_hit", "simulation", "game.write", "Co-op host: another player's blow on a monster, by slot; told how it landed, taken and shown as this game's own hero's blow; a kill dies here."},
 +    {"dungeons.shared_events_get", "dungeons", "shared_events_get", "simulation", "game.read", "Co-op: the map events this player started since the last call that change the floor (a door, a gate, a switch), to run for the other players."},
 +    {"dungeons.shared_event_run", "dungeons", "shared_event_run", "simulation", "game.write", "Co-op: run another player's floor-changing event here, at its place, once the player is free; the key it asks for is taken as given."},
@@ -6427,12 +6571,13 @@ index 00000000..f77e8380
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_two_adapter.cpp b/port/src/moonmod/chronicle_two_adapter.cpp
 new file mode 100644
-index 00000000..2ba562cf
+index 00000000..c1b65688
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_two_adapter.cpp
-@@ -0,0 +1,7314 @@
+@@ -0,0 +1,7318 @@
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "moonmod/coop.hpp"
++#include "moonmod/dungeon_scale_api.hpp"
 +#include "moonmod/audio_api.hpp"
 +#include "moonmod/combat_formula.hpp"
 +#include "moonmod/content_characters.hpp"
@@ -12866,6 +13011,7 @@ index 00000000..2ba562cf
 +
 +ApiCallResult Call(std::string_view mod_id, const ApiOperationSpec &operation, const Json &args) {
 +    if (std::optional<ApiCallResult> handled = coop::Call(mod_id, operation, args)) return std::move(*handled);
++    if (std::optional<ApiCallResult> handled = scale::Call(mod_id, operation.path, args)) return std::move(*handled);
 +    if (operation.path == "content.list") return ListContent(args);
 +    if (operation.path == "content.register") return RegisterContent(mod_id, args);
 +    if (operation.path == "content.unregister") return UnregisterContent(mod_id, args);
@@ -13380,11 +13526,13 @@ index 00000000..2ba562cf
 +        RestoreChronicleTwoModelReplacements(mod_id);
 +        DespawnOwnedChronicleTwoActors(mod_id);
 +        coop::OwnerUnloaded(mod_id);
++        scale::OwnerUnloaded(mod_id);
 +        UnloadChronicleTwoNpcs(mod_id);
 +        UnloadChronicleTwoRegisteredCharacters(mod_id);
 +        std::erase_if(g_debug_overlays, [mod_id](const auto &entry) { return entry.second.owner == mod_id; });
 +    };
 +    coop::AddCapabilities(config);
++    scale::AddCapabilities(config);
 +    ConfigureAudioApi(config);
 +    CompleteApiCapabilityLedger(config.game_id, config.api_capabilities);
 +    config.require_complete_api_capabilities = true;
@@ -15261,15 +15409,16 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..52878313
+index 00000000..b4843085
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1483 @@
+@@ -0,0 +1,1512 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
 +
 +#include "moonmod/coop.hpp"
++#include "moonmod/dungeon_scale.hpp"
 +#include "moonmod/coop_down.hpp"
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "moonmod/coop_save.hpp"
@@ -15284,6 +15433,7 @@ index 00000000..52878313
 +#include <set>
 +#include <string>
 +
++#include "automap.hpp"
 +#include "dng_event.hpp"
 +#include "dng_main.hpp"
 +#include "gamedata.hpp"
@@ -16482,6 +16632,19 @@ index 00000000..52878313
 +    if (loop == LOOP_DUNGEON) {
 +        if (const std::optional<int> seed = LastFloorSeed()) world["floor_seed"] = *seed;
 +        if (const std::optional<std::string> layout = FloorLayoutHash()) world["floor_layout"] = *layout;
++        // The map the floor is (a boss's room is one of the game's made maps, with no seed) and whether it is a boss's:
++        // the game marks the floor (boss_map) only once its boss is out, after the room's own scene, so a boss's room is
++        // known by its map's name from the moment it loads (d<dungeon>b<room>: d01b01 is the Underground Channel's).
++        const std::string map = FloorMapName();
++        if (!map.empty()) world["floor_map"] = map;
++        world["boss_floor"] = (BattleAreaScene != nullptr && BattleAreaScene->boss_map != 0) || BossRoomMap(map);
++        if (FightHeld()) world["fight_held"] = true;
++        // A built floor's size: its rooms and the side of its grid (a room grows both: dungeons.set_modifiers).
++        if (LastFloorSeed()) {
++            world["floor_rooms"] = AutoMapGen.room_num;
++            world["floor_grid"] = AutoMapGen.grid_w;
++            world["monsters_added"] = moonmod::scale::ExtraMonstersPlacedLast();
++        }
 +        // Playing on the floor: the hero is there and no scene, menu or floor change holds the game.
 +        world["walking"] = MainChara__2 != nullptr && DngStatus.mode == DNG_STATUS_FIELD && !ChoiceIsOpen();
 +        // The floor's clear as the game itself decides it (IsEventRun): the monsters it still counts (a monster
@@ -16668,6 +16831,15 @@ index 00000000..52878313
 +        return Ok({{"cleared", true}});
 +    }
 +    if (path == "monsters.mirror_hit") return MirrorHit(args);
++    if (path == "monsters.hold") {
++        int frames = 0;
++        if (!args.is_array() || args.size() != 1 || !args[0].is_object() || args[0].size() != 1 || !ReadBoundedInt(args[0], "frames", 0, 36000, frames)) {
++            return Invalid("expected {frames = 0-36000}: how long the fight waits (0 lets it go)");
++        }
++        if (frames > 0 && GetNowLoopNo() != LOOP_DUNGEON) return Failed("the player isn't on a dungeon floor");
++        FightHold(frames);
++        return Ok({{"held", FightHeld()}, {"frames", frames}});
++    }
 +    if (path == "dungeons.set_seed") {
 +        if (!args.is_array() || args.size() > 1 || (args.size() == 1 && !args[0].is_object())) return Invalid("expected {seed = 0-2147483647}, or {} for the game's own");
 +        if (args.empty() || args[0].empty()) {
@@ -16706,7 +16878,7 @@ index 00000000..52878313
 +                             "party.room_hero_set", "party.room_hero_clear", "world.watch_set", "world.change_apply",
 +                             "player.down_rule_set", "player.revive", "player.give_up",
 +                             "world.avatar_set", "world.avatar_clear", "world.enter_map", "world.avatar_effect", "player.effects_take",
-+                             "monsters.mirror_get", "monsters.puppet_set", "monsters.puppet_clear", "monsters.mirror_hit",
++                             "monsters.mirror_get", "monsters.puppet_set", "monsters.puppet_clear", "monsters.mirror_hit", "monsters.hold",
 +                             "dungeons.set_seed", "dungeons.enter_floor", "dungeons.shared_events_get", "dungeons.shared_event_run",
 +                             "combat.strike_player", "items.owned", "georama.town_export", "georama.town_import", "ui.choice_open", "ui.choice_close",
 +                             "title.mode_register", "title.mode_set", "title.mode_remove"}) {
@@ -16745,6 +16917,11 @@ index 00000000..52878313
 +    UiReset();
 +    g_player_extras.clear();
 +    if (net::Shared().state() != net::State::Idle) net::Shared().Leave();
++}
++
++bool BossRoomMap(std::string_view map) {
++    const auto digit = [](char c) { return c >= '0' && c <= '9'; };
++    return map.size() == 6 && map[0] == 'd' && digit(map[1]) && digit(map[2]) && map[3] == 'b' && digit(map[4]) && digit(map[5]);
 +}
 +
 +} // namespace moonmod::coop
@@ -19443,15 +19620,16 @@ index 00000000..ab5344b5
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..6141e366
+index 00000000..cbd1b370
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,1965 @@
+@@ -0,0 +1,2015 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
 +#include "moonmod/coop.hpp"
 +#include "moonmod/coop_down.hpp"
++#include "moonmod/dungeon_scale.hpp"
 +#include "moonmod/chronicle_two_adapter.hpp"
 +
 +#include <algorithm>
@@ -20870,7 +21048,13 @@ index 00000000..6141e366
 +        p.trail.clear();
 +    }
 +    monster->life = std::clamp(puppet.hp, 0, 1000000);
-+    if (puppet.max_hp > 0) monster->max_life = puppet.max_hp;
++    if (puppet.max_hp > 0 && puppet.max_hp != monster->max_life) {
++        // (the leader's scale for its monsters: a boss's share of the bosses' gauge goes with it)
++        if (monster->tbl != nullptr && monster->tbl->boss != 0 && ActiveMonster != nullptr) {
++            ActiveMonster->boss_max_life = std::max(0, ActiveMonster->boss_max_life + puppet.max_hp - monster->max_life);
++        }
++        monster->max_life = puppet.max_hp;
++    }
 +    // The leader's monster died (its life gone, or dead already): the copy dies too once it is shown at that moment,
 +    // 8 frames behind the leader's clock as everything of the leader's is (PuppetsStep, CopyDies).
 +    if ((puppet.state == ACTIVE_MONSTER_DEAD || puppet.hp <= 0) && monster->state == ACTIVE_MONSTER_LIVE && p.dies_at < 0) {
@@ -21150,6 +21334,43 @@ index 00000000..6141e366
 +
 +std::optional<int> LastFloorSeed() { return g_last_seed; }
 +
++namespace {
++std::string g_floor_map;                 // the map the floor is
++int         g_hold_frames = 0;           // monsters.hold: frames of play the fight still waits
++const void *g_hold_scene = nullptr;      // the floor it waits on
++} // namespace
++
++void FloorMapLoading(const char *map_name, bool generated) {
++    g_floor_map = map_name != nullptr ? std::string(map_name) : std::string();
++    g_hold_frames = 0;
++    if (!generated) {
++        // A made map is no built floor: the seed of the floor before it is not this one's, nor is its layout.
++        g_last_seed.reset();
++        g_hash_ready = false;
++    }
++}
++
++std::string FloorMapName() { return OnFloor() ? g_floor_map : std::string(); }
++
++void FightHold(int frames) {
++    g_hold_frames = OnFloor() ? std::max(0, frames) : 0;
++    g_hold_scene = DngMainScene;
++}
++
++bool FightHeld() { return g_hold_frames > 0 && OnFloor() && g_hold_scene == DngMainScene; }
++
++namespace {
++// The hold counts down while the floor plays (a scene or a menu on top of it waits, as the fight does).
++void FightHoldStep() {
++    if (g_hold_frames <= 0) return;
++    if (!OnFloor() || g_hold_scene != DngMainScene) {
++        g_hold_frames = 0;
++        return;
++    }
++    if (DngStatus.mode == DNG_STATUS_FIELD) --g_hold_frames;
++}
++} // namespace
++
 +// ---- Each frame ------------------------------------------------------------------------------------------------------
 +
 +// A monster's blow on another player's hero. The game tests each attack's primitives against the bodies of the
@@ -21175,7 +21396,9 @@ index 00000000..6141e366
 +            // kind as the mod reads it: 2 a small hit (a flinch), 3 a blow that knocks down
 +            const int kind = (prim.param->hit_flags & DAMAGE_HIT_KNOCKDOWN) != 0 ? 3 : 2;
 +            if (g_avatar_hits.size() < 64) {
-+                AvatarHit hit{i + 1, prim.attacker, std::max(1, static_cast<int>(prim.damage)), kind, static_cast<int>(prim.param->hit_flags)};
++                // (as hard as it lands on this game's own hero: dungeons.set_enemy_scale)
++                AvatarHit hit{i + 1, prim.attacker, std::max(1, static_cast<int>(moonmod::scale::Blow(static_cast<float>(prim.damage), prim))), kind,
++                              static_cast<int>(prim.param->hit_flags)};
 +                hit.stun = prim.param->stun_time;
 +                hit.stagger = prim.param->stagger;
 +                hit.guard_rate = prim.param->critical_rate;
@@ -21383,10 +21606,14 @@ index 00000000..6141e366
 +    AvatarHitsStep();
 +    PuppetsStep();
 +    SharedEventsStep();
++    FightHoldStep();
 +}
 +
 +void WorldReset() {
 +    StoryScenesReset();
++    g_floor_map.clear();
++    g_hold_frames = 0;
++    g_hold_scene = nullptr;
 +    for (int i = 0; i < kAvatars; ++i) {
 +        g_avatars[static_cast<std::size_t>(i)].wanted = false;
 +        g_avatars[static_cast<std::size_t>(i)].pending.clear();
@@ -21612,6 +21839,267 @@ index 00000000..81a09c08
 +    }
 +    return false;
 +}
+diff --git a/port/src/moonmod/dungeon_scale_moonmod.cpp b/port/src/moonmod/dungeon_scale_moonmod.cpp
+new file mode 100755
+index 00000000..4adcffb2
+--- /dev/null
++++ b/port/src/moonmod/dungeon_scale_moonmod.cpp
+@@ -0,0 +1,255 @@
++// Floors built bigger and fuller, and monsters made tougher (moonmod/dungeon_scale.hpp).
++//
++// dungeons.set_modifiers {rooms, monsters}: each mod's bonus in percent, the mods' added up. A random floor's room
++// goal grows by the rooms bonus (automap.cpp, CAutoMapGen::Build) on a grid grown to hold them, and its list of
++// monsters is gone round again for the monsters bonus (dng_event.cpp, AutoSetMonster).
++//
++// dungeons.set_enemy_scale {life, blows, boss_life, boss_blows}: each mod's percent of the native numbers, the mods'
++// multiplied. A monster put on the floor starts with its kind's life so scaled (monster.cpp, SetActiveMonster), a
++// blow aimed at the players lands so scaled (actionchara.cpp, CheckDamage, and co-op's blows on another player's
++// hero), and a change reaches the monsters already out at once, each keeping its share of life. A co-op copy of a
++// monster is left alone: its life is the game's that runs it.
++
++// nlohmann/json (through the MoonMod headers) must precede the game headers, whose macros it would otherwise see.
++#include "moonmod/coop.hpp"
++#include "moonmod/dungeon_scale.hpp"
++#include "moonmod/dungeon_scale_api.hpp"
++
++#include <algorithm>
++#include <cmath>
++#include <map>
++#include <string>
++
++#include "automap.hpp"
++#include "colprim.hpp"
++#include "dng_main.hpp"
++#include "gamedata.hpp"
++#include "mainloop.hpp"
++#include "monster.hpp"
++#include "scenesnd.hpp"
++
++namespace moonmod::scale {
++
++namespace {
++
++struct Modifiers {
++    int rooms = 0;
++    int monsters = 0;
++};
++
++std::map<std::string, Modifiers, std::less<>>  g_modifiers; // by owner
++std::map<std::string, EnemyScale, std::less<>> g_enemies;   // by owner
++
++constexpr int kBonusMax = 300;
++int           g_extra_placed = 0; // monsters the last floor built got over its list
++bool          g_rescale_due = false; // a mod that scaled the monsters unloaded: StepFloor rescales them
++constexpr int kScaleMin = 10, kScaleMax = 1000;
++
++ApiCallResult Invalid(std::string message) { return {ApiCallStatus::InvalidArgument, nullptr, std::move(message)}; }
++ApiCallResult Ok(Json value) { return {ApiCallStatus::Ok, std::move(value), {}}; }
++
++bool ReadPercent(const Json &object, const char *key, int minimum, int maximum, int &out) {
++    const auto field = object.find(key);
++    if (field == object.end()) return true;
++    if (!field->is_number_integer()) return false;
++    const std::int64_t value = field->get<std::int64_t>();
++    if (value < minimum || value > maximum) return false;
++    out = static_cast<int>(value);
++    return true;
++}
++
++bool OnlyFields(const Json &object, std::initializer_list<std::string_view> allowed, std::string &unknown) {
++    for (auto field = object.begin(); field != object.end(); ++field) {
++        if (std::ranges::find(allowed, field.key()) == allowed.end()) {
++            unknown = field.key();
++            return false;
++        }
++    }
++    return true;
++}
++
++Json ModifiersJson() { return {{"rooms", RoomBonus()}, {"monsters", MonsterBonus()}}; }
++
++Json EnemiesJson() {
++    const EnemyScale s = Enemies();
++    return {{"life", s.life}, {"blows", s.blows}, {"boss_life", s.boss_life}, {"boss_blows", s.boss_blows}};
++}
++
++int Scaled(int value, int percent) {
++    if (percent == 100 || value <= 0) return value;
++    return std::max(1, static_cast<int>(std::lround(static_cast<double>(value) * percent / 100.0)));
++}
++
++// The monsters out on the floor now take the new scale, each keeping its share of life (a boss's share of the bosses'
++// gauge too). A copy of another game's monster is that game's to scale.
++void RescaleLive() {
++    if (GetNowLoopNo() != LOOP_DUNGEON || ActiveMonster == nullptr || ActiveMonster->GetScene() == nullptr) return;
++    const EnemyScale s = Enemies();
++    for (int slot = 0; slot < MONSTER_ACTIVE_MAX; ++slot) {
++        CActiveMonster *monster = ActiveMonster->GetActiveMonster(slot);
++        if (monster == nullptr || monster->state == ACTIVE_MONSTER_NONE || monster->tbl == nullptr) continue;
++        if (coop::IsPuppet(slot)) continue;
++        const bool boss = monster->tbl->boss != 0;
++        const int  was = monster->max_life;
++        const int  now = Scaled(monster->tbl->life, boss ? s.boss_life : s.life);
++        if (was <= 0 || now == was) continue;
++        if (monster->life > 0) monster->life = std::max(1, static_cast<int>(std::lround(static_cast<double>(monster->life) * now / was)));
++        monster->max_life = now;
++        if (boss) ActiveMonster->boss_max_life = std::max(0, ActiveMonster->boss_max_life + now - was);
++    }
++}
++
++ApiCallResult SetModifiers(std::string_view owner, const Json &args) {
++    static constexpr const char *kUsage = "expected {rooms = 0-300, monsters = 0-300} (percent more), or {} to clear this mod's";
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
++    const Json &request = args[0];
++    std::string unknown;
++    if (!OnlyFields(request, {"rooms", "monsters"}, unknown)) {
++        if (unknown == "chests" || unknown == "chest_value") return Invalid("Chronicle Two's floors take rooms and monsters; " + unknown + " is not here yet");
++        return Invalid("unknown field: " + unknown);
++    }
++    Modifiers m;
++    if (!ReadPercent(request, "rooms", 0, kBonusMax, m.rooms) || !ReadPercent(request, "monsters", 0, kBonusMax, m.monsters)) return Invalid(kUsage);
++    if (m.rooms == 0 && m.monsters == 0) {
++        g_modifiers.erase(std::string(owner));
++    } else {
++        g_modifiers[std::string(owner)] = m;
++    }
++    return Ok(ModifiersJson());
++}
++
++ApiCallResult SetEnemyScale(std::string_view owner, const Json &args) {
++    static constexpr const char *kUsage =
++        "expected {life, blows, boss_life, boss_blows} in percent of the game's own (10-1000, 100 as it is), or {} to clear this mod's";
++    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
++    const Json &request = args[0];
++    std::string unknown;
++    if (!OnlyFields(request, {"life", "blows", "boss_life", "boss_blows"}, unknown)) return Invalid("unknown field: " + unknown);
++    EnemyScale s;
++    if (!ReadPercent(request, "life", kScaleMin, kScaleMax, s.life) || !ReadPercent(request, "blows", kScaleMin, kScaleMax, s.blows) ||
++        !ReadPercent(request, "boss_life", kScaleMin, kScaleMax, s.boss_life) || !ReadPercent(request, "boss_blows", kScaleMin, kScaleMax, s.boss_blows)) {
++        return Invalid(kUsage);
++    }
++    const bool native = s.life == 100 && s.blows == 100 && s.boss_life == 100 && s.boss_blows == 100;
++    const auto found = g_enemies.find(owner);
++    const bool same = native ? found == g_enemies.end()
++                             : found != g_enemies.end() && found->second.life == s.life && found->second.blows == s.blows &&
++                                   found->second.boss_life == s.boss_life && found->second.boss_blows == s.boss_blows;
++    if (!same) {
++        if (native) {
++            g_enemies.erase(found);
++        } else {
++            g_enemies[std::string(owner)] = s;
++        }
++        RescaleLive();
++    }
++    return Ok(EnemiesJson());
++}
++
++} // namespace
++
++int RoomBonus() {
++    int sum = 0;
++    for (const auto &[owner, m] : g_modifiers) sum += m.rooms;
++    return std::min(sum, kBonusMax);
++}
++
++int MonsterBonus() {
++    int sum = 0;
++    for (const auto &[owner, m] : g_modifiers) sum += m.monsters;
++    return std::min(sum, kBonusMax);
++}
++
++int RoomGoal(int goal) {
++    const int bonus = RoomBonus();
++    if (bonus <= 0) return goal;
++    return std::clamp(goal + (goal * bonus + 50) / 100, 2, DNG_ROOM_MAX);
++}
++
++int BuildArea(int area) {
++    const int bonus = RoomBonus();
++    if (bonus <= 0) return area;
++    // the grid's side grows as the rooms do: rooms are placed at random and the builder gives up on a room it can't
++    // fit, so ground grown only as much as the rooms need (its area by the bonus) held fewer of them than asked (a
++    // floor of 6 asked for, on 17 squares, came out with 5). Two players have more ground to cover, too.
++    return std::clamp(static_cast<int>(std::lround(area * (1.0 + bonus / 100.0))), area, DNG_GRID);
++}
++
++int ExtraMonsters(int count) {
++    const int bonus = MonsterBonus();
++    if (bonus <= 0 || count <= 0) return 0;
++    return (count * bonus + 50) / 100;
++}
++
++void ExtraMonstersPlaced(int count) { g_extra_placed = count; }
++
++int ExtraMonstersPlacedLast() { return g_extra_placed; }
++
++EnemyScale Enemies() {
++    double life = 1.0, blows = 1.0, boss_life = 1.0, boss_blows = 1.0;
++    for (const auto &[owner, s] : g_enemies) {
++        life *= s.life / 100.0;
++        blows *= s.blows / 100.0;
++        boss_life *= s.boss_life / 100.0;
++        boss_blows *= s.boss_blows / 100.0;
++    }
++    const auto percent = [](double f) { return std::clamp(static_cast<int>(std::lround(f * 100.0)), kScaleMin, kScaleMax); };
++    return {percent(life), percent(blows), percent(boss_life), percent(boss_blows)};
++}
++
++int SpawnLife(const BASE_MONSTER_TBL &table) {
++    if (g_enemies.empty()) return table.life;
++    const EnemyScale s = Enemies();
++    return Scaled(table.life, table.boss != 0 ? s.boss_life : s.life);
++}
++
++float Blow(float damage, const CColPrim &prim) {
++    if (g_enemies.empty() || prim.owner == 0 || (prim.target & DAMAGE_TARGET_PLAYER) == 0) return damage;
++    const EnemyScale s = Enemies();
++    bool             boss = false;
++    const int        slot = prim.owner - DNG_CHARA_SLOT_MONSTER;
++    if (slot >= 0 && slot < MONSTER_ACTIVE_MAX && ActiveMonster != nullptr) {
++        const CActiveMonster *monster = ActiveMonster->GetActiveMonster(slot);
++        boss = monster != nullptr && monster->tbl != nullptr && monster->tbl->boss != 0;
++    } else {
++        // (a blow no monster dealt: a boss's breath or a trap of the floor; on a boss's floor it is the boss's)
++        boss = BattleAreaScene != nullptr && BattleAreaScene->boss_map != 0;
++    }
++    const int percent = boss ? s.boss_blows : s.blows;
++    return percent == 100 ? damage : damage * static_cast<float>(percent) / 100.0f;
++}
++
++std::optional<ApiCallResult> Call(std::string_view mod_id, std::string_view path, const Json &args) {
++    if (path == "dungeons.set_modifiers") return SetModifiers(mod_id, args);
++    if (path == "dungeons.set_enemy_scale") return SetEnemyScale(mod_id, args);
++    return std::nullopt;
++}
++
++void AddCapabilities(RuntimeConfig &config) {
++    config.api_capabilities.push_back({"dungeons.set_modifiers", true, {}});
++    config.api_capabilities.push_back({"dungeons.set_enemy_scale", true, {}});
++}
++
++void OwnerUnloaded(std::string_view mod_id) {
++    g_modifiers.erase(std::string(mod_id));
++    // (not here and now: a mod unloads as the game shuts down too, when the floor's monsters are already gone; the
++    // floor's next step rescales them)
++    if (g_enemies.erase(std::string(mod_id)) > 0) g_rescale_due = true;
++}
++
++void StepFloor() {
++    if (!g_rescale_due) return;
++    g_rescale_due = false;
++    RescaleLive();
++}
++
++bool RescaleDue() { return g_rescale_due; }
++
++void ResetForTests() {
++    g_modifiers.clear();
++    g_enemies.clear();
++    g_extra_placed = 0;
++    g_rescale_due = false;
++}
++
++} // namespace moonmod::scale
 diff --git a/port/src/moonmod/gamedata_moonmod.cpp b/port/src/moonmod/gamedata_moonmod.cpp
 new file mode 100644
 index 00000000..d2425e37
@@ -30679,16 +31167,17 @@ index 10ac7b34..3d4eed00 100644
  
  void DrawTakePhotoSystem(int texture, CInventUserData *user_data) {
 diff --git a/port/src/object/dun/actionchara.cpp b/port/src/object/dun/actionchara.cpp
-index 97732c47..611c1df4 100644
+index 97732c47..e138348e 100644
 --- a/port/src/object/dun/actionchara.cpp
 +++ b/port/src/object/dun/actionchara.cpp
-@@ -1,3 +1,5 @@
+@@ -1,3 +1,6 @@
 +#include "moonmod/coop.hpp"
 +#include "moonmod/coop_down.hpp"
++#include "moonmod/dungeon_scale.hpp"
  #include "common.h"
  
  #include <libvu0.h>
-@@ -635,6 +637,10 @@ void CActionChara::ThrowItemObject() {
+@@ -635,6 +638,10 @@ void CActionChara::ThrowItemObject() {
              sceVu0ScaleVector(target, target, 120.0f);
              sceVu0AddVector(target, target, position);
              effect_man->SetScriptVect1(target, 0, throw_effect);
@@ -30699,7 +31188,7 @@ index 97732c47..611c1df4 100644
              hold_type = ACTION_HOLD_NONE;
  
              item = GetBattleCharaInfo()->GetActiveItemInfo(0);
-@@ -731,6 +737,9 @@ void CActionChara::EntryThrowItem() {
+@@ -731,6 +738,9 @@ void CActionChara::EntryThrowItem() {
      if (throw_effect < 0) {
          dc2::log::PrintGame("effect entry err\n");
      } else {
@@ -30709,7 +31198,7 @@ index 97732c47..611c1df4 100644
          effect_man->SetValue(0, 1, 0, throw_effect);
          effect_man->SetValue(1, item_no, 0, throw_effect);
  
-@@ -764,6 +773,9 @@ void CActionChara::RemoveThrowItem() {
+@@ -764,6 +774,9 @@ void CActionChara::RemoveThrowItem() {
  
              if (effect_no >= 0) {
                  effect_man->DeleteEffSpt(0, effect_no);
@@ -30719,7 +31208,7 @@ index 97732c47..611c1df4 100644
              }
  
              hold_type = ACTION_HOLD_NONE;
-@@ -1049,6 +1061,8 @@ void CActionChara::StepEffect() {
+@@ -1049,6 +1062,8 @@ void CActionChara::StepEffect() {
                              sword_effect[slot->sword_no]->StartEffect(
                                  start_frame, end_frame, slot->length, slot->fade_time,
                                  slot->hold_time);
@@ -30728,7 +31217,16 @@ index 97732c47..611c1df4 100644
                              slot->wait = 5;
                          }
                      }
-@@ -3287,7 +3301,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -2964,7 +2979,7 @@ int CActionChara::CheckDamage() {
+ 
+         max_hp = battle->GetMaxHp_i();
+         now_hp = battle->GetNowHp_i();
+-        damage = hit->damage * (1.0f + fRand(0.15f));
++        damage = moonmod::scale::Blow(static_cast<float>(hit->damage), *hit) * (1.0f + fRand(0.15f)); // MoonMod: dungeons.set_enemy_scale
+         damage -= battle->GetDefenceVol();
+ 
+         if (damage <= 0.0f) {
+@@ -3287,7 +3302,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
          AllDeleteDamage();
          prog_no = ACTION_PROG_DEAD;
          damage_req = ACTION_DAMAGE_REQ_NONE;
@@ -30740,7 +31238,7 @@ index 97732c47..611c1df4 100644
      }
  
      if (damage_req == ACTION_DAMAGE_REQ_HOLD) {
-@@ -3316,7 +3333,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -3316,7 +3334,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
      } else {
          script.resume();
  
@@ -30751,19 +31249,20 @@ index 97732c47..611c1df4 100644
          }
      }
 diff --git a/port/src/object/dun/automap.cpp b/port/src/object/dun/automap.cpp
-index fdee1a6e..aa8aa404 100644
+index fdee1a6e..1280506a 100644
 --- a/port/src/object/dun/automap.cpp
 +++ b/port/src/object/dun/automap.cpp
-@@ -3,6 +3,8 @@
+@@ -3,6 +3,9 @@
  #include "log/game_output.hpp"
  // clang-format on
  
 +// nlohmann/json (through moonmod/coop.hpp) must precede the game headers, whose macros it would otherwise see.
 +#include "moonmod/coop.hpp"
++#include "moonmod/dungeon_scale.hpp"
  #include "common.h"
  #include "mw_runtime.h"
  
-@@ -33,6 +35,18 @@
+@@ -33,6 +36,18 @@
  #include "scenesnd.hpp"
  #include "scriptinterpreter.hpp"
  
@@ -30782,7 +31281,7 @@ index fdee1a6e..aa8aa404 100644
  /**
   *
   * Names and connection flags of parts for generated dungeon cells.
-@@ -462,6 +476,505 @@ std::span<CAutoMapParts> CAutoMapGen::GridCells() const { return LiveGridCells(g
+@@ -462,6 +477,505 @@ std::span<CAutoMapParts> CAutoMapGen::GridCells() const { return LiveGridCells(g
  
  std::span<CAutoMapParts> CMiniMapSymbol::GridCells() const { return LiveGridCells(grid_storage, grid_w, grid_h); }
  
@@ -31288,7 +31787,7 @@ index fdee1a6e..aa8aa404 100644
  void CMiniMapSymbol::DrawSymbol(float *pos, int symbol) {
      auto *grid = GridCells().data();
      if (grid_w > 0 && grid_h > 0 && grid == nullptr) {
-@@ -472,8 +985,16 @@ void CMiniMapSymbol::DrawSymbol(float *pos, int symbol) {
+@@ -472,8 +986,16 @@ void CMiniMapSymbol::DrawSymbol(float *pos, int symbol) {
          !std::isfinite(cell_w) || !std::isfinite(cell_d) || cell_w <= 0.0f || cell_d <= 0.0f) {
          return;
      }
@@ -31307,7 +31806,7 @@ index fdee1a6e..aa8aa404 100644
      int          revealed = false;
      const auto   point = GridPoint(pos, cell_w, cell_d, grid_w, grid_h);
      if (grid != nullptr && point && grid[(*point)[1] * grid_w + (*point)[0]].visible) {
-@@ -555,6 +1076,7 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
+@@ -555,6 +1077,7 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
              })) {
              return false;
          }
@@ -31315,7 +31814,7 @@ index fdee1a6e..aa8aa404 100644
          for (;;) {
              pick = iRand(room_info_num);
              const int roll = iRand(100);
-@@ -562,7 +1084,12 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
+@@ -562,7 +1085,12 @@ int CAutoMapGen::CreatRoom(int x, int y, int room_no, int info_no) {
                  continue;
              }
              const auto &preset = presets[static_cast<std::size_t>(pick)];
@@ -31329,7 +31828,7 @@ index fdee1a6e..aa8aa404 100644
                  info_no = pick;
                  break;
              }
-@@ -1373,9 +1900,9 @@ void CAutoMapGen::CreatDoorRoom() {
+@@ -1373,9 +1901,9 @@ void CAutoMapGen::CreatDoorRoom() {
          return;
      }
  
@@ -31341,7 +31840,7 @@ index fdee1a6e..aa8aa404 100644
          candidates[i] = -1;
      }
  
-@@ -1727,6 +2254,9 @@ void CAutoMapGen::IndexToPartsPlace() {
+@@ -1727,6 +2255,9 @@ void CAutoMapGen::IndexToPartsPlace() {
          return;
      }
  
@@ -31351,7 +31850,7 @@ index fdee1a6e..aa8aa404 100644
      map->ClearPlaceParts();
      float rot[4] = {0.0f, 0.0f, 0.0f, 1.0f};
      float scale[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-@@ -1940,7 +2470,7 @@ void CAutoMapGen::RandomMapMainProc() {
+@@ -1940,7 +2471,7 @@ void CAutoMapGen::RandomMapMainProc() {
      int               n = {};
      CDngFloorManager *manager = {};
      random_map = true;
@@ -31360,36 +31859,37 @@ index fdee1a6e..aa8aa404 100644
  
      if (DebugFlag) {
          dc2::log::PrintGame("rand = %d\n", seed);
-@@ -1974,6 +2504,9 @@ void CAutoMapGen::RandomMapMainProc() {
+@@ -1974,6 +2505,10 @@ void CAutoMapGen::RandomMapMainProc() {
  
      rooms = 2;
      goal = iRand(3) + 4;
 +    if (DngLayoutRooms > 0) {
 +        goal = DngLayoutRooms;
 +    }
++    goal = moonmod::scale::RoomGoal(goal); // MoonMod: dungeons.set_modifiers rooms
      round = 0;
  
      while (rooms < goal) {
-@@ -2132,14 +2665,14 @@ void CAutoMapGen::Build() {
+@@ -2132,14 +2667,14 @@ void CAutoMapGen::Build() {
      }
  
      if (mode & AUTOMAP_GEN_FIXED_START) {
 -        grid_w = 20;
 -        grid_h = 16;
-+        grid_w = DngLayoutArea > 20 ? DngLayoutArea : 20;
-+        grid_h = DngLayoutArea > 16 ? DngLayoutArea : 16;
++        grid_w = moonmod::scale::BuildArea(DngLayoutArea > 20 ? DngLayoutArea : 20); // MoonMod: room for the rooms bonus
++        grid_h = moonmod::scale::BuildArea(DngLayoutArea > 16 ? DngLayoutArea : 16);
          RandomMapMainProc();
          return;
      }
  
 -    grid_w = 14;
 -    grid_h = 14;
-+    grid_w = DNG_BUILD_AREA;
-+    grid_h = DNG_BUILD_AREA;
++    grid_w = moonmod::scale::BuildArea(DNG_BUILD_AREA); // MoonMod: room for the rooms bonus
++    grid_h = moonmod::scale::BuildArea(DNG_BUILD_AREA);
      RandomMapMainProc();
      map = DngMainScene->GetMap(0);
  
-@@ -2730,7 +3263,7 @@ void CMiniMapSymbol::DrawSymbolClose() {
+@@ -2730,7 +3265,7 @@ void CMiniMapSymbol::DrawSymbolClose() {
      gfx::SetUiAnchor({});
  }
  
@@ -31398,7 +31898,7 @@ index fdee1a6e..aa8aa404 100644
      gfx::UiAnchorScope anchor(kMiniMapAnchor);
  
      float pos[4];
-@@ -2746,10 +3279,42 @@ void CMiniMapSymbol::DrawSymbol_Chara(CCharacter2 *chara) {
+@@ -2746,10 +3281,42 @@ void CMiniMapSymbol::DrawSymbol_Chara(CCharacter2 *chara) {
  
      chara->GetPosition(pos);
      chara->GetRotation(rot);
@@ -31441,7 +31941,7 @@ index fdee1a6e..aa8aa404 100644
      CPreSprite sprite;
      sprite.Initialize(nullptr, nullptr);
      sprite.Preset2D();
-@@ -2804,6 +3369,82 @@ void CMiniMapSymbol::Draw(float *pos) {
+@@ -2804,6 +3371,82 @@ void CMiniMapSymbol::Draw(float *pos) {
      sceVu0CopyVector(center, pos);
      const bool dimmed = (BattleAreaScene->minimap_reveal & MINIMAP_REVEAL_ROOMS) != 0;
  
@@ -31524,7 +32024,7 @@ index fdee1a6e..aa8aa404 100644
      CPreSprite sprite;
      CPreSprite spare;
      float      part_pos[4];
-@@ -2903,3 +3544,9 @@ bool CAutoMapGen::SetupRoomInfo(std::string_view path) {
+@@ -2903,3 +3546,9 @@ bool CAutoMapGen::SetupRoomInfo(std::string_view path) {
      room_info_num = static_cast<int>(count);
      return true;
  }
@@ -31535,19 +32035,20 @@ index fdee1a6e..aa8aa404 100644
 +int DngLayoutRoomMin = 0;
 +int DngLayoutRoomMax = 0;
 diff --git a/port/src/object/dun/dng_event.cpp b/port/src/object/dun/dng_event.cpp
-index b07b90e2..19823df2 100644
+index b07b90e2..45dfcb57 100644
 --- a/port/src/object/dun/dng_event.cpp
 +++ b/port/src/object/dun/dng_event.cpp
-@@ -7,6 +7,8 @@
+@@ -7,6 +7,9 @@
  #include "common.h"
  #include "mw_runtime.h"
  
 +#include "moonmod/coop_floor.hpp"
++#include "moonmod/dungeon_scale.hpp"
 +
  #include <cmath>
  #include <cstddef>
  #include <cstdio>
-@@ -37,6 +39,7 @@
+@@ -37,6 +40,7 @@
  #include "gameutil.hpp"
  #include "mainloop.hpp"
  #include "maintex.hpp"
@@ -31555,7 +32056,51 @@ index b07b90e2..19823df2 100644
  #include "mapinfo.hpp"
  #include "mapjump.hpp"
  #include "mapload.hpp"
-@@ -2011,7 +2014,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
+@@ -1866,6 +1870,43 @@ void AutoSetMonster() {
+                 }
+             } while (!placed);
+         }
++
++        // MoonMod: a fuller floor (dungeons.set_modifiers monsters): the floor's list gone round again from the top,
++        // each placed as the game places its own, but never a mimic (a chest), and the gate key stays with the first;
++        // a spot not found in a good while is given up rather than waited on.
++        const int extra = moonmod::scale::ExtraMonsters(spawn_count);
++        int       added = 0;
++
++        for (int k = 0; k < extra && spawn_count > 0; k++) {
++            const int entry = k % spawn_count;
++            base_id = ActiveMonster->locate.monster_id[entry];
++
++            if (base_id < 0 || (base_id >= MONSTER_ID_MIMIC_FIRST && base_id <= MONSTER_ID_MIMIC_LAST)) {
++                continue;
++            }
++
++            for (int tries = 0; tries < 256; tries++) {
++                if (SearchMapFlatPosition(position, &AutoMapGen) == 0) {
++                    continue;
++                }
++
++                rand();
++                direction[0] = direction[1] = direction[2] = direction[3] = 0.0f;
++
++                if (!(mgDistVector(event_point, position) <= 520.0f) && CheckObjectPutArea(position) != 0) {
++                    monster = ActiveMonster->SetActiveMonster(ActiveMonster->SearchBaseIndex(base_id), position, direction, -1);
++
++                    if (monster != nullptr) {
++                        monster->locate_param = ActiveMonster->locate.param[entry];
++                        added++;
++                    }
++
++                    break;
++                }
++            }
++        }
++
++        moonmod::scale::ExtraMonstersPlaced(added);
+     }
+ }
+ 
+@@ -2011,7 +2052,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
          GetLoadMapInfo(&load_info, map_no);
          load_info.sky_tex_block = 0x4C;
          load_info.load_sky = 1;
@@ -31564,7 +32109,7 @@ index b07b90e2..19823df2 100644
          DngMainScene->DeleteMap(0, 1);
          DngMainScene->LoadMap(0, &load_info, 0);
          DngMainScene->SetNowMapNo(map_no);
-@@ -2100,7 +2103,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
+@@ -2100,7 +2141,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
          grid_cells[static_cast<std::size_t>(cell)].Initialize();
      }
  
@@ -31573,7 +32118,15 @@ index b07b90e2..19823df2 100644
          AutoMapGen.room[room].no_door = 0;
      }
  
-@@ -2127,6 +2130,7 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
+@@ -2121,12 +2162,15 @@ void LoadDungeonMapFile(char *map_name, char *cfg_name, int gen_flag) {
+     AutoMapGen.random_map = 0;
+     AutoMapGen.minimap_enable = 0;
+ 
++    moonmod::coop::FloorMapLoading(map_name, cfg_name != nullptr); // MoonMod: world.get().floor_map
++
+     if (cfg_name != nullptr) {
+         const auto room_path = std::format("dungeon/cfg_file/{}.cfg.json", cfg_name);
+         if (!AutoMapGen.SetupRoomInfo(room_path)) {
              return;
          }
          AutoMapGen.gen_flag |= gen_flag;
@@ -31581,7 +32134,7 @@ index b07b90e2..19823df2 100644
          AutoMapGen.Build();
      }
  
-@@ -2220,7 +2224,17 @@ void PrepareMonsterMemory(CMonsterMan &manager) {
+@@ -2220,7 +2264,17 @@ void PrepareMonsterMemory(CMonsterMan &manager) {
      }
  }
  
@@ -31599,7 +32152,7 @@ index b07b90e2..19823df2 100644
      if (!ActiveMonster) {
          return;
      }
-@@ -2234,7 +2248,8 @@ void LoadMonsterFile() {
+@@ -2234,7 +2288,8 @@ void LoadMonsterFile() {
      PrepareMonsterMemory(*ActiveMonster);
      sndInitPort(5);
      auto &locate = ActiveMonster->locate;
@@ -31609,7 +32162,7 @@ index b07b90e2..19823df2 100644
      for (int i = 0; i < MONSTER_LOCATE_MAX; ++i) {
          locate.param[i] = -1;
          locate.monster_id[i] = -1;
-@@ -2253,6 +2268,8 @@ void LoadMonsterFile() {
+@@ -2253,6 +2308,8 @@ void LoadMonsterFile() {
              ActiveMonster->EntryRefer(id, memory);
          }
      }
@@ -31618,7 +32171,7 @@ index b07b90e2..19823df2 100644
      dc2::debug::RosterStressLoadMonsters(memory);
  }
  
-@@ -2265,6 +2282,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
+@@ -2265,6 +2322,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
      }
  
      if (initialize != 0) {
@@ -31626,7 +32179,7 @@ index b07b90e2..19823df2 100644
          manager->Initialize(scene);
          scene->AssignStack(3);
          scene->ClearStack(3);
-@@ -2279,6 +2297,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
+@@ -2279,6 +2337,7 @@ void LoadMonsterFile(int monster_id, int initialize) {
          // Retail places these at +4 with a 0x30 stride; host pointers enlarge both fields.
          PrepareMonsterMemory(*manager);
          sndInitPort(5);
@@ -31634,7 +32187,7 @@ index b07b90e2..19823df2 100644
      }
  
      if (manager->SearchBaseIndex(monster_id) < 0) {
-@@ -2482,5 +2501,10 @@ bool dc2::dungeon::LoadTreasureBoxInfo(TRESURE_BOX_FLOOR_INFO &table, std::strin
+@@ -2482,5 +2541,10 @@ bool dc2::dungeon::LoadTreasureBoxInfo(TRESURE_BOX_FLOOR_INFO &table, std::strin
          std::copy_n(source.group_id.begin(), count, floor.group_id);
          floor.group_num = static_cast<int>(count);
      }
@@ -31646,18 +32199,19 @@ index b07b90e2..19823df2 100644
      return true;
  }
 diff --git a/port/src/object/dun/dng_main.cpp b/port/src/object/dun/dng_main.cpp
-index ff2a7551..7c74ce60 100644
+index ff2a7551..9cc65446 100644
 --- a/port/src/object/dun/dng_main.cpp
 +++ b/port/src/object/dun/dng_main.cpp
-@@ -1,3 +1,7 @@
+@@ -1,3 +1,8 @@
 +// nlohmann/json (through moonmod/coop.hpp) must precede the game headers, whose macros it would otherwise see.
 +#include "moonmod/coop.hpp"
 +#include "moonmod/coop_down.hpp"
 +#include "moonmod/coop_story.hpp"
++#include "moonmod/dungeon_scale.hpp"
  #include "common.h"
  #include "mw_runtime.h"
  
-@@ -347,8 +351,9 @@ void memoryInit() {
+@@ -347,8 +352,9 @@ void memoryInit() {
  
      BuffWorkData.stReset();
      const bool roster_stress = dc2::debug::RosterStressEnabled();
@@ -31669,7 +32223,7 @@ index ff2a7551..7c74ce60 100644
      mgTexManager.Initialize(GetVramTopAddress(), -1);
      size = GetCharaMemAllocSize();
      BuffCharacter.stSetChildBuffer(*MainBuffer, MainBuffer->stAlloc64(size), size);
-@@ -737,15 +742,15 @@ void InitDungeonMain(INIT_LOOP_ARG arg) {
+@@ -737,15 +743,15 @@ void InitDungeonMain(INIT_LOOP_ARG arg) {
      AutoMapGen.navi_enable = 0;
      AutoMapGen.cell_d = 320.0f;
      AutoMapGen.cell_w = 320.0f;
@@ -31690,7 +32244,7 @@ index ff2a7551..7c74ce60 100644
      MainChara__2->sound_info.foot_se_bank = DngMainScene->se_base_id;
      MainChara__2->sound_info.foot_sound_id = -1;
      sndInitPort(SND_PORT_CHARA);
-@@ -1675,6 +1680,7 @@ void DngMainDraw() {
+@@ -1675,6 +1681,7 @@ void DngMainDraw() {
              }
  
              AutoMapGen.mini_map.DrawSymbolClose();
@@ -31698,7 +32252,7 @@ index ff2a7551..7c74ce60 100644
              AutoMapGen.mini_map.DrawSymbol_Chara(MainChara__2);
          }
      }
-@@ -1771,6 +1777,7 @@ void DngMainDraw() {
+@@ -1771,6 +1778,7 @@ void DngMainDraw() {
      DebugMainDraw();
      dngDebugDraw();
      DrawDebugWindow();
@@ -31706,16 +32260,23 @@ index ff2a7551..7c74ce60 100644
  }
  
  void DngStep() {
-@@ -1980,7 +1987,7 @@ void DngStep() {
+@@ -1980,7 +1988,9 @@ void DngStep() {
      MainChara__2->GetPosition(player);
      AutoMapGen.UpdateNaviMap(player, 4);
  
 -    if (!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI)) {
-+    if (!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI) || moonmod::coop::CopiesDying()) { // co-op: a copy dies here as the game's own
++    // (co-op: a copy dies here as the game's own; and the fight waits for another player while monsters.hold holds it)
++    moonmod::scale::StepFloor();
++    if ((!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI) && !moonmod::coop::FightHeld()) || moonmod::coop::CopiesDying()) {
          ActiveMonster->ThinkHost();
      }
  
-@@ -2023,7 +2030,9 @@ void DngStep() {
+@@ -2019,11 +2029,13 @@ void DngStep() {
+         }
+     }
+ 
+-    if (!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI)) {
++    if (!(BattleAreaScene->pause_flag & DNG_PAUSE_MONSTER_AI) && !moonmod::coop::FightHeld()) {
          ActiveMonster->StepEffectScript();
      }
  
@@ -31726,7 +32287,7 @@ index ff2a7551..7c74ce60 100644
          FxScriptMan->PauseFromLevel(3, 3);
      }
  
-@@ -2279,6 +2288,7 @@ void IsEventRun() {
+@@ -2279,6 +2291,7 @@ void IsEventRun() {
      CSceneEventData data;
  
      if (DngMainScene->GetMapEvent(pos, button, &data)) {
@@ -31734,7 +32295,7 @@ index ff2a7551..7c74ce60 100644
          DngMainScene->RunEvent(data.event.point_no, &data);
          return;
      }
-@@ -2354,6 +2364,7 @@ int EventScriptSetup(SYSTEM_SCRIPT_INFO *script) {
+@@ -2354,6 +2367,7 @@ int EventScriptSetup(SYSTEM_SCRIPT_INFO *script) {
  
      if (RunEvent(script->event_no, DngMainScene)) {
          script->running = true;
@@ -31742,7 +32303,7 @@ index ff2a7551..7c74ce60 100644
          dc2::log::PrintGame("RUN SYS_SCRIPT %d\n", script->event_no);
          DngStatus.mode = DNG_STATUS_EVENT;
          DngMainScene->before_camera = 0;
-@@ -2379,6 +2390,10 @@ int IsRunDeadEvent(CActionChara *chara) {
+@@ -2379,6 +2393,10 @@ int IsRunDeadEvent(CActionChara *chara) {
          return false;
      }
  
@@ -31753,7 +32314,7 @@ index ff2a7551..7c74ce60 100644
      info = GetBattleCharaInfo();
  
      if (info->chr_no == USER_CHARA_MONSTER) {
-@@ -2449,7 +2464,7 @@ void CheckStatusError() {
+@@ -2449,7 +2467,7 @@ void CheckStatusError() {
          }
      }
  
@@ -31762,7 +32323,7 @@ index ff2a7551..7c74ce60 100644
          MainChara__2->damage_req = ACTION_DAMAGE_REQ_DEAD;
      }
  }
-@@ -2908,6 +2923,10 @@ int dc2::dungeon::MainKeyCore() {
+@@ -2908,6 +2926,10 @@ int dc2::dungeon::MainKeyCore() {
          unit = DNG_CHANGE_UNIT_RIDE;
      }
  
@@ -31772,6 +32333,15 @@ index ff2a7551..7c74ce60 100644
 +
      if (MainChara__2->CheckRunEvent() && unit >= 0 && !dead) {
          unit = ChangeSetUnit(unit);
+ 
+@@ -2998,7 +3020,7 @@ int dc2::dungeon::MainKeyCore() {
+     }
+ 
+     if (!DngStatus.eye_view) {
+-        if (!DebugPause && !(BattleAreaScene->pause_flag & DNG_PAUSE_PLAYER_CONTROL)) {
++        if (!DebugPause && !(BattleAreaScene->pause_flag & DNG_PAUSE_PLAYER_CONTROL) && !moonmod::coop::FightHeld()) { // (co-op: monsters.hold)
+             MainChara__2->RunScript(DngMainScene, &ActionScriptEnv);
+         }
  
 diff --git a/port/src/object/dun/dng_object.cpp b/port/src/object/dun/dng_object.cpp
 index d90eaaad..b5f56fd2 100644
@@ -31888,19 +32458,20 @@ index 3a177a37..0bfbd353 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 706fda8f..60ec7496 100644
+index 706fda8f..6a04b508 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
-@@ -4,6 +4,8 @@
+@@ -4,6 +4,9 @@
  #include "log/game_output.hpp"
  // clang-format on
  
 +// nlohmann/json (through moonmod/coop.hpp) must precede the game headers, whose macros it would otherwise see.
 +#include "moonmod/coop.hpp"
++#include "moonmod/dungeon_scale.hpp"
  #include "common.h"
  #include "mw_runtime.h"
  
-@@ -721,6 +723,11 @@ void CActiveMonster::Initialize() {
+@@ -721,6 +724,11 @@ void CActiveMonster::Initialize() {
  }
  
  BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
@@ -31912,7 +32483,7 @@ index 706fda8f..60ec7496 100644
      BASE_MONSTER_TBL *entry = base_monster_define;
  
      while (entry->name[0] != 0) {
-@@ -735,13 +742,25 @@ BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
+@@ -735,13 +743,25 @@ BASE_MONSTER_TBL *GetMonsterTable(int monster_id) {
  }
  
  void CMonsterLocateInfo::SetPutFlag(int slot, int put) {
@@ -31942,7 +32513,7 @@ index 706fda8f..60ec7496 100644
          put_num -= 1;
      }
  }
-@@ -775,6 +794,10 @@ void CMonsterMan::Initialize(CScene *scene) {
+@@ -775,6 +795,10 @@ void CMonsterMan::Initialize(CScene *scene) {
      textures = &mgTexManager;
      effect_man = FxScriptMan;
      priority_limit = PortMonsterLatchLimits();
@@ -31953,7 +32524,7 @@ index 706fda8f..60ec7496 100644
  
      for (i = 0; i < MONSTER_ACTIVE_MAX; i++) {
          active_views[i] = scene->GetCharacterView(DNG_CHARA_SLOT_MONSTER + i);
-@@ -803,7 +826,7 @@ void CMonsterMan::Initialize(CScene *scene) {
+@@ -803,7 +827,7 @@ void CMonsterMan::Initialize(CScene *scene) {
      boss_max_life = 0;
      locate.num = 0;
      locate.put_num = 0;
@@ -31962,7 +32533,7 @@ index 706fda8f..60ec7496 100644
  
      for (m = 0; m < MONSTER_LOCATE_MAX; m++) {
          s16 *param = locate.param;
-@@ -994,6 +1017,11 @@ int CMonsterMan::GetMonsterNum(float limit) {
+@@ -994,6 +1018,11 @@ int CMonsterMan::GetMonsterNum(float limit) {
  }
  
  BASE_MONSTER_TBL *CMonsterMan::GetReferPtr2(int monster_id) {
@@ -31974,7 +32545,7 @@ index 706fda8f..60ec7496 100644
      BASE_MONSTER_TBL *entry = base_monster_define;
  
      while (entry->name[0] != 0) {
-@@ -1058,7 +1086,7 @@ int CMonsterMan::EntryRefer(int monster_id, mgCMemory *memory) {
+@@ -1058,7 +1087,7 @@ int CMonsterMan::EntryRefer(int monster_id, mgCMemory *memory) {
      return true;
  }
  
@@ -31983,7 +32554,7 @@ index 706fda8f..60ec7496 100644
      const auto activation_scene = scene_view;
      auto      *scene = activation_scene.Get();
      if (scene == nullptr) {
-@@ -1079,7 +1107,19 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
+@@ -1079,7 +1108,19 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
          return nullptr;
      }
  
@@ -32004,7 +32575,16 @@ index 706fda8f..60ec7496 100644
  
      if (slot < 0) {
          return nullptr;
-@@ -2216,9 +2256,12 @@ void CMonsterMan::CheckDamage() {
+@@ -1151,7 +1192,7 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
+     monster->next_pos[2] = 0.0f;
+     monster->next_pos[3] = 1.0f;
+     monster->move_speed = 0.0f;
+-    monster->max_life = monster->life = tbl->life;
++    monster->max_life = monster->life = moonmod::scale::SpawnLife(*tbl); // MoonMod: dungeons.set_enemy_scale
+     monster->reward_exp = tbl->reward_exp;
+     monster->reward_money = tbl->reward_money;
+     monster->unk_1322 = tbl->unk_5a;
+@@ -2216,9 +2257,12 @@ void CMonsterMan::CheckDamage() {
                  damage *= 0.01f * static_cast<float>(prim->param->critical_rate);
              }
  
@@ -32017,7 +32597,7 @@ index 706fda8f..60ec7496 100644
  
              if (monster->life <= 0) {
                  monster->life = 0;
-@@ -2654,7 +2697,9 @@ void CMonsterMan::ThinkHost() {
+@@ -2654,7 +2698,9 @@ void CMonsterMan::ThinkHost() {
          if (monster == nullptr || monster->state == ACTIVE_MONSTER_NONE) {
              continue;
          }
@@ -32027,7 +32607,7 @@ index 706fda8f..60ec7496 100644
  
          monster->GetEntryObjectPos(CHARA_ENTRY_GROUP_TARGET, 0, monster->center_pos);
          monster->scoop.ok = false;
-@@ -2738,7 +2783,11 @@ void CMonsterMan::ThinkHost() {
+@@ -2738,7 +2784,11 @@ void CMonsterMan::ThinkHost() {
                  monster->camera_dist = mgDistVector(camera_pos, own_pos);
              }
  
@@ -32040,7 +32620,7 @@ index 706fda8f..60ec7496 100644
                  continue;
              }
          }
-@@ -2943,6 +2992,7 @@ void CMonsterMan::ThinkHost() {
+@@ -2943,6 +2993,7 @@ void CMonsterMan::ThinkHost() {
              monster->Step();
          }
      }
@@ -32048,6 +32628,20 @@ index 706fda8f..60ec7496 100644
  
      PriorityLevelCheck();
  }
+@@ -3187,8 +3238,11 @@ int active_monsters = kRetailActiveMonsters;
+ 
+ int PortMonsterLatchLimits() {
+     const bool more = ConfigGet().more_monsters;
+-    active_monsters = dc2::debug::RosterStressEnabled() ? MONSTER_ACTIVE_MAX : more ? MONSTER_MORE_MAX
+-                                                                                    : kRetailActiveMonsters;
++    // MoonMod: a floor with more monsters (dungeons.set_modifiers monsters) has the slots for them; how many act at
++    // once stays the game's
++    const bool fuller = moonmod::scale::MonsterBonus() > 0;
++    active_monsters = dc2::debug::RosterStressEnabled() ? MONSTER_ACTIVE_MAX : (more || fuller) ? MONSTER_MORE_MAX
++                                                                                                : kRetailActiveMonsters;
+     return dc2::debug::DungeonStressPriorityLimit(more ? MONSTER_MORE_MAX : kRetailPriorityLimit);
+ }
+ 
 diff --git a/port/src/object/dun/savedatadungeon.cpp b/port/src/object/dun/savedatadungeon.cpp
 index 252459f6..23f433db 100644
 --- a/port/src/object/dun/savedatadungeon.cpp
@@ -43499,6 +44093,161 @@ index 00000000..ec22d674
 +                                 moonmod::Json::array({moonmod::Json{{"rooms", 12}, {"room_min", 5}, {"room_max", 3}}})).status,
 +              moonmod::ApiCallStatus::InvalidArgument);
 +}
+diff --git a/port/src/tests/moonmod_dungeon_scale_test.cpp b/port/src/tests/moonmod_dungeon_scale_test.cpp
+new file mode 100755
+index 00000000..e33a955d
+--- /dev/null
++++ b/port/src/tests/moonmod_dungeon_scale_test.cpp
+@@ -0,0 +1,149 @@
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <string>
++
++#include "moonmod/chronicle_two_adapter.hpp"
++#include "moonmod/coop.hpp"
++#include "moonmod/dungeon_scale.hpp"
++#include "moonmod/dungeon_scale_api.hpp"
++
++#include "automap.hpp"
++#include "colprim.hpp"
++#include "dng_main.hpp"
++#include "gamedata.hpp"
++
++namespace {
++
++struct ScaleScope {
++    ScaleScope() { moonmod::scale::ResetForTests(); }
++    ~ScaleScope() { moonmod::scale::ResetForTests(); }
++};
++
++moonmod::ApiCallResult Call(const moonmod::RuntimeConfig &config, const char *mod, const char *path, const moonmod::Json &request) {
++    const moonmod::ApiOperationSpec *operation = moonmod::FindApiOperation(path);
++    EXPECT_NE(operation, nullptr) << path;
++    if (operation == nullptr) return {};
++    return config.api_handler(mod, *operation, moonmod::Json::array({request}));
++}
++
++} // namespace
++
++TEST(MoonModDungeonScale, ModifiersAddUpPerOwnerAndGrowTheFloor) {
++    ScaleScope scope;
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleTwoApi(config);
++    for (const char *path : {"dungeons.set_modifiers", "dungeons.set_enemy_scale"}) {
++        EXPECT_TRUE(std::ranges::any_of(config.api_capabilities, [path](const moonmod::ApiCapability &capability) {
++            return capability.path == path && capability.supported;
++        })) << path;
++    }
++
++    // none asks: the game's own floor
++    EXPECT_EQ(moonmod::scale::RoomGoal(5), 5);
++    EXPECT_EQ(moonmod::scale::BuildArea(14), 14);
++    EXPECT_EQ(moonmod::scale::ExtraMonsters(8), 0);
++
++    moonmod::ApiCallResult set = Call(config, "test.one", "dungeons.set_modifiers", {{"rooms", 50}, {"monsters", 50}});
++    ASSERT_EQ(set.status, moonmod::ApiCallStatus::Ok) << set.message;
++    EXPECT_EQ(set.value.value("rooms", -1), 50);
++    EXPECT_EQ(set.value.value("monsters", -1), 50);
++    set = Call(config, "test.two", "dungeons.set_modifiers", {{"rooms", 50}});
++    ASSERT_EQ(set.status, moonmod::ApiCallStatus::Ok) << set.message;
++    EXPECT_EQ(set.value.value("rooms", -1), 100);
++    EXPECT_EQ(moonmod::scale::RoomGoal(5), 10);
++    EXPECT_EQ(moonmod::scale::BuildArea(14), 28); // twice the rooms, on a grid twice as wide
++    EXPECT_EQ(moonmod::scale::ExtraMonsters(8), 4);
++    EXPECT_LE(moonmod::scale::BuildArea(DNG_GRID), DNG_GRID);
++
++    // an owner's {} takes back its own only; unloading a mod takes back its own
++    ASSERT_EQ(Call(config, "test.two", "dungeons.set_modifiers", moonmod::Json::object()).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::scale::RoomBonus(), 50);
++    config.api_owner_unloaded("test.one");
++    EXPECT_EQ(moonmod::scale::RoomBonus(), 0);
++    EXPECT_EQ(moonmod::scale::MonsterBonus(), 0);
++
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_modifiers", {{"rooms", 301}}).status, moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_modifiers", {{"rooms", -1}}).status, moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_modifiers", {{"chests", 20}}).status, moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_modifiers", {{"halls", 20}}).status, moonmod::ApiCallStatus::InvalidArgument);
++}
++
++TEST(MoonModDungeonScale, EnemyScaleMultipliesOwnersAndScalesLifeAndBlows) {
++    ScaleScope scope;
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleTwoApi(config);
++
++    BASE_MONSTER_TBL rat{};
++    rat.life = 100;
++    BASE_MONSTER_TBL boss{};
++    boss.life = 1000;
++    boss.boss = 1;
++    EXPECT_EQ(moonmod::scale::SpawnLife(rat), 100);
++
++    moonmod::ApiCallResult set =
++        Call(config, "test.one", "dungeons.set_enemy_scale", {{"life", 160}, {"blows", 125}, {"boss_life", 175}, {"boss_blows", 150}});
++    ASSERT_EQ(set.status, moonmod::ApiCallStatus::Ok) << set.message;
++    EXPECT_EQ(set.value.value("life", -1), 160);
++    EXPECT_EQ(moonmod::scale::SpawnLife(rat), 160);
++    EXPECT_EQ(moonmod::scale::SpawnLife(boss), 1750);
++
++    // a second mod's scale multiplies the first's
++    ASSERT_EQ(Call(config, "test.two", "dungeons.set_enemy_scale", {{"life", 50}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::scale::Enemies().life, 80);
++    EXPECT_EQ(moonmod::scale::SpawnLife(rat), 80);
++    ASSERT_EQ(Call(config, "test.two", "dungeons.set_enemy_scale", moonmod::Json::object()).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::scale::Enemies().life, 160);
++
++    // a blow aimed at the players, from no monster and off a boss's floor, lands as an ordinary monster's; the hero's
++    // own (owner 0) and one aimed at the monsters are as they were
++    CColPrim prim{};
++    prim.owner = -1;
++    prim.target = DAMAGE_TARGET_PLAYER;
++    EXPECT_FLOAT_EQ(moonmod::scale::Blow(40.0f, prim), 50.0f);
++    prim.owner = 0;
++    EXPECT_FLOAT_EQ(moonmod::scale::Blow(40.0f, prim), 40.0f);
++    prim.owner = -1;
++    prim.target = DAMAGE_TARGET_MONSTER;
++    EXPECT_FLOAT_EQ(moonmod::scale::Blow(40.0f, prim), 40.0f);
++
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_enemy_scale", {{"life", 9}}).status, moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_enemy_scale", {{"life", 1001}}).status, moonmod::ApiCallStatus::InvalidArgument);
++    EXPECT_EQ(Call(config, "test.one", "dungeons.set_enemy_scale", {{"speed", 120}}).status, moonmod::ApiCallStatus::InvalidArgument);
++
++    // {} (or all hundreds) takes it back, as does the mod unloading
++    ASSERT_EQ(Call(config, "test.one", "dungeons.set_enemy_scale", {{"life", 100}, {"blows", 100}, {"boss_life", 100}, {"boss_blows", 100}}).status,
++              moonmod::ApiCallStatus::Ok);
++    EXPECT_EQ(moonmod::scale::SpawnLife(boss), 1000);
++    ASSERT_EQ(Call(config, "test.one", "dungeons.set_enemy_scale", {{"blows", 200}}).status, moonmod::ApiCallStatus::Ok);
++    prim.target = DAMAGE_TARGET_PLAYER;
++    EXPECT_FLOAT_EQ(moonmod::scale::Blow(40.0f, prim), 80.0f);
++    config.api_owner_unloaded("test.one");
++    EXPECT_FLOAT_EQ(moonmod::scale::Blow(40.0f, prim), 40.0f);
++}
++
++TEST(MoonModDungeonScale, BossRoomsAreKnownByTheirMapsName) {
++    EXPECT_TRUE(moonmod::coop::BossRoomMap("d01b01"));
++    EXPECT_TRUE(moonmod::coop::BossRoomMap("d06b03"));
++    EXPECT_FALSE(moonmod::coop::BossRoomMap("d01f01"));  // a built floor's map
++    EXPECT_FALSE(moonmod::coop::BossRoomMap("d06e01"));  // the way out
++    EXPECT_FALSE(moonmod::coop::BossRoomMap("s06"));
++    EXPECT_FALSE(moonmod::coop::BossRoomMap(""));
++    EXPECT_FALSE(moonmod::coop::BossRoomMap("d01b011"));
++}
++
++TEST(MoonModDungeonScale, AnUnloadLeavesTheRescaleToTheFloorsNextStep) {
++    ScaleScope scope;
++    moonmod::RuntimeConfig config;
++    moonmod::ConfigureChronicleTwoApi(config);
++    ASSERT_EQ(Call(config, "mod.a", "dungeons.set_enemy_scale", {{"life", 160}}).status, moonmod::ApiCallStatus::Ok);
++    EXPECT_FALSE(moonmod::scale::RescaleDue());
++    config.api_owner_unloaded("mod.b");
++    EXPECT_FALSE(moonmod::scale::RescaleDue()) << "a mod that scaled nothing leaves nothing to do";
++    config.api_owner_unloaded("mod.a");
++    EXPECT_TRUE(moonmod::scale::RescaleDue()) << "unloading touches no monster then and there (the game may be shutting down)";
++    EXPECT_EQ(moonmod::scale::Enemies().life, 100);
++    moonmod::scale::StepFloor(); // (off a floor it finds no monsters)
++    EXPECT_FALSE(moonmod::scale::RescaleDue());
++}
++
 diff --git a/port/src/tests/moonmod_economy_api_test.cpp b/port/src/tests/moonmod_economy_api_test.cpp
 new file mode 100644
 index 00000000..0b285f76

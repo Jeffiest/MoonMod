@@ -33,6 +33,7 @@ local function make_game(name, opts)
   end
   S.slot_writes = {}
   S.applied = {}
+  S.holds, S.modifiers, S.enemy_scales = {}, {}, {}
   S.hero_log = {}
   S.shots_out, S.shots_drawn = {}, {} -- the hero's shots (player.effects_take), and the others' drawn here
   local env = setmetatable({}, {__index = _G})
@@ -118,6 +119,13 @@ local function make_game(name, opts)
       end,
       puppet_clear = function() S.puppets = nil; return {cleared = true} end,
       mirror_hit = function(a) S.mirror_hits[#S.mirror_hits + 1] = a; return {slot = a.slot, damage = a.damage} end,
+      -- (the fight held: world.get says so while it lasts)
+      hold = function(a)
+        if a.frames > 0 and S.map.context ~= "dungeon" then return nil, {code = "failed", message = "not on a floor"} end
+        S.holds[#S.holds + 1] = a.frames
+        S.map.fight_held = a.frames > 0 or nil
+        return {frames = a.frames}
+      end,
     },
     items = {
       owned = function()
@@ -148,6 +156,8 @@ local function make_game(name, opts)
     combat = {strike_player = function(a) S.strikes[#S.strikes + 1] = a; return {} end},
     dungeons = {
       set_seed = function(a) S.seeds[#S.seeds + 1] = a.seed; return {seed = a.seed} end,
+      set_modifiers = function(a) S.modifiers[#S.modifiers + 1] = a; return {} end,
+      set_enemy_scale = function(a) S.enemy_scales[#S.enemy_scales + 1] = a; return {} end,
       enter_floor = function(a)
         if S.busy then return nil, {code = "failed", message = "busy: the player isn't walking in a town or playing on a floor"} end
         S.entered[#S.entered + 1] = "floor " .. a.dungeon_id .. ":" .. a.floor_id; return {queued = true}
@@ -2192,6 +2202,155 @@ do
   both(h, g, 12)
   check(find_toast(h, "asked Monica for this floor's open doors again"), "the host can resync with its joiner", h.last_toast())
   check(#h.doors_run > runs, "and the joiner sends the floor's doors", #h.doors_run - runs)
+end
+
+print("Chronicle Two: a boss's room, entered together")
+do
+  local h, g = dc2_room({})
+  check(g.started ~= nil, "(the joiner is in the host's world)")
+  if g.panel then g.choose(nil) end
+  local function town() return {context = "town", scene_map = 10, map_no = 10, town_map = 1, walking = true} end
+  local function floor6() return {context = "dungeon", dungeon_id = 0, floor_id = 6, floor_seed = 12, map_no = 0, walking = true} end
+  local function boss_room()
+    return {context = "dungeon", dungeon_id = 0, floor_id = 7, map_no = 0, floor_map = "d01b01", boss_floor = true, walking = true}
+  end
+  h.map, g.map = town(), town()
+  both(h, g, 60)
+  h.player = {character = "max", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "monica", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
+  -- the host walks into the Underground Channel's boss: its own map, no seed
+  h.map = boss_room()
+  both(h, g, 90)
+  check(h.holds[1] == 3600, "the host, in a boss's room with the joiner elsewhere, has the fight wait (monsters.hold)", h.holds[1])
+  check(find_toast(h, "the fight waits for Monica"), "and is told so, by name", h.toasts[#h.toasts])
+  check(h.panel and h.panel.title == "Waiting for Monica" and h.panel.subtitle == "Start the fight without them?" and h.panel.style == "yes_no",
+        "and asked, in the game's window, whether to start without them", h.panel and h.panel.title)
+  check(g.panel and g.panel.title == "Max faces the boss of the Underground Channel" and g.panel.subtitle == "Join the fight?" and
+        g.panel.style == "yes_no", "the joiner is asked to join the fight", g.panel and g.panel.title)
+  g.choose(1)
+  both(h, g, 4)
+  check(g.entered[#g.entered] == "floor 0:7", "joining walks to the boss's floor", g.entered[#g.entered])
+  check(find_toast(h, "Monica is on the way"), "the host hears the joiner is coming", h.toasts[#h.toasts])
+  check(h.map.fight_held == true, "and the fight waits on")
+  g.map = boss_room()
+  both(h, g, 90)
+  check(find_toast(h, "Monica joins the fight"), "once the joiner is in the room the host is told", h.toasts[#h.toasts])
+  check(h.holds[#h.holds] == 0 and h.map.fight_held == nil, "and the fight begins", h.holds[#h.holds])
+  check(h.panel == nil, "the host's question is taken back", h.panel and h.panel.title)
+  check(#g.holds == 0, "the joiner, coming in second, holds nothing", #g.holds)
+  -- the joiner walks back to town; the host leaves and comes back: this time the joiner stays behind
+  g.map = town()
+  h.map = floor6()
+  both(h, g, 60)
+  while g.panel do g.choose(2); both(h, g, 2) end
+  local holds = #h.holds
+  h.map = boss_room()
+  both(h, g, 90)
+  check(#h.holds == holds + 1 and h.holds[#h.holds] == 3600, "coming into the room again, the fight waits again", h.holds[#h.holds])
+  check(g.panel and g.panel.title:find("faces the boss", 1, true), "and the joiner is asked again", g.panel and g.panel.title)
+  g.choose(2)
+  both(h, g, 4)
+  check(find_toast(h, "Monica stays behind") and find_toast(h, "the fight begins") and h.holds[#h.holds] == 0,
+        "the joiner staying behind starts the host's fight", h.toasts[#h.toasts])
+  -- once more, and the host starts without waiting
+  h.map = floor6()
+  both(h, g, 60)
+  while g.panel do g.choose(2); both(h, g, 2) end
+  h.map = boss_room()
+  both(h, g, 90)
+  check(h.panel and h.panel.title == "Waiting for Monica", "(the host is asked again)", h.panel and h.panel.title)
+  h.choose(1)
+  both(h, g, 2)
+  check(h.holds[#h.holds] == 0 and h.map.fight_held == nil, "the host can start the fight without the joiner", h.holds[#h.holds])
+  -- a hold the engine let run out (a minute of play) ends the wait too
+  h.map = floor6()
+  both(h, g, 60)
+  while g.panel do g.choose(2); both(h, g, 2) end
+  h.map = boss_room()
+  both(h, g, 90)
+  if h.panel then h.choose(2) end
+  local begun = count_toasts(h, "the fight begins")
+  h.map.fight_held = nil
+  both(h, g, 200)
+  check(count_toasts(h, "the fight begins") == begun + 1 and h.holds[#h.holds] == 0, "a fight the engine let begin is no longer waited for",
+        h.holds[#h.holds])
+  -- and the room closed while waiting lets the fight go
+  h.map = floor6()
+  both(h, g, 60)
+  while g.panel do g.choose(2); both(h, g, 2) end
+  h.map = boss_room()
+  both(h, g, 90)
+  local before = #h.holds
+  check(h.holds[before] == 3600, "(the fight waits once more)", h.holds[before])
+  h.keys.leave_key = true
+  both(h, g, 40)
+  check(#h.holds == before + 1 and h.holds[#h.holds] == 0, "closing the room while the fight waits lets it begin", h.holds[#h.holds])
+end
+
+print("Chronicle Two: harder with two")
+do
+  local h, g = dc2_room({})
+  h.settings.follow_offers, g.settings.follow_offers = false, false
+  both(h, g, 60)
+  local hm, gm = h.modifiers[#h.modifiers], g.modifiers[#g.modifiers]
+  check(hm and hm.rooms == 50 and hm.monsters == 50, "a room's floors are built larger and fuller in the host's game (the settings' defaults)",
+        hm and (tostring(hm.rooms) .. " " .. tostring(hm.monsters)))
+  check(gm and gm.rooms == 50 and gm.monsters == 50, "and alike in the joiner's", gm and (tostring(gm.rooms) .. " " .. tostring(gm.monsters)))
+  -- the host's choices are the room's: the joiner's own are not
+  h.settings.larger_floors, h.settings.more_monsters = "+100%", "Off"
+  g.settings.larger_floors = "Off"
+  both(h, g, 60)
+  gm = g.modifiers[#g.modifiers]
+  check(gm and gm.rooms == 100 and gm.monsters == 0, "the host changing its settings changes the joiner's floors too",
+        gm and (tostring(gm.rooms) .. " " .. tostring(gm.monsters)))
+  h.settings.larger_floors = "Off"
+  both(h, g, 60)
+  check(next(g.modifiers[#g.modifiers]) == nil and next(h.modifiers[#h.modifiers]) == nil, "both Off: the game's own floors", #g.modifiers)
+  h.settings.larger_floors, h.settings.more_monsters = nil, nil
+  both(h, g, 60)
+  -- the monsters: the game's own while the host is alone on a floor, stronger once the joiner is there
+  local function floor() return {context = "dungeon", dungeon_id = 0, floor_id = 3, floor_seed = 91, map_no = 0, walking = true} end
+  h.player = {character = "max", position = {x = 0, y = 0, z = 0}, heading = 0, motion = 0}
+  g.player = {character = "monica", position = {x = 50, y = 0, z = 0}, heading = 0, motion = 0}
+  h.map = floor()
+  local scales = #h.enemy_scales
+  both(h, g, 120)
+  check(#h.enemy_scales == scales, "alone on a floor, the monsters are the game's", #h.enemy_scales)
+  g.map = floor()
+  both(h, g, 120)
+  for _, x in ipairs({{h, "host"}, {g, "joiner"}}) do
+    local e = x[1].enemy_scales[#x[1].enemy_scales] or {}
+    check(e.life == 160 and e.blows == 125 and e.boss_life == 175 and e.boss_blows == 125,
+          "with the other on the floor the " .. x[2] .. "'s monsters have 60% more life, hit 25% harder, bosses 75% more",
+          string.format("%s %s %s %s", tostring(e.life), tostring(e.blows), tostring(e.boss_life), tostring(e.boss_blows)))
+  end
+  check(count_toasts(h, "the monsters grow stronger") == 1 and count_toasts(g, "the monsters grow stronger") == 1, "each is told once",
+        count_toasts(h, "the monsters grow stronger"))
+  -- a setting Off is off
+  h.settings.scale_life, h.settings.scale_blows, h.settings.scale_bosses = "Off", "+50%", "+150%"
+  both(h, g, 120)
+  local e = g.enemy_scales[#g.enemy_scales] or {}
+  check(e.life == 100 and e.blows == 150 and e.boss_life == 250, "the host's choices are the joiner's monsters' too",
+        string.format("%s %s %s", tostring(e.life), tostring(e.blows), tostring(e.boss_life)))
+  h.settings.scale_life, h.settings.scale_blows, h.settings.scale_bosses = "Off", "Off", "Off"
+  both(h, g, 120)
+  check(next(g.enemy_scales[#g.enemy_scales]) == nil and next(h.enemy_scales[#h.enemy_scales]) == nil, "all Off: the game's own monsters",
+        #g.enemy_scales)
+  h.settings.scale_life, h.settings.scale_blows, h.settings.scale_bosses = nil, nil, nil
+  both(h, g, 120)
+  -- the joiner leaves the floor: the host's monsters are the game's again
+  g.map = {context = "town", scene_map = 10, map_no = 10, town_map = 1, walking = true}
+  both(h, g, 120)
+  check(next(h.enemy_scales[#h.enemy_scales]) == nil, "the other gone from the floor, the monsters are the game's again", #h.enemy_scales)
+  -- the room closed: both games' floors are their own again
+  g.map = floor()
+  both(h, g, 120)
+  check(next(h.enemy_scales[#h.enemy_scales]) ~= nil, "(the joiner is back on the floor)")
+  h.keys.leave_key = true
+  both(h, g, 60)
+  check(next(h.modifiers[#h.modifiers]) == nil and next(h.enemy_scales[#h.enemy_scales]) == nil, "the room closed, the host's game is its own again",
+        #h.modifiers)
+  check(next(g.modifiers[#g.modifiers]) == nil and next(g.enemy_scales[#g.enemy_scales]) == nil, "and the joiner's", #g.modifiers)
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

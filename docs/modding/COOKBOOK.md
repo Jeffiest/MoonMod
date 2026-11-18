@@ -132,7 +132,9 @@ end)
 
 | Operation | Does |
 | --- | --- |
-| `dungeons.set_modifiers({rooms, monsters, chests, chest_value})` | Percent changes; `chests = -100` is none |
+| `dungeons.set_modifiers({rooms, monsters, chests, chest_value})` | Percent changes; `chests = -100` is none (Chronicle Two: `rooms` and `monsters`; more rooms come on a larger grid, and `world.get()` reports `floor_rooms`, `floor_grid`, `monsters_added`) |
+| `dungeons.set_enemy_scale({life, blows, boss_life, boss_blows})` | Chronicle Two: monsters' life and how hard they hit, in percent of the game's own, at once (monsters already out keep their share of life); the co-op mod's "harder with two" |
+| `monsters.hold({frames})` + `world.get().boss_floor` | Chronicle Two: a boss's room (known by its map, `floor_map`, from the moment it loads) waits: monsters and this hero stand still for that much play, or until `monsters.hold({frames = 0})`; `world.get().fight_held` while it lasts |
 | `dungeons.set_layout` / `set_population` | Floor size and monster/chest density per room |
 | `dungeons.set_seed({seed})` | Build the floor from a seed you kept (`game.dungeon.generated` reports each floor's `floor_seed`): the same floor every visit |
 | `dungeons.set_zones({zones = {..., {rooms = 2, arena = true, quiet = true}, ...}, smoke = {n + 1}, vaults = false})` + `dungeons.room_seal` + `dungeons.zone_gate_open({zone = n + 1})` | A boss hall inside a zoned map: walking in shuts it, your boss spawns at the room's middle, and its death opens the smoke gate on (the Gauntlet's whole run on one map) |
