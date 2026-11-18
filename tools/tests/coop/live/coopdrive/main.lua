@@ -275,6 +275,16 @@ function OPS.world_log(step)
   log("world " .. table.concat(keys, " "))
   return true
 end
+-- Every living monster on the floor: slot, the game's monster id, life (scenario boss_fight: the boss and its copy).
+function OPS.monsters_log(step)
+  local c = try(game.combat.get)
+  local list = {}
+  for _, e in ipairs(type(c) == "table" and c.enemies or {}) do
+    list[#list + 1] = string.format("%s:%s:%s/%s", tostring(e.slot), tostring(e.monster_id), tostring(e.hp), tostring(e.max_hp))
+  end
+  log("monsters n=" .. #list .. " " .. table.concat(list, " "))
+  return true
+end
 function OPS.leave() return try(game.session.finish) end
 function OPS.mark(step) return true end
 -- The story's progress raised (a debug save from --jump georama:N is before the co-op gate).

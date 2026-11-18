@@ -105,8 +105,10 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   `target` the steps it holds first), 9 a sound the hero's own actions played (`value` its number in the hero's sound
   bank, `frame0` and `frame1` that bank's name, such as `CH_000` for Max or `CH_020` for Monica; a monster form has
   none), 10 a looped sound (a charge, an engine: `_SE_LOOP_PLAY`; `value` and the frames as a sound's, `amount` the
-  frames it goes on after this word, 0 to stop it), given again every 8 frames at most while the hero keeps it going.
-  Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
+  frames it goes on after this word, 0 to stop it), given again every 8 frames at most while the hero keeps it going,
+  11 a monster the hero lifted (`amount` 0; `frame0` and `frame1` the hero's frame that holds it, `nage`), threw (1:
+  from `x, y, z`, `dx, dy, dz` its arc's first step, as the game throws one) or put down (2, at `x, y, z`); `target`
+  its scene slot and `value` its `monster_id`. Up to 64 are kept between calls. `world.avatar_effect({slot, ...one of those})`
   (`game.write`) draws another player's from their avatar: the same effect, flying the same way, striking nothing in
   this game (it makes no attack, and an effect's own script makes none either). `{shown = false}` when that avatar is
   not on this floor or the effect can't be made; an effect this game hasn't loaded is loaded on first use. A sound
@@ -114,6 +116,10 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   names into a sound port of its own (game ports 12 to 14) the first time, and again only when the name changes. A
   looped sound goes on from the avatar, following it as it moves, until `amount` frames (plus the 8 between words)
   pass with no word for it, as the game's own loops are kept; up to four at once per avatar, stopped off the field.
+  A lift (11) acts where the monster is this game's own (this game leads the floor): the avatar's hands hold it as
+  the game's hero holds one, then throw it on the same arc from where it hangs, or put it down, and the landing, a
+  blow on another monster and a bomb going off are this game's. Its hands let go of it when that player is down,
+  watching a scene or gone. Where the slot is a copy, the leader's reports bring it.
 
 - Down, not out (co-op). `player.down_rule_set({enabled})` (`game.write`): while it is on, a party knocked out on a
   dungeon floor (no one left to switch to, and no Revival Powder: the powder still works first) doesn't get the game
@@ -124,7 +130,8 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   being down. The rule is off until a mod turns it on.
 
 - `monsters.mirror_get()` (co-op's host) gives the floor's monsters, `{monsters = {{slot, kind, state, hp, max_hp, x,
-  y, z, heading, motion}, ...}, hits}`, and what struck other players' heroes since the last call (anything that would
+  y, z, heading, motion, catch}, ...}, hits}` (`catch` 1 while a hero's hands hold it, reported where the hands are
+  and facing as it hangs; 2 while it flies thrown), and what struck other players' heroes since the last call (anything that would
   strike the player: a monster's blow, its shot or spell, a trap, measured on each hero as the game measures it on the
   player), `hits = {{avatar, slot, damage, kind, flags}, ...}` (`avatar` as `world.avatar_set` numbers it, `slot` the
   monster or -1, `kind` 2 a small hit, 3 a blow, 4 a heavy blow). While heroes are on
@@ -134,7 +141,11 @@ items and stock; Gilda; fishing points). Both travel as text a mod passes along.
   gone on the host, and a copy still up dies, its own death and drops playing out. A slot holding another kind here is
   `refused`. It returns, as `hits = {{slot, damage}, ...}`, the blows this player landed on the copies since the last
   call (any blow: a weapon's, a bomb's, a thrown item's), for the host's monsters; a copy keeps a sliver of life until
-  the host's dies. `monsters.puppet_clear()` gives them their own thoughts back (leaving the floor does too).
+  the host's dies. Each monster's `catch` (as `mirror_get` gives it) keeps this game's hero from lifting a copy the
+  host's game has in a hero's hands or flying. A copy this game's hero lifts is this game's a moment: held in the
+  hands, thrown or put down and landed at once (`player.effects_take` tells the lift, kind 11), then it stands where
+  it landed until the host's reports have its monster free again (two seconds at most), and follows them again.
+  `monsters.puppet_clear()` gives them their own thoughts back (leaving the floor does too).
   `monsters.mirror_hit({slot, damage})` (the host) lands another player's blow on a monster: the life goes, and a kill
   dies on the host as the host's own would.
 
@@ -391,12 +402,15 @@ data); the plan for Dark Chronicle's own co-op is `docs/plans/DC2_COOP_PLAN.md`.
 - A boss's room: `world.get()` on a floor gives `floor_map`, the map the floor loaded (a boss's room is a map of
   its own, `d01b01` for the Underground Channel's, with no `floor_seed`), and `boss_floor = true` there.
   `monsters.hold({frames})` (0-36000, 0 ends it; refused off a floor) has the fight wait: the floor's monsters and
-  effects stand still and this hero's script does not run, so a boss's opening does not begin. The frames count only
+  effects stand still and this hero's script does not run. The frames count only
   while the floor is played (not in a menu or a scene), and the hold ends by itself when they run out, when the
   player leaves the floor or a scene starts. `world.get().fight_held` is true meanwhile. The co-op mod asks the other
   player "Max faces the boss of the Underground Channel: join the fight?" (`FA 1` or `FA 0` back), holds the fight
   for a minute of play at most, tells its player who it waits for and asks whether to start without them; the other
-  player walking in, staying behind or the room closing starts it.
+  player walking in, staying behind or the room closing starts it. In the other player's game the boss is the
+  leader's copy (its room's monster table set up for it, as the room's own scene would), with the leader's life; a
+  copy asks for no scene, so the boss's end plays in the leader's game alone, and the follower's room is cleared
+  once the leader's game has emptied the boss's slot.
 - Harder with two: the co-op mod plays a room harder than a game alone, each part a setting in the Mod Manager:
   `larger_floors` (+50%) and `more_monsters` (+50%) for floors built while another player is in the room
   (`dungeons.set_modifiers`, so the two games still build one floor from one seed), `scale_life` (+60%),

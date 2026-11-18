@@ -1839,6 +1839,7 @@ do
   g.map = FLOOR
   local hurt = rat(25)
   hurt.motion_flags, hurt.motion_step = 2, 1.5 -- (a swing, held on its last frame, played fast)
+  hurt.catch = 1 -- (and in the joiner's hero's hands)
   g.monsters = {hurt} -- one of two already struck down, the other hurt
   both(h, g, 60)
   check(g.puppets == nil and h.puppets == nil, "a joiner alone on a floor runs its monsters itself")
@@ -1852,6 +1853,7 @@ do
   check(copy.motion_flags == 2 and copy.motion_step == 1.5 and type(h.puppet_age) == "number" and h.puppet_age >= 0 and h.puppet_age < 60,
         "each copy plays its motion as the leader's monster does (held, at its pace), on the leader's clock",
         tostring(copy.motion_flags) .. " " .. tostring(copy.motion_step) .. " " .. tostring(h.puppet_age))
+  check(copy.catch == 1, "and is in a hero's hands as the leader's monster is (catch)", tostring(copy.catch))
   local joiner = h.avatars[1] or {}
   check(joiner.character == "monica" and joiner.motion == 3 and joiner.motion_flags == 2 and joiner.motion_step == 0.45 and
         type(joiner.age) == "number" and joiner.age >= 0 and joiner.age < 60 and joiner.tint == nil,

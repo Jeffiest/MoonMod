@@ -755,7 +755,7 @@ Written up in [world.md](world.md).
 | `world.avatar_clear` | `game.write` | simulation | yes | – | Co-op: take another player's hero away (one slot, or every one). |
 | `world.dungeon_npc_clear` | `game.write` | simulation | yes | – | Take this mod's figure off the dungeon floor. |
 | `world.set_roads` | `game.write` | simulation | yes | – | Chronicle: {enabled = true} makes walking into a town's gate game.town.road, the mod's to take (world.transition), not the world map. |
-| `world.avatar_effect` | `game.write` | simulation | – | – | Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; with an age, in step with their hero. |
+| `world.avatar_effect` | `game.write` | simulation | – | – | Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; a monster their hero lifted, threw or put down is held, thrown or put down by their hero here when it is this game's; with an age, in step with their hero. |
 | `world.watch_set` | `game.read` | any | – | – | Co-op: {enabled}: tell this mod (game.world.changed) of each change this game makes to the save's shared world: story flags and counters, the story's progress, the story's party, joinable townsfolk, dungeon floor records, Georama parts in stock, items the story's scripts give (gift), and that a town's Georama changed (as it is built, part by part). |
 | `world.change_apply` | `game.write` | any | – | – | Co-op: write another game's change {kind, id, value} (as game.world.changed gives it) into this game's save without telling it back; a floor's record is merged. |
 

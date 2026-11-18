@@ -11,7 +11,7 @@
 -- Messages are text, "KIND rest". Large ones (a world is about 64 KB, a player's things about 37 KB) go in pieces:
 -- "KIND i n piece", reassembled per sender. PROTOCOL is net.host/join's version: change it when the messages change.
 
-local PROTOCOL = 11
+local PROTOCOL = 12
 local MODE = "coop"
 local PIECE = 12000 -- characters of one piece; net.send takes 16 KiB
 local LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -353,7 +353,9 @@ end
 -- that player's hero (world.avatar_effect): the same shot flying the same way, striking nothing there, since its hits
 -- are the firing game's and reach the monsters as that game's other hits do. A sound (kind 9) names its bank in
 -- frames ("CH_000,CH_000"), as a trail names its two frames; so does a looped one (kind 10: a charge, an engine),
--- told again every few frames while the hero keeps it going.
+-- told again every few frames while the hero keeps it going. A monster the hero lifts, throws or puts down (kind 11)
+-- names the hero's hands ("nage,nage"): where the monster is that game's own, the other's avatar holds it and throws
+-- it the same way, and the other games see it held and thrown by its reports.
 S.shots = {MOST = 8} -- shots sent in one frame at most (a machine gun fires one a frame)
 function S.shots.send()
   if not (game.player and game.player.effects_take) then return end
@@ -589,7 +591,8 @@ end)
 -- nearest; a blow, shot or spell that lands on another player comes back from monsters.mirror_get and goes to that player's game
 -- ("D damage kind flags"), which takes it as a monster's blow (combat.strike_player), guard and dodge and all. Fifteen
 -- times a second the host sends where its monsters are ("M scene frame
--- slot,kind,state,hp,max_hp,x,y,z,heading,motion,motion_flags,motion_step;..."),
+-- slot,kind,state,hp,max_hp,x,y,z,heading,motion,motion_flags,motion_step,catch;...", catch saying whether a hero
+-- holds it, 1, or it flies thrown, 2: a lifted monster is held where the hands are, and nobody else lifts it),
 -- and a guest on that floor makes its own monsters copies of them (monsters.puppet_set): they stand, move and die as
 -- the host's do. A guest's blow on one (puppet_set returns them) goes to the host ("H slot damage"), whose monster
 -- takes it.
@@ -648,9 +651,9 @@ function mon.host_step()
   if type(got) ~= "table" then return end
   local parts = {}
   for _, m in ipairs(got.monsters or {}) do
-    parts[#parts + 1] = string.format("%d,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.3f,%d,%d,%.2f", m.slot, m.kind, m.state, m.hp, m.max_hp,
+    parts[#parts + 1] = string.format("%d,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.3f,%d,%d,%.2f,%d", m.slot, m.kind, m.state, m.hp, m.max_hp,
                                       m.x, m.y, m.z, m.heading, m.motion, math.floor(S.num(m.motion_flags)) % 8,
-                                      m.motion_step ~= nil and S.num(m.motion_step) or -1)
+                                      m.motion_step ~= nil and S.num(m.motion_step) or -1, math.floor(S.num(m.catch)) % 4)
   end
   send("all", "M", my_scene .. " " .. math.floor(S.frame) .. " " .. (#parts > 0 and table.concat(parts, ";") or "-"))
   local alive = 0
@@ -726,13 +729,16 @@ function mon.hear(peer, rest)
     for item in list:gmatch("[^;]+") do
       local f = {}
       for v in item:gmatch("[^,]+") do f[#f + 1] = tonumber(v) end
-      if #f == 12 then
-        -- (in Chronicle Two each plays its motion as the leader's does, looping or held, at its pace)
+      if #f == 12 or #f == 13 then
+        -- (in Chronicle Two each plays its motion as the leader's does, looping or held, at its pace, and is held or
+        -- flies as the leader's does)
         local step = f[12] >= 0 and f[12] <= 16 and f[12] or nil
+        local caught = f[13] and math.floor(f[13]) or 0
         monsters[#monsters + 1] = {slot = math.floor(f[1]), kind = math.floor(f[2]), state = math.floor(f[3]),
                                    hp = math.floor(f[4]), max_hp = math.floor(f[5]), x = f[6], y = f[7], z = f[8],
                                    heading = f[9], motion = math.floor(f[10]),
-                                   motion_flags = DC2 and math.floor(f[11]) % 8 or nil, motion_step = DC2 and step or nil}
+                                   motion_flags = DC2 and math.floor(f[11]) % 8 or nil, motion_step = DC2 and step or nil,
+                                   catch = DC2 and caught >= 0 and caught <= 2 and caught or nil}
       end
     end
   end

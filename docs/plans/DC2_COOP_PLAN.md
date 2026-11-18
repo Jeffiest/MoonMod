@@ -901,11 +901,9 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   the boss comes out at the end of the room's scene); a made map clears the last floor's seed. The other player is
   asked "Max faces the boss of the Underground Channel: join the fight?" in the game's window and answers (`FA 1` /
   `FA 0`). Meanwhile the fight waits: `monsters.hold {frames}` stops the floor's monsters, its effect scripts and the
-  hero's own script (so the hero does not walk up and start the boss's scene), for at most a minute of play; the
-  waiting player is told who it waits for and asked whether to start without them. The other walking in, staying
-  behind, the minute running out or the room closing starts it. Not covered yet: the boss's own scene and fight in a
-  room (it starts where the hero walks up to the boss, which a headless game does not do), so how the other game
-  sees the scene and the boss copied there are unverified.
+  hero's own script, for at most a minute of play; the waiting player is told who it waits for and asked whether to
+  start without them. The other walking in, staying behind, the minute running out or the room closing starts it.
+  (The boss's fight itself: the next entry; this one first thought the boss came out where the hero walks up to it.)
 - Harder with two (2026-11-18, Jeffie: "when multiplayer is turned on everything should be harder ... more enemies,
   harder bosses, larger maps ... options in game to toggle"). Five settings in the Mod Manager, each with `Off`;
   the host's are the room's (`SCALE`, sent on joining and on a change): `larger_floors` (+50%: more rooms, on a grid
@@ -929,6 +927,35 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   `clear` 13/13, `reward` 10/10, `meet` 7/7, `map` 15/15, `floor_first` 14/14, `gate` 6/6, `gate_host` 4/4, `shove`
   12/12, `look` 3/3; `ridepod` 3/5 as before (the host does not board, for the debug-mode reason in the K4 note).
   Engine `8fd6bf1a`.
+- The boss's fight together (2026-11-18, Jeffie: "keep pushing, polishing, verifying, and naturalizing"; alone stays
+  as the game made it). The boss comes out in its room's first visit: event 500 plays the intro (story flag 10
+  unset), which sets the room's monster table up, places Halloween and ends in a hint that waits for a button. The
+  joiner, asked once the host is free, walks in the short way (the intro's flag reached its game first). New live
+  scenario `boss_fight` found three faults in the joiner's game, all fixed in the engine: no boss (the copy could not
+  be made, the room having no monster table: `MakePuppet` now sets it up in a boss's room as the room's first
+  `load_dungeon_monster` does, and marks the room uncleared); a crash at the boss's end (the copy's death program
+  asked for event 520, the boss's end, a scene of the host's story written for Max: a copy now asks for no event,
+  the scene being the leader's); and a room never cleared (a boss's death rests in its slot until its scene empties
+  it: a dying copy whose slot the leader's game has emptied is emptied after five seconds). `boss_fight` 18/18: the
+  boss in the host's game (256 life), 448 with two (`scale_bosses`), the copy in the joiner's game with the same
+  life, the host's blows taking it in both, its fall in both, the host's game playing the boss's end and the floor's
+  clear, the joiner's playing no scene with its room cleared. A boss's room has no floor's clear of its own, so the
+  joiner's clear is quiet. The rest on this build: `boss` 15/15, `scale` 13/13, `floor` 15/15, `hurt` 11/11, `down`
+  15/15, `clear` 13/13, `reward` 10/10, `floor_first` 14/14. Engine `4dcde6a4`. A joiner talking to someone in
+  town once seemed to drop from the room in a first run: new scenario `town_talk` (7/7) has the joiner's Cross start
+  a talk (event 400) and the room hold both until the joiner's game ends; not reproduced.
+- Lifting and throwing together (2026-11-18, co-op 0.15.0, protocol 12). The first boss is hurt only by its own
+  RoBombs lifted (R1 held, then the action button) and thrown back, and any monster the game lets a hero lift can be
+  carried and thrown. A lift and a let-go are the hero's effects (kind 11 of `player.effects_take`, sent as other
+  shots are): in the leader's game the other player's avatar takes the monster in its hands and throws it on the same
+  arc, so the landing, a blow on another monster and a RoBomb's blast are the leader's own; the hands let go when that
+  player is down, in a scene or gone. The `M` line has a 13th field, `catch` (held, thrown), a held monster reported
+  where the hands are: a follower's hero lifts no copy held or flying there, and a copy it lifts is its own a moment
+  (held, thrown, landed), then follows the leader's reports again once they have it free. What a dying copy's script
+  makes (a RoBomb's blast) is only drawn in the follower's game: read from the code, one RoBomb would hit the follower
+  twice before (its copy's blast and the leader's relayed one). Live `lift` 10/10: seven lifts and throws by the joiner,
+  each held and thrown from the same place in the host's game, the copy landing and following again. Not covered
+  live: throwing Halloween's RoBombs back at it with two (the blast fix is unit-tested). Engine `38734864`.
 
 ## 7. Risks
 

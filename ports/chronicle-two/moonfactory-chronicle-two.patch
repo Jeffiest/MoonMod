@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..2975858f
+index 00000000..1e984a89
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,491 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -1183,19 +1183,43 @@ index 00000000..2975858f
 +
 +`monsters.hold {frames}` (0-36000; 0 ends it) has the fight wait while the other player answers and walks in: the
 +floor's monsters do not think (`ThinkHost` is gated, not `DNG_PAUSE_MONSTER_AI`, so a copy dying still dies), the
-+floor's effect scripts rest, and this hero's script does not run, so the hero does not walk up to the boss and start
-+its scene. The frames count only while the dungeon is in play (not in a menu or a scene); the hold ends by itself
++floor's effect scripts rest, and this hero's script does not run. The frames count only while the dungeon is in play (not in a menu or a scene); the hold ends by itself
 +when they run out, when the player leaves the floor, or when another scene begins. `world.get().fight_held` is true
 +meanwhile. The mod holds for at most a minute of play, tells the player who it waits for and asks, in the game's
 +window, whether to start without them; the other player arriving, saying "Stay here", or the room closing ends the
 +wait.
 +
 +Live scenario `boss`: the host walks into the Underground Channel's boss's room (story flag 10 set first, so the
-+room's way in is its short one: the first visit's hint ends in a message that waits for a button), the joiner is
-+asked and joins, the host's fight waits and then goes on, both are in `d01b01`, and both games scale the room's
-+monsters for two. Not covered: the boss's own scene and the fight (the scene starts where the hero walks up to the
-+boss, and a headless game does not walk there), so how the scene plays in the other game and the boss copied there
-+are unverified.
++room's way in is its short one, with no boss), the joiner is asked and joins, the host's fight waits and then goes on,
++both are in `d01b01`, and both games scale the room's monsters for two.
++
++The fight itself (live scenario `boss_fight`, 2026-11-18). The boss comes out in the room's first visit: its event
++500 plays the intro (flag 10 unset), which sets the room's monster table up (`event.load_dungeon_monster`, the first
++call initializing), places Halloween (`place_dungeon_monster`, `AutoSetMonster`) and ends in a hint that waits for a
++button. The joiner, asked once the host is free, walks in the short way (flag 10, set by the host's intro, is the
++story's and reached it first), so three things were missing in its game, each found live:
++
++- No boss: the copy could not be made, its kind not loadable with no monster table ("still loading", for ever). Now
++  `MakePuppet` in a boss's room sets the table up as the room's first `load_dungeon_monster` does (`LoadMonsterFile
++  (kind, 1)`) while it holds no monster, and marks the room uncleared as the game's own placement does
++  (`battle_clear`), so the copy counts.
++- A crash at the boss's end: the copy's death program asked for event 520, the boss's end, and the joiner's game
++  played it: a scene of the host's story, written for Max and using the characters the intro loaded, which left the
++  joiner's game with no hero (`BattleAreaBGMCtrl`, SIGSEGV). Now a copy asks for no event (`_RUN_EVENT_SCRIPT`
++  returns without setting `event_no` for an `IsPuppet` slot): the scene a monster asks for is the leader's.
++- A room never cleared: a boss's death rests in its slot until its room's scene empties it
++  (`clear_event_battle_monsters`), so the joiner's game, which plays no scene, counted the boss for ever. Now a dying
++  copy whose slot the leader's game has emptied is emptied here once its death has had five seconds (`kDeathRests`).
++  The room has no floor's clear of its own (its scene loads the dungeon's script, which has one, and the map's
++  script says "no handler floor_clear (1500)"), so the joiner's room counts no monster and is cleared, quietly.
++
++`boss_fight` (18 checks): the intro brings Halloween out in the host's game (256 life), the joiner is asked and
++joins, the fight waits for it, with two the boss has 448 (`scale_bosses` +75%), the copy is in the joiner's game with
++the same life, the host's blows take it in both, it falls in both, the host's game plays 520 and 1500, the joiner's
++plays no scene and its room is cleared, and its copy dies as the game's own boss dies. The host presses Cross through
++the hint; the joiner presses nothing (Cross in a town talks to whoever is near).
++
++Halloween's own way to be hurt, a RoBomb lifted and thrown back at it, is the next section's.
 +
 +## Harder with two (2026-11-18)
 +
@@ -1220,6 +1244,46 @@ index 00000000..2975858f
 +this floor (100 + each setting for each other player there); alone, or once the room closes, it sets `{}` and the
 +game is its own. Live scenario `scale`: both games build floor 2 larger and fuller and alike, the host's monsters
 +have their own life while the host is alone there and 60% more once the joiner stands there too, in both games.
++
++## Lifting and throwing (2026-11-18)
++
++A hero lifts a monster the game lets it (hold R1, then the action button near one: `CActionChara::CheckEnemyCatch`,
++which `CheckThrowTarget` answers) and throws it with the action button again (`_RELEASE_OBJ`: on the arc
++`ParabolicInitialVector` gives, or put down when it lands no throw). The first boss is hurt only so, by its own
++RoBombs thrown back. Both games now see it, the leader's game doing it to its monster and the follower's to its copy:
++
++- A lift and a let-go are the hero's effects, `HeroShot::Lift` (11, in `player.effects_take`): the monster's scene
++  slot and kind and the hand's frame (`nage`); for a throw, where it left the hands and its arc's first step.
++- Where the monster is this game's own (it leads the floor), the avatar's hands take it as the game's hero's do (the
++  monster's frame hangs from the avatar's frame of that name, held, `MONSTER_PROG_CATCH`) and let it go as
++  `_RELEASE_OBJ` does, from where it hangs: thrown (`ACTION_CATCH_THROWN`, its blow the sent arc, so the game's own
++  monster code flies it, lands it, and makes its blow on another monster and a RoBomb's blast) or put down. The
++  hands let go when that player is down, watching a scene or gone. A monster another player's hero holds is not this
++  game's hero's to let go (`HeldByOther`, asked by `_RELEASE_OBJ`).
++- The leader reports each monster's `catch` (held, thrown), a held one where the hands are. A follower's hero lifts
++  no copy the leader's game has held or flying (`LiftRefused`, asked by `CheckThrowTarget`). A copy it lifts is its
++  own a moment (`LiftedHere`): it hangs in the hands whatever the reports say, is thrown (the game's own flight,
++  gravity once) or put down, lands on the ground it was lifted from (dust, a sound), and stands there until a report
++  of the leader's from after the lift has had its monster held or thrown and now free (two seconds at most), then
++  follows the reports again, by then from where the leader's game landed it.
++- A copy's death plays here with the game's own script (`ThinkHost`), and what that script makes (`_ESM_CREATE`: a
++  RoBomb's blast) is only drawn (`EffectDrawnOnly`): the leader's monster's blast strikes there, and its blow on this
++  game's hero comes from there. (Read from the code, not yet seen live: before, the copy's blast struck here too, so
++  one RoBomb would hit the follower's hero twice, and a bomb the follower threw would go off on it as the boss's
++  does, the copy not having been caught by its own script.)
++
++Protocol 12: the mod's `M` line has a 13th field, `catch`.
++
++Live scenario `lift` (10 checks, 2026-11-18): on floor 2 a foe of the test's own comes to both; the joiner holds R1
++and presses Cross, then Cross again, nine times over a minute. Seven times its hero lifted the copy, threw it, and it
++landed (some 190 from where it left the hands); each time the host's game held its monster in the joiner's avatar's
++hands and threw it from the same place, and the copy followed the host's monster again once the reports had it free.
++The drawn-only blast of a dying copy is unit-tested only (`WhatACopysScriptMakesIsOnlyDrawnHere`): a joiner throwing
++Halloween's RoBombs back at it in a live fight is not covered yet.
++
++`town_talk` (7 checks): the joiner's Cross in Palm Brinks starts a talk (event 400) and the room holds both until the
++joiner's game ends. Talking does not drop the link; the drop seen once in an early `boss_fight` run is not
++reproduced.
 +
 +## What is not finished (reported, never silently passed)
 +
@@ -3064,10 +3128,10 @@ index 00000000..37654b76
 +} // namespace moonmod
 diff --git a/port/include/moonmod/coop.hpp b/port/include/moonmod/coop.hpp
 new file mode 100644
-index 00000000..ae136232
+index 00000000..8c8ebf9c
 --- /dev/null
 +++ b/port/include/moonmod/coop.hpp
-@@ -0,0 +1,448 @@
+@@ -0,0 +1,467 @@
 +#pragma once
 +
 +// Online co-op for Chronicle Two (docs/COOP.md): the adapter operations the moonmod.coop mod drives, and the hooks the
@@ -3245,6 +3309,9 @@ index 00000000..ae136232
 +                    // frame0, that bank by name (CH_000: snd2/chara/CH_000.sound.json); played from the avatar
 +    SoundLoop = 10, // a looped sound of the hero's (_SE_LOOP_PLAY: a charge, an engine): value and frame0 as Sound's,
 +                    // amount the frames it goes on after its last word; told again while the hero keeps it going
++    Lift = 11,      // a monster lifted (amount 0, by the hero's frame named in frame0 and frame1), thrown (1: from pos,
++                    // dir its arc's first step, as _RELEASE_OBJ throws one) or put down (2, at pos); target: its scene
++                    // slot, value: its monster_id
 +};
 +struct HeroEffect {
 +    int   kind = 0; // HeroShot
@@ -3258,6 +3325,11 @@ index 00000000..ae136232
 +// actscript.cpp: a character fired; kept when it is this game's hero.
 +void                    HeroFired(const void *chara, HeroShot kind, const float *pos, const float *dir, int value = 0,
 +                                  float amount = 0.0f, int target = -1);
++// actionchara.cpp: a character lifted the monster in scene slot `target` with its frame `frame` (CheckEnemyCatch);
++// actscript.cpp: it let one go (_RELEASE_OBJ), from `from`, thrown on the arc whose first step is `blow`, or put down
++// (blow nullptr). Kept when it is this game's hero.
++void                    HeroLifted(const void *chara, int target, int kind, const char *frame);
++void                    HeroReleased(const void *chara, int target, int kind, const float *from, const float *blow);
 +// actionchara.cpp: a character's blade began a trail (CActionChara::StepEffect); kept when it is this game's hero.
 +void                    HeroSwung(const void *chara, const char *frame0, const char *frame1, int length, int fade, int hold);
 +// actscript.cpp: a character's action script played one of its sounds (_SE_PLAY); kept when it is this game's hero.
@@ -3281,6 +3353,7 @@ index 00000000..ae136232
 +    int   motion_flags = 0;    // as AvatarState's: how the leader's monster plays its motion
 +    float motion_step = -1.0f; // and how fast
 +    int   age = -1;            // frames since the leader's report, on its clock: shown behind and eased, as avatars are
++    int   catch_state = 0;     // held in a hero's hands there (ACTION_CATCH_HELD), or flying thrown (ACTION_CATCH_THROWN)
 +};
 +// A blow on a copy, as this game's CMonsterMan::CheckDamage took it, for the leader's game to show and take as its
 +// own: the damage row's kind and flags, the strongest element (-1 none), stagger and stun, whether the monster guarded,
@@ -3302,6 +3375,16 @@ index 00000000..ae136232
 +};
 +bool                   PuppetSet(int slot, const Puppet &puppet);
 +bool                   IsPuppet(int slot);
++// monster.cpp (CheckThrowTarget): a monster this game's hero may not lift. One another player's hero holds here, or a
++// copy whose monster the leader's game has in a hero's hands or flying, or which this game's hero let go a moment ago
++// and the leader's reports have not freed yet. (The game's own hero lifts none while it holds one.)
++bool                   LiftRefused(int slot);
++// actscript.cpp (_RELEASE_OBJ): another player's hero holds this monster here; this game's hero does not let it go.
++bool                   HeldByOther(int slot);
++// actscript.cpp (_ESM_CREATE): what this character's script makes is only drawn here, with no blow of its own. A
++// copy's: its script runs only for its death, and what the death makes (a RoBomb's blast) strikes in the leader's
++// game, whose blows on this game's hero come from there.
++bool                   EffectDrawnOnly(const void *chara);
 +// This floor's monsters are copies of another game's: their own thinking rests (DNG_PAUSE_MONSTER_AI), while the
 +// floor's effects go on (dng_main.cpp asks).
 +bool                   MonstersMirrored();
@@ -5634,7 +5717,7 @@ index 5535a388..62305c72 100644
  }
 diff --git a/port/src/moonmod/api.cpp b/port/src/moonmod/api.cpp
 new file mode 100644
-index 00000000..56e35654
+index 00000000..891fb116
 --- /dev/null
 +++ b/port/src/moonmod/api.cpp
 @@ -0,0 +1,540 @@
@@ -5861,13 +5944,13 @@ index 00000000..56e35654
 +    {"dungeons.enter_floor", "dungeons", "enter_floor", "simulation", "game.write", "Enter floor floor_id of the current dungeon (or, from a town, of dungeon_id), built again from the start."},
 +    {"world.avatar_set", "world", "avatar_set", "simulation", "game.write", "Co-op: show another player (slot 1-3) on the dungeon floor or in the town as their hero, easing to where they are; with an age, shown a little behind on that player's clock, its motion played as theirs (motion_flags, motion_step); away = true while that player watches a scene: the hero fades from sight until it is over."},
 +    {"world.avatar_clear", "world", "avatar_clear", "simulation", "game.write", "Co-op: take another player's hero away (one slot, or every one)."},
-+    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; with an age, in step with their hero."},
++    {"world.avatar_effect", "world", "avatar_effect", "simulation", "game.write", "Co-op: draw another player's shot or spell, or play their hero's sound (an entry of their player.effects_take, with slot 1-3), as it was in their game, striking nothing here; a monster their hero lifted, threw or put down is held, thrown or put down by their hero here when it is this game's; with an age, in step with their hero."},
 +    {"world.enter_map", "world", "enter_map", "simulation", "game.write", "Co-op: walk into a town or one of its maps by map number (world.get().map_no), from a town or a dungeon floor."},
 +    {"world.watch_set", "world", "watch_set", "any", "game.read", "Co-op: {enabled}: tell this mod (game.world.changed) of each change this game makes to the save's shared world: story flags and counters, the story's progress, the story's party, joinable townsfolk, dungeon floor records, Georama parts in stock, items the story's scripts give (gift), and that a town's Georama changed (as it is built, part by part)."},
 +    {"world.change_apply", "world", "change_apply", "any", "game.write", "Co-op: write another game's change {kind, id, value} (as game.world.changed gives it) into this game's save without telling it back; a floor's record is merged."},
 +    {"georama.town_export", "georama", "town_export", "any", "game.read", "Co-op: one town's Georama (its record and layout) as text."},
 +    {"georama.town_import", "georama", "town_import", "any", "game.write", "Co-op: take a town's Georama from georama.town_export; a player walking in it sees it change where they stand."},
-+    {"monsters.mirror_get", "monsters", "mirror_get", "simulation", "game.read", "Co-op host: the floor's monsters (slot, kind, state, life, place, motion and how it plays) and the blows that landed on other players since the last call, with how each was dealt and where it struck."},
++    {"monsters.mirror_get", "monsters", "mirror_get", "simulation", "game.read", "Co-op host: the floor's monsters (slot, kind, state, life, place, motion and how it plays, whether a hero holds it or it flies thrown) and the blows that landed on other players since the last call, with how each was dealt and where it struck."},
 +    {"monsters.puppet_set", "monsters", "puppet_set", "simulation", "game.write", "Co-op guest: make this floor's monsters copies of the host's, by slot (with an age, on the host's clock); a slot left out is gone on the host. Returns this game's blows on them, with how each landed."},
 +    {"monsters.puppet_clear", "monsters", "puppet_clear", "simulation", "game.write", "Co-op guest: give the floor's monsters their own thoughts back."},
 +    {"monsters.hold", "monsters", "hold", "simulation", "game.write", "Co-op: the fight waits for another player: for up to {frames} of play on this floor its monsters do not think and this game's hero does not act; {frames = 0} lets them go, as does leaving the floor."},
@@ -15409,10 +15492,10 @@ index 00000000..f64817aa
 +} // namespace moonmod
 diff --git a/port/src/moonmod/coop_api_moonmod.cpp b/port/src/moonmod/coop_api_moonmod.cpp
 new file mode 100644
-index 00000000..b4843085
+index 00000000..b1c1360a
 --- /dev/null
 +++ b/port/src/moonmod/coop_api_moonmod.cpp
-@@ -0,0 +1,1512 @@
+@@ -0,0 +1,1522 @@
 +// Co-op's adapter operations (moonmod/coop.hpp): net.*, session.*, the save split and the host's guests, the other
 +// players' heroes, the host's monsters, shared doors, floors, the choice panel and the title modes. Dispatched before
 +// the Chronicle Two adapter's own operations (chronicle_two_adapter.cpp calls Call first).
@@ -16053,7 +16136,7 @@ index 00000000..b4843085
 +// world.avatar_effect: another player's shot, drawn from their avatar.
 +ApiCallResult AvatarEffectCall(const Json &args) {
 +    static constexpr const char *kUsage =
-+        "expected {slot = 1-3, kind = 1-10, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil, age = frames since it was fired (0-3600) or nil} (player.effects_take's entries)";
++        "expected {slot = 1-3, kind = 1-11, x, y, z, dx, dy, dz, value = a whole number or nil, amount = a number or nil, target = a scene slot or nil, frame0, frame1 = a trail's frames or nil, age = frames since it was fired (0-3600) or nil} (player.effects_take's entries)";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object()) return Invalid(kUsage);
 +    const Json &request = args[0];
 +    std::string unknown;
@@ -16062,7 +16145,7 @@ index 00000000..b4843085
 +    }
 +    int        slot = 0;
 +    HeroEffect e;
-+    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 10, e.kind)) return Invalid(kUsage);
++    if (!ReadBoundedInt(request, "slot", 1, kAvatars, slot) || !ReadBoundedInt(request, "kind", 1, 11, e.kind)) return Invalid(kUsage);
 +    for (const char *key : {"frame0", "frame1"}) {
 +        if (!request.contains(key) || request[key].is_null()) continue;
 +        if (!request[key].is_string() || request[key].get<std::string>().size() > 31) return Invalid(kUsage);
@@ -16183,10 +16266,19 @@ index 00000000..b4843085
 +            float at[4] = {0.0f, 0.0f, 0.0f, 1.0f}, rotation[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 +            m->GetPosition(at);
 +            m->GetRotation(rotation);
++            float heading = rotation[1];
++            // One held in a hero's hands hangs from them (its frame's parent): where it is, and which way it faces, are
++            // the world's, not the hands'.
++            if (m->catch_state == ACTION_CATCH_HELD && m->catch_frame != nullptr && m->CObjectFrame::frame != nullptr) {
++                m->CObjectFrame::frame->GetWorldPosition0(at);
++                float ahead[4] = {0.0f, 0.0f, 1.0f, 0.0f}, way[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++                m->CObjectFrame::frame->GetWorldDir(way, ahead);
++                if (way[0] != 0.0f || way[2] != 0.0f) heading = std::atan2(way[0], way[2]);
++            }
 +            const auto round = [](float v) { return std::round(v * 10.0f) / 10.0f; };
 +            monsters.push_back({{"slot", slot}, {"kind", m->monster_id}, {"state", m->state}, {"hp", m->life}, {"max_hp", m->max_life},
-+                                {"x", round(at[0])}, {"y", round(at[1])}, {"z", round(at[2])},
-+                                {"heading", std::round(rotation[1] * 1000.0f) / 1000.0f}, {"motion", MotionNumberOf(*m)},
++                                {"x", round(at[0])}, {"y", round(at[1])}, {"z", round(at[2])}, {"catch", m->catch_state},
++                                {"heading", std::round(heading * 1000.0f) / 1000.0f}, {"motion", MotionNumberOf(*m)},
 +                                {"motion_flags", m->now_flags & 7}, {"motion_step", std::round(m->step * 100.0f) / 100.0f},
 +                                // (drawn in this game: in sight of its hero, or fading in or out)
 +                                {"seen", m->view_state != MONSTER_VIEW_OUT && m->view_state != MONSTER_VIEW_INIT && m->view_alpha > 0.0f}});
@@ -16204,7 +16296,7 @@ index 00000000..b4843085
 +}
 +
 +ApiCallResult PuppetSetCall(const Json &args) {
-+    static constexpr const char *kUsage = "expected {monsters = {{slot, kind, state, hp, max_hp, x, y, z, heading, motion, motion_flags, motion_step}, ...}, age = frames or nil}";
++    static constexpr const char *kUsage = "expected {monsters = {{slot, kind, state, hp, max_hp, x, y, z, heading, motion, motion_flags, motion_step, catch}, ...}, age = frames or nil}";
 +    if (!args.is_array() || args.size() != 1 || !args[0].is_object() || !args[0].contains("monsters") ||
 +        !(args[0]["monsters"].is_array() || (args[0]["monsters"].is_object() && args[0]["monsters"].empty()))) {
 +        return Invalid(kUsage);
@@ -16224,6 +16316,7 @@ index 00000000..b4843085
 +        if (entry.contains("max_hp") && !ReadBoundedInt(entry, "max_hp", 0, 1000000, puppet.max_hp)) return Invalid(kUsage);
 +        if (entry.contains("motion") && !ReadBoundedInt(entry, "motion", -1, 1023, puppet.motion)) return Invalid(kUsage);
 +        if (entry.contains("motion_flags") && !ReadBoundedInt(entry, "motion_flags", 0, 7, puppet.motion_flags)) return Invalid(kUsage);
++        if (entry.contains("catch") && !entry["catch"].is_null() && !ReadBoundedInt(entry, "catch", 0, 2, puppet.catch_state)) return Invalid(kUsage);
 +        if (entry.contains("motion_step") && (!ReadNumber(entry, "motion_step", puppet.motion_step, true) || puppet.motion_step > 16.0f)) {
 +            return Invalid(kUsage);
 +        }
@@ -19620,10 +19713,10 @@ index 00000000..ab5344b5
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..cbd1b370
+index 00000000..f839d8bf
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,2015 @@
+@@ -0,0 +1,2304 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -19709,6 +19802,7 @@ index 00000000..cbd1b370
 +    float x = 0.0f, y = 0.0f, z = 0.0f, heading = 0.0f;
 +    int   motion = -1, flags = 0;
 +    float step = -1.0f;
++    int   catch_state = 0; // (a monster's: held in a hero's hands, or thrown)
 +};
 +
 +// Keeps a report, in its time's order. One older than a report kept, or the same as the last, is let go; one far
@@ -19719,7 +19813,7 @@ index 00000000..cbd1b370
 +        const Sample &last = trail.back();
 +        if (n.t <= last.t) return;
 +        if (n.x == last.x && n.y == last.y && n.z == last.z && n.heading == last.heading && n.motion == last.motion &&
-+            n.flags == last.flags && n.step == last.step) {
++            n.flags == last.flags && n.step == last.step && n.catch_state == last.catch_state) {
 +            return;
 +        }
 +        if (std::hypot(n.x - last.x, n.z - last.z) > kJump) {
@@ -19940,6 +20034,9 @@ index 00000000..cbd1b370
 +        int count = 0;
 +    };
 +    std::array<LoopSound, 4> loops{};
++    // A monster of this game's its hands hold (AvatarEffectNow's lift), by its slot, and the frame it hangs from.
++    int                         held_monster = -1;
++    mgCFrame                   *held_frame = nullptr;
 +};
 +
 +std::array<Avatar, kAvatars> g_avatars;
@@ -19964,8 +20061,33 @@ index 00000000..cbd1b370
 +    return nullptr;
 +}
 +
++// The monster an avatar's hands hold is let go where it hangs, as the game's hero puts one down (_RELEASE_OBJ): before
++// the body goes (its frames with it), when its player is down, away or gone, or when the monster no longer hangs there.
++void AvatarLetGo(Avatar &a) {
++    if (a.held_monster < 0) return;
++    CActiveMonster *m = OnFloor() && ActiveMonster != nullptr ? ActiveMonster->GetActiveMonster(a.held_monster) : nullptr;
++    if (m != nullptr && a.held_frame != nullptr && m->catch_frame == a.held_frame) {
++        if (m->CObjectFrame::frame != nullptr) {
++            float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++            m->CObjectFrame::frame->GetWorldPosition0(at);
++            m->CObjectFrame::frame->DeleteReference();
++            m->SetPosition(at);
++        }
++        m->catch_frame = nullptr;
++        if (m->catch_state == ACTION_CATCH_HELD) {
++            m->catch_state = ACTION_CATCH_NONE;
++            m->no_hit_time = 5;
++            m->req_prog = MONSTER_PROG_LAND;
++        }
++        std::fprintf(stderr, "co-op: an avatar's hands let go of the monster in slot %d\n", a.held_monster);
++    }
++    a.held_monster = -1;
++    a.held_frame = nullptr;
++}
++
 +void Unload(int index) {
 +    Avatar &a = g_avatars[static_cast<std::size_t>(index)];
++    AvatarLetGo(a);
 +    // (what it was drawing goes with it: an item held up, a shot in flight that follows it)
 +    if (a.slot >= 0 && GetNowLoopNo() == LOOP_DUNGEON && FxScriptMan != nullptr && a.scene == DngMainScene) {
 +        FxScriptMan->ClearEffectFromChrid(a.slot);
@@ -20246,10 +20368,18 @@ index 00000000..cbd1b370
 +    std::vector<Sample> trail; // the leader's reports kept (TrailHeard, TrailAt)
 +    int    dies_at = -1;       // the frame (this clock) the copy comes to the moment the leader's monster died
 +    bool   dying = false;      // its death is this game's own now (CopyDies)
++    int    died_at = -1;       // and since when (this clock)
 +    // This game's hero's last blow on it: when, by whom, from what (CColPrim's attacker, its row's source and kind,
 +    // the hit's status bits), for a death it dealt (CopyDies).
 +    int    blow_at = -1, blow_by = -1, blow_source = DAMAGE_SOURCE_NONE, blow_kind = -1;
 +    u32    blow_attr = 0;
++    // This game's hero lifted it (LiftedHere): 1 in the hands, 2 let go and flying (or falling), 3 landed and waiting
++    // for the leader's reports to have its monster free again; when it was lifted and since when in this state (this
++    // clock), the ground it was lifted from, and whether a report of the leader's from after the lift has had it held
++    // or thrown.
++    int    lift = 0, lifted_at = -1, lift_since = -1;
++    float  ground = 0.0f;
++    bool   reported = false;
 +};
 +std::vector<PuppetSlot>  g_puppets(static_cast<std::size_t>(MONSTER_ACTIVE_MAX));
 +std::vector<PuppetHit>   g_puppet_hits;
@@ -20264,6 +20394,105 @@ index 00000000..cbd1b370
 +    return ActiveMonster->GetActiveMonster(slot);
 +}
 +
++// Where a monster is in the world: one held in a hero's hands hangs from them (its frame's parent).
++void WorldAt(CActiveMonster &m, float out[4]) {
++    out[3] = 1.0f;
++    if (m.catch_state == ACTION_CATCH_HELD && m.catch_frame != nullptr && m.CObjectFrame::frame != nullptr) {
++        m.CObjectFrame::frame->GetWorldPosition0(out);
++        out[3] = 1.0f;
++        return;
++    }
++    m.GetPosition(out);
++    out[3] = 1.0f;
++}
++
++// A copy this game's hero holds is let go where it hangs, as _RELEASE_OBJ puts one down, before it dies or leaves its
++// slot: a monster in the hands neither dies nor goes. (The hero's hands are empty from then: its throw throws nothing.)
++void LetGoHere(CActiveMonster &m, PuppetSlot &p) {
++    if (m.catch_state == ACTION_CATCH_HELD && m.catch_frame != nullptr && m.CObjectFrame::frame != nullptr) {
++        float at[4];
++        WorldAt(m, at);
++        m.CObjectFrame::frame->DeleteReference();
++        m.SetPosition(at);
++    }
++    m.catch_frame = nullptr;
++    if (p.lift != 0 || m.catch_state != ACTION_CATCH_NONE) {
++        m.catch_state = ACTION_CATCH_NONE;
++        m.no_hit_time = 0;
++        m.req_prog = MONSTER_PROG_RUNNING;
++        if (m.damage_req == ACTION_DAMAGE_REQ_THROWN) m.damage_req = ACTION_DAMAGE_REQ_NONE;
++    }
++    p.lift = 0;
++}
++
++// This game's hero lifted the copy (CheckThrowTarget takes any monster near the hands): it is held, then thrown or
++// put down, as the game's own monster is, and lands, before the leader's reports could have it so. The leader's game
++// is told (HeroLifted, HeroReleased) and its hands of this player's hero hold the monster there, and throw it the same
++// way, a moment behind; the copy waits where it landed until the reports have that monster free again (kLiftWait at
++// most: a lift the leader's game refused, its monster taken first). False when the copy is the leader's to place.
++constexpr int   kLiftWait = 120;
++constexpr float kFall = 0.6f; // a thrown monster's fall each frame (CActionChara::Step, the arc _RELEASE_OBJ aims)
++
++bool LiftedHere(int slot, CActiveMonster &m, PuppetSlot &p, const Sample &now) {
++    if (m.catch_state == ACTION_CATCH_HELD && p.lift != 1) {
++        p.lift = 1;
++        p.lifted_at = p.lift_since = g_clock;
++        p.reported = false;
++        std::fprintf(stderr, "co-op: this game's hero lifted the copy in slot %d (kind %d)\n", slot, m.monster_id);
++    }
++    if (p.lift == 0) return false;
++    // (a report from before the lift, its monster then in another's hands, is not this lift's)
++    if (now.catch_state != ACTION_CATCH_NONE && now.t > p.lifted_at) p.reported = true;
++    if (p.lift == 1) {
++        if (m.catch_state == ACTION_CATCH_HELD) {
++            m.SetPosition(0.0f, -2.0f, 0.0f); // (in the hands, as CMonsterMan::ThinkHost holds a monster)
++            return true;
++        }
++        // Let go: thrown (its arc's first step in blow_vec), or put down, to fall from where it hung.
++        if (m.catch_state != ACTION_CATCH_THROWN) {
++            for (int k = 0; k < 3; ++k) m.blow_vec[k] = 0.0f;
++        }
++        p.lift = 2;
++        p.lift_since = g_clock;
++        std::fprintf(stderr, "co-op: the copy in slot %d let go (%s)\n", slot, m.catch_state == ACTION_CATCH_THROWN ? "thrown" : "put down");
++    }
++    if (m.no_hit_time > 0) --m.no_hit_time; // (as the game counts it down for a monster that thinks)
++    if (p.lift == 2) {
++        float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++        m.GetPosition(at);
++        const float rise = m.blow_vec[1];
++        for (int k = 0; k < 3; ++k) at[k] += m.blow_vec[k];
++        // (one thrown falls by the game's own step, CActionChara::Step taking kFall from its arc each frame; one put
++        // down, by ours)
++        if (m.catch_state != ACTION_CATCH_THROWN) m.blow_vec[1] -= kFall;
++        if ((at[1] <= p.ground && rise <= 0.0f) || g_clock - p.lift_since > kLiftWait) {
++            // Landed, as CMonsterMan's move lands a thrown monster: a puff of dust where it struck the ground.
++            at[1] = p.ground;
++            m.catch_state = ACTION_CATCH_NONE;
++            m.req_prog = MONSTER_PROG_RUNNING;
++            if (m.damage_req == ACTION_DAMAGE_REQ_THROWN) m.damage_req = ACTION_DAMAGE_REQ_NONE;
++            p.lift = 3;
++            p.lift_since = g_clock;
++            std::fprintf(stderr, "co-op: the copy in slot %d landed at %.0f,%.0f,%.0f\n", slot, at[0], at[1], at[2]);
++            if (FxScriptMan != nullptr && DngMainScene != nullptr) {
++                char dust[] = "\x8D\xBB\x89\x8C";
++                if (FxScriptMan->CreateEffSpt(dust, 0, 0) >= 0) FxScriptMan->SetScriptVect1(at, 0, -1);
++                sndSePlay(static_cast<u32>(DngMainScene->se_battle_id), 30, 0);
++            }
++        }
++        m.SetPosition(at[0], at[1], at[2]);
++        return true;
++    }
++    if ((p.reported && now.catch_state == ACTION_CATCH_NONE) || g_clock - p.lift_since > kLiftWait) {
++        std::fprintf(stderr, "co-op: the copy in slot %d is the leader's again (%s)\n", slot,
++                     p.reported ? "its reports have it free" : "no report had it held");
++        p.lift = 0;
++        m.no_hit_time = 0;
++        return false;
++    }
++    return true;
++}
++
 +// The leader's monster died, and the copy has come to that moment here: it dies as the game's own monster dies,
 +// CMonsterMan::ThinkHost playing it from here (CopiesDying, CopyRests): the death motion, the burst and its sound,
 +// the money and things it drops, the absorption (ABS) its orbs give the weapons of the hero who gathers them, a key
@@ -20273,6 +20502,7 @@ index 00000000..cbd1b370
 +constexpr int kOwnBlowFrames = 180;
 +
 +void CopyDies(CActiveMonster &monster, PuppetSlot &p) {
++    LetGoHere(monster, p);
 +    const bool ours = p.blow_at >= 0 && g_clock - p.blow_at <= kOwnBlowFrames;
 +    monster.life = 0;
 +    monster.damage_req = ACTION_DAMAGE_REQ_DEAD;
@@ -20282,7 +20512,11 @@ index 00000000..cbd1b370
 +    if (ours && p.blow_kind >= 0) monster.last_hit_kind = p.blow_kind;
 +    p.dying = true;
 +    p.dies_at = -1;
++    p.died_at = g_clock;
 +}
++
++// A death has had its time (a boss's slot rests from here until its room's scene empties it).
++constexpr int kDeathRests = 300;
 +
 +// The avatars on this floor: where each stands.
 +int AvatarsHere(std::array<std::array<float, 3>, kAvatars> &at, std::array<bool, kAvatars> &here) {
@@ -20310,7 +20544,7 @@ index 00000000..cbd1b370
 +    float hero_at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 +    float own_at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 +    hero->GetPosition(hero_at);
-+    monster->GetPosition(own_at);
++    WorldAt(*monster, own_at);
 +    monster->target_dist = mgDistVector(hero_at, own_at);
 +    if (auto *camera = static_cast<CCameraControl *>(DngMainScene->GetCamera(DngMainScene->active_camera)); camera != nullptr) {
 +        float camera_at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -20377,10 +20611,14 @@ index 00000000..cbd1b370
 +        // (on the leader's clock a little behind, eased between its reports, as the other players' heroes are; each
 +        // motion played as the leader's monster plays it, looping or held on its last frame)
 +        const Sample now = p.trail.empty() ? Sample{g_clock, p.host.x, p.host.y, p.host.z, p.host.heading, p.host.motion,
-+                                                    p.host.motion_flags, p.host.motion_step}
++                                                    p.host.motion_flags, p.host.motion_step, p.host.catch_state}
 +                                           : TrailAt(p.trail);
-+        monster->SetPosition(now.x, now.y, now.z);
-+        monster->SetRotation(0.0f, now.heading, 0.0f);
++        // (in this game's hero's hands, or let go from them: this game's own a moment)
++        if (!LiftedHere(slot, *monster, p, now)) {
++            monster->SetPosition(now.x, now.y, now.z);
++            monster->SetRotation(0.0f, now.heading, 0.0f);
++            p.ground = now.y;
++        }
 +        if (now.motion >= 0 && (now.motion != p.motion || now.flags != p.flags)) {
 +            p.motion = now.motion;
 +            p.flags = now.flags;
@@ -20579,8 +20817,17 @@ index 00000000..cbd1b370
 +    const int loop = GetNowLoopNo();
 +    for (int i = 0; i < kAvatars; ++i) {
 +        Avatar &a = g_avatars[static_cast<std::size_t>(i)];
++        // (a monster in its hands is let go when its player is down, watching a scene or gone, or the monster is no
++        // longer held there: struck from the hands, or its floor gone)
++        if (a.held_monster >= 0) {
++            const CActiveMonster *m = OnFloor() && ActiveMonster != nullptr ? ActiveMonster->GetActiveMonster(a.held_monster) : nullptr;
++            const bool holds = m != nullptr && m->catch_state == ACTION_CATCH_HELD && m->catch_frame == a.held_frame && a.body &&
++                               scene == a.scene && scene == DngMainScene;
++            if (!holds || !a.wanted || a.target.down || a.target.away || a.body->leaving) AvatarLetGo(a);
++        }
 +        // Another place, or the scene gave the slot to someone else: the body goes; the mod's wish stays.
 +        if (a.body && (scene != a.scene || loop != a.loop || scene == nullptr || scene->GetCharacter(a.slot) != a.body.get())) {
++            AvatarLetGo(a);
 +            a.body.reset(); // the scene's slot was reset with the scene; nothing of ours to take back
 +            if (scene != nullptr && scene == a.scene && scene == DngMainScene && FxScriptMan != nullptr && a.slot >= 0) {
 +                FxScriptMan->ClearEffectFromChrid(a.slot); // (the same floor, its slot given to another: our effects go)
@@ -20685,6 +20932,34 @@ index 00000000..cbd1b370
 +static bool FrameNameOk(const std::string &name) {
 +    return !name.empty() && name.size() < 32 &&
 +           std::ranges::all_of(name, [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
++}
++
++void HeroLifted(const void *chara, int target, int kind, const char *frame) {
++    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || frame == nullptr || !FrameNameOk(frame)) return;
++    HeroEffect e;
++    e.kind = static_cast<int>(HeroShot::Lift);
++    e.target = target;
++    e.value = kind;
++    e.amount = 0.0f;
++    e.frame0 = frame;
++    e.frame1 = frame;
++    if (g_hero_effects.size() >= kHeroEffectsKept) g_hero_effects.erase(g_hero_effects.begin());
++    g_hero_effects.push_back(std::move(e));
++}
++
++void HeroReleased(const void *chara, int target, int kind, const float *from, const float *blow) {
++    if (chara == nullptr || chara != MainChara__2 || !InDungeon() || from == nullptr) return;
++    HeroEffect e;
++    e.kind = static_cast<int>(HeroShot::Lift);
++    e.target = target;
++    e.value = kind;
++    e.amount = blow != nullptr ? 1.0f : 2.0f;
++    for (int axis = 0; axis < 3; ++axis) {
++        e.pos[axis] = from[axis];
++        e.dir[axis] = blow != nullptr ? blow[axis] : 0.0f;
++    }
++    if (g_hero_effects.size() >= kHeroEffectsKept) g_hero_effects.erase(g_hero_effects.begin());
++    g_hero_effects.push_back(std::move(e));
 +}
 +
 +void HeroSounded(const void *chara, int sound) {
@@ -20957,6 +21232,67 @@ index 00000000..cbd1b370
 +                                              std::clamp(e.target, 0, 120));
 +            return true;
 +        }
++        case HeroShot::Lift: {
++            // Another player's hero lifted a monster, threw it or put it down. Where the monster is this game's own
++            // (this game leads the floor), the avatar's hands hold it as the game's hero's do (CheckThrowTarget), and
++            // let it go as _RELEASE_OBJ does: from where it hangs, on the same arc, or put down; the throw, the landing,
++            // a blow on another monster and a bomb going off are this game's. A copy here is the leader's monster,
++            // whose reports bring all of it.
++            Avatar   &a = g_avatars[static_cast<std::size_t>(slot)];
++            const int at_slot = e.target - DNG_CHARA_SLOT_MONSTER;
++            if (at_slot < 0 || at_slot >= MONSTER_ACTIVE_MAX) return false;
++            if (IsPuppet(at_slot)) return true;
++            CActiveMonster *m = ActiveMonster != nullptr ? ActiveMonster->GetActiveMonster(at_slot) : nullptr;
++            if (m == nullptr || (e.value > 0 && m->monster_id != e.value)) return false;
++            const int phase = static_cast<int>(e.amount);
++            if (phase == 0) {
++                if (a.body->shaped || !FrameNameOk(e.frame0)) return false;
++                mgCFrame *hands = FindFrame(*a.body, e.frame0.c_str());
++                if (hands == nullptr || m->CObjectFrame::frame == nullptr || m->state != ACTIVE_MONSTER_LIVE || m->catch_state != ACTION_CATCH_NONE || m->monster_id == 0x25A ||
++                    (m->tbl != nullptr && (m->tbl->lift_flags & MONSTER_LIFT_FORBIDDEN))) {
++                    std::fprintf(stderr, "co-op: avatar %d can't lift the monster in slot %d (%s)\n", slot + 1, at_slot,
++                                 hands == nullptr ? "no such frame" : m->catch_state != ACTION_CATCH_NONE ? "held or flying" : "not liftable now");
++                    return false;
++                }
++                AvatarLetGo(a);
++                m->CObjectFrame::frame->SetReference(hands);
++                m->catch_frame = hands;
++                m->catch_state = ACTION_CATCH_HELD;
++                m->no_hit_time = 0;
++                m->req_prog = MONSTER_PROG_CATCH;
++                a.held_monster = at_slot;
++                a.held_frame = hands;
++                std::fprintf(stderr, "co-op: avatar %d lifted the monster in slot %d (kind %d)\n", slot + 1, at_slot, m->monster_id);
++                return true;
++            }
++            if (a.held_monster != at_slot || a.held_frame == nullptr || m->catch_state != ACTION_CATCH_HELD || m->catch_frame != a.held_frame) {
++                return false;
++            }
++            float from[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++            a.held_frame->GetWorldPosition0(from);
++            from[3] = 1.0f;
++            if (m->CObjectFrame::frame != nullptr) m->CObjectFrame::frame->DeleteReference();
++            m->SetPosition(from);
++            m->catch_frame = nullptr;
++            m->no_hit_time = 5;
++            a.held_monster = -1;
++            a.held_frame = nullptr;
++            const bool arc = phase == 1 && std::fabs(dir[0]) < 64.0f && std::fabs(dir[1]) < 64.0f && std::fabs(dir[2]) < 64.0f;
++            if (arc) {
++                for (int k = 0; k < 3; ++k) m->blow_vec[k] = dir[k];
++                m->blow_vec[3] = 1.0f;
++                m->catch_state = ACTION_CATCH_THROWN;
++                m->damage_req = ACTION_DAMAGE_REQ_THROWN;
++                float still[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++                sceVu0CopyVector(m->velocity, still);
++            } else {
++                m->catch_state = ACTION_CATCH_NONE;
++                m->req_prog = MONSTER_PROG_LAND;
++            }
++            std::fprintf(stderr, "co-op: avatar %d %s the monster in slot %d from %.0f,%.0f,%.0f\n", slot + 1, arc ? "threw" : "put down", at_slot,
++                         from[0], from[1], from[2]);
++            return true;
++        }
 +    }
 +    return false;
 +}
@@ -20971,6 +21307,7 @@ index 00000000..cbd1b370
 +void FreeMonsterSlot(int slot) {
 +    CActiveMonster *monster = Monster(slot);
 +    if (monster == nullptr || (monster->state == ACTIVE_MONSTER_NONE && monster->chara_kind != ACTION_KIND_SCRIPT)) return;
++    LetGoHere(*monster, g_puppets[static_cast<std::size_t>(slot)]);
 +    monster->state = ACTIVE_MONSTER_NONE;
 +    monster->chara_kind = ACTION_KIND_NONE;
 +    monster->damage_req = ACTION_DAMAGE_REQ_NONE;
@@ -20988,6 +21325,14 @@ index 00000000..cbd1b370
 +// made: that slot alone is refused.
 +CActiveMonster *MakePuppet(int slot, const Puppet &puppet) {
 +    if (ActiveMonster == nullptr || DngMainScene == nullptr) return nullptr;
++    // A boss's room is one of the game's made maps, whose monsters its own scene loads (event.load_dungeon_monster, the
++    // first call setting the room's monster table up). A game that walked in the short way (the room's intro seen, its
++    // flag set by the leader's game) played none of that and has no table: it is set up here as that first call does,
++    // with this kind, while the room holds no monster to lose.
++    const bool boss_room = BossRoomMap(FloorMapName());
++    if (boss_room && !IsMonsterManagerReadyForModSpawn(DngMainScene) && ActiveMonster->GetMonsterNum(-1.0f) == 0) {
++        LoadMonsterFile(puppet.kind, 1);
++    }
 +    std::string why;
 +    const int   refer = moonmod::ChronicleTwoMonsterReferFor(puppet.kind, why);
 +    if (refer < 0) {
@@ -21004,6 +21349,9 @@ index 00000000..cbd1b370
 +    CActiveMonster *made = ActiveMonster->SetActiveMonster(refer, at, turn, -1, slot);
 +    if (made == nullptr || made->chara_type != DNG_CHARA_SLOT_MONSTER + slot) return nullptr;
 +    DngMainScene->SetActive(SCENE_DATA_CHARA, DNG_CHARA_SLOT_MONSTER + slot);
++    // (and, as the game's own placement does, AutoSetMonster, the room is not cleared while a monster is in it: a built
++    // floor's own monsters did so as it was built, but a boss's room has only the leader's)
++    if (boss_room) DngMainScene->battle_area.battle_clear = false;
 +    std::fprintf(stderr, "co-op: made the leader's monster in slot %d (kind %d) here\n", slot, puppet.kind);
 +    return made;
 +}
@@ -21018,6 +21366,16 @@ index 00000000..cbd1b370
 +    // there changes nothing. A living one in that slot there is another monster (the leader's game used the slot
 +    // again first): this one goes, and that one is made.
 +    if (p.dying) {
++        // A boss's death rests in its slot until its room's scene empties it (clear_event_battle_monsters). That scene
++        // is the leader's story and plays in the leader's game alone: once the leader's slot is empty and the copy's
++        // death has had its time, the slot is emptied here too, or this game would count the boss for ever and never
++        // give the floor's clear.
++        if ((puppet.state <= 0 || puppet.kind < 0) && monster != nullptr && monster->state != ACTIVE_MONSTER_NONE &&
++            g_clock - p.died_at >= kDeathRests) {
++            FreeMonsterSlot(slot);
++            p = PuppetSlot{};
++            return true;
++        }
 +        const bool another = puppet.state == ACTIVE_MONSTER_LIVE && puppet.hp > 0 && puppet.kind >= 0;
 +        if (monster != nullptr && monster->state != ACTIVE_MONSTER_NONE && !another) return true;
 +        if (monster != nullptr && monster->state != ACTIVE_MONSTER_NONE) FreeMonsterSlot(slot);
@@ -21043,7 +21401,7 @@ index 00000000..cbd1b370
 +    p.host = puppet;
 +    if (puppet.age >= 0) {
 +        TrailHeard(p.trail, {g_clock - std::min(puppet.age, kMaxAge), puppet.x, puppet.y, puppet.z, puppet.heading, puppet.motion,
-+                        puppet.motion_flags, puppet.motion_step});
++                        puppet.motion_flags, puppet.motion_step, puppet.catch_state});
 +    } else {
 +        p.trail.clear();
 +    }
@@ -21065,7 +21423,30 @@ index 00000000..cbd1b370
 +
 +bool IsPuppet(int slot) { return slot >= 0 && slot < MONSTER_ACTIVE_MAX && g_puppets[static_cast<std::size_t>(slot)].used; }
 +
++bool HeldByOther(int slot) {
++    const CActiveMonster *m = Monster(slot);
++    if (m == nullptr || m->catch_state != ACTION_CATCH_HELD || m->catch_frame == nullptr) return false;
++    return std::ranges::any_of(g_avatars, [&](const Avatar &a) { return a.held_monster == slot && a.held_frame == m->catch_frame; });
++}
++
++bool LiftRefused(int slot) {
++    const CActiveMonster *m = Monster(slot);
++    if (m == nullptr) return false;
++    if (m->catch_state == ACTION_CATCH_HELD) return true;
++    if (!IsPuppet(slot)) return false;
++    const PuppetSlot &p = g_puppets[static_cast<std::size_t>(slot)];
++    return p.dying || p.host.catch_state != ACTION_CATCH_NONE || p.lift != 0;
++}
++
 +bool MonstersMirrored() { return g_puppets_pause; }
++
++bool EffectDrawnOnly(const void *chara) {
++    if (chara == nullptr || !g_puppets_pause) return false;
++    for (int slot = 0; slot < MONSTER_ACTIVE_MAX; ++slot) {
++        if (g_puppets[static_cast<std::size_t>(slot)].used && Monster(slot) == chara) return true;
++    }
++    return false;
++}
 +
 +// (only while the floor plays: the game's own events and menus hold every monster, a dying one too)
 +bool CopiesDying() {
@@ -21615,6 +21996,7 @@ index 00000000..cbd1b370
 +    g_hold_frames = 0;
 +    g_hold_scene = nullptr;
 +    for (int i = 0; i < kAvatars; ++i) {
++        AvatarLetGo(g_avatars[static_cast<std::size_t>(i)]);
 +        g_avatars[static_cast<std::size_t>(i)].wanted = false;
 +        g_avatars[static_cast<std::size_t>(i)].pending.clear();
 +        AvatarLoopsStop(g_avatars[static_cast<std::size_t>(i)]);
@@ -31167,7 +31549,7 @@ index 10ac7b34..3d4eed00 100644
  
  void DrawTakePhotoSystem(int texture, CInventUserData *user_data) {
 diff --git a/port/src/object/dun/actionchara.cpp b/port/src/object/dun/actionchara.cpp
-index 97732c47..e138348e 100644
+index 97732c47..1004dce0 100644
 --- a/port/src/object/dun/actionchara.cpp
 +++ b/port/src/object/dun/actionchara.cpp
 @@ -1,3 +1,6 @@
@@ -31177,7 +31559,17 @@ index 97732c47..e138348e 100644
  #include "common.h"
  
  #include <libvu0.h>
-@@ -635,6 +638,10 @@ void CActionChara::ThrowItemObject() {
+@@ -564,7 +567,8 @@ int CActionChara::CheckEnemyCatch(char *name) {
+         return false;
+     }
+ 
+-    if (ActiveMonster->CheckThrowTarget(object) != nullptr) {
++    if (CActiveMonster *caught = ActiveMonster->CheckThrowTarget(object); caught != nullptr) {
++        moonmod::coop::HeroLifted(this, caught->chara_type, caught->monster_id, name); // (co-op: told to the others)
+         hold_type = ACTION_HOLD_ENEMY;
+         release_timing = ACTION_RELEASE_CATCH;
+         other = SearchChara("sword");
+@@ -635,6 +639,10 @@ void CActionChara::ThrowItemObject() {
              sceVu0ScaleVector(target, target, 120.0f);
              sceVu0AddVector(target, target, position);
              effect_man->SetScriptVect1(target, 0, throw_effect);
@@ -31188,7 +31580,7 @@ index 97732c47..e138348e 100644
              hold_type = ACTION_HOLD_NONE;
  
              item = GetBattleCharaInfo()->GetActiveItemInfo(0);
-@@ -731,6 +738,9 @@ void CActionChara::EntryThrowItem() {
+@@ -731,6 +739,9 @@ void CActionChara::EntryThrowItem() {
      if (throw_effect < 0) {
          dc2::log::PrintGame("effect entry err\n");
      } else {
@@ -31198,7 +31590,7 @@ index 97732c47..e138348e 100644
          effect_man->SetValue(0, 1, 0, throw_effect);
          effect_man->SetValue(1, item_no, 0, throw_effect);
  
-@@ -764,6 +774,9 @@ void CActionChara::RemoveThrowItem() {
+@@ -764,6 +775,9 @@ void CActionChara::RemoveThrowItem() {
  
              if (effect_no >= 0) {
                  effect_man->DeleteEffSpt(0, effect_no);
@@ -31208,7 +31600,7 @@ index 97732c47..e138348e 100644
              }
  
              hold_type = ACTION_HOLD_NONE;
-@@ -1049,6 +1062,8 @@ void CActionChara::StepEffect() {
+@@ -1049,6 +1063,8 @@ void CActionChara::StepEffect() {
                              sword_effect[slot->sword_no]->StartEffect(
                                  start_frame, end_frame, slot->length, slot->fade_time,
                                  slot->hold_time);
@@ -31217,7 +31609,7 @@ index 97732c47..e138348e 100644
                              slot->wait = 5;
                          }
                      }
-@@ -2964,7 +2979,7 @@ int CActionChara::CheckDamage() {
+@@ -2964,7 +2980,7 @@ int CActionChara::CheckDamage() {
  
          max_hp = battle->GetMaxHp_i();
          now_hp = battle->GetNowHp_i();
@@ -31226,7 +31618,7 @@ index 97732c47..e138348e 100644
          damage -= battle->GetDefenceVol();
  
          if (damage <= 0.0f) {
-@@ -3287,7 +3302,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -3287,7 +3303,10 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
          AllDeleteDamage();
          prog_no = ACTION_PROG_DEAD;
          damage_req = ACTION_DAMAGE_REQ_NONE;
@@ -31238,7 +31630,7 @@ index 97732c47..e138348e 100644
      }
  
      if (damage_req == ACTION_DAMAGE_REQ_HOLD) {
-@@ -3316,7 +3334,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
+@@ -3316,7 +3335,8 @@ void CActionChara::RunScript(CScene *scene, RUN_SCRIPT_ENV *env) {
      } else {
          script.resume();
  
@@ -32458,7 +32850,7 @@ index 3a177a37..0bfbd353 100644
 +    moonmod::ApplyChronicleTwoDungeons(this);
  }
 diff --git a/port/src/object/dun/monster.cpp b/port/src/object/dun/monster.cpp
-index 706fda8f..6a04b508 100644
+index 706fda8f..5722f4e3 100644
 --- a/port/src/object/dun/monster.cpp
 +++ b/port/src/object/dun/monster.cpp
 @@ -4,6 +4,9 @@
@@ -32533,7 +32925,18 @@ index 706fda8f..6a04b508 100644
  
      for (m = 0; m < MONSTER_LOCATE_MAX; m++) {
          s16 *param = locate.param;
-@@ -994,6 +1018,11 @@ int CMonsterMan::GetMonsterNum(float limit) {
+@@ -940,8 +964,9 @@ CActiveMonster *CMonsterMan::CheckThrowTarget(mgCFrame *frame) {
+ 
+     for (i = 0; i < MONSTER_ACTIVE_MAX; i++) {
+         auto *active_monster = GetActiveMonster(i);
++        // (co-op: not one another player's hero holds, nor a copy the leader's game has held or flying)
+         if (active_monster != nullptr && active_monster->IsDraw(true) &&
+-            active_monster->monster_id != 0x25A) {
++            active_monster->monster_id != 0x25A && !moonmod::coop::LiftRefused(i)) {
+             active_monster->GetPosition(monster_pos);
+             monster_pos[3] = 1.0f;
+ 
+@@ -994,6 +1019,11 @@ int CMonsterMan::GetMonsterNum(float limit) {
  }
  
  BASE_MONSTER_TBL *CMonsterMan::GetReferPtr2(int monster_id) {
@@ -32545,7 +32948,7 @@ index 706fda8f..6a04b508 100644
      BASE_MONSTER_TBL *entry = base_monster_define;
  
      while (entry->name[0] != 0) {
-@@ -1058,7 +1087,7 @@ int CMonsterMan::EntryRefer(int monster_id, mgCMemory *memory) {
+@@ -1058,7 +1088,7 @@ int CMonsterMan::EntryRefer(int monster_id, mgCMemory *memory) {
      return true;
  }
  
@@ -32554,7 +32957,7 @@ index 706fda8f..6a04b508 100644
      const auto activation_scene = scene_view;
      auto      *scene = activation_scene.Get();
      if (scene == nullptr) {
-@@ -1079,7 +1108,19 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
+@@ -1079,7 +1109,19 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
          return nullptr;
      }
  
@@ -32575,7 +32978,7 @@ index 706fda8f..6a04b508 100644
  
      if (slot < 0) {
          return nullptr;
-@@ -1151,7 +1192,7 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
+@@ -1151,7 +1193,7 @@ CActiveMonster *CMonsterMan::SetActiveMonster(int refer_no, float pos[], sceVu0F
      monster->next_pos[2] = 0.0f;
      monster->next_pos[3] = 1.0f;
      monster->move_speed = 0.0f;
@@ -32584,7 +32987,7 @@ index 706fda8f..6a04b508 100644
      monster->reward_exp = tbl->reward_exp;
      monster->reward_money = tbl->reward_money;
      monster->unk_1322 = tbl->unk_5a;
-@@ -2216,9 +2257,12 @@ void CMonsterMan::CheckDamage() {
+@@ -2216,9 +2258,12 @@ void CMonsterMan::CheckDamage() {
                  damage *= 0.01f * static_cast<float>(prim->param->critical_rate);
              }
  
@@ -32597,7 +33000,7 @@ index 706fda8f..6a04b508 100644
  
              if (monster->life <= 0) {
                  monster->life = 0;
-@@ -2654,7 +2698,9 @@ void CMonsterMan::ThinkHost() {
+@@ -2654,7 +2699,9 @@ void CMonsterMan::ThinkHost() {
          if (monster == nullptr || monster->state == ACTIVE_MONSTER_NONE) {
              continue;
          }
@@ -32607,7 +33010,7 @@ index 706fda8f..6a04b508 100644
  
          monster->GetEntryObjectPos(CHARA_ENTRY_GROUP_TARGET, 0, monster->center_pos);
          monster->scoop.ok = false;
-@@ -2738,7 +2784,11 @@ void CMonsterMan::ThinkHost() {
+@@ -2738,7 +2785,11 @@ void CMonsterMan::ThinkHost() {
                  monster->camera_dist = mgDistVector(camera_pos, own_pos);
              }
  
@@ -32620,7 +33023,7 @@ index 706fda8f..6a04b508 100644
                  continue;
              }
          }
-@@ -2943,6 +2993,7 @@ void CMonsterMan::ThinkHost() {
+@@ -2943,6 +2994,7 @@ void CMonsterMan::ThinkHost() {
              monster->Step();
          }
      }
@@ -32628,7 +33031,7 @@ index 706fda8f..6a04b508 100644
  
      PriorityLevelCheck();
  }
-@@ -3187,8 +3238,11 @@ int active_monsters = kRetailActiveMonsters;
+@@ -3187,8 +3239,11 @@ int active_monsters = kRetailActiveMonsters;
  
  int PortMonsterLatchLimits() {
      const bool more = ConfigGet().more_monsters;
@@ -35471,7 +35874,7 @@ index 0e0d3789..48d69d3a 100644
  /**
   * Writes the current town save and optional spawn or the recorded dungeon floor-entry save, preserving the
 diff --git a/port/src/script/actscript.cpp b/port/src/script/actscript.cpp
-index a0105f01..0f85c503 100644
+index a0105f01..465c0db5 100644
 --- a/port/src/script/actscript.cpp
 +++ b/port/src/script/actscript.cpp
 @@ -35,6 +35,7 @@
@@ -35498,7 +35901,35 @@ index a0105f01..0f85c503 100644
      }
  
      return true;
-@@ -1760,6 +1763,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+@@ -1683,7 +1686,9 @@ int _RELEASE_OBJ(dc2::script::RunArguments stack, int argc) {
+         do {
+             CActionChara *held = static_cast<CActionChara *>(nowScene__2->GetCharacter(chara_no));
+ 
+-            if (held != nullptr && held->catch_state == ACTION_CATCH_HELD) {
++            // (co-op: a monster another player's hero holds is theirs to let go)
++            if (held != nullptr && held->catch_state == ACTION_CATCH_HELD &&
++                !moonmod::coop::HeldByOther(chara_no - DNG_CHARA_SLOT_MONSTER)) {
+                 held->catch_frame->GetWorldPosition0(held_pos);
+                 held->CObjectFrame::frame->DeleteReference();
+                 held->SetPosition(held_pos);
+@@ -1693,6 +1698,7 @@ int _RELEASE_OBJ(dc2::script::RunArguments stack, int argc) {
+                     held->catch_state = ACTION_CATCH_NONE;
+                     held->no_hit_time = 5;
+                     static_cast<CActiveMonster *>(held)->req_prog = MONSTER_PROG_LAND;
++                    moonmod::coop::HeroReleased(action_info.chara, chara_no, static_cast<CActiveMonster *>(held)->monster_id, held_pos, nullptr);
+                 } else {
+ 
+                     (action_info.chara)->GetPosition(start_pos);
+@@ -1728,6 +1734,8 @@ int _RELEASE_OBJ(dc2::script::RunArguments stack, int argc) {
+                     float offset[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                     sceVu0CopyVector(held->velocity, offset);
+                     action_info.chara->release_timing = ACTION_RELEASE_THROW_ENEMY;
++                    moonmod::coop::HeroReleased(action_info.chara, chara_no, static_cast<CActiveMonster *>(held)->monster_id, held_pos,
++                                                held->blow_vec);
+                 }
+             }
+ 
+@@ -1760,6 +1768,8 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
      action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
      float tint = (float) effect_power / 255.0f;
      tint *= 1.5f;
@@ -35507,7 +35938,7 @@ index a0105f01..0f85c503 100644
      action_info.chara->effect_man->SetValue(0, tint, -1, -1);
      action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
      CColPrim *prim = ColPrimMan.GetPrim();
-@@ -1782,6 +1787,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
+@@ -1782,6 +1792,7 @@ void ShotMonicaMagic(float *position, float *direction, float scale) {
   *
   */
  void ShotNormalGun(float *position, float *direction) {
@@ -35515,7 +35946,7 @@ index a0105f01..0f85c503 100644
      action_info.chara->effect_man->CreateEffSpt("\x8F"
                                                  "e\x92"
                                                  "e",
-@@ -1814,6 +1820,7 @@ void ShotNormalGun(float *position, float *direction) {
+@@ -1814,6 +1825,7 @@ void ShotNormalGun(float *position, float *direction) {
   *
   */
  void ShotMachineGun(float *position, float *direction, char *damage_name, float damage) {
@@ -35523,7 +35954,7 @@ index a0105f01..0f85c503 100644
      MachineGun.Set(position, direction);
      CColPrim *prim = ColPrimMan.GetPrim();
      int       col_prim_id = -1;
-@@ -1845,6 +1852,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
+@@ -1845,6 +1857,8 @@ void ShotMachineGun(float *position, float *direction, char *damage_name, float
   *
   */
  void ShotGrenadGun(float *position, float *direction) {
@@ -35532,7 +35963,7 @@ index a0105f01..0f85c503 100644
      float muzzle[4];
      sceVu0ScaleVector(muzzle, direction, 500.0f);
      sceVu0AddVector(muzzle, position, muzzle);
-@@ -1885,6 +1894,7 @@ void ShotGrenadGun(float *position, float *direction) {
+@@ -1885,6 +1899,7 @@ void ShotGrenadGun(float *position, float *direction) {
   *
   */
  void ShotLaserGun(float *position, float *direction, int type) {
@@ -35540,7 +35971,7 @@ index a0105f01..0f85c503 100644
      float muzzle[4];
      float target[4];
      sceVu0ScaleVector(muzzle, direction, 20.0f);
-@@ -2125,6 +2135,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2125,6 +2140,9 @@ int _SET_SPECIAL_SHOT(dc2::script::RunArguments stack, int argc) {
      action_info.chara->effect_man->SetScriptVect2(direction, 0, -1);
      action_info.chara->effect_man->SetValue(0, 0.0f, -1, -1);
      action_info.chara->effect_man->SetScriptTargetId(action_info.chara->target_no, -1, -1);
@@ -35550,7 +35981,7 @@ index a0105f01..0f85c503 100644
      CColPrim *prim = ColPrimMan.GetPrim();
  
      if (prim != nullptr) {
-@@ -2224,6 +2237,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2224,6 +2242,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
  
      if (whp[0] > 0) {
          if (attack_type == WEAPON_ATTACK_LAUNCHER) {
@@ -35559,7 +35990,7 @@ index a0105f01..0f85c503 100644
              sceVu0ScaleVector(rocket_target, direction, 500.0f);
              sceVu0AddVector(rocket_target, position, rocket_target);
              CRocketLauncher *launcher = RocketLauncher.Get();
-@@ -2266,6 +2281,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2266,6 +2286,9 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
          }
  
          if (attack_type == WEAPON_ATTACK_MISSILE) {
@@ -35569,7 +36000,7 @@ index a0105f01..0f85c503 100644
              sceVu0ScaleVector(missile_target, direction, 500.0f);
              sceVu0AddVector(missile_target, position, missile_target);
              direction[0] += direction[2] * (fRand(1.0f) - 0.5f);
-@@ -2297,6 +2315,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2297,6 +2320,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
              sceVu0AddVector(laser_target, position, laser_target);
              sceVu0SubVector(direction, target_pos, position);
              sceVu0Normalize(direction, direction);
@@ -35578,7 +36009,7 @@ index a0105f01..0f85c503 100644
              CLaserGun *laser = LaserGun.Get();
  
              if (laser != nullptr) {
-@@ -2334,6 +2354,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
+@@ -2334,6 +2359,8 @@ int _SHOT(dc2::script::RunArguments stack, int argc) {
              sceVu0AddVector(beam_target, position, beam_target);
              sceVu0ScaleVector(beam_offset, direction, 20.0f);
              sceVu0AddVector(position, position, beam_offset);
@@ -35587,6 +36018,28 @@ index a0105f01..0f85c503 100644
              CLaserGun *laser = LaserGun.Get();
  
              if (laser != nullptr) {
+@@ -2817,13 +2844,21 @@ static int _ESM_CREATE(dc2::script::RunArguments stack, int argc) {
+     }
+ 
+     char *name = GetStackString(stack++);
++    // (co-op: what a copy of another game's monster makes, its death's blast, is only drawn here)
++    CEffectScriptMan  *const fx = action_info.chara->effect_man;
++    const _EFF_SCRIPT *const before = fx->now;
++    const auto         drawn_only = [&] {
++        if (fx->now != nullptr && fx->now != before && moonmod::coop::EffectDrawnOnly(action_info.chara)) fx->now->shown_only = true;
++    };
+ 
+     switch (argc) {
+         case 1:
+             action_info.chara->effect_man->CreateEffSpt(name, 0, 0);
++            drawn_only();
+             break;
+         case 2: {
+             int id = action_info.chara->effect_man->CreateEffSpt(name, 0, 1);
++            drawn_only();
+ 
+             if (id <= -1) {
+                 return false;
 diff --git a/port/src/script/effscript.cpp b/port/src/script/effscript.cpp
 index 7adb508e..772be8f6 100644
 --- a/port/src/script/effscript.cpp
@@ -35706,10 +36159,18 @@ index 7adb508e..772be8f6 100644
      switch (args.Remaining()) {
          case 0:
 diff --git a/port/src/script/runscript_opcodes.cpp b/port/src/script/runscript_opcodes.cpp
-index 4c665de3..2516ccd5 100644
+index 4c665de3..4b07d8e9 100644
 --- a/port/src/script/runscript_opcodes.cpp
 +++ b/port/src/script/runscript_opcodes.cpp
-@@ -3038,7 +3038,9 @@ int _SET_DEAD_START(dc2::script::RunArguments args, int argc) {
+@@ -32,6 +32,7 @@
+ #include "mg_texture.hpp"
+ #include "mglib.hpp"
+ #include "monster.hpp"
++#include "moonmod/coop.hpp"
+ #include "nd_meswin.hpp"
+ #include "object.hpp"
+ #include "runscript.hpp"
+@@ -3038,7 +3039,9 @@ int _SET_DEAD_START(dc2::script::RunArguments args, int argc) {
          return 0;
      }
  
@@ -35719,6 +36180,39 @@ index 4c665de3..2516ccd5 100644
      pallet = &nowMonster->script_pallet;
      pallet->duration = 0;
      pallet->elapsed = 0;
+@@ -3621,13 +3624,21 @@ int _ESM_CREATE(dc2::script::RunArguments stack, int argc) {
+     char *name = GetStackString(stack++);
+     int   group = nowMonster->chara_type;
+     int   slot = {};
++    // (co-op: what a copy of another game's monster makes, its death's blast, is only drawn here)
++    CEffectScriptMan  *const fx = ActiveMonster->effect_man;
++    const _EFF_SCRIPT *const before = fx->now;
++    const auto         drawn_only = [&] {
++        if (fx->now != nullptr && fx->now != before && moonmod::coop::EffectDrawnOnly(nowMonster)) fx->now->shown_only = true;
++    };
+ 
+     switch (argc) {
+         case 1:
+             ActiveMonster->effect_man->CreateEffSpt(name, group, 0);
++            drawn_only();
+             break;
+         case 2:
+             slot = ActiveMonster->effect_man->CreateEffSpt(name, group, 1);
++            drawn_only();
+ 
+             if (slot <= -1) {
+                 return 0;
+@@ -4028,6 +4039,10 @@ int _RUN_EVENT_SCRIPT(dc2::script::RunArguments stack, int argc) {
+     }
+ 
+     s16 v = static_cast<s16>(GetStackInt(stack));
++    // (co-op: a copy of the leader's monster asks for nothing here. The scene it asks for, a boss's end among them, is
++    // the leader's story and plays in the leader's game; this game, its hero another, has not the scene's setting
++    // either, the characters its room's own scenes loaded. This game gets the floor's own clear.)
++    if (moonmod::coop::IsPuppet(nowMonster->chara_type - DNG_CHARA_SLOT_MONSTER)) return 1;
+     nowMonster->event_no = v;
+     return 1;
+ }
 diff --git a/port/src/test_hooks.cpp b/port/src/test_hooks.cpp
 index 578c28de..a253ca63 100644
 --- a/port/src/test_hooks.cpp
@@ -41792,10 +42286,10 @@ index 00000000..c7d8149a
 +}
 diff --git a/port/src/tests/moonmod_coop_api_test.cpp b/port/src/tests/moonmod_coop_api_test.cpp
 new file mode 100644
-index 00000000..989bb7f6
+index 00000000..e81987fc
 --- /dev/null
 +++ b/port/src/tests/moonmod_coop_api_test.cpp
-@@ -0,0 +1,1167 @@
+@@ -0,0 +1,1351 @@
 +// Co-op's adapter operations (moonmod/coop.hpp) without a disc: the other players' heroes, the host's monsters
 +// mirrored on a floor fixture, the doors one player opens, the seed a floor is built from, the title modes and a
 +// visit's request, and the catalogue (net.* says so without a socket; everything else is supported).
@@ -41996,7 +42490,7 @@ index 00000000..989bb7f6
 +    const ApiCallResult drawn = api.Call("world.avatar_effect", shot);
 +    ASSERT_EQ(drawn.status, ApiCallStatus::Ok) << drawn.message;
 +    EXPECT_FALSE(drawn.value.at("shown").get<bool>());
-+    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 11}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
++    EXPECT_EQ(api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 12}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"dx", 0.0},
 +                                                            {"dy", 0.0}, {"dz", 1.0}}})).status, ApiCallStatus::InvalidArgument);
 +    // a looped sound (kind 10) too: off a floor it is not heard, and nothing is left going
 +    const ApiCallResult looped = api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 10}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0},
@@ -42170,6 +42664,164 @@ index 00000000..989bb7f6
 +    EXPECT_EQ(api.Call("monsters.mirror_hit", Json::array({{{"slot", 0}, {"damage", 5}, {"why", 1}}})).status, ApiCallStatus::InvalidArgument);
 +}
 +
++TEST(MoonModCoopApi, AMonsterTheHeroLiftsIsToldAndOneHeldIsReportedWhereItHangs) {
++    FloorFixture floor;
++    Api          api;
++    CActionChara *previous_hero = MainChara__2;
++    alignas(16) static unsigned char hero_storage[16];
++    alignas(16) static unsigned char other_storage[16];
++    MainChara__2 = reinterpret_cast<CActionChara *>(hero_storage);
++    // The hero lifts the monster in slot 2 with its "nage" frame, then throws it, then lifts and puts it down: each is
++    // told (kind 11) with its scene slot and kind; a frame name a message can't carry, or another's lift, is not.
++    const float from[3] = {1.0f, 12.0f, 3.0f}, blow[3] = {0.5f, 3.0f, -1.0f};
++    moonmod::coop::HeroLifted(hero_storage, DNG_CHARA_SLOT_MONSTER + 2, 1000, "nage");
++    moonmod::coop::HeroLifted(hero_storage, DNG_CHARA_SLOT_MONSTER + 2, 1000, "na ge");
++    moonmod::coop::HeroLifted(other_storage, DNG_CHARA_SLOT_MONSTER + 2, 1000, "nage");
++    moonmod::coop::HeroReleased(hero_storage, DNG_CHARA_SLOT_MONSTER + 2, 1000, from, blow);
++    moonmod::coop::HeroReleased(other_storage, DNG_CHARA_SLOT_MONSTER + 2, 1000, from, blow);
++    moonmod::coop::HeroReleased(hero_storage, DNG_CHARA_SLOT_MONSTER + 2, 1000, from, nullptr);
++    const ApiCallResult taken = api.Call("player.effects_take");
++    ASSERT_EQ(taken.status, ApiCallStatus::Ok) << taken.message;
++    const Json &effects = taken.value.at("effects");
++    ASSERT_EQ(effects.size(), 3u);
++    EXPECT_EQ(effects[0].at("kind"), 11);
++    EXPECT_EQ(effects[0].at("amount"), 0.0f);
++    EXPECT_EQ(effects[0].at("target"), DNG_CHARA_SLOT_MONSTER + 2);
++    EXPECT_EQ(effects[0].at("value"), 1000);
++    EXPECT_EQ(effects[0].at("frame0"), "nage");
++    EXPECT_EQ(effects[1].at("amount"), 1.0f);
++    EXPECT_EQ(effects[1].at("y"), 12.0f);
++    EXPECT_EQ(effects[1].at("dx"), 0.5f);
++    EXPECT_EQ(effects[1].at("dy"), 3.0f);
++    EXPECT_EQ(effects[2].at("amount"), 2.0f);
++    EXPECT_EQ(effects[2].at("dy"), 0.0f);
++    MainChara__2 = previous_hero;
++    // Another player's lift needs their avatar on this floor (none without a disc).
++    const ApiCallResult lift = api.Call("world.avatar_effect", Json::array({{{"slot", 1}, {"kind", 11}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0},
++                                                                             {"dx", 0.0}, {"dy", 0.0}, {"dz", 0.0}, {"value", 1000},
++                                                                             {"target", DNG_CHARA_SLOT_MONSTER + 2}, {"frame0", "nage"},
++                                                                             {"frame1", "nage"}}}));
++    ASSERT_EQ(lift.status, ApiCallStatus::Ok) << lift.message;
++    EXPECT_FALSE(lift.value.at("shown").get<bool>());
++
++    // A monster in a hero's hands is reported held, and nobody else lifts it. (Held by this game's own hero: not
++    // another player's to let go. Where it hangs, the hands' place in the world, needs the game's frames: live.)
++    floor.Live(0, 12, 80);
++    CActiveMonster &held = floor.Live(1, 1000, 40);
++    mgCFrame        hands;
++    held.catch_frame = &hands;
++    held.catch_state = ACTION_CATCH_HELD;
++    const ApiCallResult mirror = api.Call("monsters.mirror_get");
++    ASSERT_EQ(mirror.status, ApiCallStatus::Ok) << mirror.message;
++    ASSERT_EQ(mirror.value.at("monsters").size(), 2u) << mirror.value.dump();
++    EXPECT_EQ(mirror.value.at("monsters")[0].at("catch"), ACTION_CATCH_NONE);
++    EXPECT_EQ(mirror.value.at("monsters")[1].at("catch"), ACTION_CATCH_HELD);
++    EXPECT_NEAR(mirror.value.at("monsters")[1].at("x").get<double>(), 10.0, 0.01);
++    EXPECT_TRUE(moonmod::coop::LiftRefused(1));
++    EXPECT_FALSE(moonmod::coop::HeldByOther(1));
++    EXPECT_FALSE(moonmod::coop::LiftRefused(0));
++    held.catch_frame = nullptr;
++    held.catch_state = ACTION_CATCH_NONE;
++    EXPECT_FALSE(moonmod::coop::LiftRefused(1));
++}
++
++TEST(MoonModCoopApi, ACopyTheLeaderHoldsIsNotLiftedHereAndOneLiftedHereFliesLandsAndWaitsForTheLeader) {
++    FloorFixture floor;
++    Api          api;
++    struct Hero {
++        CActionChara  body;
++        CActionChara *previous = MainChara__2;
++        Hero() { MainChara__2 = &body; }
++        ~Hero() { MainChara__2 = previous; }
++    } hero;
++    CActiveMonster &copy = floor.Live(0, 12, 80);
++    const auto report = [&](float x, int caught) {
++        const Json one = {{"slot", 0}, {"kind", 12}, {"state", 1}, {"hp", 80}, {"x", x}, {"y", 0.0}, {"z", 5.0}, {"heading", 0.0}, {"catch", caught}};
++        return api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({one})}, {"age", 0}}}));
++    };
++    ASSERT_EQ(report(0.0f, ACTION_CATCH_NONE).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    ASSERT_TRUE(moonmod::coop::IsPuppet(0));
++    EXPECT_FALSE(moonmod::coop::LiftRefused(0));
++    // The leader's game has it in a hero's hands, or flying: not this game's hero's to lift.
++    ASSERT_EQ(report(0.0f, ACTION_CATCH_HELD).status, ApiCallStatus::Ok);
++    EXPECT_TRUE(moonmod::coop::LiftRefused(0));
++    moonmod::coop::WorldStep();
++    ASSERT_EQ(report(0.0f, ACTION_CATCH_THROWN).status, ApiCallStatus::Ok);
++    EXPECT_TRUE(moonmod::coop::LiftRefused(0));
++    moonmod::coop::WorldStep();
++    ASSERT_EQ(report(0.0f, ACTION_CATCH_NONE).status, ApiCallStatus::Ok);
++    EXPECT_FALSE(moonmod::coop::LiftRefused(0));
++    const Json bad = {{"slot", 0}, {"kind", 12}, {"state", 1}, {"hp", 80}, {"x", 0.0}, {"y", 0.0}, {"z", 5.0}, {"heading", 0.0}, {"catch", 3}};
++    EXPECT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({bad})}}})).status, ApiCallStatus::InvalidArgument);
++    for (int frame = 0; frame < 2; ++frame) moonmod::coop::WorldStep();
++
++    // This game's hero lifts it (as CheckThrowTarget takes it, less the frame a fixture's monster has not), the
++    // leader's last reports, from before, still saying its monster was in another's hands a moment ago: it hangs in
++    // the hands, whatever the leader reports.
++    mgCFrame hands;
++    copy.catch_frame = &hands;
++    copy.catch_state = ACTION_CATCH_HELD;
++    copy.no_hit_time = 0;
++    ASSERT_EQ(report(30.0f, ACTION_CATCH_NONE).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    float at[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    copy.GetPosition(at);
++    EXPECT_NEAR(at[1], -2.0f, 0.01f); // (below the hands)
++    EXPECT_TRUE(moonmod::coop::LiftRefused(0));
++    // Thrown, as _RELEASE_OBJ throws it: from where it hung, on its arc. It flies, falls and lands on the ground it was
++    // lifted from, this game's own, before any report could bring it.
++    float hung[4] = {0.0f, 8.0f, 5.0f, 1.0f};
++    copy.SetPosition(hung);
++    copy.catch_frame = nullptr;
++    copy.catch_state = ACTION_CATCH_THROWN;
++    copy.no_hit_time = 5;
++    copy.damage_req = ACTION_DAMAGE_REQ_THROWN;
++    copy.blow_vec[0] = 3.0f;
++    copy.blow_vec[1] = 3.0f;
++    copy.blow_vec[2] = 0.0f;
++    moonmod::coop::WorldStep();
++    copy.GetPosition(at);
++    EXPECT_NEAR(at[0], 3.0f, 0.01f);
++    EXPECT_NEAR(at[1], 11.0f, 0.01f);
++    for (int frame = 0; frame < 13; ++frame) moonmod::coop::WorldStep();
++    copy.GetPosition(at);
++    EXPECT_EQ(copy.catch_state, ACTION_CATCH_NONE);
++    EXPECT_NEAR(at[0], 42.0f, 0.01f);
++    EXPECT_NEAR(at[1], 0.0f, 0.01f);
++    EXPECT_NE(copy.damage_req, ACTION_DAMAGE_REQ_THROWN);
++    // Landed, it waits for the leader's reports: the leader's monster is still where it was, then held by this
++    // player's hero there, then thrown, then free where it landed.
++    for (int frame = 0; frame < 20; ++frame) moonmod::coop::WorldStep();
++    copy.GetPosition(at);
++    EXPECT_NEAR(at[0], 42.0f, 0.01f);
++    EXPECT_TRUE(moonmod::coop::LiftRefused(0));
++    ASSERT_EQ(report(30.0f, ACTION_CATCH_HELD).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    ASSERT_EQ(report(36.0f, ACTION_CATCH_THROWN).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    copy.GetPosition(at);
++    EXPECT_NEAR(at[0], 42.0f, 0.01f);
++    ASSERT_EQ(report(41.0f, ACTION_CATCH_NONE).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    copy.GetPosition(at);
++    EXPECT_NEAR(at[0], 41.0f, 0.01f);
++    EXPECT_FALSE(moonmod::coop::LiftRefused(0));
++    EXPECT_EQ(copy.no_hit_time, 0);
++
++    // Lifted again and the leader's monster dies meanwhile: it is let go, and dies as the game's own.
++    copy.catch_frame = &hands;
++    copy.catch_state = ACTION_CATCH_HELD;
++    moonmod::coop::WorldStep();
++    const Json dead = {{"slot", 0}, {"kind", 12}, {"state", 1}, {"hp", 0}, {"x", 41.0}, {"y", 0.0}, {"z", 5.0}, {"heading", 0.0}};
++    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({dead})}, {"age", 0}}})).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    EXPECT_EQ(copy.catch_state, ACTION_CATCH_NONE);
++    EXPECT_EQ(copy.catch_frame, nullptr);
++    EXPECT_EQ(copy.damage_req, ACTION_DAMAGE_REQ_DEAD);
++    EXPECT_EQ(api.Call("monsters.puppet_clear").status, ApiCallStatus::Ok);
++}
++
 +TEST(MoonModCoopApi, AFollowersMonstersTheLeaderNoLongerHasLeaveTheFloorsCountForItsClear) {
 +    FloorFixture floor;
 +    Api          api;
@@ -42280,6 +42932,32 @@ index 00000000..989bb7f6
 +    EXPECT_EQ(api.Call("monsters.puppet_clear").status, ApiCallStatus::Ok);
 +    EXPECT_FALSE(moonmod::coop::CopiesDying());
 +    EXPECT_FALSE(moonmod::coop::CopyRests(1));
++}
++
++TEST(MoonModCoopApi, WhatACopysScriptMakesIsOnlyDrawnHere) {
++    FloorFixture floor;
++    Api          api;
++    // (a hero on the floor: the copies follow the leader only where this game has one)
++    struct Hero {
++        CActionChara  body;
++        CActionChara *previous = MainChara__2;
++        Hero() { MainChara__2 = &body; }
++        ~Hero() { MainChara__2 = previous; }
++    } hero;
++    CActiveMonster &copy = floor.Live(0, 12, 80);
++    // This game leads its floor: what its monsters make (a RoBomb's blast) strikes here.
++    EXPECT_FALSE(moonmod::coop::EffectDrawnOnly(&copy));
++    const Json one = {{"slot", 0}, {"kind", 12}, {"state", 1}, {"hp", 80}, {"x", 0.0}, {"y", 0.0}, {"z", 5.0}, {"heading", 0.0}};
++    ASSERT_EQ(api.Call("monsters.puppet_set", Json::array({{{"monsters", Json::array({one})}, {"age", 0}}})).status, ApiCallStatus::Ok);
++    for (int frame = 0; frame < 10; ++frame) moonmod::coop::WorldStep();
++    ASSERT_TRUE(moonmod::coop::MonstersMirrored());
++    // A copy's script runs here only for its death, and what the death makes strikes in the leader's game, whose
++    // blows on this game's hero come from there: here it is only drawn. A hero's own are not a copy's.
++    EXPECT_TRUE(moonmod::coop::EffectDrawnOnly(&copy));
++    EXPECT_FALSE(moonmod::coop::EffectDrawnOnly(&hero.body));
++    EXPECT_FALSE(moonmod::coop::EffectDrawnOnly(nullptr));
++    EXPECT_EQ(api.Call("monsters.puppet_clear").status, ApiCallStatus::Ok);
++    EXPECT_FALSE(moonmod::coop::EffectDrawnOnly(&copy));
 +}
 +
 +TEST(MoonModCoopApi, AMonsterTheOtherPlayerKillsSharesItsAbsorptionAsAKillAnotherDealt) {
