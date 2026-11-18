@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "moonmod.coop",
   "name": "Online Co-op",
-  "version": "0.13.1",
+  "version": "0.15.0",
   "author": "Jeffiest",
   "description": "Play Dark Cloud (up to four) or Dark Cloud 2 (two) together online. The host plays their own save and opens a room; friends join it from the title screen's Online Co-op with its code and walk into the host's world: the host's story, towns, Georama and dungeons, with their own weapons, items and Gilda. In Dark Cloud a friend's things are kept in the host's save, and a friend's own save is never touched. In Dark Cloud 2 a friend brings one of their own saves instead (past the talk with Donny): its things come along and go back into it, its story is left alone, the host plays Max and the friend Monica, and they can swap; each sees the other's shots, spells, sword trails and Georama parts as they happen, and hears their hero. A dropped friend gets back in by itself; each player's ping is on the HUD. A player knocked out is down, not out: a friend beside them revives them, and a party that all falls walks back to town with its things. Needs the MoonFactory engine with online play (net.*) and visits.",
   "framework_api": 1,
@@ -15,6 +15,11 @@
     {"id": "follow_offers", "name": "Ask to join another player when they go to another floor, town or house", "type": "boolean", "default": true},
     {"id": "shared_doors", "name": "Doors, gates and switches one player opens open for everyone on the floor", "type": "boolean", "default": true},
     {"id": "down_not_out", "name": "Down, not out: a friend can revive a knocked-out player", "description": "A player knocked out lies there instead of the game over; another player beside them holds Revive for three seconds to get them up: R or the right stick in Dark Cloud, V or the left stick in Dark Cloud 2.", "type": "boolean", "default": true},
-    {"id": "keep_every", "name": "How often a guest's things are kept, in seconds (Dark Cloud 2: into their own save)", "type": "integer", "default": 60, "min": 15, "max": 600}
+    {"id": "keep_every", "name": "How often a guest's things are kept, in seconds (Dark Cloud 2: into their own save)", "type": "integer", "default": 60, "min": 15, "max": 600},
+    {"id": "scale_life", "name": "Dark Cloud 2: monsters' life with a friend on the floor", "description": "While another player stands on the same floor, every monster has this much more life; a monster already out keeps its share. Alone, monsters are as the game has them. The host's choice is the room's.", "type": "choice", "default": "+60%", "choices": ["Off", "+30%", "+60%", "+100%", "+150%"]},
+    {"id": "scale_blows", "name": "Dark Cloud 2: how much harder monsters hit with a friend on the floor", "description": "While another player stands on the same floor, monsters' and bosses' blows land this much harder. The host's choice is the room's.", "type": "choice", "default": "+25%", "choices": ["Off", "+15%", "+25%", "+50%", "+100%"]},
+    {"id": "scale_bosses", "name": "Dark Cloud 2: bosses' life with a friend in the fight", "description": "While another player is in a boss's room, the boss has this much more life. The host's choice is the room's.", "type": "choice", "default": "+75%", "choices": ["Off", "+50%", "+75%", "+100%", "+150%"]},
+    {"id": "more_monsters", "name": "Dark Cloud 2: more monsters on floors built in a room", "description": "A floor built while another player is in the room holds this many more of its monsters. The host's choice is the room's; a floor built alone is the game's own.", "type": "choice", "default": "+50%", "choices": ["Off", "+25%", "+50%", "+100%"]},
+    {"id": "larger_floors", "name": "Dark Cloud 2: larger floors built in a room", "description": "A floor built while another player is in the room has this many more rooms, on ground grown to hold them. The host's choice is the room's; a floor built alone is the game's own.", "type": "choice", "default": "+50%", "choices": ["Off", "+25%", "+50%", "+100%"]}
   ]
 }
