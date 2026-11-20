@@ -954,8 +954,17 @@ ridepod drawn as itself) does not pass yet, for the debug-mode reason in the K4 
   (held, thrown, landed), then follows the leader's reports again once they have it free. What a dying copy's script
   makes (a RoBomb's blast) is only drawn in the follower's game: read from the code, one RoBomb would hit the follower
   twice before (its copy's blast and the leader's relayed one). Live `lift` 10/10: seven lifts and throws by the joiner,
-  each held and thrown from the same place in the host's game, the copy landing and following again. Not covered
-  live: throwing Halloween's RoBombs back at it with two (the blast fix is unit-tested). Engine `38734864`.
+  each held and thrown from the same place in the host's game, the copy landing and following again. Engine
+  `38734864`.
+- Halloween's RoBombs with two, live (2026-11-19, engine `32a7ab4b`). New scenario `robomb` (Halloween's room, the
+  joiner walking up and trying lift, lock-on and throw every few seconds), five runs: the joiner lifts RoBombs and
+  throws them (18 lifts, 15 throws in the last run), each held and thrown from the joiner's avatar's hands in the
+  host's game; every RoBomb copy that dies in the joiner's game has its blast only drawn there (8 or 9 a run, the
+  engine now logging `dies here`); later in the fight the host's game moves Halloween and calls six kind-25 monsters,
+  copied in the joiner's game. Not seen: a thrown RoBomb hurting Halloween (448 life throughout): the scripted throws
+  fly straight ahead along the joiner's walk, the Circle lock-on did not turn them, and Halloween's own position reads
+  0,0 most of the fight. Needs a hand in a real game. `entities.query` on Chronicle Two now gives each monster's
+  position, as the API reference already said; coopdrive's `monsters_where` logs them.
 
 ## 7. Risks
 

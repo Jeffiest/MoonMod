@@ -285,6 +285,21 @@ function OPS.monsters_log(step)
   log("monsters n=" .. #list .. " " .. table.concat(list, " "))
   return true
 end
+-- Where the floor's monsters and the player stand ("DRIVE where me=x,z kind@x,z ..."), from entities.query.
+local function S_num(v) return tonumber(v) or 0 end
+function OPS.monsters_where(step)
+  local q = try(game.entities.query, {type = "monster"})
+  local list = {}
+  for _, e in ipairs(type(q) == "table" and q.entities or {}) do
+    local p = type(e.position) == "table" and e.position or nil
+    local def = type(e.definition) == "table" and e.definition or {}
+    local kind = e.native_monster_id or def.monster_id or e.monster_id or "?"
+    if p then list[#list + 1] = string.format("%s@%.0f,%.0f", tostring(kind), S_num(p.x), S_num(p.z)) end
+  end
+  local me = (try(game.player.get) or {}).position
+  log("where me=" .. (me and string.format("%.0f,%.0f", S_num(me.x), S_num(me.z)) or "-") .. " " .. table.concat(list, " "))
+  return true
+end
 function OPS.leave() return try(game.session.finish) end
 function OPS.mark(step) return true end
 -- The story's progress raised (a debug save from --jump georama:N is before the co-op gate).

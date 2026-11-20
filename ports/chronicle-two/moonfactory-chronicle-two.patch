@@ -829,10 +829,10 @@ index 00000000..09a0b646
 +Not covered headless: drawing a villager or hero model (needs the retail data and a renderer) and the active switch.
 diff --git a/port/docs/COOP.md b/port/docs/COOP.md
 new file mode 100644
-index 00000000..1e984a89
+index 00000000..a8d8cdda
 --- /dev/null
 +++ b/port/docs/COOP.md
-@@ -0,0 +1,491 @@
+@@ -0,0 +1,503 @@
 +# Online co-op for Chronicle Two
 +
 +Up to four players through the co-op relay, driven by MoonMod's `moonmod.coop` mod (MoonMod
@@ -1268,9 +1268,9 @@ index 00000000..1e984a89
 +  follows the reports again, by then from where the leader's game landed it.
 +- A copy's death plays here with the game's own script (`ThinkHost`), and what that script makes (`_ESM_CREATE`: a
 +  RoBomb's blast) is only drawn (`EffectDrawnOnly`): the leader's monster's blast strikes there, and its blow on this
-+  game's hero comes from there. (Read from the code, not yet seen live: before, the copy's blast struck here too, so
-+  one RoBomb would hit the follower's hero twice, and a bomb the follower threw would go off on it as the boss's
-+  does, the copy not having been caught by its own script.)
++  game's hero comes from there. (Before, the copy's blast struck here too, so one RoBomb would hit the follower's
++  hero twice, and a bomb the follower threw would go off on it as the boss's does, the copy not having been caught by
++  its own script. Seen live in `robomb`: each RoBomb copy's death, `dies here`, is followed by `only drawn here`.)
 +
 +Protocol 12: the mod's `M` line has a 13th field, `catch`.
 +
@@ -1278,8 +1278,20 @@ index 00000000..1e984a89
 +and presses Cross, then Cross again, nine times over a minute. Seven times its hero lifted the copy, threw it, and it
 +landed (some 190 from where it left the hands); each time the host's game held its monster in the joiner's avatar's
 +hands and threw it from the same place, and the copy followed the host's monster again once the reports had it free.
-+The drawn-only blast of a dying copy is unit-tested only (`WhatACopysScriptMakesIsOnlyDrawnHere`): a joiner throwing
-+Halloween's RoBombs back at it in a live fight is not covered yet.
++The drawn-only blast of a dying copy is unit-tested (`WhatACopysScriptMakesIsOnlyDrawnHere`) and seen live in
++`robomb`.
++
++Live scenario `robomb` (10 checks, 2026-11-19, five runs): in Halloween's room (the `boss_fight` way in) the joiner
++walks up the line from the room's door toward the boss and then, every few seconds, holds R1 and presses Cross (a
++lift), Circle (a lock-on) and Cross (a throw). Seen: the joiner's hero lifts RoBombs' copies and throws them (18 lifts
++and 15 throws in the last run), and the host's game holds each RoBomb in the joiner's avatar's hands and throws it from
++the same place; every RoBomb copy that dies in the joiner's game (8 or 9 a run) has its blast only drawn there; later in
++the fight the host's game moves Halloween and calls six monsters of kind 25, and the joiner's game makes their copies.
++Not seen: a thrown RoBomb hurting Halloween (its life stays 448 in both games). The scripted joiner cannot aim: its
++throws fly some 100 to 190 straight ahead along the line it walked, its Circle did not turn a held RoBomb toward the
++boss in these runs, and Halloween's position (now in `entities.query`) reads 0,0 for most of the fight, the boss's body
++being elsewhere. Whether a RoBomb a joiner throws hurts Halloween needs a hand in a real game; the two checks on it
++fail until then.
 +
 +`town_talk` (7 checks): the joiner's Cross in Palm Brinks starts a talk (event 400) and the room holds both until the
 +joiner's game ends. Talking does not drop the link; the drop seen once in an early `boss_fight` run is not
@@ -6654,10 +6666,10 @@ index 00000000..f77e8380
 +} // namespace moonmod
 diff --git a/port/src/moonmod/chronicle_two_adapter.cpp b/port/src/moonmod/chronicle_two_adapter.cpp
 new file mode 100644
-index 00000000..c1b65688
+index 00000000..39778ce0
 --- /dev/null
 +++ b/port/src/moonmod/chronicle_two_adapter.cpp
-@@ -0,0 +1,7318 @@
+@@ -0,0 +1,7321 @@
 +#include "moonmod/chronicle_two_adapter.hpp"
 +#include "moonmod/coop.hpp"
 +#include "moonmod/dungeon_scale_api.hpp"
@@ -11451,16 +11463,19 @@ index 00000000..c1b65688
 +
 +    Json entities = Json::array();
 +    for (int slot = 0; slot < MONSTER_ACTIVE_MAX; ++slot) {
-+        const CActiveMonster *monster = ActiveMonster->GetActiveMonster(slot);
++        CActiveMonster *monster = ActiveMonster->GetActiveMonster(slot);
 +        if (monster == nullptr || monster->state != ACTIVE_MONSTER_LIVE || monster->life <= 0) continue;
 +        const unsigned int generation = EnsureMoonModMonsterSlotGeneration(slot);
 +        if (generation == 0) continue;
 +        const std::string handle = "chronicle-two:monster:" + std::to_string(slot) + ":" + std::to_string(generation);
++        float position[4] = {};
++        monster->GetPosition(position);
 +        Json entity = {{"id", handle},
 +                       {"type", "monster"},
 +                       {"slot", slot},
 +                       {"generation", generation},
 +                       {"definition", {{"monster_id", monster->monster_id}}},
++                       {"position", {{"x", position[0]}, {"y", position[1]}, {"z", position[2]}}},
 +                       {"health", {{"current", monster->life}, {"maximum", monster->max_life}}},
 +                       {"status", {{"flags", monster->status.attr}, {"target_slot", monster->target_no}}}};
 +        const auto mod_spawn = g_character_spawns.find(handle);
@@ -19713,10 +19728,10 @@ index 00000000..ab5344b5
 +} // namespace moonmod::coop
 diff --git a/port/src/moonmod/coop_world_moonmod.cpp b/port/src/moonmod/coop_world_moonmod.cpp
 new file mode 100644
-index 00000000..f839d8bf
+index 00000000..7fb56f3b
 --- /dev/null
 +++ b/port/src/moonmod/coop_world_moonmod.cpp
-@@ -0,0 +1,2304 @@
+@@ -0,0 +1,2306 @@
 +// Co-op's world (moonmod/coop.hpp): the other players' heroes on the floor or in the town, the host's monsters
 +// mirrored on a guest, the doors one player opens for everyone, and the seed a floor is built from.
 +
@@ -20513,6 +20528,8 @@ index 00000000..f839d8bf
 +    p.dying = true;
 +    p.dies_at = -1;
 +    p.died_at = g_clock;
++    std::fprintf(stderr, "co-op: the copy in slot %d (kind %d) dies here\n",
++                 static_cast<int>(&p - g_puppets.data()), monster.monster_id);
 +}
 +
 +// A death has had its time (a boss's slot rests from here until its room's scene empties it).
@@ -36159,7 +36176,7 @@ index 7adb508e..772be8f6 100644
      switch (args.Remaining()) {
          case 0:
 diff --git a/port/src/script/runscript_opcodes.cpp b/port/src/script/runscript_opcodes.cpp
-index 4c665de3..4b07d8e9 100644
+index 4c665de3..fc569fe0 100644
 --- a/port/src/script/runscript_opcodes.cpp
 +++ b/port/src/script/runscript_opcodes.cpp
 @@ -32,6 +32,7 @@
@@ -36180,7 +36197,7 @@ index 4c665de3..4b07d8e9 100644
      pallet = &nowMonster->script_pallet;
      pallet->duration = 0;
      pallet->elapsed = 0;
-@@ -3621,13 +3624,21 @@ int _ESM_CREATE(dc2::script::RunArguments stack, int argc) {
+@@ -3621,13 +3624,24 @@ int _ESM_CREATE(dc2::script::RunArguments stack, int argc) {
      char *name = GetStackString(stack++);
      int   group = nowMonster->chara_type;
      int   slot = {};
@@ -36188,7 +36205,10 @@ index 4c665de3..4b07d8e9 100644
 +    CEffectScriptMan  *const fx = ActiveMonster->effect_man;
 +    const _EFF_SCRIPT *const before = fx->now;
 +    const auto         drawn_only = [&] {
-+        if (fx->now != nullptr && fx->now != before && moonmod::coop::EffectDrawnOnly(nowMonster)) fx->now->shown_only = true;
++        if (fx->now == nullptr || fx->now == before || !moonmod::coop::EffectDrawnOnly(nowMonster)) return;
++        fx->now->shown_only = true;
++        std::fprintf(stderr, "co-op: what the copy in slot %d (kind %d) made is only drawn here\n",
++                     nowMonster->chara_type - DNG_CHARA_SLOT_MONSTER, nowMonster->monster_id);
 +    };
  
      switch (argc) {
@@ -36202,7 +36222,7 @@ index 4c665de3..4b07d8e9 100644
  
              if (slot <= -1) {
                  return 0;
-@@ -4028,6 +4039,10 @@ int _RUN_EVENT_SCRIPT(dc2::script::RunArguments stack, int argc) {
+@@ -4028,6 +4042,10 @@ int _RUN_EVENT_SCRIPT(dc2::script::RunArguments stack, int argc) {
      }
  
      s16 v = static_cast<s16>(GetStackInt(stack));
@@ -45005,10 +45025,10 @@ index 00000000..0b285f76
 +}
 diff --git a/port/src/tests/moonmod_entities_api_test.cpp b/port/src/tests/moonmod_entities_api_test.cpp
 new file mode 100644
-index 00000000..a436600d
+index 00000000..8b3029e8
 --- /dev/null
 +++ b/port/src/tests/moonmod_entities_api_test.cpp
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,384 @@
 +#include <gtest/gtest.h>
 +
 +#include <algorithm>
@@ -45143,6 +45163,9 @@ index 00000000..a436600d
 +    EXPECT_EQ(entity.at("definition").at("monster_id"), 28);
 +    EXPECT_EQ(entity.at("health").at("current"), 64);
 +    EXPECT_EQ(entity.at("health").at("maximum"), 100);
++    EXPECT_FLOAT_EQ(entity.at("position").at("x").get<float>(), 3.0f);
++    EXPECT_FLOAT_EQ(entity.at("position").at("y").get<float>(), 4.0f);
++    EXPECT_FLOAT_EQ(entity.at("position").at("z").get<float>(), 0.0f);
 +    EXPECT_EQ(entity.at("status").at("flags"), MONSTER_STATUS_POISON | MONSTER_STATUS_SLOW);
 +    EXPECT_EQ(entity.at("status").at("target_slot"), 1);
 +
